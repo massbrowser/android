@@ -340,12 +340,12 @@ public class SigninTest extends ChromeTabbedActivityTestBase {
                 AccountSigninActivity.class.getName(), null, false);
 
         // Click sign in.
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                clickSigninPreference(prefActivity);
-            }
-        });
+//        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+//            @Override
+//            public void run() {
+//                clickSigninPreference(prefActivity);
+//            }
+//        });
 
         // Pick the mock account.
         AccountSigninActivity signinActivity = (AccountSigninActivity)
@@ -414,14 +414,14 @@ public class SigninTest extends ChromeTabbedActivityTestBase {
         return (MainPreferences) fragment;
     }
 
-    private static void clickSigninPreference(Preferences prefActivity) {
-        MainPreferences mainPrefs = getMainPreferences(prefActivity);
-        Preference signinPref = mainPrefs.findPreference(MainPreferences.PREF_SIGN_IN);
-        assertNotNull(signinPref);
-        assertTrue(signinPref instanceof SignInPreference);
-        assertNotNull(signinPref.getOnPreferenceClickListener());
-        signinPref.getOnPreferenceClickListener().onPreferenceClick(signinPref);
-    }
+//    private static void clickSigninPreference(Preferences prefActivity) {
+//        MainPreferences mainPrefs = getMainPreferences(prefActivity);
+//        Preference signinPref = mainPrefs.findPreference(MainPreferences.PREF_SIGN_IN);
+//        assertNotNull(signinPref);
+//        assertTrue(signinPref instanceof SignInPreference);
+//        assertNotNull(signinPref.getOnPreferenceClickListener());
+//        signinPref.getOnPreferenceClickListener().onPreferenceClick(signinPref);
+//    }
 
     private static void clickSignOut(Preferences prefActivity) {
         Fragment fragment = prefActivity.getFragmentForTest();

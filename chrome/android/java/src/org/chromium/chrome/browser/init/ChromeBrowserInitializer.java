@@ -37,6 +37,7 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.FileProviderHelper;
 import org.chromium.chrome.browser.crash.MinidumpDirectoryObserver;
 import org.chromium.chrome.browser.device.DeviceClassManager;
+import org.chromium.chrome.browser.init.adblocktask.DownloadWhiteListTask;
 import org.chromium.chrome.browser.init.tasks.GetCurrencyTask;
 import org.chromium.chrome.browser.init.tasks.GetUsersCountTask;
 import org.chromium.chrome.browser.init.tasks.SendInfoTask;
@@ -370,6 +371,7 @@ public class ChromeBrowserInitializer {
           new DownloadTrackingProtectionDataAsyncTask(mApplication).execute();
           new DownloadAdBlockDataAsyncTask(mApplication).execute();
           new DownloadHTTPSDataAsyncTask(mApplication).execute();
+          new DownloadWhiteListTask(mApplication).execute();
     }
 
 

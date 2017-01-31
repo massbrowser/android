@@ -16,6 +16,7 @@ public class CoinsSingleton {
     public static final String COIN_COUNT = "coin_count";
     public static final String LAST_TIME_INC = "last_time_inc";
     private static final String ONE_SURF_REWARD = "one_surf_reward";
+    private static final String USE_TIME = "USE_TIME";
     private static CoinsSingleton instance = new CoinsSingleton();
 
     public static CoinsSingleton getInstance() {
@@ -26,18 +27,25 @@ public class CoinsSingleton {
     private List<ChangeListener> changeListeners = new ArrayList<ChangeListener>();
 
     private Map<CoinType, Float> quotations = new HashMap<CoinType, Float>();
-    private float oneSurfValue = 0.01f;
+    private float oneSurfReward = 1f;
+    private long useTime;
 
     private SharedPreferences sharedPreferences;
     private long lastTimeInc = 0;
     public void init(Context context) {
         sharedPreferences = context.getSharedPreferences("coins", Context.MODE_PRIVATE);
         value = sharedPreferences.getFloat(COIN_COUNT, 0);
-        oneSurfValue = sharedPreferences.getFloat(ONE_SURF_REWARD, 0.01f);
+        useTime = sharedPreferences.getLong(USE_TIME, 0);
+        oneSurfReward = sharedPreferences.getFloat(ONE_SURF_REWARD, 1f);
+        quotations.put(CoinType.BIT_COIN, sharedPreferences.getFloat(CoinType.BIT_COIN.toString(), 0));
+        quotations.put(CoinType.DOLLAR, sharedPreferences.getFloat(CoinType.DOLLAR.toString(), 0));
     }
 
     public void setQuotation(CoinType coinType, float value) {
         quotations.put(coinType, value);
+        if(sharedPreferences != null) {
+            sharedPreferences.edit().putFloat(coinType.toString(), value).apply();
+        }
     }
 
     public CoinsSingleton() {
@@ -61,10 +69,10 @@ public class CoinsSingleton {
         setValue(quotations.get(type) != 0 ?  value / quotations.get(type) : 0);
     }
 
-    public void setOneSurfValue(float oneSurfValue) {
-        this.oneSurfValue = oneSurfValue;
+    public void setOneSurfReward(float oneSurfReward) {
+        this.oneSurfReward = oneSurfReward;
         if(sharedPreferences != null) {
-            sharedPreferences.edit().putFloat(ONE_SURF_REWARD, oneSurfValue).apply();
+            sharedPreferences.edit().putFloat(ONE_SURF_REWARD, oneSurfReward).apply();
         }
     }
 
@@ -128,10 +136,12 @@ public class CoinsSingleton {
         }
         long newLastTimeInc = System.currentTimeMillis();
         if(newLastTimeInc - TimeUnit.MINUTES.toMillis(1) > lastTimeInc) {
-            setValue(CoinType.MASS_COIN, getValue(CoinType.MASS_COIN) + oneSurfValue);
+            useTime++;
+            setValue(CoinType.MASS_COIN, getValue(CoinType.MASS_COIN) + oneSurfReward);
             lastTimeInc = newLastTimeInc;
             if(sharedPreferences != null) {
                 sharedPreferences.edit().putLong(LAST_TIME_INC, lastTimeInc).apply();
+                sharedPreferences.edit().putLong(USE_TIME, useTime).apply();
             }
         }
     }
@@ -146,6 +156,10 @@ public class CoinsSingleton {
     }
     public float getValue(CoinType type) {
         return value * quotations.get(type);
+    }
+
+    public long getUseTime() {
+        return useTime;
     }
 
     public interface ChangeListener {

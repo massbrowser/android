@@ -60,6 +60,9 @@ Still reading?
   <issue id="ExportedContentProvider">
     <ignore path="AndroidManifest.xml"/>
   </issue>
+  <issue id="ExportedReceiver" severity="Error">
+    <ignore regexp="AndroidManifest.xml"/>
+  </issue>
   <issue id="ExportedService" severity="Error">
     <ignore regexp="AndroidManifest.xml"/>
   </issue>
@@ -221,6 +224,7 @@ Still reading?
     <ignore regexp="chrome/android/webapk/libs/client/src/org/chromium/webapk/lib/client/WebApkValidator.java"/>
   </issue>
   <issue id="PluralsCandidate" severity="Error">
+    <ignore regexp="chrome/android/java/res/values/strings.xml"/>
     <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-en-rGB/android_chrome_strings.xml"/>
     <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values/android_chrome_strings.xml"/>
   </issue>

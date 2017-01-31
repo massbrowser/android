@@ -12,9 +12,11 @@
 #include "../../../../url/gurl.h"
 #include "TPParser.h"
 #include "ABPFilterParser.h"
+#include "WhiteListFilterParser.h"
 
 #define TP_DATA_FILE                "TrackingProtectionDownloaded.dat"
 #define ADBLOCK_DATA_FILE           "ABPFilterParserDataDownloaded.dat"
+#define WHITELIST_DATA_FILE          "WhiteList.dat"
 #define HTTPSE_DATA_FILE            "httpseDownloaded.sqlite"
 #define TP_THIRD_PARTY_HOSTS_QUEUE  20
 
@@ -53,7 +55,8 @@ namespace blockers {
     BlockersWorker::BlockersWorker() :
         httpse_db_(nullptr),
         tp_parser_(nullptr),
-        adblock_parser_(nullptr) {
+        adblock_parser_(nullptr),
+        whitelist_parser_(nullptr) {
         base::ThreadRestrictions::SetIOAllowed(true);
     }
 
@@ -80,6 +83,19 @@ namespace blockers {
         adblock_parser_->deserialize((char*)&adblock_buffer_.front());
 
         return false;
+    }
+
+    bool BlockersWorker::InitWhiteList() {
+        std::lock_guard<std::mutex> guard(white_list_init_mutex_);
+
+        if (!GetData(WHITELIST_DATA_FILE, whitelist_buffer_)) {
+                return false;
+        }
+
+        whitelist_parser_ = new WhiteListFilterParser();
+        whitelist_parser_->deserialize((char*)&whitelist_buffer_.front());
+
+        return true;
     }
 
     bool BlockersWorker::InitTP() {
@@ -172,10 +188,6 @@ namespace blockers {
     }
 
     bool BlockersWorker::shouldAdBlockUrl(const std::string& base_host, const std::string& url, unsigned int resource_type) {
-        if (nullptr == adblock_parser_ && !InitAdBlock()) {
-            return false;
-        }
-
         FilterOption currentOption = FONoFilterOption;
         content::ResourceType internalResource = (content::ResourceType)resource_type;
         if (content::RESOURCE_TYPE_STYLESHEET == internalResource) {
@@ -184,6 +196,16 @@ namespace blockers {
             currentOption = FOImage;
         } else if (content::RESOURCE_TYPE_SCRIPT == internalResource) {
             currentOption = FOScript;
+        }
+
+        if(nullptr != whitelist_parser_ || InitWhiteList()) {
+            if (whitelist_parser_->matches(url.c_str(), base_host.c_str())) {
+                return false;
+            }
+        }
+
+        if (nullptr == adblock_parser_ && !InitAdBlock()) {
+            return false;
         }
 
         if (adblock_parser_->matches(url.c_str(), currentOption, base_host.c_str())) {
@@ -242,6 +264,12 @@ namespace blockers {
     }
 
     bool BlockersWorker::shouldTPBlockUrl(const std::string& base_host, const std::string& host) {
+       if(nullptr != whitelist_parser_ || InitWhiteList()) {
+            if (whitelist_parser_->matches(host.c_str(), base_host.c_str())) {
+                return false;
+            }
+       }
+
         if (nullptr == tp_parser_ && !InitTP()) {
             return false;
         }

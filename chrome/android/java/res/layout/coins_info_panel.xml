@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+
+<TextView
+        xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"
+        android:id="@+id/coins_text_view"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:drawableStart="@drawable/ic_masscoin"
+        android:drawablePadding="3dp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:layout_gravity="center_vertical"
+        android:textStyle="bold"
+        android:text="@string/coins_stub"
+        android:textColor="#068ffc" tools:showIn="@layout/toolbar_phone_common"/>

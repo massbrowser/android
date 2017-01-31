@@ -17,12 +17,15 @@ import java.net.URL;
  * Created by elvis on 06.01.17.
  */
 public class GetCurrencyTask extends AsyncTask<Void, Void, Void> {
+
+    public static final String URL_CURRENCY = "http://adverttool.ru/currency";
+
     @Override
     protected Void doInBackground(Void... voids) {
 
         try {
 
-            URL url = new URL("http://adverttool.ru/currency");
+            URL url = new URL(URL_CURRENCY);
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             InputStream stream = connection.getInputStream();
             BufferedReader streamReader = new BufferedReader(new InputStreamReader(stream, "UTF-8"));

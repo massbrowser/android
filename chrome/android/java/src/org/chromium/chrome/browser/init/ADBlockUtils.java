@@ -17,7 +17,7 @@ import org.chromium.base.PathUtils;
 
 public class ADBlockUtils {
 
-    public static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "chrome";
+    public static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "cd ad_data";
 
     public static final String TRACKING_PROTECTION_URL = "https://mass.network/android-browser-data/TrackingProtection.dat";
 //    public static final String TRACKING_PROTECTION_URL = "https://s3.amazonaws.com/tracking-protection-data/1/TrackingProtection.dat";

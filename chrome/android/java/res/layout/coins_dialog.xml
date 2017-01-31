@@ -21,7 +21,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginBottom="24dp"
+                android:layout_marginBottom="12dp"
                 android:background="@drawable/coin_round">
             <RadioButton
                     android:id="@+id/masscoin"
@@ -80,6 +80,15 @@
                     android:textColor="@color/coins_text_color"
                     android:text=""/>
         </RadioGroup>
+
+        <TextView
+                android:id="@+id/use_time"
+                android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginBottom="12dp"
+                  android:textColor="@android:color/black"
+                  android:textSize="14sp"
+                  android:text="@string/use_time_text"/>
 
         <TextView android:layout_width="wrap_content"
                   android:layout_height="wrap_content"

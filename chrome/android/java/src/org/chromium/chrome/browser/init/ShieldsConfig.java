@@ -17,7 +17,7 @@ package org.chromium.chrome.browser.init;
         import org.chromium.base.annotations.CalledByNative;
         import org.chromium.base.annotations.JNINamespace;
         import org.chromium.chrome.browser.ContentSettingsType;
-        import org.chromium.chrome.browser.init.tasks.SendStatisticTask;
+        import org.chromium.chrome.browser.init.tasks.StatisticLogger;
         import org.chromium.chrome.browser.preferences.PrefServiceBridge;
         import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
         import org.chromium.chrome.browser.preferences.website.ContentSetting;
@@ -399,7 +399,7 @@ public class ShieldsConfig {
 
     @CalledByNative
     public static void setBlockedInfo(String url) {
-        new SendStatisticTask(ContextUtils.getApplicationContext(), "blocked url:" + url ).executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
+        StatisticLogger.getInstance(ContextUtils.getApplicationContext()).log("blocked url:" + url);
     }
 
     private native void nativeInit();

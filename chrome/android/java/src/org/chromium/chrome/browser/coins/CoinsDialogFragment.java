@@ -12,6 +12,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.TextView;
 import org.chromium.chrome.R;
 
 import java.text.DecimalFormat;
@@ -47,6 +48,8 @@ public class CoinsDialogFragment extends DialogFragment {
         dollar = (RadioButton) view.findViewById(R.id.dollar);
         dollar.setTag(CoinType.DOLLAR);
 
+        long useTime = CoinsSingleton.getInstance().getUseTime();
+        ((TextView)view.findViewById(R.id.use_time)).setText(getString(R.string.use_time_text, useTime));
 
         updateCoins();
 

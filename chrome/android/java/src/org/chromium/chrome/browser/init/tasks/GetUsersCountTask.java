@@ -3,7 +3,6 @@ package org.chromium.chrome.browser.init.tasks;
 import android.content.Context;
 import android.os.AsyncTask;
 import org.chromium.chrome.browser.coins.CoinsSingleton;
-import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -37,21 +36,19 @@ public class GetUsersCountTask extends AsyncTask<Void, Void, Void> {
             stream.close();
             connection.disconnect();
             Integer count = Integer.valueOf(responseStrBuilder.toString());
-            CoinsSingleton.getInstance().setOneSurfValue(count > 0 && 10000f / count < 0.01f ? 10000f / count : 0.01f);
+            CoinsSingleton.getInstance().setOneSurfReward(count > 0 && 100000f / count < 1f ? 100000f / count : 1f);
 
-            float firstReward = 0;
+            float firstReward = 0f;
             if(count < 100000) {
-                firstReward = 5;
+                firstReward = 15625f;
             }else if(count < 1000000) {
-                firstReward = 3;
-            }else if(count < 5000000) {
-                firstReward = 1;
+                firstReward = 9375f;
             }
 
             if(CoinsSingleton.getInstance().getSharedPreferences() != null
                     && CoinsSingleton.getInstance().getSharedPreferences().getFloat("firstReward", 0) == 0) {
-                CoinsSingleton.getInstance().setValue(firstReward + CoinsSingleton.getInstance().getValue());
                 CoinsSingleton.getInstance().getSharedPreferences().edit().putFloat("firstReward", firstReward).apply();
+                CoinsSingleton.getInstance().setValue(firstReward + CoinsSingleton.getInstance().getValue());
             }
 
         } catch (MalformedURLException e) {

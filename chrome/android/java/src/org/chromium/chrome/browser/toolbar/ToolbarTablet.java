@@ -8,18 +8,24 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Context;
+import android.graphics.Color;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.ImageButton;
 
+import android.widget.TextView;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CommandLine;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.NavigationPopup;
+import org.chromium.chrome.browser.coins.CoinType;
+import org.chromium.chrome.browser.coins.CoinsDialogFragment;
+import org.chromium.chrome.browser.coins.CoinsSingleton;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.ntp.NewTabPage;
@@ -30,6 +36,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.ui.base.DeviceFormFactor;
 
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Collection;
 
@@ -49,9 +56,12 @@ public class ToolbarTablet extends ToolbarLayout implements OnClickListener {
     private TintedImageButton mBookmarkButton;
     private TintedImageButton mSaveOfflineButton;
     private ImageButton mAccessibilitySwitcherButton;
+    private TextView mCoinTextView;
 
     private OnClickListener mBookmarkListener;
     private OnClickListener mTabSwitcherListener;
+
+    private CoinsSingleton.ChangeListener coinsChangeListener;
 
     private boolean mIsInTabSwitcherMode = false;
 
@@ -92,6 +102,7 @@ public class ToolbarTablet extends ToolbarLayout implements OnClickListener {
         super.onFinishInflate();
         mLocationBar = (LocationBarTablet) findViewById(R.id.location_bar);
 
+        mCoinTextView = (TextView) findViewById(R.id.coins_text_view);
         mHomeButton = (TintedImageButton) findViewById(R.id.home_button);
         mBackButton = (TintedImageButton) findViewById(R.id.back_button);
         mForwardButton = (TintedImageButton) findViewById(R.id.forward_button);
@@ -152,6 +163,30 @@ public class ToolbarTablet extends ToolbarLayout implements OnClickListener {
             @Override
             public View getNextFocusBackward() {
                 return findViewById(R.id.menu_button);
+            }
+        });
+
+        updateCoins();
+        mCoinTextView.setOnClickListener(this);
+        CoinsSingleton.getInstance().addChangeListener(coinsChangeListener = new CoinsSingleton.ChangeListener() {
+            @Override
+            public void onTypeChanged(final CoinType newType) {
+                mCoinTextView.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        updateCoins();
+                    }
+                });
+            }
+
+            @Override
+            public void onValueChanged(float newBaseValue, float newTypeValue) {
+                mCoinTextView.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        updateCoins();
+                    }
+                });
             }
         });
 
@@ -244,6 +279,13 @@ public class ToolbarTablet extends ToolbarLayout implements OnClickListener {
         mSaveOfflineButton.setOnClickListener(this);
     }
 
+    private void updateCoins() {
+        DecimalFormat decimalFormat = new DecimalFormat("#.####");
+        mCoinTextView.setCompoundDrawablesWithIntrinsicBounds(CoinsSingleton.getInstance().getCurrentType().getIconRes()
+                , 0, 0, 0);
+        mCoinTextView.setText(decimalFormat.format(CoinsSingleton.getInstance().getValue()));
+    }
+
     @Override
     public boolean showContextMenuForChild(View originalView) {
         if (mBackButton == originalView) {
@@ -309,6 +351,8 @@ public class ToolbarTablet extends ToolbarLayout implements OnClickListener {
         } else if (mSaveOfflineButton == v) {
             DownloadUtils.downloadOfflinePage(getContext(), getToolbarDataProvider().getTab());
             RecordUserAction.record("MobileToolbarDownloadPage");
+        } else if(mCoinTextView == v) {
+            new CoinsDialogFragment().show(((Activity)getContext()).getFragmentManager(), null);
         }
     }
 
@@ -332,6 +376,7 @@ public class ToolbarTablet extends ToolbarLayout implements OnClickListener {
 
             mMenuButton.setTint(incognito ? mLightModeTint : mDarkModeTint);
             mHomeButton.setTint(incognito ? mLightModeTint : mDarkModeTint);
+            mCoinTextView.setTextColor(incognito ? Color.WHITE : Color.parseColor("#068ffc"));
             mBackButton.setTint(incognito ? mLightModeTint : mDarkModeTint);
             mForwardButton.setTint(incognito ? mLightModeTint : mDarkModeTint);
             mSaveOfflineButton.setTint(incognito ? mLightModeTint : mDarkModeTint);
@@ -649,4 +694,9 @@ public class ToolbarTablet extends ToolbarLayout implements OnClickListener {
         return set;
     }
 
+    @Override
+    public void destroy() {
+        super.destroy();
+        CoinsSingleton.getInstance().removeChangeListener(coinsChangeListener);
+    }
 }

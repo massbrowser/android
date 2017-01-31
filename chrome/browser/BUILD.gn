@@ -617,6 +617,8 @@ split_static_library("browser") {
     "net/async_dns_field_trial.cc",
     "net/async_dns_field_trial.h",
     # Blocker
+    "net/blockers/WhiteListFilterParser.cpp",
+    "net/blockers/WhiteListFilterParser.h",
     "net/blockers/ABPFilterParser.cpp",
     "net/blockers/ABPFilterParser.h",
     "net/blockers/BadFingerprint.h",
@@ -639,7 +641,6 @@ split_static_library("browser") {
     "net/blockers/shields_config.h",
     "net/blockers/TPParser.cpp",
     "net/blockers/TPParser.h",
-    "net/blockers/TrackerData.h",
 
     "net/chrome_cookie_notification_details.h",
     "net/chrome_extensions_network_delegate.cc",

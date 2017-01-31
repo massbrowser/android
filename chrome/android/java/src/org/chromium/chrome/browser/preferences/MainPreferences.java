@@ -35,7 +35,7 @@ import org.chromium.components.sync.AndroidSyncSettings;
  */
 public class MainPreferences extends PreferenceFragment
         implements SignInStateObserver, Preference.OnPreferenceClickListener, LoadListener {
-    public static final String PREF_SIGN_IN = "sign_in";
+//    public static final String PREF_SIGN_IN = "sign_in";
     public static final String PREF_DOCUMENT_MODE = "document_mode";
     public static final String PREF_AUTOFILL_SETTINGS = "autofill_settings";
     public static final String PREF_SEARCH_ENGINE = "search_engine";
@@ -71,10 +71,10 @@ public class MainPreferences extends PreferenceFragment
         // the SignInPreference.
         updatePreferences();
 
-        if (SigninManager.get(getActivity()).isSigninSupported()) {
-            SigninManager.get(getActivity()).addSignInStateObserver(this);
-            setupSignInPref();
-        }
+//        if (SigninManager.get(getActivity()).isSigninSupported()) {
+//            SigninManager.get(getActivity()).addSignInStateObserver(this);
+//            setupSignInPref();
+//        }
     }
 
     @Override
@@ -163,9 +163,9 @@ public class MainPreferences extends PreferenceFragment
             getPreferenceScreen().removePreference(dataReduction);
         }
 
-        if (!SigninManager.get(getActivity()).isSigninSupported()) {
-            getPreferenceScreen().removePreference(findPreference(PREF_SIGN_IN));
-        }
+//        if (!SigninManager.get(getActivity()).isSigninSupported()) {
+//            getPreferenceScreen().removePreference(findPreference(PREF_SIGN_IN));
+//        }
     }
 
     @Override
@@ -187,11 +187,11 @@ public class MainPreferences extends PreferenceFragment
         pref.setSummary(getResources().getString(isOn ? R.string.text_on : R.string.text_off));
     }
 
-    private void setupSignInPref() {
-        mSignInPreference = (SignInPreference) findPreference(PREF_SIGN_IN);
-        mSignInPreference.registerForUpdates();
-        mSignInPreference.setEnabled(true);
-    }
+//    private void setupSignInPref() {
+//        mSignInPreference = (SignInPreference) findPreference(PREF_SIGN_IN);
+//        mSignInPreference.registerForUpdates();
+//        mSignInPreference.setEnabled(true);
+//    }
 
     private void clearSignInPref() {
         if (mSignInPreference != null) {

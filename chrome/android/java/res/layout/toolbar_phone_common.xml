@@ -25,20 +25,7 @@
         <!--android:src="@drawable/btn_toolbar_home"-->
         <!--android:contentDescription="@string/accessibility_toolbar_btn_home"-->
         <!--android:visibility="gone" />-->
-
-
-    <TextView
-            android:id="@+id/coins_text_view"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:drawableStart="@drawable/ic_masscoin"
-            android:drawablePadding="3dp"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"
-            android:layout_gravity="center_vertical"
-            android:textStyle="bold"
-            android:text="@string/coins_stub"
-            android:textColor="#068ffc"/>
+    <include layout="@layout/coins_info_panel"/>
 
     <org.chromium.chrome.browser.omnibox.LocationBarPhone
         android:id="@+id/location_bar"

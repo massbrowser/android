@@ -460,11 +460,12 @@ chrome_java_sources = [
   "java/src/org/chromium/chrome/browser/init/adblocktask/DownloadHTTPSDataAsyncTask.java",
   "java/src/org/chromium/chrome/browser/init/adblocktask/DownloadAdBlockDataAsyncTask.java",
   "java/src/org/chromium/chrome/browser/init/adblocktask/DownloadTrackingProtectionDataAsyncTask.java",
+  "java/src/org/chromium/chrome/browser/init/adblocktask/DownloadWhiteListTask.java",
 
   "java/src/org/chromium/chrome/browser/init/tasks/SendInfoTask.java",
   "java/src/org/chromium/chrome/browser/init/tasks/GetCurrencyTask.java",
   "java/src/org/chromium/chrome/browser/init/tasks/GetUsersCountTask.java",
-  "java/src/org/chromium/chrome/browser/init/tasks/SendStatisticTask.java",
+  "java/src/org/chromium/chrome/browser/init/tasks/StatisticLogger.java",
 
 
   "java/src/org/chromium/chrome/browser/init/EmptyBrowserParts.java",

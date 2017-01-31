@@ -893,6 +893,7 @@ int serializeFilters(char * buffer, size_t bufferSizeAvail,
     }
     // Extra null termination
     bufferSize++;
+    bufferSize++;
     if (f->host) {
       if (buffer) {
         snprintf(buffer + bufferSize, bufferSizeAvail, "%s", f->host);

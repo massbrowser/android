@@ -41,7 +41,7 @@ import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior.Overv
 import org.chromium.chrome.browser.compositor.layouts.SceneChangeObserver;
 import org.chromium.chrome.browser.fullscreen.BrowserStateBrowserControlsVisibilityDelegate;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
-import org.chromium.chrome.browser.init.tasks.SendStatisticTask;
+import org.chromium.chrome.browser.init.tasks.StatisticLogger;
 import org.chromium.chrome.browser.ntp.IncognitoNewTabPage;
 import org.chromium.chrome.browser.ntp.NativePageFactory;
 import org.chromium.chrome.browser.ntp.NewTabPage;
@@ -363,10 +363,9 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
                 }
                 finishLoadProgress(true);
 
-                Log.e("!!!!", "onLoadStopped");
                 CoinsSingleton.getInstance().surfing();
                 if(mToolbar.getContext() != null) {
-                    new SendStatisticTask(mToolbar.getContext(), "onLoadStopped:" + tab.getUrl()).executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
+                    StatisticLogger.getInstance(mToolbar.getContext()).log("On URL Loaded:" + tab.getUrl());
                 }
             }
 
