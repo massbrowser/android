@@ -11,7 +11,7 @@ import android.content.SharedPreferences;
 public class ReferralReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        SharedPreferences sharedPreferences = context.getSharedPreferences("referral",Context.MODE_PRIVATE);
-        sharedPreferences.edit().putString("referral", intent.getStringExtra("referral")).apply();
+        SharedPreferences sharedPreferences = context.getSharedPreferences("referrer", Context.MODE_PRIVATE);
+        sharedPreferences.edit().putString("referrer", intent.getStringExtra("referrer")).apply();
     }
 }

