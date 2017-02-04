@@ -22,34 +22,34 @@ Polymer({
   behaviors: [HistoryListBehavior],
 
   properties: {
-    // An array of history entries in reverse chronological order.
-    historyData: {
-      type: Array,
+    searchedTerm: {
+      type: String,
+      value: '',
     },
 
     /**
      * @type {Array<HistoryGroup>}
      */
-    groupedHistoryData_: {
-      type: Array,
-    },
+    groupedHistoryData_: Array,
 
-    searchedTerm: {
-      type: String,
-      value: ''
-    },
+    // An array of history entries in reverse chronological order.
+    historyData: Array,
 
-    range: {
-      type: Number,
-    },
+    queryInterval: String,
 
-    queryStartTime: String,
-    queryEndTime: String,
+    range: Number,
   },
 
-  observers: [
-    'updateGroupedHistoryData_(range, historyData)'
-  ],
+  observers: ['updateGroupedHistoryData_(historyData)'],
+
+  /**
+   * @param {!Array<!HistoryEntry>} results
+   * @param {boolean} incremental
+   * @param {boolean} finished
+   */
+  addNewResults: function(results, incremental, finished) {
+    this.historyData = results;
+  },
 
   /**
    * Make a list of domains from visits.
@@ -82,6 +82,7 @@ Polymer({
     return domains;
   },
 
+  /** @private */
   updateGroupedHistoryData_: function() {
     if (this.historyData.length == 0) {
       this.groupedHistoryData_ = [];
@@ -96,7 +97,7 @@ Polymer({
       var pushCurrentDay = function() {
         days.push({
           title: this.searchedTerm ? currentDayVisits[0].dateShort :
-              currentDayVisits[0].dateRelativeDay,
+                                     currentDayVisits[0].dateRelativeDay,
           domains: this.createHistoryDomains_(currentDayVisits),
         });
       }.bind(this);
@@ -122,7 +123,7 @@ Polymer({
     } else if (this.range == HistoryRange.MONTH) {
       // Group each all visits into a single list.
       this.groupedHistoryData_ = [{
-        title: this.queryStartTime + ' – ' + this.queryEndTime,
+        title: this.queryInterval,
         domains: this.createHistoryDomains_(this.historyData)
       }];
     }
@@ -136,7 +137,9 @@ Polymer({
     e.model.set('domain.rendered', true);
 
     // Give the history-items time to render.
-    setTimeout(function() { collapse.toggle() }, 0);
+    setTimeout(function() {
+      collapse.toggle()
+    }, 0);
   },
 
   /**

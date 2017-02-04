@@ -63,6 +63,9 @@ class TestPlatformDisplay : public PlatformDisplay {
   const display::ViewportMetrics& GetViewportMetrics() const override {
     return display_metrics_;
   }
+  gfx::AcceleratedWidget GetAcceleratedWidget() const override {
+    return gfx::kNullAcceleratedWidget;
+  }
   FrameGenerator* GetFrameGenerator() override { return nullptr; }
 
  private:
@@ -86,18 +89,17 @@ ClientWindowId NextUnusedClientWindowId(WindowTree* tree) {
 
 }  // namespace
 
-// TestPlatformScreen  -------------------------------------------------
+// TestScreenManager  -------------------------------------------------
 
-TestPlatformScreen::TestPlatformScreen() {}
+TestScreenManager::TestScreenManager() {}
 
-TestPlatformScreen::~TestPlatformScreen() {}
+TestScreenManager::~TestScreenManager() {}
 
-int64_t TestPlatformScreen::AddDisplay() {
+int64_t TestScreenManager::AddDisplay() {
   return AddDisplay(MakeViewportMetrics(0, 0, 100, 100, 1.0f));
 }
 
-int64_t TestPlatformScreen::AddDisplay(
-    const display::ViewportMetrics& metrics) {
+int64_t TestScreenManager::AddDisplay(const display::ViewportMetrics& metrics) {
   // Generate a unique display id.
   int64_t display_id = display_ids_.empty() ? 1 : *display_ids_.rbegin() + 1;
   display_ids_.insert(display_id);
@@ -113,27 +115,26 @@ int64_t TestPlatformScreen::AddDisplay(
   return display_id;
 }
 
-void TestPlatformScreen::ModifyDisplay(
-    int64_t id,
-    const display::ViewportMetrics& metrics) {
+void TestScreenManager::ModifyDisplay(int64_t id,
+                                      const display::ViewportMetrics& metrics) {
   DCHECK(display_ids_.count(id) == 1);
   delegate_->OnDisplayModified(id, metrics);
 }
 
-void TestPlatformScreen::RemoveDisplay(int64_t id) {
+void TestScreenManager::RemoveDisplay(int64_t id) {
   DCHECK(display_ids_.count(id) == 1);
   delegate_->OnDisplayRemoved(id);
   display_ids_.erase(id);
 }
 
-void TestPlatformScreen::Init(display::PlatformScreenDelegate* delegate) {
+void TestScreenManager::Init(display::ScreenManagerDelegate* delegate) {
   // Reset
   delegate_ = delegate;
   display_ids_.clear();
   primary_display_id_ = display::kInvalidDisplayId;
 }
 
-int64_t TestPlatformScreen::GetPrimaryDisplayId() const {
+int64_t TestScreenManager::GetPrimaryDisplayId() const {
   return primary_display_id_;
 }
 
@@ -237,6 +238,14 @@ void TestWindowManager::WmPerformMoveLoop(uint32_t change_id,
 }
 
 void TestWindowManager::WmCancelMoveLoop(uint32_t window_id) {}
+
+void TestWindowManager::WmDeactivateWindow(uint32_t window_id) {}
+
+void TestWindowManager::WmStackAbove(uint32_t change_id,
+                                     uint32_t above_id,
+                                     uint32_t below_id) {}
+
+void TestWindowManager::WmStackAtTop(uint32_t change_id, uint32_t window_id) {}
 
 void TestWindowManager::OnAccelerator(uint32_t ack_id,
                                       uint32_t accelerator_id,
@@ -373,9 +382,7 @@ void TestWindowTreeClient::OnWindowPredefinedCursorChanged(
 
 void TestWindowTreeClient::OnWindowSurfaceChanged(
     Id window_id,
-    const cc::SurfaceId& surface_id,
-    const gfx::Size& frame_size,
-    float device_scale_factor) {}
+    const cc::SurfaceInfo& surface_info) {}
 
 void TestWindowTreeClient::OnDragDropStart(
     const std::unordered_map<std::string, std::vector<uint8_t>>& mime_data) {}
@@ -513,11 +520,13 @@ ServerWindow* WindowEventTargetingHelper::CreatePrimaryTree(
   EXPECT_TRUE(wm_tree->AddWindow(FirstRootId(wm_tree), embed_window_id));
   display_->root_window()->SetBounds(root_window_bounds);
   mojom::WindowTreeClientPtr client;
-  mojom::WindowTreeClientRequest client_request = GetProxy(&client);
+  mojom::WindowTreeClientRequest client_request(&client);
   wm_client_->Bind(std::move(client_request));
   const uint32_t embed_flags = 0;
   wm_tree->Embed(embed_window_id, std::move(client), embed_flags);
   ServerWindow* embed_window = wm_tree->GetWindowByClientId(embed_window_id);
+  embed_window->set_event_targeting_policy(
+      mojom::EventTargetingPolicy::DESCENDANTS_ONLY);
   WindowTree* tree1 = window_server()->GetTreeWithRoot(embed_window);
   EXPECT_NE(nullptr, tree1);
   EXPECT_NE(tree1, wm_tree);
@@ -547,7 +556,6 @@ void WindowEventTargetingHelper::CreateSecondaryTree(
 
   child1->SetVisible(true);
   child1->SetBounds(window_bounds);
-  EnableHitTest(child1);
 
   TestWindowTreeClient* embed_client =
       ws_test_helper_.window_server_delegate()->last_client();

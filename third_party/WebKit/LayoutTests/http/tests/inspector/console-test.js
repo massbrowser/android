@@ -93,6 +93,7 @@ InspectorTest.dumpConsoleMessages = function(printOriginatingCommand, dumpClassN
 
 InspectorTest.dumpConsoleMessagesIntoArray = function(printOriginatingCommand, dumpClassNames, formatter)
 {
+    Common.settingForTest('messageLevelFilters2').set(SDK.ConsoleMessage.MessageLevel.Verbose);
     formatter = formatter || InspectorTest.prepareConsoleMessageText;
     var result = [];
     InspectorTest.disableConsoleViewport();
@@ -396,7 +397,7 @@ InspectorTest.changeExecutionContext = function(namePrefix)
     var selector = Console.ConsoleView.instance()._consoleContextSelector._selectElement;
     var option = selector.firstChild;
     while (option) {
-        if (option.textContent && option.textContent.startsWith(namePrefix))
+        if (option.textContent && option.textContent.trim().startsWith(namePrefix))
             break;
         option = option.nextSibling;
     }

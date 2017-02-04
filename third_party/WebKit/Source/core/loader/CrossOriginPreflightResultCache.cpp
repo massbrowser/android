@@ -26,8 +26,8 @@
 
 #include "core/loader/CrossOriginPreflightResultCache.h"
 
-#include "core/fetch/FetchUtils.h"
 #include "platform/HTTPNames.h"
+#include "platform/loader/fetch/FetchUtils.h"
 #include "platform/network/ResourceResponse.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/StdLibExtras.h"
@@ -72,7 +72,7 @@ static void addToAccessControlAllowList(const String& string,
   while (end && isSpaceOrNewline((*stringImpl)[end]))
     --end;
 
-  set.add(string.substring(start, end - start + 1));
+  set.insert(string.substring(start, end - start + 1));
 }
 
 template <class HashType>

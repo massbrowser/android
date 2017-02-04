@@ -4,14 +4,15 @@
 
 #include "net/quic/test_tools/simulator/quic_endpoint.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/sha1.h"
-#include "base/strings/stringprintf.h"
 #include "net/quic/core/crypto/crypto_handshake_message.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
+#include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/test_tools/quic_test_utils.h"
 #include "net/quic/test_tools/simulator/simulator.h"
 
-using base::StringPrintf;
+using std::string;
 
 namespace net {
 namespace simulator {
@@ -21,8 +22,8 @@ const QuicByteCount kWriteChunkSize = 128 * 1024;
 const char kStreamDataContents = 'Q';
 
 // Takes a SHA-1 hash of the name and converts it into five 32-bit integers.
-static std::vector<uint32_t> HashNameIntoFive32BitIntegers(std::string name) {
-  const std::string hash = base::SHA1HashString(name);
+static std::vector<uint32_t> HashNameIntoFive32BitIntegers(string name) {
+  const string hash = test::Sha1Hash(name);
 
   std::vector<uint32_t> output;
   uint32_t current_number = 0;
@@ -37,14 +38,14 @@ static std::vector<uint32_t> HashNameIntoFive32BitIntegers(std::string name) {
   return output;
 }
 
-QuicSocketAddress GetAddressFromName(std::string name) {
+QuicSocketAddress GetAddressFromName(string name) {
   const std::vector<uint32_t> hash = HashNameIntoFive32BitIntegers(name);
 
   // Generate a random port between 1025 and 65535.
   const uint16_t port = 1025 + hash[0] % (65535 - 1025 + 1);
 
   // Generate a random 10.x.x.x address, where x is between 1 and 254.
-  std::string ip_address({10, 0, 0, 0});
+  string ip_address{"\xa\0\0\0", 4};
   for (size_t i = 1; i < 4; i++) {
     ip_address[i] = 1 + hash[i] % 254;
   }
@@ -54,15 +55,15 @@ QuicSocketAddress GetAddressFromName(std::string name) {
 }
 
 QuicEndpoint::QuicEndpoint(Simulator* simulator,
-                           std::string name,
-                           std::string peer_name,
+                           string name,
+                           string peer_name,
                            Perspective perspective,
                            QuicConnectionId connection_id)
     : Endpoint(simulator, name),
       peer_name_(peer_name),
       writer_(this),
       nic_tx_queue_(simulator,
-                    StringPrintf("%s (TX Queue)", name.c_str()),
+                    QuicStringPrintf("%s (TX Queue)", name.c_str()),
                     kMaxPacketSize * kTxQueueSize),
       connection_(connection_id,
                   GetAddressFromName(peer_name),
@@ -81,8 +82,10 @@ QuicEndpoint::QuicEndpoint(Simulator* simulator,
 
   connection_.SetSelfAddress(GetAddressFromName(name));
   connection_.set_visitor(this);
-  connection_.SetEncrypter(ENCRYPTION_FORWARD_SECURE, new NullEncrypter());
-  connection_.SetDecrypter(ENCRYPTION_FORWARD_SECURE, new NullDecrypter());
+  connection_.SetEncrypter(ENCRYPTION_FORWARD_SECURE,
+                           new NullEncrypter(perspective));
+  connection_.SetDecrypter(ENCRYPTION_FORWARD_SECURE,
+                           new NullDecrypter(perspective));
   connection_.SetDefaultEncryptionLevel(ENCRYPTION_FORWARD_SECURE);
 
   // Configure the connection as if it received a handshake.  This is important
@@ -186,12 +189,12 @@ WriteResult QuicEndpoint::Writer::WritePacket(
     return WriteResult(WRITE_STATUS_BLOCKED, 0);
   }
 
-  auto packet = base::MakeUnique<Packet>();
+  auto packet = QuicMakeUnique<Packet>();
   packet->source = endpoint_->name();
   packet->destination = endpoint_->peer_name_;
   packet->tx_timestamp = endpoint_->clock_->Now();
 
-  packet->contents = std::string(buffer, buf_len);
+  packet->contents = string(buffer, buf_len);
   packet->size = buf_len;
 
   endpoint_->nic_tx_queue_.AcceptPacket(std::move(packet));
@@ -242,7 +245,7 @@ void QuicEndpoint::WriteStreamData() {
 }
 
 QuicEndpointMultiplexer::QuicEndpointMultiplexer(
-    std::string name,
+    string name,
     std::initializer_list<QuicEndpoint*> endpoints)
     : Endpoint((*endpoints.begin())->simulator(), name) {
   for (QuicEndpoint* endpoint : endpoints) {

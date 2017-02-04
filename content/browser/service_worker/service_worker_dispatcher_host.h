@@ -13,6 +13,7 @@
 #include "base/id_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "content/browser/service_worker/service_worker_registration_status.h"
 #include "content/common/service_worker/service_worker.mojom.h"
@@ -188,6 +189,7 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
       const base::string16& message,
       const url::Origin& source_origin,
       const std::vector<int>& sent_message_ports,
+      const base::Optional<base::TimeDelta>& timeout,
       const StatusCallback& callback,
       const SourceInfo& source_info);
   void DispatchExtendableMessageEventAfterStartWorker(
@@ -196,6 +198,7 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
       const url::Origin& source_origin,
       const std::vector<int>& sent_message_ports,
       const ExtendableMessageEventSource& source,
+      const base::Optional<base::TimeDelta>& timeout,
       const StatusCallback& callback);
   template <typename SourceInfo>
   void DidFailToDispatchExtendableMessageEvent(
@@ -275,10 +278,10 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
   ResourceContext* resource_context_;
   scoped_refptr<ServiceWorkerContextWrapper> context_wrapper_;
 
-  IDMap<ServiceWorkerHandle, IDMapOwnPointer> handles_;
+  IDMap<std::unique_ptr<ServiceWorkerHandle>> handles_;
 
   using RegistrationHandleMap =
-      IDMap<ServiceWorkerRegistrationHandle, IDMapOwnPointer>;
+      IDMap<std::unique_ptr<ServiceWorkerRegistrationHandle>>;
   RegistrationHandleMap registration_handles_;
 
   bool channel_ready_;  // True after BrowserMessageFilter::sender_ != NULL.

@@ -60,7 +60,7 @@ class MockVideoWebMediaPlayer : public WebMediaPlayer {
   unsigned droppedFrameCount() const override { return 0; };
   size_t audioDecodedByteCount() const override { return 0; };
   size_t videoDecodedByteCount() const override { return 0; };
-  void paint(WebCanvas*, const WebRect&, SkPaint&) override{};
+  void paint(WebCanvas*, const WebRect&, PaintFlags&) override{};
 };
 
 class MockWebRemotePlaybackClient : public WebRemotePlaybackClient {
@@ -88,13 +88,13 @@ class StubFrameLoaderClient : public EmptyFrameLoaderClient {
       HTMLMediaElement&,
       const WebMediaPlayerSource&,
       WebMediaPlayerClient*) override {
-    return wrapUnique(new MockVideoWebMediaPlayer);
+    return WTF::wrapUnique(new MockVideoWebMediaPlayer);
   }
 
   WebRemotePlaybackClient* createWebRemotePlaybackClient(
       HTMLMediaElement&) override {
     if (!m_remotePlaybackClient) {
-      m_remotePlaybackClient = wrapUnique(new MockWebRemotePlaybackClient);
+      m_remotePlaybackClient = WTF::wrapUnique(new MockWebRemotePlaybackClient);
     }
     return m_remotePlaybackClient.get();
   }

@@ -1353,6 +1353,11 @@ GLenum Texture::SetParameteri(
       }
       swizzle_a_ = param;
       break;
+    case GL_TEXTURE_SRGB_DECODE_EXT:
+      if (!feature_info->validators()->texture_srgb_decode_ext.IsValid(param)) {
+        return GL_INVALID_ENUM;
+      }
+      break;
     case GL_TEXTURE_IMMUTABLE_FORMAT:
     case GL_TEXTURE_IMMUTABLE_LEVELS:
       return GL_INVALID_ENUM;
@@ -3461,6 +3466,7 @@ GLenum TextureManager::ExtractFormatFromStorageFormat(GLenum internalformat) {
     case GL_RGBA32I:
       return GL_RGBA_INTEGER;
     case GL_BGRA_EXT:
+    case GL_BGRA8_EXT:
       return GL_BGRA_EXT;
     case GL_DEPTH_COMPONENT16:
     case GL_DEPTH_COMPONENT24:
@@ -3490,8 +3496,6 @@ GLenum TextureManager::ExtractFormatFromStorageFormat(GLenum internalformat) {
       return GL_LUMINANCE;
     case GL_LUMINANCE_ALPHA16F_EXT:
       return GL_LUMINANCE_ALPHA;
-    case GL_BGRA8_EXT:
-      return GL_BGRA_EXT;
     default:
       return GL_NONE;
   }

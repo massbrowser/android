@@ -59,18 +59,31 @@
 
 namespace WTF {
 
+namespace internal {
+
+ThreadIdentifier currentThreadSyscall() {
+#if OS(MACOSX)
+  return pthread_mach_thread_np(pthread_self());
+#elif OS(LINUX)
+  return syscall(__NR_gettid);
+#elif OS(ANDROID)
+  return gettid();
+#else
+  return reinterpret_cast<uintptr_t>(pthread_self());
+#endif
+}
+
+}  // namespace internal
+
 static Mutex* atomicallyInitializedStaticMutex;
 
 void initializeThreading() {
   // This should only be called once.
   DCHECK(!atomicallyInitializedStaticMutex);
 
-  // StringImpl::empty() does not construct its static string in a threadsafe
-  // fashion, so ensure it has been initialized from here.
-  StringImpl::empty();
-  StringImpl::empty16Bit();
+  WTFThreadData::initialize();
+
   atomicallyInitializedStaticMutex = new Mutex;
-  wtfThreadData();
   initializeDates();
   // Force initialization of static DoubleToStringConverter converter variable
   // inside EcmaScriptConverter function while we are in single thread mode.
@@ -87,15 +100,7 @@ void unlockAtomicallyInitializedStaticMutex() {
 }
 
 ThreadIdentifier currentThread() {
-#if OS(MACOSX)
-  return pthread_mach_thread_np(pthread_self());
-#elif OS(LINUX)
-  return syscall(__NR_gettid);
-#elif OS(ANDROID)
-  return gettid();
-#else
-  return reinterpret_cast<uintptr_t>(pthread_self());
-#endif
+  return wtfThreadData().threadId();
 }
 
 MutexBase::MutexBase(bool recursive) {

@@ -30,7 +30,7 @@
 
 #include "public/web/WebNode.h"
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
@@ -170,7 +170,7 @@ WebElement WebNode::querySelector(const WebString& selector) const {
   if (!m_private->isContainerNode())
     return WebElement();
   return toContainerNode(m_private.get())
-      ->querySelector(selector, IGNORE_EXCEPTION);
+      ->querySelector(selector, IGNORE_EXCEPTION_FOR_TESTING);
 }
 
 bool WebNode::focused() const {

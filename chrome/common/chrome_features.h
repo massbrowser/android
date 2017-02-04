@@ -60,6 +60,10 @@ extern const base::Feature kExpectCTReporting;
 
 extern const base::Feature kExperimentalKeyboardLockUI;
 
+#if defined(OS_WIN)
+extern const base::Feature kGdiTextPrinting;
+#endif
+
 #if defined(OS_CHROMEOS)
 extern const base::Feature kHappinessTrackingSystem;
 #endif
@@ -68,10 +72,13 @@ extern const base::Feature kHappinessTrackingSystem;
 extern const base::Feature kLinuxObsoleteSystemIsEndOfTheLine;
 #endif
 
+extern const base::Feature kLsdPermissionPrompt;
+
 extern const base::Feature kMaterialDesignBookmarks;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 extern const base::Feature kMaterialDesignExtensions;
+extern const base::Feature kAcknowledgeNtpOverrideOnDeactivate;
 #endif
 
 extern const base::Feature kMaterialDesignHistory;
@@ -85,6 +92,10 @@ extern const base::Feature kMediaRemotingEncrypted;
 
 extern const base::Feature kModalPermissionPrompts;
 
+#if defined(OS_WIN)
+extern const base::Feature kModuleDatabase;
+#endif
+
 #if defined(OS_MACOSX)
 extern const base::Feature kNativeNotifications;
 #endif  // defined(OS_MACOSX)
@@ -93,11 +104,25 @@ extern const base::Feature kOfflinePageDownloadSuggestionsFeature;
 
 extern const base::Feature kOverrideYouTubeFlashEmbed;
 
+extern const base::Feature kParallelDownloading;
+
+extern const base::Feature kPermissionsBlacklist;
+
+#if defined(OS_WIN)
+extern const base::Feature kPostScriptPrinting;
+#endif
+
 #if BUILDFLAG(ENABLE_PLUGINS)
 extern const base::Feature kPreferHtmlOverPlugins;
 #endif
 
+#if defined(OS_CHROMEOS)
+extern const base::Feature kPreloadLockScreen;
+#endif
+
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+extern const base::Feature kPrintPdfAsImage;
+
 extern const base::Feature kPrintScaling;
 #endif
 
@@ -115,10 +140,6 @@ extern const base::Feature kSafeSearchUrlReporting;
 
 extern const base::Feature kSimplifiedFullscreenUI;
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-extern const base::Feature kSecurityChip;
-#endif
-
 #if defined(SYZYASAN)
 extern const base::Feature kSyzyasanDeferredFree;
 #endif
@@ -130,7 +151,11 @@ extern const base::Feature kOptInImeMenu;
 
 extern const base::Feature kQuickUnlockPin;
 
+extern const base::Feature kQuickUnlockFingerprint;
+
 extern const base::Feature kEHVInputOnImeMenu;
+
+extern const base::Feature kCrosCompUpdates;
 #endif  // defined(OS_CHROMEOS)
 
 // DON'T ADD RANDOM STUFF HERE. Put it in the main section above in

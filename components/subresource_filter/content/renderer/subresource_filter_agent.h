@@ -10,7 +10,8 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "components/subresource_filter/core/common/activation_state.h"
+#include "components/subresource_filter/content/common/document_load_statistics.h"
+#include "components/subresource_filter/core/common/activation_level.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "url/gurl.h"
 
@@ -22,7 +23,7 @@ class WebDocumentSubresourceFilter;
 
 namespace subresource_filter {
 
-class RulesetDealer;
+class UnverifiedRulesetDealer;
 class DocumentSubresourceFilter;
 
 // The renderer-side agent of the ContentSubresourceFilterDriver. There is one
@@ -36,7 +37,7 @@ class SubresourceFilterAgent
   // The |ruleset_dealer| must not be null and must outlive this instance. The
   // |render_frame| may be null in unittests.
   explicit SubresourceFilterAgent(content::RenderFrame* render_frame,
-                                  RulesetDealer* ruleset_dealer);
+                                  UnverifiedRulesetDealer* ruleset_dealer);
   ~SubresourceFilterAgent() override;
 
  protected:
@@ -56,9 +57,14 @@ class SubresourceFilterAgent
   // the most recently committed load. Not called if all resources are allowed.
   virtual void SignalFirstSubresourceDisallowedForCommittedLoad();
 
+  // Sends statistics about the DocumentSubresourceFilter's work to the browser.
+  virtual void SendDocumentLoadStatistics(
+      const DocumentLoadStatistics& statistics);
+
  private:
-  void OnActivateForProvisionalLoad(ActivationState activation_state,
-                                    const GURL& url);
+  void OnActivateForProvisionalLoad(ActivationLevel activation_level,
+                                    const GURL& url,
+                                    bool measure_performance);
   void RecordHistogramsOnLoadCommitted();
   void RecordHistogramsOnLoadFinished();
 
@@ -71,10 +77,11 @@ class SubresourceFilterAgent
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // Owned by the ChromeContentRendererClient and outlives us.
-  RulesetDealer* ruleset_dealer_;
+  UnverifiedRulesetDealer* ruleset_dealer_;
 
-  ActivationState activation_state_for_provisional_load_;
+  ActivationLevel activation_level_for_provisional_load_;
   GURL url_for_provisional_load_;
+  bool measure_performance_ = false;
   base::WeakPtr<DocumentSubresourceFilter> filter_for_last_committed_load_;
 
   DISALLOW_COPY_AND_ASSIGN(SubresourceFilterAgent);

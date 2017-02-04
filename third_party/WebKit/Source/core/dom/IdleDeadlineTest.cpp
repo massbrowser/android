@@ -12,11 +12,29 @@
 namespace blink {
 namespace {
 
-class MockScheduler final : public TestingPlatformMockScheduler {
+class MockScheduler final : public WebScheduler {
  public:
   MockScheduler() {}
   ~MockScheduler() override {}
+
+  // WebScheduler implementation:
+  WebTaskRunner* loadingTaskRunner() override { return nullptr; }
+  WebTaskRunner* timerTaskRunner() override { return nullptr; }
+  void shutdown() override {}
   bool shouldYieldForHighPriorityWork() override { return true; }
+  bool canExceedIdleDeadlineIfRequired() override { return false; }
+  void postIdleTask(const WebTraceLocation&, WebThread::IdleTask*) override {}
+  void postNonNestableIdleTask(const WebTraceLocation&,
+                               WebThread::IdleTask*) override {}
+  std::unique_ptr<WebViewScheduler> createWebViewScheduler(
+      InterventionReporter*,
+      WebViewScheduler::WebViewSchedulerSettings*) override {
+    return nullptr;
+  }
+  void suspendTimerQueue() override {}
+  void resumeTimerQueue() override {}
+  void addPendingNavigation(WebScheduler::NavigatingFrameType) override {}
+  void removePendingNavigation(WebScheduler::NavigatingFrameType) override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockScheduler);
@@ -47,25 +65,36 @@ class MockPlatform : public TestingPlatformSupport {
 
 }  // namespace
 
-TEST(IdleDeadline, deadlineInFuture) {
-  setTimeFunctionsForTesting([] { return 1.0; });
+class IdleDeadlineTest : public testing::Test {
+ public:
+  void SetUp() override {
+    m_originalTimeFunction = setTimeFunctionsForTesting([] { return 1.0; });
+  }
+
+  void TearDown() override {
+    setTimeFunctionsForTesting(m_originalTimeFunction);
+  }
+
+ private:
+  TimeFunction m_originalTimeFunction;
+};
+
+TEST_F(IdleDeadlineTest, deadlineInFuture) {
   IdleDeadline* deadline =
       IdleDeadline::create(1.25, IdleDeadline::CallbackType::CalledWhenIdle);
   // Note: the deadline is computed with reduced resolution.
   EXPECT_FLOAT_EQ(249.995, deadline->timeRemaining());
 }
 
-TEST(IdleDeadline, deadlineInPast) {
-  setTimeFunctionsForTesting([] { return 1.0; });
+TEST_F(IdleDeadlineTest, deadlineInPast) {
   IdleDeadline* deadline =
       IdleDeadline::create(0.75, IdleDeadline::CallbackType::CalledWhenIdle);
   EXPECT_FLOAT_EQ(0, deadline->timeRemaining());
 }
 
-TEST(IdleDeadline, yieldForHighPriorityWork) {
-  MockPlatform platform;
+TEST_F(IdleDeadlineTest, yieldForHighPriorityWork) {
+  ScopedTestingPlatformSupport<MockPlatform> platform;
 
-  setTimeFunctionsForTesting([] { return 1.0; });
   IdleDeadline* deadline =
       IdleDeadline::create(1.25, IdleDeadline::CallbackType::CalledWhenIdle);
   EXPECT_FLOAT_EQ(0, deadline->timeRemaining());

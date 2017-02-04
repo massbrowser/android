@@ -5,6 +5,7 @@
 #ifndef WebRemoteFrame_h
 #define WebRemoteFrame_h
 
+#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/web/WebContentSecurityPolicy.h"
 #include "public/web/WebFrame.h"
@@ -13,6 +14,8 @@
 namespace blink {
 
 enum class WebTreeScopeType;
+class InterfaceProvider;
+class InterfaceRegistry;
 class WebFrameClient;
 class WebLayer;
 class WebRemoteFrameClient;
@@ -34,6 +37,8 @@ class WebRemoteFrame : public WebFrame {
                                           const WebString& uniqueName,
                                           WebSandboxFlags,
                                           WebFrameClient*,
+                                          blink::InterfaceProvider*,
+                                          blink::InterfaceRegistry*,
                                           WebFrame* previousSibling,
                                           const WebFrameOwnerProperties&,
                                           WebFrame* opener) = 0;
@@ -59,7 +64,7 @@ class WebRemoteFrame : public WebFrame {
                                  const WebString& uniqueName) const = 0;
 
   virtual void setReplicatedFeaturePolicyHeader(
-      const WebString& headerValue) const = 0;
+      const WebParsedFeaturePolicyHeader& parsedHeader) const = 0;
 
   // Adds |header| to the set of replicated CSP headers.
   virtual void addReplicatedContentSecurityPolicyHeader(
@@ -93,6 +98,8 @@ class WebRemoteFrame : public WebFrame {
   // this prepares FullscreenController to enter fullscreen for that frame
   // owner.
   virtual void willEnterFullscreen() = 0;
+
+  virtual void setHasReceivedUserGesture() = 0;
 
   // Temporary method to allow embedders to get the script context of a
   // remote frame. This should only be used by legacy code that has not yet

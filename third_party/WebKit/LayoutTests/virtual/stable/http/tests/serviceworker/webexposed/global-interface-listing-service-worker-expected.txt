@@ -94,6 +94,11 @@ interface DOMException
     getter name
     method constructor
     method toString
+interface DOMStringList
+    getter length
+    method constructor
+    method contains
+    method item
 interface DataView
     getter buffer
     getter byteLength
@@ -117,25 +122,9 @@ interface DataView
     method setUint8
 interface Event
     attribute AT_TARGET
-    attribute BLUR
     attribute BUBBLING_PHASE
     attribute CAPTURING_PHASE
-    attribute CHANGE
-    attribute CLICK
-    attribute DBLCLICK
-    attribute DRAGDROP
-    attribute FOCUS
-    attribute KEYDOWN
-    attribute KEYPRESS
-    attribute KEYUP
-    attribute MOUSEDOWN
-    attribute MOUSEDRAG
-    attribute MOUSEMOVE
-    attribute MOUSEOUT
-    attribute MOUSEOVER
-    attribute MOUSEUP
     attribute NONE
-    attribute SELECT
     getter bubbles
     getter cancelBubble
     getter cancelable
@@ -384,6 +373,8 @@ interface ImageBitmap
     method close
     method constructor
 interface ImageData
+    getter colorSpace
+    getter data
     getter height
     getter width
     method constructor
@@ -512,6 +503,7 @@ interface Response
     getter bodyUsed
     getter headers
     getter ok
+    getter redirected
     getter status
     getter statusText
     getter type

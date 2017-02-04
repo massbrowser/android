@@ -68,7 +68,7 @@ String convertInputTypeToString(InputEvent::InputType inputType) {
   if (it >= std::begin(kInputTypeStringNameMap) &&
       it < std::end(kInputTypeStringNameMap))
     return AtomicString(it->stringName);
-  return emptyString();
+  return emptyString;
 }
 
 InputEvent::InputType convertStringToInputType(const String& stringName) {
@@ -169,7 +169,7 @@ String InputEvent::inputType() const {
 StaticRangeVector InputEvent::getTargetRanges() const {
   StaticRangeVector staticRanges;
   for (const auto& range : m_ranges)
-    staticRanges.append(StaticRange::create(
+    staticRanges.push_back(StaticRange::create(
         range->ownerDocument(), range->startContainer(), range->startOffset(),
         range->endContainer(), range->endOffset()));
   return staticRanges;

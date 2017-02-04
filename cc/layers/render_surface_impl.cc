@@ -32,9 +32,9 @@
 namespace cc {
 
 RenderSurfaceImpl::RenderSurfaceImpl(LayerImpl* owning_layer)
-    : owning_layer_(owning_layer),
-      layer_tree_impl_(owning_layer->layer_tree_impl()),
+    : layer_tree_impl_(owning_layer->layer_tree_impl()),
       stable_effect_id_(owning_layer->id()),
+      effect_tree_index_(EffectTree::kInvalidNodeId),
       surface_property_changed_(false),
       ancestor_property_changed_(false),
       contributes_to_drawn_surface_(false),
@@ -50,7 +50,7 @@ RenderSurfaceImpl* RenderSurfaceImpl::render_target() {
   EffectTree& effect_tree = layer_tree_impl_->property_trees()->effect_tree;
   EffectNode* node = effect_tree.Node(EffectTreeIndex());
   EffectNode* target_node = effect_tree.Node(node->target_id);
-  if (target_node->id != 0)
+  if (target_node->id != EffectTree::kRootNodeId)
     return target_node->render_surface;
   else
     return this;
@@ -61,7 +61,7 @@ const RenderSurfaceImpl* RenderSurfaceImpl::render_target() const {
       layer_tree_impl_->property_trees()->effect_tree;
   const EffectNode* node = effect_tree.Node(EffectTreeIndex());
   const EffectNode* target_node = effect_tree.Node(node->target_id);
-  if (target_node->id != 0)
+  if (target_node->id != EffectTree::kRootNodeId)
     return target_node->render_surface;
   else
     return this;
@@ -81,11 +81,8 @@ gfx::RectF RenderSurfaceImpl::DrawableContentRect() const {
   gfx::Rect surface_content_rect = content_rect();
   const FilterOperations& filters = Filters();
   if (!filters.IsEmpty()) {
-    const gfx::Transform& owning_layer_draw_transform =
-        owning_layer_->DrawTransform();
-    DCHECK(owning_layer_draw_transform.IsScale2d());
-    surface_content_rect = filters.MapRect(
-        surface_content_rect, owning_layer_draw_transform.matrix());
+    surface_content_rect =
+        filters.MapRect(surface_content_rect, FiltersTransform().matrix());
   }
   gfx::RectF drawable_content_rect = MathUtil::MapClippedRect(
       draw_transform(), gfx::RectF(surface_content_rect));
@@ -139,7 +136,10 @@ gfx::PointF RenderSurfaceImpl::FiltersOrigin() const {
 }
 
 gfx::Transform RenderSurfaceImpl::FiltersTransform() const {
-  return owning_layer_->DrawTransform();
+  gfx::Transform filters_transform;
+  filters_transform.Scale(OwningEffectNode()->surface_contents_scale.x(),
+                          OwningEffectNode()->surface_contents_scale.y());
+  return filters_transform;
 }
 
 const FilterOperations& RenderSurfaceImpl::BackgroundFilters() const {
@@ -151,16 +151,18 @@ bool RenderSurfaceImpl::HasCopyRequest() const {
 }
 
 int RenderSurfaceImpl::TransformTreeIndex() const {
-  return owning_layer_->transform_tree_index();
+  return OwningEffectNode()->transform_id;
 }
 
 int RenderSurfaceImpl::ClipTreeIndex() const {
-  return owning_layer_->clip_tree_index();
+  return OwningEffectNode()->clip_id;
 }
 
 int RenderSurfaceImpl::EffectTreeIndex() const {
-  return layer_tree_impl_->property_trees()
-      ->effect_id_to_index_map[stable_effect_id_];
+  DCHECK_EQ(effect_tree_index_,
+            layer_tree_impl_->property_trees()
+                ->layer_id_to_effect_node_index[stable_effect_id_]);
+  return effect_tree_index_;
 }
 
 const EffectNode* RenderSurfaceImpl::OwningEffectNode() const {
@@ -188,6 +190,17 @@ void RenderSurfaceImpl::SetContentRectForTesting(const gfx::Rect& rect) {
   SetContentRect(rect);
 }
 
+gfx::Rect RenderSurfaceImpl::CalculateExpandedClipForFilters(
+    const gfx::Transform& target_to_surface) {
+  gfx::Rect clip_in_surface_space =
+      MathUtil::ProjectEnclosingClippedRect(target_to_surface, clip_rect());
+  gfx::Rect expanded_clip_in_surface_space = Filters().MapRectReverse(
+      clip_in_surface_space, FiltersTransform().matrix());
+  gfx::Rect expanded_clip_in_target_space = MathUtil::MapEnclosingClippedRect(
+      draw_transform(), expanded_clip_in_surface_space);
+  return expanded_clip_in_target_space;
+}
+
 gfx::Rect RenderSurfaceImpl::CalculateClippedAccumulatedContentRect() {
   if (HasCopyRequest() || !is_clipped())
     return accumulated_content_rect();
@@ -212,7 +225,13 @@ gfx::Rect RenderSurfaceImpl::CalculateClippedAccumulatedContentRect() {
   if (clip_rect().Contains(accumulated_rect_in_target_space))
     return accumulated_content_rect();
 
-  gfx::Rect clipped_accumulated_rect_in_target_space = clip_rect();
+  gfx::Rect clipped_accumulated_rect_in_target_space;
+  if (Filters().HasFilterThatMovesPixels()) {
+    clipped_accumulated_rect_in_target_space =
+        CalculateExpandedClipForFilters(target_to_surface);
+  } else {
+    clipped_accumulated_rect_in_target_space = clip_rect();
+  }
   clipped_accumulated_rect_in_target_space.Intersect(
       accumulated_rect_in_target_space);
 
@@ -299,7 +318,6 @@ bool RenderSurfaceImpl::SurfacePropertyChanged() const {
   // - all other property changes come from the surface's property tree nodes
   //   (or some ancestor node that propagates its change to one of these nodes).
   //
-  DCHECK(owning_layer_);
   return surface_property_changed_ || AncestorPropertyChanged();
 }
 
@@ -319,6 +337,14 @@ void RenderSurfaceImpl::NoteAncestorPropertyChanged() {
   ancestor_property_changed_ = true;
 }
 
+gfx::Rect RenderSurfaceImpl::GetDamageRect() {
+  gfx::Rect damage_rect;
+  bool is_valid_rect = damage_tracker_->GetDamageRectIfValid(&damage_rect);
+  if (!is_valid_rect)
+    return content_rect();
+  return damage_rect;
+}
+
 void RenderSurfaceImpl::ResetPropertyChangedFlags() {
   surface_property_changed_ = false;
   ancestor_property_changed_ = false;
@@ -328,19 +354,18 @@ void RenderSurfaceImpl::ClearLayerLists() {
   layer_list_.clear();
 }
 
-RenderPassId RenderSurfaceImpl::GetRenderPassId() {
-  int layer_id = owning_layer_->id();
-  int sub_id = 0;
-  DCHECK_GT(layer_id, 0);
-  return RenderPassId(layer_id, sub_id);
+int RenderSurfaceImpl::GetRenderPassId() {
+  return id();
 }
 
 void RenderSurfaceImpl::AppendRenderPasses(RenderPassSink* pass_sink) {
   std::unique_ptr<RenderPass> pass = RenderPass::Create(layer_list_.size());
-  pass->SetNew(GetRenderPassId(), content_rect(),
-               gfx::IntersectRects(content_rect(),
-                                   damage_tracker_->current_damage_rect()),
+  gfx::Rect damage_rect = GetDamageRect();
+  damage_rect.Intersect(content_rect());
+  pass->SetNew(id(), content_rect(), damage_rect,
                draw_properties_.screen_space_transform);
+  pass->filters = Filters();
+  pass->background_filters = BackgroundFilters();
   pass_sink->AppendRenderPass(std::move(pass));
 }
 
@@ -373,31 +398,30 @@ void RenderSurfaceImpl::AppendQuads(RenderPass* render_pass,
   ResourceId mask_resource_id = 0;
   gfx::Size mask_texture_size;
   gfx::Vector2dF mask_uv_scale;
-  gfx::Transform owning_layer_draw_transform = owning_layer_->DrawTransform();
+  gfx::Vector2dF surface_contents_scale =
+      OwningEffectNode()->surface_contents_scale;
   LayerImpl* mask_layer = MaskLayer();
   if (mask_layer && mask_layer->DrawsContent() &&
       !mask_layer->bounds().IsEmpty()) {
+    // The software renderer applies mask layer and blending in the wrong
+    // order but kDstIn doesn't commute with masking. It is okay to not
+    // support this configuration because kDstIn was introduced to replace
+    // mask layers.
+    DCHECK(BlendMode() != SkBlendMode::kDstIn)
+        << "kDstIn blend mode with mask layer is unsupported.";
     mask_layer->GetContentsResourceId(&mask_resource_id, &mask_texture_size);
-    gfx::Vector2dF owning_layer_draw_scale =
-        MathUtil::ComputeTransform2dScaleComponents(owning_layer_draw_transform,
-                                                    1.f);
     gfx::SizeF unclipped_mask_target_size = gfx::ScaleSize(
         gfx::SizeF(OwningEffectNode()->unscaled_mask_target_size),
-        owning_layer_draw_scale.x(), owning_layer_draw_scale.y());
+        surface_contents_scale.x(), surface_contents_scale.y());
     mask_uv_scale = gfx::Vector2dF(1.0f / unclipped_mask_target_size.width(),
                                    1.0f / unclipped_mask_target_size.height());
   }
-
-  DCHECK(owning_layer_draw_transform.IsScale2d());
-  gfx::Vector2dF owning_layer_to_target_scale =
-      owning_layer_draw_transform.Scale2d();
 
   RenderPassDrawQuad* quad =
       render_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
   quad->SetNew(shared_quad_state, content_rect(), visible_layer_rect,
                GetRenderPassId(), mask_resource_id, mask_uv_scale,
-               mask_texture_size, Filters(), owning_layer_to_target_scale,
-               FiltersOrigin(), BackgroundFilters());
+               mask_texture_size, surface_contents_scale, FiltersOrigin());
 }
 
 }  // namespace cc

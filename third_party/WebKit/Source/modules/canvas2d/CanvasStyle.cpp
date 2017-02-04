@@ -32,8 +32,10 @@
 #include "core/css/StylePropertySet.h"
 #include "core/css/parser/CSSParser.h"
 #include "core/html/HTMLCanvasElement.h"
+#include "core/html/parser/HTMLParserIdioms.h"
 #include "modules/canvas2d/CanvasGradient.h"
 #include "modules/canvas2d/CanvasPattern.h"
+#include "platform/graphics/paint/PaintFlags.h"
 #include "platform/graphics/skia/SkiaUtils.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "wtf/PassRefPtr.h"
@@ -71,7 +73,8 @@ static Color currentColor(HTMLCanvasElement* canvas) {
 bool parseColorOrCurrentColor(Color& parsedColor,
                               const String& colorString,
                               HTMLCanvasElement* canvas) {
-  ColorParseResult parseResult = parseColor(parsedColor, colorString);
+  ColorParseResult parseResult =
+      parseColor(parsedColor, colorString.stripWhiteSpace(isHTMLSpace<UChar>));
   switch (parseResult) {
     case ParsedRGBA:
     case ParsedSystemColor:
@@ -105,7 +108,7 @@ CanvasStyle* CanvasStyle::createFromPattern(CanvasPattern* pattern) {
   return new CanvasStyle(pattern);
 }
 
-void CanvasStyle::applyToPaint(SkPaint& paint) const {
+void CanvasStyle::applyToPaint(PaintFlags& paint) const {
   switch (m_type) {
     case ColorRGBA:
       paint.setShader(nullptr);

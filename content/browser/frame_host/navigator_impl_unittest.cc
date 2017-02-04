@@ -306,12 +306,17 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, BeginNavigation) {
   FrameTreeNode* subframe_node = subframe_rfh->frame_tree_node();
   RequestNavigation(subframe_node, kUrl2);
   NavigationRequest* subframe_request = subframe_node->navigation_request();
+
+  // We should be waiting for the BeforeUnload event to execute in the subframe.
+  ASSERT_TRUE(subframe_request);
+  EXPECT_EQ(NavigationRequest::WAITING_FOR_RENDERER_RESPONSE,
+            subframe_request->state());
+  EXPECT_TRUE(subframe_rfh->is_waiting_for_beforeunload_ack());
+
+  // Simulate the BeforeUnload ACK. The navigation should start.
+  subframe_rfh->SendBeforeUnloadACK(true);
   TestNavigationURLLoader* subframe_loader =
       GetLoaderForNavigationRequest(subframe_request);
-
-  // Subframe navigations should start right away as they don't have to request
-  // beforeUnload to run at the renderer.
-  ASSERT_TRUE(subframe_request);
   ASSERT_TRUE(subframe_loader);
   EXPECT_EQ(NavigationRequest::STARTED, subframe_request->state());
   EXPECT_EQ(kUrl2, subframe_request->common_params().url);
@@ -829,20 +834,13 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, Reload) {
   contents()->NavigateAndCommit(kUrl);
 
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
-  controller().Reload(false);
+  controller().Reload(ReloadType::NORMAL, false);
   int entry_id = controller().GetPendingEntry()->GetUniqueID();
   // A NavigationRequest should have been generated.
   NavigationRequest* main_request = node->navigation_request();
   ASSERT_TRUE(main_request != NULL);
-  // TODO(toyoshim): Modify following checks once the feature is enabled.
-  if (base::FeatureList::IsEnabled(
-          features::kNonValidatingReloadOnNormalReload)) {
-    EXPECT_EQ(FrameMsg_Navigate_Type::RELOAD_MAIN_RESOURCE,
-              main_request->common_params().navigation_type);
-  } else {
-    EXPECT_EQ(FrameMsg_Navigate_Type::RELOAD,
-              main_request->common_params().navigation_type);
-  }
+  EXPECT_EQ(FrameMsg_Navigate_Type::RELOAD,
+            main_request->common_params().navigation_type);
   main_test_rfh()->PrepareForCommit();
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
@@ -850,7 +848,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, Reload) {
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // Now do a shift+reload.
-  controller().ReloadBypassingCache(false);
+  controller().Reload(ReloadType::BYPASSING_CACHE, false);
   // A NavigationRequest should have been generated.
   main_request = node->navigation_request();
   ASSERT_TRUE(main_request != NULL);

@@ -55,7 +55,7 @@ class WebViewFrameWidget : public WebFrameWidgetBase {
   void compositeAndReadbackAsync(
       WebCompositeAndReadbackAsyncCallback*) override;
   void themeChanged() override;
-  WebInputEventResult handleInputEvent(const WebInputEvent&) override;
+  WebInputEventResult handleInputEvent(const WebCoalescedInputEvent&) override;
   void setCursorVisibilityState(bool isVisible) override;
   bool hasTouchEventHandlersAt(const WebPoint&) override;
   void applyViewportDeltas(const WebFloatSize& visualViewportDelta,
@@ -66,8 +66,6 @@ class WebViewFrameWidget : public WebFrameWidgetBase {
   void mouseCaptureLost() override;
   void setFocus(bool) override;
   WebRange compositionRange() override;
-  WebTextInputInfo textInputInfo() override;
-  WebTextInputType textInputType() override;
   bool selectionBounds(WebRect& anchor, WebRect& focus) const override;
   bool selectionTextDirection(WebTextDirection& start,
                               WebTextDirection& end) const override;
@@ -102,8 +100,8 @@ class WebViewFrameWidget : public WebFrameWidgetBase {
   CompositorProxyClient* createCompositorProxyClient() override;
   void setRootGraphicsLayer(GraphicsLayer*) override;
   void setRootLayer(WebLayer*) override;
-  void attachCompositorAnimationTimeline(CompositorAnimationTimeline*) override;
-  void detachCompositorAnimationTimeline(CompositorAnimationTimeline*) override;
+  WebLayerTreeView* getLayerTreeView() const override;
+  CompositorAnimationHost* animationHost() const override;
   WebWidgetClient* client() const override { return m_client; }
   HitTestResult coreHitTestResultAt(const WebPoint&) override;
 

@@ -9,8 +9,8 @@ import static android.system.OsConstants.SOCK_STREAM;
 
 import android.annotation.TargetApi;
 import android.os.Build;
+import android.support.test.filters.SmallTest;
 import android.system.Os;
-import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
@@ -89,7 +89,8 @@ public class NetworkChangeNotifierTest extends CronetTestBase {
         callback.blockForDone();
         assertNotNull(callback.mError);
         assertTrue(callback.mOnErrorCalled);
-        assertEquals(NetError.ERR_NETWORK_CHANGED, callback.mError.getCronetInternalErrorCode());
+        assertEquals(NetError.ERR_NETWORK_CHANGED,
+                ((NetworkException) callback.mError).getCronetInternalErrorCode());
         assertContains("Exception in CronetUrlRequest: net::ERR_NETWORK_CHANGED",
                 callback.mError.getMessage());
     }

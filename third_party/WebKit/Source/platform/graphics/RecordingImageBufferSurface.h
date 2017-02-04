@@ -13,10 +13,6 @@
 #include "wtf/Noncopyable.h"
 #include <memory>
 
-class SkCanvas;
-class SkPicture;
-class SkPictureRecorder;
-
 namespace blink {
 
 class ImageBuffer;
@@ -56,9 +52,9 @@ class PLATFORM_EXPORT RecordingImageBufferSurface : public ImageBufferSurface {
   ~RecordingImageBufferSurface() override;
 
   // Implementation of ImageBufferSurface interfaces
-  SkCanvas* canvas() override;
+  PaintCanvas* canvas() override;
   void disableDeferral(DisableDeferralReason) override;
-  sk_sp<SkPicture> getPicture() override;
+  sk_sp<PaintRecord> getPicture() override;
   void flush(FlushReason) override;
   void didDraw(const FloatRect&) override;
   bool isValid() const override { return true; }
@@ -95,7 +91,6 @@ class PLATFORM_EXPORT RecordingImageBufferSurface : public ImageBufferSurface {
     FallbackReasonFlushInitialClear = 4,
     FallbackReasonFlushForDrawImageOfWebGL = 5,
     FallbackReasonSnapshotForGetImageData = 6,
-    FallbackReasonSnapshotForCopyToWebGLTexture = 7,
     FallbackReasonSnapshotForPaint = 8,
     FallbackReasonSnapshotForToDataURL = 9,
     FallbackReasonSnapshotForToBlob = 10,
@@ -113,6 +108,12 @@ class PLATFORM_EXPORT RecordingImageBufferSurface : public ImageBufferSurface {
         21,  // This value should never appear in production histograms
     FallbackReasonSnapshotGetCopiedImage = 22,
     FallbackReasonSnapshotWebGLDrawImageIntoBuffer = 23,
+    FallbackReasonSnapshotForWebGLTexImage2D = 24,
+    FallbackReasonSnapshotForWebGLTexSubImage2D = 25,
+    FallbackReasonSnapshotForWebGLTexImage3D = 26,
+    FallbackReasonSnapshotForWebGLTexSubImage3D = 27,
+    FallbackReasonSnapshotForCopyToClipboard = 28,
+    FallbackReasonSnapshotForCreateImageBitmap = 29,
     FallbackReasonCount,
   };
 
@@ -123,8 +124,8 @@ class PLATFORM_EXPORT RecordingImageBufferSurface : public ImageBufferSurface {
   bool finalizeFrameInternal(FallbackReason*);
   int approximateOpCount();
 
-  std::unique_ptr<SkPictureRecorder> m_currentFrame;
-  sk_sp<SkPicture> m_previousFrame;
+  std::unique_ptr<PaintRecorder> m_currentFrame;
+  sk_sp<PaintRecord> m_previousFrame;
   std::unique_ptr<ImageBufferSurface> m_fallbackSurface;
   ImageBuffer* m_imageBuffer;
   int m_initialSaveCount;

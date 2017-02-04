@@ -464,11 +464,9 @@ class Directory {
   // Note: "Purge" is just meant to distinguish from "deleting" entries, which
   // means something different in the syncable namespace.
   // WARNING! This can be real slow, as it iterates over all entries.
-  // WARNING! Performs synchronous I/O.
-  // Returns: true on success, false if an error was encountered.
-  virtual bool PurgeEntriesWithTypeIn(ModelTypeSet disabled_types,
-                                      ModelTypeSet types_to_journal,
-                                      ModelTypeSet types_to_unapply);
+  void PurgeEntriesWithTypeIn(ModelTypeSet disabled_types,
+                              ModelTypeSet types_to_journal,
+                              ModelTypeSet types_to_unapply);
 
   // Resets the base_versions and server_versions of all synced entities
   // associated with |type| to 1.
@@ -528,6 +526,12 @@ class Directory {
   // number of classes that call these should be limited.
   Kernel* kernel();
   const Kernel* kernel() const;
+
+  // Delete the directory database files from the sync data folder to cleanup
+  // backend data. This should happen the first time sync is enabled for a user,
+  // to prevent accidentally reusing old sync data, as well as shutdown when the
+  // user is no longer syncing.
+  static void DeleteDirectoryFiles(const base::FilePath& directory_path);
 
  private:
   friend class SyncableDirectoryTest;

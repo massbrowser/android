@@ -20,6 +20,7 @@
 #include "components/ui_devtools/devtools_server.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -56,6 +57,7 @@ const char kPortForwardingConfigCommand[] = "set-port-forwarding-config";
 const char kDiscoverTCPTargetsEnabledCommand[] =
     "set-discover-tcp-targets-enabled";
 const char kTCPDiscoveryConfigCommand[] = "set-tcp-discovery-config";
+const char kOpenNodeFrontendCommand[] = "open-node-frontend";
 
 const char kPortForwardingDefaultPort[] = "8080";
 const char kPortForwardingDefaultLocation[] = "localhost:8080";
@@ -99,6 +101,7 @@ class InspectMessageHandler : public WebUIMessageHandler {
                                 const base::ListValue* args);
   void HandlePortForwardingConfigCommand(const base::ListValue* args);
   void HandleTCPDiscoveryConfigCommand(const base::ListValue* args);
+  void HandleOpenNodeFrontendCommand(const base::ListValue* args);
 
   InspectUI* inspect_ui_;
 
@@ -139,6 +142,9 @@ void InspectMessageHandler::RegisterMessages() {
                  &prefs::kDevToolsDiscoverTCPTargetsEnabled[0]));
   web_ui()->RegisterMessageCallback(kTCPDiscoveryConfigCommand,
       base::Bind(&InspectMessageHandler::HandleTCPDiscoveryConfigCommand,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(kOpenNodeFrontendCommand,
+      base::Bind(&InspectMessageHandler::HandleOpenNodeFrontendCommand,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kReloadCommand,
       base::Bind(&InspectMessageHandler::HandleReloadCommand,
@@ -259,6 +265,14 @@ void InspectMessageHandler::HandleTCPDiscoveryConfigCommand(
     profile->GetPrefs()->Set(prefs::kDevToolsTCPDiscoveryConfig, *list_src);
 }
 
+void InspectMessageHandler::HandleOpenNodeFrontendCommand(
+    const base::ListValue* args) {
+  Profile* profile = Profile::FromWebUI(web_ui());
+  if (!profile)
+    return;
+  DevToolsWindow::OpenNodeFrontendWindow(profile);
+}
+
 // DevToolsUIBindingsEnabler ----------------------------------------
 
 class DevToolsUIBindingsEnabler
@@ -273,9 +287,8 @@ class DevToolsUIBindingsEnabler
  private:
   // contents::WebContentsObserver overrides.
   void WebContentsDestroyed() override;
-  void DidNavigateMainFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
   DevToolsUIBindings bindings_;
   GURL url_;
@@ -298,10 +311,12 @@ void DevToolsUIBindingsEnabler::WebContentsDestroyed() {
   delete this;
 }
 
-void DevToolsUIBindingsEnabler::DidNavigateMainFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) {
-  if (url_ != params.url)
+void DevToolsUIBindingsEnabler::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
+    return;
+
+  if (url_ != navigation_handle->GetURL())
     delete this;
 }
 
@@ -311,7 +326,7 @@ void DevToolsUIBindingsEnabler::DidNavigateMainFrame(
 
 InspectUI::InspectUI(content::WebUI* web_ui)
     : WebUIController(web_ui) {
-  web_ui->AddMessageHandler(new InspectMessageHandler(this));
+  web_ui->AddMessageHandler(base::MakeUnique<InspectMessageHandler>(this));
   Profile* profile = Profile::FromWebUI(web_ui);
   content::WebUIDataSource::Add(profile, CreateInspectUIHTMLSource());
 

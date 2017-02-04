@@ -5,15 +5,15 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-menu/paper-menu.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-menu/paper-submenu.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-ripple/paper-ripple.html">
-<link rel="import" href="/icons.html">
-<link rel="import" href="/route.html">
-<link rel="import" href="/settings_shared_css.html">
+<link rel="import" href="../icons.html">
+<link rel="import" href="../route.html">
+<link rel="import" href="../settings_shared_css.html">
 
 <dom-module id="settings-menu">
   <template>
     <style include="settings-shared">
       #about-menu[about-selected] {
-        color: var(--google-blue-500);
+        color: var(--google-blue-700);
       }
 
       iron-icon {
@@ -22,7 +22,7 @@
       }
 
       .iron-selected:not(.menu-trigger) > iron-icon {
-        fill: var(--google-blue-500);
+        fill: var(--google-blue-700);
       }
 
       .menu-trigger span {
@@ -65,13 +65,13 @@
       }
 
       paper-ripple {
-        color: var(--google-blue-500);
+        color: var(--google-blue-700);
         opacity: .5;
       }
 
       .page-menu paper-menu {
         --paper-menu-selected-item: {
-          color: var(--google-blue-500);
+          color: var(--google-blue-700);
           font-weight: 500;
         };
       }
@@ -83,6 +83,11 @@
         font-size: 100%;
         font-weight: 500;
         min-height: 40px;
+        word-break: break-word;
+      }
+
+      .page-menu div iron-icon {
+        flex-shrink: 0;
       }
 
       .separator {
@@ -99,6 +104,10 @@
           <div data-path="/internet" on-tap="openPage_">
             <iron-icon icon="settings:network-wifi"></iron-icon>
             $i18n{internetPageTitle}
+          </div>
+          <div data-path="/bluetooth" on-tap="openPage_">
+            <iron-icon icon="settings:bluetooth"></iron-icon>
+            $i18n{bluetoothPageTitle}
           </div>
 </if>
           <div id="people" data-path="/people" on-tap="openPage_"
@@ -121,6 +130,13 @@
             <iron-icon icon="cr:search"></iron-icon>
             $i18n{searchPageTitle}
           </div>
+<if expr="chromeos">
+           <div data-path="/androidApps" on-tap="openPage_"
+               hidden="[[!showAndroidApps]]">
+             <iron-icon icon="settings:android"></iron-icon>
+             $i18n{androidAppsPageTitle}
+           </div>
+</if>
 <if expr="not chromeos">
           <div data-path="/defaultBrowser" on-tap="openPage_"
               hidden="[[!pageVisibility.defaultBrowser]]">
@@ -135,7 +151,7 @@
           </div>
         </paper-menu>
       </div>
-      <paper-submenu class="page-menu" id="advancedPage" actionable
+      <paper-submenu class="page-menu" id="advancedSubmenu" actionable
           opened="{{advancedOpened}}"
           hidden="[[!pageVisibility.advancedSettings]]">
         <div class="menu-trigger">
@@ -155,12 +171,6 @@
             <iron-icon icon="settings:security"></iron-icon>
             $i18n{privacyPageTitle}
           </div>
-<if expr="chromeos">
-          <div data-path="/bluetooth" on-tap="openPage_">
-            <iron-icon icon="settings:bluetooth"></iron-icon>
-            $i18n{bluetoothPageTitle}
-          </div>
-</if>
           <div data-path="/passwordsAndForms" on-tap="openPage_"
               hidden="[[!pageVisibility.passwordsAndForms]]">
             <iron-icon icon="settings:assignment"></iron-icon>

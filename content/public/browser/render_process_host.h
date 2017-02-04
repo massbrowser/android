@@ -33,7 +33,6 @@ class AudioOutputController;
 }
 
 namespace service_manager {
-class Connection;
 class InterfaceProvider;
 }
 
@@ -55,7 +54,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
                                          public IPC::Listener,
                                          public base::SupportsUserData {
  public:
-  typedef IDMap<RenderProcessHost>::iterator iterator;
+  using iterator = IDMap<RenderProcessHost*>::iterator;
 
   // Details for RENDERER_PROCESS_CLOSED notifications.
   struct RendererClosedDetails {
@@ -305,10 +304,26 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Returns true if this process currently has backgrounded priority.
   virtual bool IsProcessBackgrounded() const = 0;
 
-  // Called when the existence of the other renderer process which is connected
-  // to the Worker in this renderer process has changed.
+  // Returns the sum of the shared worker and service worker ref counts.
+  virtual size_t GetWorkerRefCount() const = 0;
+
+  // Counts the number of service workers who live on this process. The service
+  // worker ref count is incremented when this process is allocated to the
+  // worker, and decremented when worker's shutdown sequence is completed.
   virtual void IncrementServiceWorkerRefCount() = 0;
   virtual void DecrementServiceWorkerRefCount() = 0;
+
+  // The shared worker ref count is non-zero if any other process is connected
+  // to a shared worker in this process, or a new shared worker is being created
+  // in this process.
+  // IncrementSharedWorkerRefCount is called in two cases:
+  // - there was no external renderer connected to a shared worker in this
+  //   process, and now there is at least one
+  // - a new worker is being created in this process.
+  // DecrementSharedWorkerRefCount is called in two cases:
+  // - there was an external renderer connected to a shared worker in this
+  //    process, and now there is none
+  // - a new worker finished being created in this process.
   virtual void IncrementSharedWorkerRefCount() = 0;
   virtual void DecrementSharedWorkerRefCount() = 0;
 
@@ -332,6 +347,11 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // internal use only, and is only exposed here to support
   // MockRenderProcessHost usage in tests.
   virtual mojom::Renderer* GetRendererInterface() = 0;
+
+  // Whether this process is locked out from ever being reused for sites other
+  // than the ones it currently has.
+  virtual void SetIsNeverSuitableForReuse() = 0;
+  virtual bool MayReuseHost() = 0;
 
   // Returns the current number of active views in this process.  Excludes
   // any RenderViewHosts that are swapped out.

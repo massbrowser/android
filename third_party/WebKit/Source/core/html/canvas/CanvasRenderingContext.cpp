@@ -30,9 +30,11 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/weborigin/SecurityOrigin.h"
 
-const char* const kLinearRGBCanvasColorSpaceName = "linear-rgb";
-const char* const kSRGBCanvasColorSpaceName = "srgb";
-const char* const kLegacyCanvasColorSpaceName = "legacy-srgb";
+constexpr const char* kLegacyCanvasColorSpaceName = "legacy-srgb";
+constexpr const char* kSRGBCanvasColorSpaceName = "srgb";
+constexpr const char* kLinearRGBCanvasColorSpaceName = "linear-rgb";
+constexpr const char* kRec2020CanvasColorSpaceName = "rec-2020";
+constexpr const char* kP3CanvasColorSpaceName = "p3";
 
 namespace blink {
 
@@ -51,6 +53,10 @@ CanvasRenderingContext::CanvasRenderingContext(
     else if (m_creationAttributes.colorSpace() ==
              kLinearRGBCanvasColorSpaceName)
       m_colorSpace = kLinearRGBCanvasColorSpace;
+    else if (m_creationAttributes.colorSpace() == kRec2020CanvasColorSpaceName)
+      m_colorSpace = kRec2020CanvasColorSpace;
+    else if (m_creationAttributes.colorSpace() == kP3CanvasColorSpaceName)
+      m_colorSpace = kP3CanvasColorSpace;
   }
   // Make m_creationAttributes reflect the effective colorSpace rather than the
   // requested one
@@ -59,39 +65,61 @@ CanvasRenderingContext::CanvasRenderingContext(
 
 WTF::String CanvasRenderingContext::colorSpaceAsString() const {
   switch (m_colorSpace) {
+    case kLegacyCanvasColorSpace:
+      return kLegacyCanvasColorSpaceName;
     case kSRGBCanvasColorSpace:
       return kSRGBCanvasColorSpaceName;
     case kLinearRGBCanvasColorSpace:
       return kLinearRGBCanvasColorSpaceName;
-    case kLegacyCanvasColorSpace:
-      return kLegacyCanvasColorSpaceName;
+    case kRec2020CanvasColorSpace:
+      return kRec2020CanvasColorSpaceName;
+    case kP3CanvasColorSpace:
+      return kP3CanvasColorSpaceName;
   };
   CHECK(false);
   return "";
 }
 
-sk_sp<SkColorSpace> CanvasRenderingContext::skColorSpace() const {
+gfx::ColorSpace CanvasRenderingContext::gfxColorSpace() const {
   switch (m_colorSpace) {
-    case kSRGBCanvasColorSpace:
-      return SkColorSpace::MakeNamed(SkColorSpace::kSRGB_Named);
-    case kLinearRGBCanvasColorSpace:
-      return SkColorSpace::MakeNamed(SkColorSpace::kSRGBLinear_Named);
     case kLegacyCanvasColorSpace:
-      if (RuntimeEnabledFeatures::colorCorrectRenderingEnabled()) {
-        // Legacy colorspace ensures color matching with CSS is preserved.
-        // So if CSS is color corrected from sRGB to display space, then
-        // canvas must do the same
-        return SkColorSpace::MakeNamed(SkColorSpace::kSRGB_Named);
-      }
-      return nullptr;
-  };
-  CHECK(false);
+    case kSRGBCanvasColorSpace:
+      return gfx::ColorSpace::CreateSRGB();
+    case kLinearRGBCanvasColorSpace:
+      return gfx::ColorSpace::CreateSCRGBLinear();
+    case kRec2020CanvasColorSpace:
+      return gfx::ColorSpace(gfx::ColorSpace::PrimaryID::BT2020,
+                             gfx::ColorSpace::TransferID::IEC61966_2_1);
+    case kP3CanvasColorSpace:
+      return gfx::ColorSpace(gfx::ColorSpace::PrimaryID::SMPTEST432_1,
+                             gfx::ColorSpace::TransferID::IEC61966_2_1);
+  }
+  NOTREACHED();
+  return gfx::ColorSpace();
+}
+
+sk_sp<SkColorSpace> CanvasRenderingContext::skSurfaceColorSpace() const {
+  if (skSurfacesUseColorSpace())
+    return gfxColorSpace().ToSkColorSpace();
   return nullptr;
+}
+
+bool CanvasRenderingContext::skSurfacesUseColorSpace() const {
+  return m_colorSpace != kLegacyCanvasColorSpace;
+}
+
+ColorBehavior CanvasRenderingContext::colorBehaviorForMediaDrawnToCanvas()
+    const {
+  if (RuntimeEnabledFeatures::colorCorrectRenderingEnabled())
+    return ColorBehavior::transformTo(gfxColorSpace());
+  return ColorBehavior::transformToGlobalTarget();
 }
 
 SkColorType CanvasRenderingContext::colorType() const {
   switch (m_colorSpace) {
     case kLinearRGBCanvasColorSpace:
+    case kRec2020CanvasColorSpace:
+    case kP3CanvasColorSpace:
       return kRGBA_F16_SkColorType;
     default:
       return kN32_SkColorType;
@@ -108,6 +136,10 @@ void CanvasRenderingContext::dispose() {
   if (canvas()) {
     canvas()->detachContext();
     m_canvas = nullptr;
+  }
+  if (offscreenCanvas()) {
+    offscreenCanvas()->detachContext();
+    m_offscreenCanvas = nullptr;
   }
 }
 
@@ -158,9 +190,9 @@ bool CanvasRenderingContext::wouldTaintOrigin(
 
   if (hasURL) {
     if (taintOrigin)
-      m_dirtyURLs.add(sourceURL.getString());
+      m_dirtyURLs.insert(sourceURL.getString());
     else
-      m_cleanURLs.add(sourceURL.getString());
+      m_cleanURLs.insert(sourceURL.getString());
   }
   return taintOrigin;
 }

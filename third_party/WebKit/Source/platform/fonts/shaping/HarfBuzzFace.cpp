@@ -124,7 +124,7 @@ class HbFontCacheEntry : public RefCounted<HbFontCacheEntry> {
  private:
   explicit HbFontCacheEntry(hb_font_t* font)
       : m_hbFont(HbFontUniquePtr(font)),
-        m_hbFontData(makeUnique<HarfBuzzFontData>()){};
+        m_hbFontData(WTF::makeUnique<HarfBuzzFontData>()){};
 
   HbFontUniquePtr m_hbFont;
   std::unique_ptr<HarfBuzzFontData> m_hbFontData;
@@ -162,7 +162,7 @@ HarfBuzzFace::~HarfBuzzFace() {
   ASSERT(result.get()->value->refCount() > 1);
   result.get()->value->deref();
   if (result.get()->value->refCount() == 1)
-    harfBuzzFontCache()->remove(m_uniqueID);
+    harfBuzzFontCache()->erase(m_uniqueID);
 }
 
 static hb_position_t SkiaScalarToHarfBuzzPosition(SkScalar value) {
@@ -386,6 +386,9 @@ hb_font_t* HarfBuzzFace::getScaledFont(
   m_harfBuzzFontData->m_paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
   m_harfBuzzFontData->m_rangeSet = rangeSet;
   m_harfBuzzFontData->updateSimpleFontData(m_platformData);
+
+  // TODO crbug.com/674879 - Connect variation axis parameters to future
+  // HarfBuzz API here.
   ASSERT(m_harfBuzzFontData->m_simpleFontData);
   int scale = SkiaScalarToHarfBuzzPosition(m_platformData->size());
   hb_font_set_scale(m_unscaledFont, scale, scale);

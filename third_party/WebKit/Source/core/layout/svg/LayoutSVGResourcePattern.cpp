@@ -23,14 +23,15 @@
 
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGResources.h"
+#include "core/layout/svg/SVGResourcesCache.h"
 #include "core/paint/SVGPaintContext.h"
 #include "core/paint/TransformRecorder.h"
 #include "core/svg/SVGFitToViewBox.h"
 #include "core/svg/SVGPatternElement.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/PaintController.h"
+#include "platform/graphics/paint/PaintRecord.h"
 #include "platform/graphics/paint/SkPictureBuilder.h"
-#include "third_party/skia/include/core/SkPicture.h"
 #include "wtf/PtrUtil.h"
 #include <memory>
 
@@ -60,7 +61,7 @@ void LayoutSVGResourcePattern::removeAllClientsFromCache(
 void LayoutSVGResourcePattern::removeClientFromCache(LayoutObject* client,
                                                      bool markForInvalidation) {
   ASSERT(client);
-  m_patternMap.remove(client);
+  m_patternMap.erase(client);
   markClientForInvalidation(
       client, markForInvalidation ? PaintInvalidation : ParentOnlyInvalidation);
 }
@@ -115,7 +116,7 @@ std::unique_ptr<PatternData> LayoutSVGResourcePattern::buildPatternData(
                           clientBoundingBox.height());
   }
 
-  std::unique_ptr<PatternData> patternData = wrapUnique(new PatternData);
+  std::unique_ptr<PatternData> patternData = WTF::wrapUnique(new PatternData);
   patternData->pattern =
       Pattern::createPicturePattern(asPicture(tileBounds, tileTransform));
 
@@ -186,7 +187,7 @@ LayoutSVGResourcePattern::resolveContentElement() const {
   return this;
 }
 
-sk_sp<SkPicture> LayoutSVGResourcePattern::asPicture(
+sk_sp<PaintRecord> LayoutSVGResourcePattern::asPicture(
     const FloatRect& tileBounds,
     const AffineTransform& tileTransform) const {
   ASSERT(!m_shouldCollectPatternAttributes);

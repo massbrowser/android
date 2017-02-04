@@ -6,13 +6,10 @@
 
 namespace physical_web {
 
-const char kDescriptionKey[] = "description";
-const char kDistanceEstimateKey[] = "distanceEstimate";
-const char kGroupIdKey[] = "groupId";
-const char kIconUrlKey[] = "icon";
-const char kResolvedUrlKey[] = "resolvedUrl";
-const char kScanTimestampKey[] = "scanTimestamp";
-const char kScannedUrlKey[] = "scannedUrl";
-const char kTitleKey[] = "title";
+Metadata::Metadata() {}
+
+Metadata::Metadata(const Metadata& other) = default;
+
+Metadata::~Metadata() {}
 
 }  // namespace physical_web

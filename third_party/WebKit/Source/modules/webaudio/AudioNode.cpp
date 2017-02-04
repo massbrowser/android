@@ -174,12 +174,12 @@ void AudioHandler::setNodeType(NodeType type) {
 }
 
 void AudioHandler::addInput() {
-  m_inputs.append(AudioNodeInput::create(*this));
+  m_inputs.push_back(AudioNodeInput::create(*this));
 }
 
 void AudioHandler::addOutput(unsigned numberOfChannels) {
   DCHECK(isMainThread());
-  m_outputs.append(AudioNodeOutput::create(this, numberOfChannels));
+  m_outputs.push_back(AudioNodeOutput::create(this, numberOfChannels));
   node()->didAddOutput(numberOfOutputs());
 }
 
@@ -330,6 +330,10 @@ void AudioHandler::processIfNecessary(size_t framesToProcess) {
 
     if (silentInputs && propagatesSilence()) {
       silenceOutputs();
+      // AudioParams still need to be processed so that the value can be updated
+      // if there are automations or so that the upstream nodes get pulled if
+      // any are connected to the AudioParam.
+      processOnlyAudioParams(framesToProcess);
     } else {
       // Unsilence the outputs first because the processing of the node may
       // cause the outputs to go silent and we want to propagate that hint to
@@ -528,7 +532,6 @@ unsigned AudioHandler::numberOfOutputChannels() const {
 
 AudioNode::AudioNode(BaseAudioContext& context)
     : m_context(context), m_handler(nullptr) {
-  ThreadState::current()->registerPreFinalizer(this);
 }
 
 void AudioNode::dispose() {
@@ -618,7 +621,7 @@ AudioNode* AudioNode::connect(AudioNode* destination,
   }
 
   if (context() != destination->context()) {
-    exceptionState.throwDOMException(SyntaxError,
+    exceptionState.throwDOMException(InvalidAccessError,
                                      "cannot connect to a destination "
                                      "belonging to a different audio context.");
     return nullptr;
@@ -641,7 +644,7 @@ AudioNode* AudioNode::connect(AudioNode* destination,
       .connect(handler().output(outputIndex));
   if (!m_connectedNodes[outputIndex])
     m_connectedNodes[outputIndex] = new HeapHashSet<Member<AudioNode>>();
-  m_connectedNodes[outputIndex]->add(destination);
+  m_connectedNodes[outputIndex]->insert(destination);
 
   // Let context know that a connection has been made.
   context()->incrementConnectionCount();
@@ -684,7 +687,7 @@ void AudioNode::connect(AudioParam* param,
   param->handler().connect(handler().output(outputIndex));
   if (!m_connectedParams[outputIndex])
     m_connectedParams[outputIndex] = new HeapHashSet<Member<AudioParam>>();
-  m_connectedParams[outputIndex]->add(param);
+  m_connectedParams[outputIndex]->insert(param);
 }
 
 void AudioNode::disconnectAllFromOutput(unsigned outputIndex) {
@@ -944,9 +947,9 @@ ExecutionContext* AudioNode::getExecutionContext() const {
 }
 
 void AudioNode::didAddOutput(unsigned numberOfOutputs) {
-  m_connectedNodes.append(nullptr);
+  m_connectedNodes.push_back(nullptr);
   DCHECK_EQ(numberOfOutputs, m_connectedNodes.size());
-  m_connectedParams.append(nullptr);
+  m_connectedParams.push_back(nullptr);
   DCHECK_EQ(numberOfOutputs, m_connectedParams.size());
 }
 

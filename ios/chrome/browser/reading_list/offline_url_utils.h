@@ -8,20 +8,38 @@
 #include <string>
 
 #include "base/files/file_path.h"
+#include "base/strings/string16.h"
 #include "url/gurl.h"
 
 namespace reading_list {
 
 // The distilled URL chrome://offline/... that will load the file at |path|.
-GURL DistilledURLForPath(const base::FilePath& path);
+// |entry_url| is the URL of the ReadingListEntry.
+// |virtual_url| is the URL to display in the omnibox. This can be different
+// from |entry_url| is the distillation was done after a redirection.
+// |entry_url| and |virtual_url| are optionnal.
+GURL OfflineURLForPath(const base::FilePath& distilled_path,
+                       const GURL& entry_url,
+                       const GURL& virtual_url);
+
+// If |offline_url| has a "entryURL" query params that is a URL, returns it.
+// If not, return |offline_url|
+GURL EntryURLForOfflineURL(const GURL& offline_url);
+
+// If |offline_url| has a "virtualURL" query params that is a URL, returns it.
+// If not, return |EntryURLForOfflineURL(|offline_url|)|
+GURL VirtualURLForOfflineURL(const GURL& offline_url);
 
 // The file URL pointing to the local file to load to display |distilled_url|.
 // If |resources_root_url| is not nullptr, it is set to a file URL to the
 // directory conatining all the resources needed by |distilled_url|.
-// |profile_path| is the path to the profile directory.
+// |offline_path| is the root path to the directory containing offline files.
 GURL FileURLForDistilledURL(const GURL& distilled_url,
-                            const base::FilePath& profile_path,
+                            const base::FilePath& offline_path,
                             GURL* resources_root_url);
+
+// Returns whether the URL points to a chrome offline URL.
+bool IsOfflineURL(const GURL& url);
 
 }  // namespace reading_list
 

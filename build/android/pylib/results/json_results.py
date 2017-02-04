@@ -100,8 +100,9 @@ def GenerateResultsDict(test_run_results):
           'elapsed_time_ms': r.GetDuration(),
           'output_snippet': r.GetLog(),
           'losless_snippet': '',
-          'output_snippet_base64:': '',
-          'tombstones': r.GetTombstones() or '',
+          'output_snippet_base64': '',
+          'tombstones': r.GetTombstonesUrl() or '',
+          'logcat_url': r.GetLogcatUrl() or '',
       }
       iteration_data[r.GetName()].append(result_dict)
 

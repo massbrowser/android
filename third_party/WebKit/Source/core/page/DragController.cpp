@@ -26,7 +26,7 @@
 
 #include "core/page/DragController.h"
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/HTMLNames.h"
 #include "core/InputTypeNames.h"
 #include "core/clipboard/DataObject.h"
@@ -39,15 +39,13 @@
 #include "core/dom/Node.h"
 #include "core/dom/Text.h"
 #include "core/dom/shadow/ShadowRoot.h"
-#include "core/editing/DragCaretController.h"
+#include "core/editing/DragCaret.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/commands/DragAndDropCommand.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/events/TextEvent.h"
-#include "core/fetch/ImageResource.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
@@ -64,11 +62,13 @@
 #include "core/layout/api/LayoutViewItem.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
+#include "core/loader/resource/ImageResourceContent.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/DragData.h"
 #include "core/page/DragSession.h"
 #include "core/page/DragState.h"
 #include "core/page/Page.h"
+#include "core/svg/graphics/SVGImageForContainer.h"
 #include "platform/DragImage.h"
 #include "platform/SharedBuffer.h"
 #include "platform/geometry/IntRect.h"
@@ -76,6 +76,7 @@
 #include "platform/graphics/BitmapImage.h"
 #include "platform/graphics/Image.h"
 #include "platform/graphics/ImageOrientation.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebCommon.h"
@@ -117,13 +118,19 @@ static bool dragTypeIsValid(DragSourceAction action) {
 }
 #endif  // DCHECK_IS_ON()
 
-static PlatformMouseEvent createMouseEvent(DragData* dragData) {
-  return PlatformMouseEvent(
-      dragData->clientPosition(), dragData->globalPosition(),
-      WebPointerProperties::Button::Left, PlatformEvent::MouseMoved, 0,
+static WebMouseEvent createMouseEvent(DragData* dragData) {
+  WebMouseEvent result(
+      WebInputEvent::MouseMove, WebFloatPoint(dragData->clientPosition().x(),
+                                              dragData->clientPosition().y()),
+      WebFloatPoint(dragData->globalPosition().x(),
+                    dragData->globalPosition().y()),
+      WebPointerProperties::Button::Left, 0,
       static_cast<PlatformEvent::Modifiers>(dragData->modifiers()),
-      PlatformMouseEvent::RealOrIndistinguishable,
-      monotonicallyIncreasingTime());
+      TimeTicks::Now().InSeconds());
+  // TODO(dtapuska): Really we should chnage DragData to store the viewport
+  // coordinates and scale.
+  result.setFrameScale(1);
+  return result;
 }
 
 static DataTransfer* createDraggingDataTransfer(DataTransferAccessPolicy policy,
@@ -199,13 +206,13 @@ bool DragController::dragIsMove(FrameSelection& selection, DragData* dragData) {
 // FIXME: This method is poorly named.  We're just clearing the selection from
 // the document this drag is exiting.
 void DragController::cancelDrag() {
-  m_page->dragCaretController().clear();
+  m_page->dragCaret().clear();
 }
 
 void DragController::dragEnded() {
   m_dragInitiator = nullptr;
   m_didInitiateDrag = false;
-  m_page->dragCaretController().clear();
+  m_page->dragCaret().clear();
 }
 
 void DragController::dragExited(DragData* dragData, LocalFrame& localRoot) {
@@ -213,11 +220,7 @@ void DragController::dragExited(DragData* dragData, LocalFrame& localRoot) {
 
   FrameView* frameView(localRoot.view());
   if (frameView) {
-    DataTransferAccessPolicy policy =
-        (!m_documentUnderMouse ||
-         m_documentUnderMouse->getSecurityOrigin()->isLocal())
-            ? DataTransferReadable
-            : DataTransferTypesReadable;
+    DataTransferAccessPolicy policy = DataTransferTypesReadable;
     DataTransfer* dataTransfer = createDraggingDataTransfer(policy, dragData);
     dataTransfer->setSourceOperation(dragData->draggingSourceOperationMask());
     localRoot.eventHandler().cancelDragAndDrop(createMouseEvent(dragData),
@@ -280,7 +283,7 @@ bool DragController::performDrag(DragData* dragData, LocalFrame& localRoot) {
   if (operationForLoad(dragData, localRoot) == DragOperationNone)
     return false;
 
-  if (m_page->settings().navigateOnDragDrop()) {
+  if (m_page->settings().getNavigateOnDragDrop()) {
     m_page->mainFrame()->navigate(
         FrameLoadRequest(nullptr, ResourceRequest(dragData->asURL())));
   }
@@ -378,7 +381,7 @@ bool DragController::tryDocumentDrag(DragData* dragData,
     return false;
 
   if (isHandlingDrag) {
-    m_page->dragCaretController().clear();
+    m_page->dragCaret().clear();
     return true;
   }
 
@@ -397,7 +400,7 @@ bool DragController::tryDocumentDrag(DragData* dragData,
     }
 
     if (!m_fileInputElementUnderMouse) {
-      m_page->dragCaretController().setCaretPosition(
+      m_page->dragCaret().setCaretPosition(
           m_documentUnderMouse->frame()->positionForPoint(point));
     }
 
@@ -434,7 +437,7 @@ bool DragController::tryDocumentDrag(DragData* dragData,
 
   // We are not over an editable region. Make sure we're clearing any prior drag
   // cursor.
-  m_page->dragCaretController().clear();
+  m_page->dragCaret().clear();
   if (m_fileInputElementUnderMouse)
     m_fileInputElementUnderMouse->setCanReceiveDroppedFiles(false);
   m_fileInputElementUnderMouse = nullptr;
@@ -483,12 +486,12 @@ DispatchEventResult DragController::dispatchTextInputEventFor(
     DragData* dragData) {
   // Layout should be clean due to a hit test performed in |elementUnderMouse|.
   DCHECK(!innerFrame->document()->needsLayoutTreeUpdate());
-  DCHECK(m_page->dragCaretController().hasCaret());
-  String text = m_page->dragCaretController().isContentRichlyEditable()
+  DCHECK(m_page->dragCaret().hasCaret());
+  String text = m_page->dragCaret().isContentRichlyEditable()
                     ? ""
                     : dragData->asPlainText();
   const PositionWithAffinity& caretPosition =
-      m_page->dragCaretController().caretPosition();
+      m_page->dragCaret().caretPosition();
   DCHECK(caretPosition.isConnected()) << caretPosition;
   Element* target =
       innerFrame->editor().findEventTargetFrom(createVisibleSelection(
@@ -517,7 +520,7 @@ bool DragController::concludeEditDrag(DragData* dragData) {
   LocalFrame* innerFrame = element->ownerDocument()->frame();
   DCHECK(innerFrame);
 
-  if (m_page->dragCaretController().hasCaret() &&
+  if (m_page->dragCaret().hasCaret() &&
       dispatchTextInputEventFor(innerFrame, dragData) !=
           DispatchEventResult::NotCanceled)
     return true;
@@ -536,14 +539,14 @@ bool DragController::concludeEditDrag(DragData* dragData) {
   // TODO(paulmeyer): Isn't |m_page->dragController()| the same as |this|?
   if (!m_page->dragController().canProcessDrag(dragData,
                                                *innerFrame->localFrameRoot())) {
-    m_page->dragCaretController().clear();
+    m_page->dragCaret().clear();
     return false;
   }
 
-  if (m_page->dragCaretController().hasCaret()) {
+  if (m_page->dragCaret().hasCaret()) {
     // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
     // needs to be audited.  See http://crbug.com/590369 for more details.
-    m_page->dragCaretController()
+    m_page->dragCaret()
         .caretPosition()
         .position()
         .document()
@@ -551,16 +554,16 @@ bool DragController::concludeEditDrag(DragData* dragData) {
   }
 
   const PositionWithAffinity& caretPosition =
-      m_page->dragCaretController().caretPosition();
+      m_page->dragCaret().caretPosition();
   if (!caretPosition.isConnected()) {
     // "editing/pasteboard/drop-text-events-sideeffect-crash.html" and
     // "editing/pasteboard/drop-text-events-sideeffect.html" reach here.
-    m_page->dragCaretController().clear();
+    m_page->dragCaret().clear();
     return false;
   }
   VisibleSelection dragCaret = createVisibleSelection(
       SelectionInDOMTree::Builder().collapse(caretPosition).build());
-  m_page->dragCaretController().clear();
+  m_page->dragCaret().clear();
   // |innerFrame| can be removed by event handler called by
   // |dispatchTextInputEventFor()|.
   if (!innerFrame->selection().isAvailable()) {
@@ -718,15 +721,12 @@ bool DragController::tryDHTMLDrag(DragData* dragData,
   if (!localRoot.view())
     return false;
 
-  DataTransferAccessPolicy policy =
-      m_documentUnderMouse->getSecurityOrigin()->isLocal()
-          ? DataTransferReadable
-          : DataTransferTypesReadable;
+  DataTransferAccessPolicy policy = DataTransferTypesReadable;
   DataTransfer* dataTransfer = createDraggingDataTransfer(policy, dragData);
   DragOperation srcOpMask = dragData->draggingSourceOperationMask();
   dataTransfer->setSourceOperation(srcOpMask);
 
-  PlatformMouseEvent event = createMouseEvent(dragData);
+  WebMouseEvent event = createMouseEvent(dragData);
   if (localRoot.eventHandler().updateDragAndDrop(event, dataTransfer) ==
       WebInputEventResult::NotHandled) {
     dataTransfer->setAccessPolicy(
@@ -784,7 +784,7 @@ Node* DragController::draggableNode(const LocalFrame* src,
       // Even if the image is part of a selection, we always only drag the image
       // in this case.
       if (layoutObject->isImage() && src->settings() &&
-          src->settings()->loadsImagesAutomatically()) {
+          src->settings()->getLoadsImagesAutomatically()) {
         dragType = DragSourceActionImage;
         return node;
       }
@@ -828,7 +828,7 @@ Node* DragController::draggableNode(const LocalFrame* src,
   return node;
 }
 
-static ImageResource* getImageResource(Element* element) {
+static ImageResourceContent* getImageResource(Element* element) {
   DCHECK(element);
   LayoutObject* layoutObject = element->layoutObject();
   if (!layoutObject || !layoutObject->isImage())
@@ -839,7 +839,7 @@ static ImageResource* getImageResource(Element* element) {
 
 static Image* getImage(Element* element) {
   DCHECK(element);
-  ImageResource* cachedImage = getImageResource(element);
+  ImageResourceContent* cachedImage = getImageResource(element);
   return (cachedImage && !cachedImage->errorOccurred())
              ? cachedImage->getImage()
              : nullptr;
@@ -982,6 +982,16 @@ static std::unique_ptr<DragImage> dragImageForImage(
   std::unique_ptr<DragImage> dragImage;
   IntPoint origin;
 
+  // Substitute an appropriately-sized SVGImageForContainer, to ensure dragged
+  // SVG images scale seamlessly.
+  RefPtr<SVGImageForContainer> svgImage;
+  if (image->isSVGImage()) {
+    KURL url = element->document().completeURL(element->imageSourceURL());
+    svgImage = SVGImageForContainer::create(toSVGImage(image),
+                                            imageElementSizeInPixels, 1, url);
+    image = svgImage.get();
+  }
+
   InterpolationQuality interpolationQuality =
       element->ensureComputedStyle()->imageRendering() ==
               ImageRenderingPixelated
@@ -1047,7 +1057,7 @@ static std::unique_ptr<DragImage> dragImageForLink(
 
 bool DragController::startDrag(LocalFrame* src,
                                const DragState& state,
-                               const PlatformMouseEvent& dragEvent,
+                               const WebMouseEvent& dragEvent,
                                const IntPoint& dragOrigin) {
 #if DCHECK_IS_ON()
   DCHECK(dragTypeIsValid(state.m_dragType));
@@ -1069,8 +1079,8 @@ bool DragController::startDrag(LocalFrame* src,
   const KURL& linkURL = hitTestResult.absoluteLinkURL();
   const KURL& imageURL = hitTestResult.absoluteImageURL();
 
-  IntPoint mouseDraggedPoint =
-      src->view()->rootFrameToContents(dragEvent.position());
+  IntPoint mouseDraggedPoint = src->view()->rootFrameToContents(
+      flooredIntPoint(dragEvent.positionInRootFrame()));
 
   IntPoint dragLocation;
   IntPoint dragOffset;

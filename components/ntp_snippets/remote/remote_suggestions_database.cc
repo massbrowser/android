@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/files/file_path.h"
+#include "base/memory/ptr_util.h"
 #include "components/leveldb_proto/proto_database_impl.h"
 #include "components/ntp_snippets/remote/proto/ntp_snippets.pb.h"
 
@@ -23,7 +24,10 @@ const char kImageDatabaseUMAClientName[] = "NTPSnippetImages";
 const char kSnippetDatabaseFolder[] = "snippets";
 const char kImageDatabaseFolder[] = "images";
 
-const size_t kDatabaseWriteCacheSizeBytes = 512 << 10;
+const size_t kSuggestionDatabaseReadCacheSizeBytes = 512 << 10;
+const size_t kImageDatabaseReadCacheSizeBytes = 2 << 20;
+
+const size_t kDatabaseWriteBufferSizeBytes = 512 << 10;
 }  // namespace
 
 namespace ntp_snippets {
@@ -40,14 +44,16 @@ RemoteSuggestionsDatabase::RemoteSuggestionsDatabase(
   base::FilePath snippet_dir = database_dir.AppendASCII(kSnippetDatabaseFolder);
   database_->InitWithOptions(
       kDatabaseUMAClientName,
-      leveldb_proto::Options(snippet_dir, kDatabaseWriteCacheSizeBytes),
+      leveldb_proto::Options(snippet_dir, kDatabaseWriteBufferSizeBytes,
+                             kSuggestionDatabaseReadCacheSizeBytes),
       base::Bind(&RemoteSuggestionsDatabase::OnDatabaseInited,
                  weak_ptr_factory_.GetWeakPtr()));
 
   base::FilePath image_dir = database_dir.AppendASCII(kImageDatabaseFolder);
   image_database_->InitWithOptions(
       kImageDatabaseUMAClientName,
-      leveldb_proto::Options(image_dir, kDatabaseWriteCacheSizeBytes),
+      leveldb_proto::Options(image_dir, kDatabaseWriteBufferSizeBytes,
+                             kImageDatabaseReadCacheSizeBytes),
       base::Bind(&RemoteSuggestionsDatabase::OnImageDatabaseInited,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -76,7 +82,7 @@ void RemoteSuggestionsDatabase::LoadSnippets(const SnippetsCallback& callback) {
   }
 }
 
-void RemoteSuggestionsDatabase::SaveSnippet(const NTPSnippet& snippet) {
+void RemoteSuggestionsDatabase::SaveSnippet(const RemoteSuggestion& snippet) {
   std::unique_ptr<KeyEntryVector> entries_to_save(new KeyEntryVector());
   // OnDatabaseLoaded relies on the detail that the primary snippet id goes
   // first in the protocol representation.
@@ -86,9 +92,9 @@ void RemoteSuggestionsDatabase::SaveSnippet(const NTPSnippet& snippet) {
 }
 
 void RemoteSuggestionsDatabase::SaveSnippets(
-    const NTPSnippet::PtrVector& snippets) {
+    const RemoteSuggestion::PtrVector& snippets) {
   std::unique_ptr<KeyEntryVector> entries_to_save(new KeyEntryVector());
-  for (const std::unique_ptr<NTPSnippet>& snippet : snippets) {
+  for (const std::unique_ptr<RemoteSuggestion>& snippet : snippets) {
     // OnDatabaseLoaded relies on the detail that the primary snippet id goes
     // first in the protocol representation.
     DCHECK_EQ(snippet->ToProto().ids(0), snippet->id());
@@ -187,9 +193,10 @@ void RemoteSuggestionsDatabase::OnDatabaseLoaded(
   std::unique_ptr<std::vector<std::string>> keys_to_remove(
       new std::vector<std::string>());
 
-  NTPSnippet::PtrVector snippets;
+  RemoteSuggestion::PtrVector snippets;
   for (const SnippetProto& proto : *entries) {
-    std::unique_ptr<NTPSnippet> snippet = NTPSnippet::CreateFromProto(proto);
+    std::unique_ptr<RemoteSuggestion> snippet =
+        RemoteSuggestion::CreateFromProto(proto);
     if (snippet) {
       snippets.emplace_back(std::move(snippet));
     } else {

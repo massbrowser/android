@@ -112,6 +112,7 @@ Elements.ElementsPanel = class extends UI.Panel {
     var filterContainerElement = hbox.createChild('div', 'styles-sidebar-pane-filter-box');
     var filterInput = Elements.StylesSidebarPane.createPropertyFilterElement(
         Common.UIString('Filter'), hbox, this._stylesWidget.onFilterChanged.bind(this._stylesWidget));
+    UI.ARIAUtils.setAccessibleName(filterInput, Common.UIString('Filter Styles'));
     filterContainerElement.appendChild(filterInput);
     var toolbar = new UI.Toolbar('styles-pane-toolbar', hbox);
     toolbar.makeToggledGray();
@@ -362,8 +363,8 @@ Elements.ElementsPanel = class extends UI.Panel {
    * @param {!Common.Event} event
    */
   _documentUpdatedEvent(event) {
-    this._documentUpdated(
-        /** @type {!SDK.DOMModel} */ (event.target), /** @type {?SDK.DOMDocument} */ (event.data));
+    var domModel = /** @type {!SDK.DOMModel} */ (event.data);
+    this._documentUpdated(domModel, domModel.existingDocument());
   }
 
   /**

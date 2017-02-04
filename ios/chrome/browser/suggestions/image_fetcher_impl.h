@@ -13,7 +13,6 @@
 #include "components/image_fetcher/image_fetcher.h"
 
 class GURL;
-class ImageFetcher;
 
 namespace base {
 class SequencedWorkerPool;
@@ -25,6 +24,7 @@ class Image;
 
 namespace image_fetcher {
 class ImageFetcherDelegate;
+class IOSImageDataFetcherWrapper;
 }
 
 namespace net {
@@ -52,7 +52,7 @@ class ImageFetcherImpl : public image_fetcher::ImageFetcher {
       override;
 
  private:
-  std::unique_ptr<::ImageFetcher> imageFetcher_;
+  std::unique_ptr<image_fetcher::IOSImageDataFetcherWrapper> image_fetcher_;
 
   image_fetcher::ImageFetcherDelegate* delegate_;
 

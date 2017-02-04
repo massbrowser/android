@@ -13,6 +13,7 @@
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -27,6 +28,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/ppapi_test_utils.h"
@@ -411,7 +413,13 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, EssentialPlugins) {
                               "medium_16_9_cross_origin");
 }
 
-IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, SmallCrossOrigin) {
+// This test fail on macOS 10.12. https://crbug.com/599484.
+#if defined(OS_MACOSX)
+#define MAYBE_SmallCrossOrigin DISABLED_SmallCrossOrigin
+#else
+#define MAYBE_SmallCrossOrigin SmallCrossOrigin
+#endif
+IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, MAYBE_SmallCrossOrigin) {
   LoadHTML("/small_cross_origin.html");
 
   VerifyPluginIsThrottled(GetActiveWebContents(), "plugin");
@@ -453,7 +461,13 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, SmallerThanPlayIcon) {
       VerifySnapshot(FILE_PATH_LITERAL("smaller_than_play_icon_expected.png")));
 }
 
-IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, PosterTests) {
+// This test fail on macOS 10.12. https://crbug.com/599484.
+#if defined(OS_MACOSX)
+#define MAYBE_PosterTests DISABLED_PosterTests
+#else
+#define MAYBE_PosterTests PosterTests
+#endif
+IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, MAYBE_PosterTests) {
   // This test simultaneously verifies the varied supported poster syntaxes,
   // as well as verifies that the poster is rendered correctly with various
   // mismatched aspect ratios and sizes, following the same rules as VIDEO.
@@ -554,6 +568,10 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, BlockTinyPlugins) {
   VerifyPluginMarkedEssential(GetActiveWebContents(), "tiny_same_origin");
   VerifyPluginIsPlaceholderOnly("tiny_cross_origin_1");
   VerifyPluginIsPlaceholderOnly("tiny_cross_origin_2");
+
+  TabSpecificContentSettings* tab_specific_content_settings =
+      TabSpecificContentSettings::FromWebContents(GetActiveWebContents());
+  EXPECT_FALSE(tab_specific_content_settings->blocked_plugin_names().empty());
 }
 
 IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, BackgroundTabTinyPlugins) {
@@ -580,6 +598,39 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, ExpandingTinyPlugins) {
 
   VerifyPluginIsThrottled(GetActiveWebContents(), "expand_to_peripheral");
   VerifyPluginMarkedEssential(GetActiveWebContents(), "expand_to_essential");
+}
+
+// Separate test case with FilterSameOriginTinyPlugins feature flag on.
+class PluginPowerSaverFilterSameOriginTinyPluginsBrowserTest
+    : public PluginPowerSaverBrowserTest {
+ public:
+  void SetUpInProcessBrowserTestFixture() override {
+    // Although this is redundant with the Field Trial testing configuration,
+    // the official builders don't read that.
+    feature_list.InitWithFeatures({features::kFilterSameOriginTinyPlugin},
+                                  {features::kPreferHtmlOverPlugins});
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list;
+};
+
+// Flaky on Mac. crbug.com/680544
+// Flaky on Win7. crbug.com/682039
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#define MAYBE_BlockSameOriginTinyPlugin DISABLED_BlockSameOriginTinyPlugin
+#else
+#define MAYBE_BlockSameOriginTinyPlugin BlockSameOriginTinyPlugin
+#endif
+IN_PROC_BROWSER_TEST_F(PluginPowerSaverFilterSameOriginTinyPluginsBrowserTest,
+                       MAYBE_BlockSameOriginTinyPlugin) {
+  LoadHTML("/same_origin_tiny_plugin.html");
+
+  VerifyPluginIsPlaceholderOnly("tiny_same_origin");
+
+  TabSpecificContentSettings* tab_specific_content_settings =
+      TabSpecificContentSettings::FromWebContents(GetActiveWebContents());
+  EXPECT_FALSE(tab_specific_content_settings->blocked_plugin_names().empty());
 }
 
 // Separate test case with HTML By Default feature flag on.

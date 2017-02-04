@@ -10,17 +10,14 @@
 #include <features.h>
 #endif
 #include <string.h>
-#include <sys/epoll.h>
 
-#include "base/logging.h"
-#include "net/quic/core/quic_bug_tracker.h"
 #include "net/quic/core/quic_flags.h"
+#include "net/quic/platform/api/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/tools/quic/platform/impl/quic_socket_utils.h"
 #include "net/tools/quic/quic_dispatcher.h"
 #include "net/tools/quic/quic_process_packet_interface.h"
-#include "net/tools/quic/quic_socket_utils.h"
-
-#define MMSG_MORE 0
 
 #ifndef SO_RXQ_OVFL
 #define SO_RXQ_OVFL 40
@@ -148,7 +145,7 @@ bool QuicPacketReader::ReadAndDispatchManyPackets(
   // We may not have read all of the packets available on the socket.
   return packets_read == kNumPacketsPerReadMmsgCall;
 #else
-  LOG(FATAL) << "Unsupported";
+  QUIC_LOG(FATAL) << "Unsupported";
   return false;
 #endif
 }

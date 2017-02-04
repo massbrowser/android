@@ -5,12 +5,12 @@
 #include "ash/touch/touch_uma.h"
 
 #include "ash/common/wm_shell.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
-#include "ui/aura/window_property.h"
+#include "ui/base/class_property.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/gfx/geometry/point_conversions.h"
@@ -41,10 +41,12 @@ struct WindowTouchDetails {
   base::TimeTicks last_mt_time_;
 };
 
-DEFINE_OWNED_WINDOW_PROPERTY_KEY(WindowTouchDetails, kWindowTouchDetails, NULL);
+DEFINE_OWNED_UI_CLASS_PROPERTY_KEY(WindowTouchDetails,
+                                   kWindowTouchDetails,
+                                   NULL);
 }
 
-DECLARE_WINDOW_PROPERTY_TYPE(WindowTouchDetails*);
+DECLARE_UI_CLASS_PROPERTY_TYPE(WindowTouchDetails*);
 
 namespace ash {
 
@@ -104,7 +106,8 @@ void TouchUMA::RecordTouchEvent(aura::Window* target,
 
   // Prefer raw event location (when available) over calibrated location.
   if (event.HasNativeEvent()) {
-    position = ui::EventLocationFromNative(event.native_event());
+    position =
+        gfx::ToFlooredPoint(ui::EventLocationFromNative(event.native_event()));
     position = gfx::ScaleToFlooredPoint(
         position, 1.f / target->layer()->device_scale_factor());
   }

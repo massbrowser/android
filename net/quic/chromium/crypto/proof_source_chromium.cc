@@ -12,7 +12,6 @@
 #include "third_party/boringssl/src/include/openssl/rsa.h"
 
 using std::string;
-using std::vector;
 
 namespace net {
 
@@ -40,7 +39,7 @@ bool ProofSourceChromium::Initialize(const base::FilePath& cert_path,
     return false;
   }
 
-  vector<string> certs;
+  std::vector<string> certs;
   for (const scoped_refptr<X509Certificate>& cert : certs_in_file) {
     std::string der_encoded_cert;
     if (!X509Certificate::GetDEREncoded(cert->os_cert_handle(),
@@ -78,13 +77,13 @@ bool ProofSourceChromium::Initialize(const base::FilePath& cert_path,
 }
 
 bool ProofSourceChromium::GetProof(
-    const QuicIpAddress& server_ip,
+    const QuicSocketAddress& server_addr,
     const string& hostname,
     const string& server_config,
     QuicVersion quic_version,
     base::StringPiece chlo_hash,
     const QuicTagVector& /* connection_options */,
-    scoped_refptr<ProofSource::Chain>* out_chain,
+    QuicReferenceCountedPointer<ProofSource::Chain>* out_chain,
     QuicCryptoProof* proof) {
   DCHECK(proof != nullptr);
   DCHECK(private_key_.get()) << " this: " << this;
@@ -134,7 +133,7 @@ bool ProofSourceChromium::GetProof(
   return true;
 }
 
-void ProofSourceChromium::GetProof(const QuicIpAddress& server_ip,
+void ProofSourceChromium::GetProof(const QuicSocketAddress& server_addr,
                                    const std::string& hostname,
                                    const std::string& server_config,
                                    QuicVersion quic_version,
@@ -143,11 +142,11 @@ void ProofSourceChromium::GetProof(const QuicIpAddress& server_ip,
                                    std::unique_ptr<Callback> callback) {
   // As a transitional implementation, just call the synchronous version of
   // GetProof, then invoke the callback with the results and destroy it.
-  scoped_refptr<ProofSource::Chain> chain;
+  QuicReferenceCountedPointer<ProofSource::Chain> chain;
   string signature;
   string leaf_cert_sct;
   QuicCryptoProof out_proof;
-  const bool ok = GetProof(server_ip, hostname, server_config, quic_version,
+  const bool ok = GetProof(server_addr, hostname, server_config, quic_version,
                            chlo_hash, connection_options, &chain, &out_proof);
   callback->Run(ok, chain, out_proof, nullptr /* details */);
 }

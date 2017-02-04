@@ -12,7 +12,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/time/time.h"
-#include "ui/events/event_constants.h"
+#include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/native_widget_types.h"
@@ -26,10 +26,8 @@ class PointF;
 }
 
 namespace ui {
-class Event;
 class EventSource;
 class EventTarget;
-class KeyEvent;
 
 namespace test {
 
@@ -238,6 +236,20 @@ class EventGenerator {
   // type event.
   void ExitPenPointerMode();
 
+  // Set radius of touch PointerDetails.
+  void SetTouchRadius(float x, float y);
+
+  // Set tilt of touch PointerDetails.
+  void SetTouchTilt(float x, float y);
+
+  // Set pointer type of touch PointerDetails.
+  void SetTouchPointerType(ui::EventPointerType type) {
+    touch_pointer_details_.pointer_type = type;
+  }
+
+  // Set force of touch PointerDetails.
+  void SetTouchForce(float force) { touch_pointer_details_.force = force; }
+
   // Generates a touch press event.
   void PressTouch();
 
@@ -247,8 +259,19 @@ class EventGenerator {
   // Generates a ET_TOUCH_MOVED event to |point|.
   void MoveTouch(const gfx::Point& point);
 
+  // Generates a ET_TOUCH_MOVED event moving by (x, y) from current location.
+  void MoveTouchBy(int x, int y) {
+    MoveTouch(current_location_ + gfx::Vector2d(x, y));
+  }
+
   // Generates a ET_TOUCH_MOVED event to |point| with |touch_id|.
   void MoveTouchId(const gfx::Point& point, int touch_id);
+
+  // Generates a ET_TOUCH_MOVED event moving (x, y) from current location with
+  // |touch_id|.
+  void MoveTouchIdBy(int touch_id, int x, int y) {
+    MoveTouchId(current_location_ + gfx::Vector2d(x, y), touch_id);
+  }
 
   // Generates a touch release event.
   void ReleaseTouch();
@@ -417,7 +440,8 @@ class EventGenerator {
   EventTarget* current_target_;
   int flags_;
   bool grab_;
-  bool pen_pointer_mode_ = false;
+  ui::PointerDetails touch_pointer_details_;
+
   std::list<std::unique_ptr<Event>> pending_events_;
   // Set to true to cause events to be posted asynchronously.
   bool async_;

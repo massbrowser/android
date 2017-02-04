@@ -36,10 +36,6 @@
 #include "core/dom/ScriptableDocumentParser.h"
 #include "core/dom/Text.h"
 #include "core/events/Event.h"
-#include "core/fetch/AccessControlStatus.h"
-#include "core/fetch/FetchRequest.h"
-#include "core/fetch/MemoryCache.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/SubresourceIntegrity.h"
 #include "core/frame/UseCounter.h"
@@ -50,10 +46,14 @@
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/svg/SVGScriptElement.h"
-#include "platform/MIMETypeRegistry.h"
+#include "platform/WebFrameScheduler.h"
+#include "platform/loader/fetch/AccessControlStatus.h"
+#include "platform/loader/fetch/FetchRequest.h"
+#include "platform/loader/fetch/MemoryCache.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
+#include "platform/network/mime/MIMETypeRegistry.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebCachePolicy.h"
-#include "public/platform/WebFrameScheduler.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/StringHash.h"
@@ -91,7 +91,7 @@ DEFINE_TRACE(ScriptLoader) {
   visitor->trace(m_element);
   visitor->trace(m_resource);
   visitor->trace(m_pendingScript);
-  ScriptResourceClient::trace(visitor);
+  PendingScriptClient::trace(visitor);
 }
 
 void ScriptLoader::setFetchDocWrittenScriptDeferIdle() {
@@ -247,10 +247,11 @@ bool ScriptLoader::prepareScript(const TextPosition& scriptStartPosition,
   if (!isScriptForEventSupported())
     return false;
 
+  String encoding;
   if (!client->charsetAttributeValue().isEmpty())
-    m_characterEncoding = client->charsetAttributeValue();
+    encoding = client->charsetAttributeValue();
   else
-    m_characterEncoding = elementDocument.characterSet();
+    encoding = elementDocument.characterSet();
 
   if (client->hasSourceAttribute()) {
     FetchRequest::DeferOption defer = FetchRequest::NoDefer;
@@ -260,7 +261,7 @@ bool ScriptLoader::prepareScript(const TextPosition& scriptStartPosition,
     if (m_documentWriteIntervention ==
         DocumentWriteIntervention::FetchDocWrittenScriptDeferIdle)
       defer = FetchRequest::IdleLoad;
-    if (!fetchScript(client->sourceAttributeValue(), defer))
+    if (!fetchScript(client->sourceAttributeValue(), encoding, defer))
       return false;
   }
 
@@ -291,7 +292,7 @@ bool ScriptLoader::prepareScript(const TextPosition& scriptStartPosition,
     m_asyncExecType = ScriptRunner::InOrder;
     contextDocument->scriptRunner()->queueScriptForExecution(this,
                                                              m_asyncExecType);
-    // Note that watchForLoad can immediately call notifyFinished.
+    // Note that watchForLoad can immediately call pendingScriptFinished.
     m_pendingScript->watchForLoad(this);
   } else if (client->hasSourceAttribute()) {
     m_pendingScript = PendingScript::create(m_element, m_resource.get());
@@ -306,7 +307,7 @@ bool ScriptLoader::prepareScript(const TextPosition& scriptStartPosition,
     }
     contextDocument->scriptRunner()->queueScriptForExecution(this,
                                                              m_asyncExecType);
-    // Note that watchForLoad can immediately call notifyFinished.
+    // Note that watchForLoad can immediately call pendingScriptFinished.
     m_pendingScript->watchForLoad(this);
   } else {
     // Reset line numbering for nested writes.
@@ -327,6 +328,7 @@ bool ScriptLoader::prepareScript(const TextPosition& scriptStartPosition,
 }
 
 bool ScriptLoader::fetchScript(const String& sourceUrl,
+                               const String& encoding,
                                FetchRequest::DeferOption defer) {
   DCHECK(m_element);
 
@@ -345,12 +347,10 @@ bool ScriptLoader::fetchScript(const String& sourceUrl,
     if (crossOrigin != CrossOriginAttributeNotSet)
       request.setCrossOriginAccessControl(elementDocument->getSecurityOrigin(),
                                           crossOrigin);
-    request.setCharset(scriptCharset());
+    request.setCharset(encoding);
 
-    if (ContentSecurityPolicy::isNonceableElement(m_element.get())) {
-      request.setContentSecurityPolicyNonce(
-          m_element->fastGetAttribute(HTMLNames::nonceAttr));
-    }
+    if (ContentSecurityPolicy::isNonceableElement(m_element.get()))
+      request.setContentSecurityPolicyNonce(client()->nonce());
 
     request.setParserDisposition(isParserInserted() ? ParserInserted
                                                     : NotParserInserted);
@@ -456,17 +456,19 @@ bool ScriptLoader::doExecuteScript(const ScriptSourceCode& sourceCode) {
     return true;
 
   LocalFrame* frame = contextDocument->frame();
+  if (!frame)
+    return true;
 
   const ContentSecurityPolicy* csp = elementDocument->contentSecurityPolicy();
   bool shouldBypassMainWorldCSP =
-      (frame && frame->script().shouldBypassMainWorldCSP()) ||
+      (frame->script().shouldBypassMainWorldCSP()) ||
       csp->allowScriptWithHash(sourceCode.source(),
                                ContentSecurityPolicy::InlineType::Block);
 
   AtomicString nonce =
       ContentSecurityPolicy::isNonceableElement(m_element.get())
-          ? m_element->fastGetAttribute(HTMLNames::nonceAttr)
-          : AtomicString();
+          ? client()->nonce()
+          : nullAtom;
   if (!m_isExternalScript &&
       (!shouldBypassMainWorldCSP &&
        !csp->allowInlineScript(m_element, elementDocument->url(), nonce,
@@ -512,11 +514,6 @@ bool ScriptLoader::doExecuteScript(const ScriptSourceCode& sourceCode) {
     }
   }
 
-  // FIXME: Can this be moved earlier in the function?
-  // Why are we ever attempting to execute scripts without a frame?
-  if (!frame)
-    return true;
-
   AccessControlStatus accessControlStatus = NotSharableCrossOrigin;
   if (!m_isExternalScript) {
     accessControlStatus = SharableCrossOrigin;
@@ -561,8 +558,7 @@ void ScriptLoader::execute() {
   DCHECK(m_pendingScript->resource());
   bool errorOccurred = false;
   ScriptSourceCode source = m_pendingScript->getSource(KURL(), errorOccurred);
-  Element* element = m_pendingScript->releaseElementAndClear();
-  ALLOW_UNUSED_LOCAL(element);
+  m_pendingScript->dispose();
   if (errorOccurred) {
     dispatchErrorEvent();
   } else if (!m_resource->wasCanceled()) {
@@ -574,8 +570,9 @@ void ScriptLoader::execute() {
   m_resource = nullptr;
 }
 
-void ScriptLoader::notifyFinished(Resource* resource) {
+void ScriptLoader::pendingScriptFinished(PendingScript* pendingScript) {
   DCHECK(!m_willBeParserExecuted);
+  DCHECK_EQ(m_pendingScript, pendingScript);
 
   // We do not need this script in the memory cache. The primary goals of
   // sending this fetch request are to let the third party server know
@@ -583,7 +580,7 @@ void ScriptLoader::notifyFinished(Resource* resource) {
   // cache for subsequent uses.
   if (m_documentWriteIntervention ==
       DocumentWriteIntervention::FetchDocWrittenScriptDeferIdle) {
-    memoryCache()->remove(resource);
+    memoryCache()->remove(m_pendingScript->resource());
     m_pendingScript->stopWatchingForLoad();
     return;
   }
@@ -596,7 +593,7 @@ void ScriptLoader::notifyFinished(Resource* resource) {
     return;
   }
 
-  DCHECK_EQ(resource, m_resource);
+  DCHECK_EQ(pendingScript->resource(), m_resource);
 
   if (m_resource->errorOccurred()) {
     contextDocument->scriptRunner()->notifyScriptLoadError(this,

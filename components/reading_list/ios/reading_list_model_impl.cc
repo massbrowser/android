@@ -19,7 +19,10 @@ ReadingListModelImpl::ReadingListModelImpl()
 ReadingListModelImpl::ReadingListModelImpl(
     std::unique_ptr<ReadingListModelStorage> storage,
     PrefService* pref_service)
-    : pref_service_(pref_service),
+    : unread_entry_count_(0),
+      read_entry_count_(0),
+      unseen_entry_count_(0),
+      pref_service_(pref_service),
       has_unseen_(false),
       loaded_(false),
       weak_ptr_factory_(this) {
@@ -29,8 +32,7 @@ ReadingListModelImpl::ReadingListModelImpl(
     storage_layer_->SetReadingListModel(this, this);
   } else {
     loaded_ = true;
-    read_ = base::MakeUnique<ReadingListEntries>();
-    unread_ = base::MakeUnique<ReadingListEntries>();
+    entries_ = base::MakeUnique<ReadingListEntries>();
   }
   has_unseen_ = GetPersistentHasUnseen();
 }
@@ -38,13 +40,14 @@ ReadingListModelImpl::ReadingListModelImpl(
 ReadingListModelImpl::~ReadingListModelImpl() {}
 
 void ReadingListModelImpl::StoreLoaded(
-    std::unique_ptr<ReadingListEntries> unread,
-    std::unique_ptr<ReadingListEntries> read) {
+    std::unique_ptr<ReadingListEntries> entries) {
   DCHECK(CalledOnValidThread());
-  read_ = std::move(read);
-  unread_ = std::move(unread);
+  entries_ = std::move(entries);
+  for (auto& iterator : *entries_) {
+    UpdateEntryStateCountersOnEntryInsertion(iterator.second);
+  }
+  DCHECK(read_entry_count_ + unread_entry_count_ == entries_->size());
   loaded_ = true;
-  SortEntries();
   for (auto& observer : observers_)
     observer.ReadingListModelLoaded(this);
 }
@@ -61,28 +64,49 @@ bool ReadingListModelImpl::loaded() const {
   return loaded_;
 }
 
+size_t ReadingListModelImpl::size() const {
+  DCHECK(CalledOnValidThread());
+  DCHECK(read_entry_count_ + unread_entry_count_ == entries_->size());
+  if (!loaded())
+    return 0;
+  return entries_->size();
+}
+
 size_t ReadingListModelImpl::unread_size() const {
   DCHECK(CalledOnValidThread());
+  DCHECK(read_entry_count_ + unread_entry_count_ == entries_->size());
   if (!loaded())
     return 0;
-  return unread_->size();
+  return unread_entry_count_;
 }
 
-size_t ReadingListModelImpl::read_size() const {
+size_t ReadingListModelImpl::unseen_size() const {
   DCHECK(CalledOnValidThread());
   if (!loaded())
     return 0;
-  return read_->size();
+  return unseen_entry_count_;
 }
 
-bool ReadingListModelImpl::HasUnseenEntries() const {
+void ReadingListModelImpl::SetUnseenFlag() {
+  if (!has_unseen_) {
+    has_unseen_ = true;
+    if (!IsPerformingBatchUpdates()) {
+      SetPersistentHasUnseen(true);
+    }
+  }
+}
+
+bool ReadingListModelImpl::GetLocalUnseenFlag() const {
   DCHECK(CalledOnValidThread());
   if (!loaded())
     return false;
-  return unread_size() && has_unseen_;
+  // If there are currently no unseen entries, return false even if has_unseen_
+  // is true.
+  // This is possible if the last unseen entry has be removed via sync.
+  return has_unseen_ && unseen_entry_count_;
 }
 
-void ReadingListModelImpl::ResetUnseenEntries() {
+void ReadingListModelImpl::ResetLocalUnseenFlag() {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
   has_unseen_ = false;
@@ -90,128 +114,165 @@ void ReadingListModelImpl::ResetUnseenEntries() {
     SetPersistentHasUnseen(false);
 }
 
-const ReadingListEntry& ReadingListModelImpl::GetUnreadEntryAtIndex(
-    size_t index) const {
+void ReadingListModelImpl::MarkAllSeen() {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
-  return unread_->at(index);
+  if (unseen_entry_count_ == 0) {
+    return;
+  }
+  std::unique_ptr<ReadingListModel::ScopedReadingListBatchUpdate>
+      model_batch_updates = BeginBatchUpdates();
+  for (auto& iterator : *entries_) {
+    ReadingListEntry& entry = iterator.second;
+    if (entry.HasBeenSeen()) {
+      continue;
+    }
+    for (auto& observer : observers_) {
+      observer.ReadingListWillUpdateEntry(this, iterator.first);
+    }
+    UpdateEntryStateCountersOnEntryRemoval(entry);
+    entry.SetRead(false);
+    UpdateEntryStateCountersOnEntryInsertion(entry);
+    if (storage_layer_) {
+      storage_layer_->SaveEntry(entry);
+    }
+    for (auto& observer : observers_) {
+      observer.ReadingListDidApplyChanges(this);
+    }
+  }
+  DCHECK(unseen_entry_count_ == 0);
 }
 
-const ReadingListEntry& ReadingListModelImpl::GetReadEntryAtIndex(
-    size_t index) const {
-  DCHECK(CalledOnValidThread());
-  DCHECK(loaded());
-  return read_->at(index);
+void ReadingListModelImpl::UpdateEntryStateCountersOnEntryRemoval(
+    const ReadingListEntry& entry) {
+  if (!entry.HasBeenSeen()) {
+    unseen_entry_count_--;
+  }
+  if (entry.IsRead()) {
+    read_entry_count_--;
+  } else {
+    unread_entry_count_--;
+  }
 }
 
-const ReadingListEntry* ReadingListModelImpl::GetEntryFromURL(
-    const GURL& gurl,
-    bool* read) const {
+void ReadingListModelImpl::UpdateEntryStateCountersOnEntryInsertion(
+    const ReadingListEntry& entry) {
+  if (!entry.HasBeenSeen()) {
+    unseen_entry_count_++;
+  }
+  if (entry.IsRead()) {
+    read_entry_count_++;
+  } else {
+    unread_entry_count_++;
+  }
+}
+
+const std::vector<GURL> ReadingListModelImpl::Keys() const {
+  std::vector<GURL> keys;
+  for (const auto& iterator : *entries_) {
+    keys.push_back(iterator.first);
+  }
+  return keys;
+}
+
+const ReadingListEntry* ReadingListModelImpl::GetEntryByURL(
+    const GURL& gurl) const {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
-  return GetMutableEntryFromURL(gurl, read);
+  return GetMutableEntryFromURL(gurl);
+}
+
+const ReadingListEntry* ReadingListModelImpl::GetFirstUnreadEntry(
+    bool distilled) const {
+  DCHECK(CalledOnValidThread());
+  DCHECK(loaded());
+  if (unread_entry_count_ == 0) {
+    return nullptr;
+  }
+  int64_t update_time_all = 0;
+  const ReadingListEntry* first_entry_all = nullptr;
+  int64_t update_time_distilled = 0;
+  const ReadingListEntry* first_entry_distilled = nullptr;
+  for (auto& iterator : *entries_) {
+    ReadingListEntry& entry = iterator.second;
+    if (entry.IsRead()) {
+      continue;
+    }
+    if (entry.UpdateTime() > update_time_all) {
+      update_time_all = entry.UpdateTime();
+      first_entry_all = &entry;
+    }
+    if (entry.DistilledState() == ReadingListEntry::PROCESSED &&
+        entry.UpdateTime() > update_time_distilled) {
+      update_time_distilled = entry.UpdateTime();
+      first_entry_distilled = &entry;
+    }
+  }
+  DCHECK(first_entry_all);
+  DCHECK_GT(update_time_all, 0);
+  if (distilled && first_entry_distilled) {
+    return first_entry_distilled;
+  }
+  return first_entry_all;
 }
 
 ReadingListEntry* ReadingListModelImpl::GetMutableEntryFromURL(
-    const GURL& gurl,
-    bool* read) const {
+    const GURL& url) const {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
-  bool is_read;
-  ReadingListEntry entry(gurl, std::string());
-  auto it = std::find(read_->begin(), read_->end(), entry);
-  is_read = true;
-  if (it == read_->end()) {
-    it = std::find(unread_->begin(), unread_->end(), entry);
-    is_read = false;
-    if (it == unread_->end())
-      return nullptr;
+  auto iterator = entries_->find(url);
+  if (iterator == entries_->end()) {
+    return nullptr;
   }
-  if (read) {
-    *read = is_read;
-  }
-  return &(*it);
+  return &(iterator->second);
 }
 
-bool ReadingListModelImpl::CallbackEntryURL(
-    const GURL& url,
-    base::Callback<void(const ReadingListEntry&)> callback) const {
-  DCHECK(CalledOnValidThread());
-  DCHECK(loaded());
-  const ReadingListEntry* entry = GetMutableEntryFromURL(url, nullptr);
-  if (entry) {
-    callback.Run(*entry);
-    return true;
-  }
-  return false;
-}
-
-void ReadingListModelImpl::MoveEntryFrom(ReadingListEntries* entries,
-                                         const ReadingListEntry& entry,
-                                         bool read) {
-  auto result = std::find(entries->begin(), entries->end(), entry);
-  DCHECK(result != entries->end());
-  int index = std::distance(entries->begin(), result);
-  for (auto& observer : observers_)
-    observer.ReadingListWillMoveEntry(this, index, read);
-  entries->erase(result);
-}
-
-void ReadingListModelImpl::SyncAddEntry(std::unique_ptr<ReadingListEntry> entry,
-                                        bool read) {
+void ReadingListModelImpl::SyncAddEntry(
+    std::unique_ptr<ReadingListEntry> entry) {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
   // entry must not already exist.
-  DCHECK(GetMutableEntryFromURL(entry->URL(), nullptr) == nullptr);
-  if (read) {
-    for (auto& observer : observers_)
-      observer.ReadingListWillAddReadEntry(this, *entry);
-    read_->insert(read_->begin(), std::move(*entry));
-  } else {
-    for (auto& observer : observers_)
-      observer.ReadingListWillAddUnreadEntry(this, *entry);
-    has_unseen_ = true;
-    SetPersistentHasUnseen(true);
-    unread_->insert(unread_->begin(), std::move(*entry));
-  }
+  DCHECK(GetMutableEntryFromURL(entry->URL()) == nullptr);
   for (auto& observer : observers_)
+    observer.ReadingListWillAddEntry(this, *entry);
+  UpdateEntryStateCountersOnEntryInsertion(*entry);
+  if (!entry->HasBeenSeen()) {
+    SetUnseenFlag();
+  }
+  GURL url = entry->URL();
+  entries_->insert(std::make_pair(url, std::move(*entry)));
+  for (auto& observer : observers_) {
+    observer.ReadingListDidAddEntry(this, url, reading_list::ADDED_VIA_SYNC);
     observer.ReadingListDidApplyChanges(this);
+  }
 }
 
 ReadingListEntry* ReadingListModelImpl::SyncMergeEntry(
-    std::unique_ptr<ReadingListEntry> entry,
-    bool read) {
+    std::unique_ptr<ReadingListEntry> entry) {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
-  bool is_existing_entry_read;
-  ReadingListEntry* existing_entry =
-      GetMutableEntryFromURL(entry->URL(), &is_existing_entry_read);
-
+  ReadingListEntry* existing_entry = GetMutableEntryFromURL(entry->URL());
   DCHECK(existing_entry);
-  DCHECK(existing_entry->UpdateTime() < entry->UpdateTime());
+  GURL url = entry->URL();
 
-  // Merge local data in new entry.
-  entry->MergeLocalStateFrom(*existing_entry);
-
-  if (is_existing_entry_read) {
-    MoveEntryFrom(read_.get(), *existing_entry, true);
-  } else {
-    MoveEntryFrom(unread_.get(), *existing_entry, false);
-  }
-
-  ReadingListEntries::iterator added_iterator;
-  if (read) {
-    read_->push_back(std::move(*entry));
-    added_iterator = read_->end() - 1;
-  } else {
-    unread_->push_back(std::move(*entry));
-    added_iterator = unread_->end() - 1;
-  }
   for (auto& observer : observers_)
-    observer.ReadingListDidApplyChanges(this);
+    observer.ReadingListWillMoveEntry(this, url);
 
-  ReadingListEntry& merged_entry = *added_iterator;
-  return &merged_entry;
+  bool was_seen = existing_entry->HasBeenSeen();
+  UpdateEntryStateCountersOnEntryRemoval(*existing_entry);
+  existing_entry->MergeWithEntry(*entry);
+  existing_entry = GetMutableEntryFromURL(url);
+  UpdateEntryStateCountersOnEntryInsertion(*existing_entry);
+  if (was_seen && !existing_entry->HasBeenSeen()) {
+    // Only set the flag if a new unseen entry is added.
+    SetUnseenFlag();
+  }
+  for (auto& observer : observers_) {
+    observer.ReadingListDidMoveEntry(this, url);
+    observer.ReadingListDidApplyChanges(this);
+  }
+
+  return existing_entry;
 }
 
 void ReadingListModelImpl::SyncRemoveEntry(const GURL& url) {
@@ -226,45 +287,30 @@ void ReadingListModelImpl::RemoveEntryByURLImpl(const GURL& url,
                                                 bool from_sync) {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
-  const ReadingListEntry entry(url, std::string());
-
-  auto result = std::find(unread_->begin(), unread_->end(), entry);
-  if (result != unread_->end()) {
-    for (auto& observer : observers_)
-      observer.ReadingListWillRemoveUnreadEntry(
-          this, std::distance(unread_->begin(), result));
-
-    if (storage_layer_ && !from_sync) {
-      storage_layer_->RemoveEntry(*result);
-    }
-    unread_->erase(result);
-
-    for (auto& observer : observers_)
-      observer.ReadingListDidApplyChanges(this);
+  const ReadingListEntry* entry = GetEntryByURL(url);
+  if (!entry)
     return;
-  }
 
-  result = std::find(read_->begin(), read_->end(), entry);
-  if (result != read_->end()) {
-    for (auto& observer : observers_)
-      observer.ReadingListWillRemoveReadEntry(
-          this, std::distance(read_->begin(), result));
-    if (storage_layer_ && !from_sync) {
-      storage_layer_->RemoveEntry(*result);
-    }
-    read_->erase(result);
+  for (auto& observer : observers_)
+    observer.ReadingListWillRemoveEntry(this, url);
 
-    for (auto& observer : observers_)
-      observer.ReadingListDidApplyChanges(this);
-    return;
+  if (storage_layer_ && !from_sync) {
+    storage_layer_->RemoveEntry(*entry);
   }
+  UpdateEntryStateCountersOnEntryRemoval(*entry);
+
+  entries_->erase(url);
+  for (auto& observer : observers_)
+    observer.ReadingListDidApplyChanges(this);
 }
 
 const ReadingListEntry& ReadingListModelImpl::AddEntry(
     const GURL& url,
-    const std::string& title) {
+    const std::string& title,
+    reading_list::EntrySource source) {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
+  DCHECK(url.SchemeIsHTTPOrHTTPS());
   RemoveEntryByURL(url);
 
   std::string trimmedTitle(title);
@@ -272,138 +318,101 @@ const ReadingListEntry& ReadingListModelImpl::AddEntry(
 
   ReadingListEntry entry(url, trimmedTitle);
   for (auto& observer : observers_)
-    observer.ReadingListWillAddUnreadEntry(this, entry);
-  has_unseen_ = true;
-  SetPersistentHasUnseen(true);
-  if (storage_layer_) {
-    storage_layer_->SaveEntry(entry, false);
-  }
-  unread_->insert(unread_->begin(), std::move(entry));
+    observer.ReadingListWillAddEntry(this, entry);
+  UpdateEntryStateCountersOnEntryInsertion(entry);
+  SetUnseenFlag();
+  entries_->insert(std::make_pair(url, std::move(entry)));
 
-  for (auto& observer : observers_)
+  if (storage_layer_) {
+    storage_layer_->SaveEntry(*GetEntryByURL(url));
+  }
+
+  for (auto& observer : observers_) {
+    observer.ReadingListDidAddEntry(this, url, source);
     observer.ReadingListDidApplyChanges(this);
-  return *unread_->begin();
+  }
+
+  return entries_->at(url);
 }
 
-void ReadingListModelImpl::MarkUnreadByURL(const GURL& url) {
+void ReadingListModelImpl::SetReadStatus(const GURL& url, bool read) {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
-  ReadingListEntry entry(url, std::string());
-  auto result = std::find(read_->begin(), read_->end(), entry);
-  if (result == read_->end())
+  auto iterator = entries_->find(url);
+  if (iterator == entries_->end()) {
     return;
-
-  for (ReadingListModelObserver& observer : observers_) {
-    observer.ReadingListWillMoveEntry(
-        this, std::distance(read_->begin(), result), true);
   }
+  ReadingListEntry& entry = iterator->second;
+  if (entry.IsRead() == read) {
+    return;
+  }
+  for (ReadingListModelObserver& observer : observers_) {
+    observer.ReadingListWillMoveEntry(this, url);
+  }
+  UpdateEntryStateCountersOnEntryRemoval(entry);
+  entry.SetRead(read);
+  entry.MarkEntryUpdated();
+  UpdateEntryStateCountersOnEntryInsertion(entry);
 
-  result->MarkEntryUpdated();
   if (storage_layer_) {
-    storage_layer_->SaveEntry(*result, false);
+    storage_layer_->SaveEntry(entry);
   }
-
-  unread_->insert(unread_->begin(), std::move(*result));
-  read_->erase(result);
-
   for (ReadingListModelObserver& observer : observers_) {
+    observer.ReadingListDidMoveEntry(this, url);
     observer.ReadingListDidApplyChanges(this);
   }
-}
-
-void ReadingListModelImpl::MarkReadByURL(const GURL& url) {
-  DCHECK(CalledOnValidThread());
-  DCHECK(loaded());
-  ReadingListEntry entry(url, std::string());
-  auto result = std::find(unread_->begin(), unread_->end(), entry);
-  if (result == unread_->end())
-    return;
-
-  for (auto& observer : observers_)
-    observer.ReadingListWillMoveEntry(
-        this, std::distance(unread_->begin(), result), false);
-
-  result->MarkEntryUpdated();
-  if (storage_layer_) {
-    storage_layer_->SaveEntry(*result, true);
-  }
-
-  read_->insert(read_->begin(), std::move(*result));
-  unread_->erase(result);
-
-  for (auto& observer : observers_)
-    observer.ReadingListDidApplyChanges(this);
 }
 
 void ReadingListModelImpl::SetEntryTitle(const GURL& url,
                                          const std::string& title) {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
-  const ReadingListEntry entry(url, std::string());
-
-  auto result = std::find(unread_->begin(), unread_->end(), entry);
-  if (result != unread_->end()) {
-    for (auto& observer : observers_)
-      observer.ReadingListWillUpdateUnreadEntry(
-          this, std::distance(unread_->begin(), result));
-    result->SetTitle(title);
-
-    if (storage_layer_) {
-      storage_layer_->SaveEntry(*result, false);
-    }
-    for (auto& observer : observers_)
-      observer.ReadingListDidApplyChanges(this);
+  auto iterator = entries_->find(url);
+  if (iterator == entries_->end()) {
+    return;
+  }
+  ReadingListEntry& entry = iterator->second;
+  if (entry.Title() == title) {
     return;
   }
 
-  result = std::find(read_->begin(), read_->end(), entry);
-  if (result != read_->end()) {
-    for (auto& observer : observers_)
-      observer.ReadingListWillUpdateReadEntry(
-          this, std::distance(read_->begin(), result));
-    result->SetTitle(title);
-    if (storage_layer_) {
-      storage_layer_->SaveEntry(*result, true);
-    }
-    for (auto& observer : observers_)
-      observer.ReadingListDidApplyChanges(this);
-    return;
+  for (ReadingListModelObserver& observer : observers_) {
+    observer.ReadingListWillUpdateEntry(this, url);
+  }
+  entry.SetTitle(title);
+  if (storage_layer_) {
+    storage_layer_->SaveEntry(entry);
+  }
+  for (ReadingListModelObserver& observer : observers_) {
+    observer.ReadingListDidApplyChanges(this);
   }
 }
 
-void ReadingListModelImpl::SetEntryDistilledPath(
+void ReadingListModelImpl::SetEntryDistilledInfo(
     const GURL& url,
-    const base::FilePath& distilled_path) {
+    const base::FilePath& distilled_path,
+    const GURL& distilled_url) {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
-  const ReadingListEntry entry(url, std::string());
-
-  auto result = std::find(unread_->begin(), unread_->end(), entry);
-  if (result != unread_->end()) {
-    for (auto& observer : observers_)
-      observer.ReadingListWillUpdateUnreadEntry(
-          this, std::distance(unread_->begin(), result));
-    result->SetDistilledPath(distilled_path);
-    if (storage_layer_) {
-      storage_layer_->SaveEntry(*result, false);
-    }
-    for (auto& observer : observers_)
-      observer.ReadingListDidApplyChanges(this);
+  auto iterator = entries_->find(url);
+  if (iterator == entries_->end()) {
+    return;
+  }
+  ReadingListEntry& entry = iterator->second;
+  if (entry.DistilledState() == ReadingListEntry::PROCESSED &&
+      entry.DistilledPath() == distilled_path) {
     return;
   }
 
-  result = std::find(read_->begin(), read_->end(), entry);
-  if (result != read_->end()) {
-    for (auto& observer : observers_)
-      observer.ReadingListWillUpdateReadEntry(
-          this, std::distance(read_->begin(), result));
-    result->SetDistilledPath(distilled_path);
-    if (storage_layer_) {
-      storage_layer_->SaveEntry(*result, true);
-    }
-    for (auto& observer : observers_)
-      observer.ReadingListDidApplyChanges(this);
-    return;
+  for (ReadingListModelObserver& observer : observers_) {
+    observer.ReadingListWillUpdateEntry(this, url);
+  }
+  entry.SetDistilledInfo(distilled_path, distilled_url);
+  if (storage_layer_) {
+    storage_layer_->SaveEntry(entry);
+  }
+  for (ReadingListModelObserver& observer : observers_) {
+    observer.ReadingListDidApplyChanges(this);
   }
 }
 
@@ -412,36 +421,26 @@ void ReadingListModelImpl::SetEntryDistilledState(
     ReadingListEntry::DistillationState state) {
   DCHECK(CalledOnValidThread());
   DCHECK(loaded());
-  const ReadingListEntry entry(url, std::string());
-
-  auto result = std::find(unread_->begin(), unread_->end(), entry);
-  if (result != unread_->end()) {
-    for (auto& observer : observers_)
-      observer.ReadingListWillUpdateUnreadEntry(
-          this, std::distance(unread_->begin(), result));
-    result->SetDistilledState(state);
-    if (storage_layer_) {
-      storage_layer_->SaveEntry(*result, false);
-    }
-    for (auto& observer : observers_)
-      observer.ReadingListDidApplyChanges(this);
+  auto iterator = entries_->find(url);
+  if (iterator == entries_->end()) {
+    return;
+  }
+  ReadingListEntry& entry = iterator->second;
+  if (entry.DistilledState() == state) {
     return;
   }
 
-  result = std::find(read_->begin(), read_->end(), entry);
-  if (result != read_->end()) {
-    for (auto& observer : observers_)
-      observer.ReadingListWillUpdateReadEntry(
-          this, std::distance(read_->begin(), result));
-    result->SetDistilledState(state);
-    if (storage_layer_) {
-      storage_layer_->SaveEntry(*result, true);
-    }
-    for (auto& observer : observers_)
-      observer.ReadingListDidApplyChanges(this);
-    return;
+  for (ReadingListModelObserver& observer : observers_) {
+    observer.ReadingListWillUpdateEntry(this, url);
   }
-};
+  entry.SetDistilledState(state);
+  if (storage_layer_) {
+    storage_layer_->SaveEntry(entry);
+  }
+  for (ReadingListModelObserver& observer : observers_) {
+    observer.ReadingListDidApplyChanges(this);
+  }
+}
 
 std::unique_ptr<ReadingListModel::ScopedReadingListBatchUpdate>
 ReadingListModelImpl::CreateBatchToken() {
@@ -467,7 +466,6 @@ void ReadingListModelImpl::LeavingBatchUpdates() {
   DCHECK(CalledOnValidThread());
   if (storage_layer_) {
     SetPersistentHasUnseen(has_unseen_);
-    SortEntries();
   }
   ReadingListModel::LeavingBatchUpdates();
 }
@@ -499,16 +497,7 @@ syncer::ModelTypeSyncBridge* ReadingListModelImpl::GetModelTypeSyncBridge() {
   DCHECK(loaded());
   if (!storage_layer_)
     return nullptr;
-  return storage_layer_->GetModelTypeSyncBridge();
-}
-
-void ReadingListModelImpl::SortEntries() {
-  DCHECK(CalledOnValidThread());
-  DCHECK(loaded());
-  std::sort(read_->begin(), read_->end(),
-            ReadingListEntry::CompareEntryUpdateTime);
-  std::sort(unread_->begin(), unread_->end(),
-            ReadingListEntry::CompareEntryUpdateTime);
+  return storage_layer_.get();
 }
 
 ReadingListModelStorage* ReadingListModelImpl::StorageLayer() {

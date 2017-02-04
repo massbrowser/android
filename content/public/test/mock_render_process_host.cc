@@ -82,7 +82,7 @@ void MockRenderProcessHost::SimulateCrash() {
   // the listeners by descending routing ID, instead of using the arbitrary
   // hash-map order like RenderProcessHostImpl.
   std::vector<std::pair<int32_t, IPC::Listener*>> sorted_listeners_;
-  IDMap<IPC::Listener>::iterator iter(&listeners_);
+  IDMap<IPC::Listener*>::iterator iter(&listeners_);
   while (!iter.IsAtEnd()) {
     sorted_listeners_.push_back(
         std::make_pair(iter.GetCurrentKey(), iter.GetCurrentValue()));
@@ -275,6 +275,10 @@ bool MockRenderProcessHost::IsProcessBackgrounded() const {
   return is_process_backgrounded_;
 }
 
+size_t MockRenderProcessHost::GetWorkerRefCount() const {
+  return worker_ref_count_;
+}
+
 void MockRenderProcessHost::IncrementServiceWorkerRefCount() {
   ++worker_ref_count_;
 }
@@ -306,9 +310,17 @@ void MockRenderProcessHost::Resume() {}
 mojom::Renderer* MockRenderProcessHost::GetRendererInterface() {
   if (!renderer_interface_) {
     renderer_interface_.reset(new mojom::RendererAssociatedPtr);
-    mojo::GetDummyProxyForTesting(renderer_interface_.get());
+    mojo::GetIsolatedProxy(renderer_interface_.get());
   }
   return renderer_interface_->get();
+}
+
+void MockRenderProcessHost::SetIsNeverSuitableForReuse() {
+  NOTREACHED();
+}
+
+bool MockRenderProcessHost::MayReuseHost() {
+  return true;
 }
 
 void MockRenderProcessHost::FilterURL(bool empty_allowed, GURL* url) {

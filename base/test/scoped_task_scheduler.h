@@ -6,31 +6,86 @@
 #define BASE_TEST_SCOPED_TASK_SCHEDULER_H_
 
 #include "base/macros.h"
+#include "base/threading/thread_checker.h"
 
 namespace base {
 
+class MessageLoop;
 class TaskScheduler;
 
 namespace test {
 
-// Initializes a TaskScheduler and allows usage of the
-// base/task_scheduler/post_task.h API within its scope.
+// Allows usage of the base/task_scheduler/post_task.h API within its scope.
+//
+// To run pending tasks synchronously, call RunLoop::Run/RunUntilIdle() on the
+// thread where the ScopedTaskScheduler lives. The destructor runs remaining
+// BLOCK_SHUTDOWN tasks synchronously.
+//
+// Example usage:
+//
+// In this snippet, RunUntilIdle() returns after "A" is run.
+// base::test::ScopedTaskScheduler scoped_task_scheduler;
+// base::PostTask(FROM_HERE, base::Bind(&A));
+// base::RunLoop::RunUntilIdle(); // Returns after running A.
+//
+// In this snippet, run_loop.Run() returns after running "B" and
+// "RunLoop::Quit".
+// base::RunLoop run_loop;
+// base::PostTask(FROM_HERE, base::Bind(&B));
+// base::PostTask(FROM_HERE, base::Bind(&RunLoop::Quit, &run_loop));
+// base::PostTask(FROM_HERE, base::Bind(&C));
+// base::PostTaskWithTraits(
+//     base::TaskTraits().WithShutdownBehavior(
+//         base::TaskShutdownBehavior::BLOCK_SHUTDOWN),
+//     base::Bind(&D));
+// run_loop.Run();  // Returns after running B and RunLoop::Quit.
+//
+// At this point, |scoped_task_scheduler| will be destroyed. The destructor
+// runs "D" because it's BLOCK_SHUTDOWN. "C" is skipped.
 class ScopedTaskScheduler {
  public:
-  // Initializes a TaskScheduler with default arguments.
+  // Registers a synchronous TaskScheduler on a thread that doesn't have a
+  // MessageLoop.
+  //
+  // This constructor handles most common cases.
   ScopedTaskScheduler();
 
-  // Waits until all TaskScheduler tasks blocking shutdown complete their
-  // execution (see TaskShutdownBehavior). Then, joins all TaskScheduler threads
-  // and deletes the TaskScheduler.
+  // Registers a synchronous TaskScheduler on a thread that already has a
+  // |message_loop|. Calling RunLoop::Run/RunUntilIdle() on the thread where
+  // this lives runs the MessageLoop and TaskScheduler tasks in posting order.
   //
-  // Note that joining TaskScheduler threads may involve waiting for
-  // CONTINUE_ON_SHUTDOWN tasks to complete their execution. Normally, in
-  // production, the process exits without joining TaskScheduler threads.
+  // In general, you don't need a ScopedTaskScheduler and a MessageLoop because
+  // ScopedTaskScheduler provides most MessageLoop features.
+  //
+  //     ScopedTaskScheduler scoped_task_scheduler;
+  //     ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, Bind(&Task));
+  //     RunLoop().RunUntilIdle();  // Runs Task.
+  //
+  //     is equivalent to
+  //
+  //     MessageLoop message_loop;
+  //     ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, Bind(&Task));
+  //     RunLoop().RunUntilIdle();  // Runs Task.
+  //
+  // Use this constructor if you need a non-default MessageLoop (e.g.
+  // MessageLoopFor(UI|IO)).
+  //
+  //    MessageLoopForIO message_loop_for_io;
+  //    ScopedTaskScheduler scoped_task_scheduler(&message_loop_for_io);
+  //    message_loop_for_io->WatchFileDescriptor(...);
+  //    message_loop_for_io->task_runner()->PostTask(
+  //        FROM_HERE, &MessageLoopTask);
+  //    PostTaskWithTraits(FROM_HERE, TaskTraits(), Bind(&TaskSchedulerTask));
+  //    RunLoop().RunUntilIdle();  // Runs both MessageLoopTask and
+  //                               // TaskSchedulerTask.
+  explicit ScopedTaskScheduler(MessageLoop* message_loop);
+
+  // Runs all pending BLOCK_SHUTDOWN tasks and unregisters the TaskScheduler.
   ~ScopedTaskScheduler();
 
  private:
   const TaskScheduler* task_scheduler_ = nullptr;
+  ThreadChecker thread_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedTaskScheduler);
 };

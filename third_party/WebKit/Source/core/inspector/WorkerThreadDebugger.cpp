@@ -105,7 +105,7 @@ void WorkerThreadDebugger::contextWillBeDestroyed(
     v8::Local<v8::Context> context) {
   int workerContextGroupId = contextGroupId(workerThread);
   DCHECK(m_workerThreads.contains(workerContextGroupId));
-  m_workerThreads.remove(workerContextGroupId);
+  m_workerThreads.erase(workerContextGroupId);
   v8Inspector()->contextDestroyed(context);
 }
 
@@ -194,7 +194,7 @@ void WorkerThreadDebugger::runIfWaitingForDebugger(int contextGroupId) {
 
 void WorkerThreadDebugger::consoleAPIMessage(
     int contextGroupId,
-    v8_inspector::V8ConsoleAPIType type,
+    v8::Isolate::MessageErrorLevel level,
     const v8_inspector::StringView& message,
     const v8_inspector::StringView& url,
     unsigned lineNumber,
@@ -202,15 +202,18 @@ void WorkerThreadDebugger::consoleAPIMessage(
     v8_inspector::V8StackTrace* stackTrace) {
   DCHECK(m_workerThreads.contains(contextGroupId));
   WorkerThread* workerThread = m_workerThreads.get(contextGroupId);
-
-  if (type == v8_inspector::V8ConsoleAPIType::kClear)
-    workerThread->consoleMessageStorage()->clear();
   std::unique_ptr<SourceLocation> location =
       SourceLocation::create(toCoreString(url), lineNumber, columnNumber,
                              stackTrace ? stackTrace->clone() : nullptr, 0);
   workerThread->workerReportingProxy().reportConsoleMessage(
-      ConsoleAPIMessageSource, consoleAPITypeToMessageLevel(type),
+      ConsoleAPIMessageSource, v8MessageLevelToMessageLevel(level),
       toCoreString(message), location.get());
+}
+
+void WorkerThreadDebugger::consoleClear(int contextGroupId) {
+  DCHECK(m_workerThreads.contains(contextGroupId));
+  WorkerThread* workerThread = m_workerThreads.get(contextGroupId);
+  workerThread->consoleMessageStorage()->clear();
 }
 
 v8::MaybeLocal<v8::Value> WorkerThreadDebugger::memoryInfo(

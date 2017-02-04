@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/test/histogram_tester.h"
 #include "base/threading/thread_checker.h"
 #include "base/values.h"
 #include "net/base/network_change_notifier.h"
@@ -40,11 +41,11 @@ class TestPrefDelegate : public NetworkQualitiesPrefsManager::PrefDelegate {
     ASSERT_EQ(value.size(), value_->size());
   }
 
-  const base::DictionaryValue& GetDictionaryValue() override {
+  std::unique_ptr<base::DictionaryValue> GetDictionaryValue() override {
     DCHECK(thread_checker_.CalledOnValidThread());
 
     read_count_++;
-    return *(value_.get());
+    return value_->CreateDeepCopy();
   }
 
   size_t write_count() const {
@@ -71,8 +72,7 @@ class TestPrefDelegate : public NetworkQualitiesPrefsManager::PrefDelegate {
 };
 
 TEST(NetworkQualitiesPrefManager, Write) {
-  std::map<std::string, std::string> variation_params;
-  TestNetworkQualityEstimator estimator(variation_params, nullptr);
+  TestNetworkQualityEstimator estimator;
 
   std::unique_ptr<TestPrefDelegate> prefs_delegate(new TestPrefDelegate());
   TestPrefDelegate* prefs_delegate_ptr = prefs_delegate.get();
@@ -110,8 +110,7 @@ TEST(NetworkQualitiesPrefManager, Write) {
 
 // Verify that the pref is not written if the network ID contains a period.
 TEST(NetworkQualitiesPrefManager, WriteWithPeriodInNetworkID) {
-  std::map<std::string, std::string> variation_params;
-  TestNetworkQualityEstimator estimator(variation_params, nullptr);
+  TestNetworkQualityEstimator estimator;
 
   std::unique_ptr<TestPrefDelegate> prefs_delegate(new TestPrefDelegate());
   TestPrefDelegate* prefs_delegate_ptr = prefs_delegate.get();
@@ -137,8 +136,7 @@ TEST(NetworkQualitiesPrefManager, WriteWithPeriodInNetworkID) {
 }
 
 TEST(NetworkQualitiesPrefManager, WriteAndReadWithMultipleNetworkIDs) {
-  std::map<std::string, std::string> variation_params;
-  TestNetworkQualityEstimator estimator(variation_params, nullptr);
+  TestNetworkQualityEstimator estimator;
 
   std::unique_ptr<TestPrefDelegate> prefs_delegate(new TestPrefDelegate());
 
@@ -225,13 +223,17 @@ TEST(NetworkQualitiesPrefManager, WriteAndReadWithMultipleNetworkIDs) {
         NOTREACHED();
     }
   }
+
+  base::HistogramTester histogram_tester;
+  estimator.OnPrefsRead(read_prefs);
+  histogram_tester.ExpectUniqueSample("NQE.Prefs.ReadSize", 3, 1);
+
   manager.ShutdownOnPrefThread();
 }
 
 // Verifies that the prefs are cleared correctly.
 TEST(NetworkQualitiesPrefManager, ClearPrefs) {
-  std::map<std::string, std::string> variation_params;
-  TestNetworkQualityEstimator estimator(variation_params, nullptr);
+  TestNetworkQualityEstimator estimator;
 
   std::unique_ptr<TestPrefDelegate> prefs_delegate(new TestPrefDelegate());
 

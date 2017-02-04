@@ -117,6 +117,9 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
 
   bool show_on_resize() { return show_on_resize_; }
 
+  // Returns true if keyboard window has been created.
+  bool IsKeyboardWindowCreated();
+
   // Returns the current keyboard bounds. An empty rectangle will get returned
   // when the keyboard is not shown or in FLOATING mode.
   const gfx::Rect& current_keyboard_bounds() {
@@ -155,6 +158,10 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   // is aborted, it won't be called.
   void ShowAnimationFinished();
   void HideAnimationFinished();
+
+  // Called when the keyboard mode is set or the keyboard is moved to another
+  // display.
+  void AdjustKeyboardBounds();
 
   std::unique_ptr<KeyboardUI> ui_;
   KeyboardLayoutDelegate* layout_delegate_;

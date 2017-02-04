@@ -31,6 +31,10 @@ public class ToSAndUMAFirstRunFragment extends FirstRunPage {
     private Button mAcceptButton;
 //    private CheckBox mSendReportCheckBox;
     private TextView mTosAndPrivacy;
+    private View mTitle;
+    private View mProgressSpinner;
+    private boolean mNativeInitialized;
+    private boolean mTriggerAcceptAfterNativeInit;
 
     @Override
     public View onCreateView(
@@ -42,6 +46,9 @@ public class ToSAndUMAFirstRunFragment extends FirstRunPage {
     public void onViewCreated(View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        mTitle = view.findViewById(R.id.title);
+        mProgressSpinner = view.findViewById(R.id.progress_spinner);
+        mProgressSpinner.setVisibility(View.GONE);
         mAcceptButton = (Button) view.findViewById(R.id.terms_accept);
 //        mSendReportCheckBox = (CheckBox) view.findViewById(R.id.send_report_checkbox);
         mTosAndPrivacy = (TextView) view.findViewById(R.id.tos_and_privacy);
@@ -49,7 +56,7 @@ public class ToSAndUMAFirstRunFragment extends FirstRunPage {
         mAcceptButton.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
-                getPageDelegate().acceptTermsOfService(true/*mSendReportCheckBox.isChecked()*/);
+                acceptTermsOfService();
             }
         });
 
@@ -73,8 +80,7 @@ public class ToSAndUMAFirstRunFragment extends FirstRunPage {
             @Override
             public void onClick(View widget) {
                 if (!isAdded()) return;
-                getPageDelegate().showEmbedContentViewActivity(R.string.terms_of_service_title,
-                        R.string.chrome_terms_of_service_url);
+                getPageDelegate().showInfoPage(R.string.chrome_terms_of_service_url);
             }
         };
 
@@ -82,17 +88,79 @@ public class ToSAndUMAFirstRunFragment extends FirstRunPage {
             @Override
             public void onClick(View widget) {
                 if (!isAdded()) return;
-                getPageDelegate().showEmbedContentViewActivity(R.string.privacy_notice_title,
-                        R.string.chrome_privacy_notice_url);
+                getPageDelegate().showInfoPage(R.string.chrome_privacy_notice_url);
             }
         };
         mTosAndPrivacy.setText(SpanApplier.applySpans(getString(R.string.fre_tos_and_privacy),
                 new SpanInfo("<LINK1>", "</LINK1>", clickableTermsSpan),
                 new SpanInfo("<LINK2>", "</LINK2>", clickablePrivacySpan)));
+
+        // If this page should be skipped, hide all the UI elements except for the
+        // Chrome logo and the spinner.
+        if (FirstRunStatus.shouldSkipWelcomePage()) {
+            setSpinnerVisible(true);
+        }
+    }
+
+    @Override
+    public void setUserVisibleHint(boolean isVisibleToUser) {
+        super.setUserVisibleHint(isVisibleToUser);
+
+        // This may be called before onViewCreated(), in which case the below is not yet relevant.
+        if (mTitle == null) return;
+
+        if (!isVisibleToUser) {
+            // Restore original enabled & visibility states, in case the user returns to the page.
+            setSpinnerVisible(false);
+        }
+//        else {
+            // On certain versions of Android, the checkbox will appear unchecked upon revisiting
+            // the page.  Force it to the end state of the drawable animation as a work around.
+            // crbug.com/666258
+//            mSendReportCheckBox.jumpDrawablesToCurrentState();
+//        }
     }
 
     @Override
     public boolean shouldSkipPageOnCreate(Context appContext) {
-        return FirstRunStatus.shouldSkipWelcomePage(appContext);
+        return FirstRunStatus.shouldSkipWelcomePage();
+    }
+
+    @Override
+    public boolean shouldRecreatePageOnDataChange() {
+        // Specify that this page shouldn't be re-created on notifyDataSetChanged(), so
+        // that state like mTriggerAcceptAfterNativeInit can be preserved on the instance
+        // when native is initialized.
+        return false;
+    }
+
+    @Override
+    protected void onNativeInitialized() {
+        assert !mNativeInitialized;
+
+        mNativeInitialized = true;
+        if (mTriggerAcceptAfterNativeInit) acceptTermsOfService();
+    }
+
+    private void acceptTermsOfService() {
+        if (!mNativeInitialized) {
+            mTriggerAcceptAfterNativeInit = true;
+            setSpinnerVisible(true);
+            return;
+        }
+
+        mTriggerAcceptAfterNativeInit = false;
+        getPageDelegate().acceptTermsOfService(false);
+    }
+
+    private void setSpinnerVisible(boolean spinnerVisible) {
+        // When the progress spinner is visibile, we hide the other UI elements so that
+        // the user can't interact with them.
+        int otherElementsVisible = spinnerVisible ? View.INVISIBLE : View.VISIBLE;
+        mTitle.setVisibility(otherElementsVisible);
+        mAcceptButton.setVisibility(otherElementsVisible);
+        mTosAndPrivacy.setVisibility(otherElementsVisible);
+//        mSendReportCheckBox.setVisibility(otherElementsVisible);
+        mProgressSpinner.setVisibility(spinnerVisible ? View.VISIBLE : View.GONE);
     }
 }

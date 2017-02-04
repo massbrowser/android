@@ -11,6 +11,7 @@
 #include "ash/common/frame/default_header_painter.h"
 #include "ash/common/frame/frame_border_hit_test.h"
 #include "ash/common/frame/header_painter_util.h"
+#include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/wm_lookup.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
@@ -24,7 +25,6 @@
 #include "chrome/browser/ui/views/frame/browser_header_painter_ash.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
-#include "chrome/browser/ui/views/frame/web_app_left_header_view_ash.h"
 #include "chrome/browser/ui/views/profiles/profile_indicator_icon.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
@@ -60,18 +60,6 @@ const int kTabstripRightSpacing = 10;
 // to hit easily.
 const int kTabShadowHeight = 4;
 
-// Combines View::ConvertPointToTarget() and View::HitTest() for a given
-// |point|. Converts |point| from |src| to |dst| and hit tests it against |dst|.
-bool ConvertedHitTest(views::View* src,
-                      views::View* dst,
-                      const gfx::Point& point) {
-  DCHECK(src);
-  DCHECK(dst);
-  gfx::Point converted_point(point);
-  views::View::ConvertPointToTarget(src, dst, &converted_point);
-  return dst->HitTestPoint(converted_point);
-}
-
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -82,7 +70,6 @@ BrowserNonClientFrameViewAsh::BrowserNonClientFrameViewAsh(
     BrowserView* browser_view)
     : BrowserNonClientFrameView(frame, browser_view),
       caption_button_container_(nullptr),
-      web_app_left_header_view_(nullptr),
       window_icon_(nullptr) {
   ash::WmLookup::Get()
       ->GetWindowForWidget(frame)
@@ -107,17 +94,12 @@ void BrowserNonClientFrameViewAsh::Init() {
     window_icon_->Update();
   }
 
-  if (UsePackagedAppHeaderStyle() || UseWebAppHeaderStyle()) {
+  if (UsePackagedAppHeaderStyle()) {
     ash::DefaultHeaderPainter* header_painter = new ash::DefaultHeaderPainter;
     header_painter_.reset(header_painter);
     header_painter->Init(frame(), this, caption_button_container_);
-    if (UseWebAppHeaderStyle()) {
-      web_app_left_header_view_ = new WebAppLeftHeaderView(browser_view());
-      AddChildView(web_app_left_header_view_);
-      header_painter->UpdateLeftHeaderView(web_app_left_header_view_);
-    } else if (window_icon_) {
+    if (window_icon_)
       header_painter->UpdateLeftHeaderView(window_icon_);
-    }
   } else {
     BrowserHeaderPainterAsh* header_painter = new BrowserHeaderPainterAsh;
     header_painter_.reset(header_painter);
@@ -160,7 +142,7 @@ int BrowserNonClientFrameViewAsh::GetTopInset(bool restored) const {
     return 0;
 
   if (!browser_view()->IsTabStripVisible()) {
-    return (UsePackagedAppHeaderStyle() || UseWebAppHeaderStyle())
+    return (UsePackagedAppHeaderStyle())
         ? header_painter_->GetHeaderHeight()
         : caption_button_container_->bounds().bottom();
   }
@@ -179,16 +161,6 @@ int BrowserNonClientFrameViewAsh::GetThemeBackgroundXInset() const {
 void BrowserNonClientFrameViewAsh::UpdateThrobber(bool running) {
   if (window_icon_)
     window_icon_->Update();
-}
-
-void BrowserNonClientFrameViewAsh::UpdateToolbar() {
-  if (web_app_left_header_view_)
-    web_app_left_header_view_->Update();
-}
-
-views::View* BrowserNonClientFrameViewAsh::GetLocationIconView() const {
-  return web_app_left_header_view_ ?
-      web_app_left_header_view_->GetLocationIconView() : nullptr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -212,12 +184,6 @@ gfx::Rect BrowserNonClientFrameViewAsh::GetWindowBoundsForClientBounds(
 int BrowserNonClientFrameViewAsh::NonClientHitTest(const gfx::Point& point) {
   const int hit_test =
       ash::FrameBorderNonClientHitTest(this, caption_button_container_, point);
-
-  // See if the point is actually within the web app back button.
-  if (hit_test == HTCAPTION && web_app_left_header_view_ &&
-      ConvertedHitTest(this, web_app_left_header_view_, point)) {
-    return HTCLIENT;
-  }
 
   // When the window is restored we want a large click target above the tabs
   // to drag the window, so redirect clicks in the tab's shadow to caption.
@@ -278,8 +244,6 @@ void BrowserNonClientFrameViewAsh::OnPaint(gfx::Canvas* canvas) {
 
   const bool should_paint_as_active = ShouldPaintAsActive();
   caption_button_container_->SetPaintAsActive(should_paint_as_active);
-  if (web_app_left_header_view_)
-    web_app_left_header_view_->SetPaintAsActive(should_paint_as_active);
 
   const ash::HeaderPainter::Mode header_mode = should_paint_as_active ?
       ash::HeaderPainter::MODE_ACTIVE : ash::HeaderPainter::MODE_INACTIVE;
@@ -299,8 +263,15 @@ void BrowserNonClientFrameViewAsh::Layout() {
   header_painter_->LayoutHeader();
 
   int painted_height = GetTopInset(false);
-  if (browser_view()->IsTabStripVisible())
-    painted_height += browser_view()->tabstrip()->GetPreferredSize().height();
+  if (browser_view()->IsTabStripVisible()) {
+    const ImmersiveModeController* const immersive_controller =
+        browser_view()->immersive_mode_controller();
+    if (!immersive_controller->IsEnabled() ||
+        immersive_controller->IsRevealed() ||
+        !ash::MaterialDesignController::IsImmersiveModeMaterial()) {
+      painted_height += browser_view()->tabstrip()->GetPreferredSize().height();
+    }
+  }
 
   header_painter_->SetHeaderHeightForPainting(painted_height);
 
@@ -408,11 +379,11 @@ void BrowserNonClientFrameViewAsh::UpdateProfileIcons() {
 // BrowserNonClientFrameViewAsh, private:
 
 int BrowserNonClientFrameViewAsh::GetTabStripLeftInset() const {
-  const gfx::Insets insets(GetLayoutInsets(AVATAR_ICON));
-  const int avatar_right = profile_indicator_icon()
-      ? (insets.left() + GetIncognitoAvatarIcon().width())
-      : 0;
-  return avatar_right + insets.right();
+  const int avatar_right =
+      profile_indicator_icon()
+          ? (kAvatarIconPadding + GetIncognitoAvatarIcon().width())
+          : 0;
+  return avatar_right + kAvatarIconPadding;
 }
 
 int BrowserNonClientFrameViewAsh::GetTabStripRightInset() const {
@@ -421,6 +392,9 @@ int BrowserNonClientFrameViewAsh::GetTabStripRightInset() const {
 }
 
 bool BrowserNonClientFrameViewAsh::UseImmersiveLightbarHeaderStyle() const {
+  if (ash::MaterialDesignController::IsImmersiveModeMaterial())
+    return false;
+
   const ImmersiveModeController* const immersive_controller =
       browser_view()->immersive_mode_controller();
   return immersive_controller->IsEnabled() &&
@@ -429,16 +403,10 @@ bool BrowserNonClientFrameViewAsh::UseImmersiveLightbarHeaderStyle() const {
 }
 
 bool BrowserNonClientFrameViewAsh::UsePackagedAppHeaderStyle() const {
-  // Use for non tabbed trusted source windows, e.g. Settings, as well as apps
-  // that aren't using the newer WebApp style.
+  // Use for non tabbed trusted source windows, e.g. Settings, as well as apps.
   const Browser* const browser = browser_view()->browser();
   return (!browser->is_type_tabbed() && browser->is_trusted_source()) ||
-         (browser->is_app() && !UseWebAppHeaderStyle());
-}
-
-bool BrowserNonClientFrameViewAsh::UseWebAppHeaderStyle() const {
-  return browser_view()->browser()->SupportsWindowFeature(
-      Browser::FEATURE_WEBAPPFRAME);
+         browser->is_app();
 }
 
 void BrowserNonClientFrameViewAsh::LayoutProfileIndicatorIcon() {
@@ -449,9 +417,9 @@ void BrowserNonClientFrameViewAsh::LayoutProfileIndicatorIcon() {
 #endif
 
   const gfx::ImageSkia incognito_icon = GetIncognitoAvatarIcon();
-  const gfx::Insets avatar_insets = GetLayoutInsets(AVATAR_ICON);
   const int avatar_bottom = GetTopInset(false) +
-      browser_view()->GetTabStripHeight() - avatar_insets.bottom();
+                            browser_view()->GetTabStripHeight() -
+                            kAvatarIconPadding;
   int avatar_y = avatar_bottom - incognito_icon.height();
 
   // Hide the incognito icon in immersive fullscreen when the tab light bar is
@@ -459,7 +427,7 @@ void BrowserNonClientFrameViewAsh::LayoutProfileIndicatorIcon() {
   // recognizable.
   const bool avatar_visible = !UseImmersiveLightbarHeaderStyle();
   const int avatar_height = avatar_visible ? (avatar_bottom - avatar_y) : 0;
-  profile_indicator_icon()->SetBounds(avatar_insets.left(), avatar_y,
+  profile_indicator_icon()->SetBounds(kAvatarIconPadding, avatar_y,
                                       incognito_icon.width(), avatar_height);
   profile_indicator_icon()->SetVisible(avatar_visible);
 }
@@ -504,7 +472,7 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(gfx::Canvas* canvas) {
   gfx::ScopedCanvas scoped_canvas(canvas);
   gfx::Rect tabstrip_bounds(GetBoundsForTabStrip(browser_view()->tabstrip()));
   tabstrip_bounds.set_x(GetMirroredXForRect(tabstrip_bounds));
-  canvas->ClipRect(tabstrip_bounds, SkRegion::kDifference_Op);
+  canvas->ClipRect(tabstrip_bounds, SkClipOp::kDifference);
   const gfx::Rect separator_rect(toolbar_bounds.x(), tabstrip_bounds.bottom(),
                                  toolbar_bounds.width(), 0);
   BrowserView::Paint1pxHorizontalLine(canvas, GetToolbarTopSeparatorColor(),

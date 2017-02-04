@@ -27,12 +27,8 @@ namespace {
 // space-delimited list of key:value pairs which correspond to these flags:
 const char kEmbeddedPageVersionFlagName[] = "espv";
 
-#if defined(OS_IOS)
+#if defined(OS_IOS) || defined(OS_ANDROID)
 const uint64_t kEmbeddedPageVersionDefault = 1;
-#elif defined(OS_ANDROID)
-const uint64_t kEmbeddedPageVersionDefault = 1;
-// Use this variant to enable EmbeddedSearch SearchBox API in the results page.
-const uint64_t kEmbeddedSearchEnabledVersion = 2;
 #else
 const uint64_t kEmbeddedPageVersionDefault = 2;
 #endif
@@ -51,24 +47,14 @@ const char kEmbeddedSearchFieldTrialName[] = "EmbeddedSearch";
 // be ignored and Instant Extended will not be enabled by default.
 const char kDisablingSuffix[] = "DISABLED";
 
-#if defined(OS_ANDROID)
-const char kPrefetchSearchResultsFlagName[] = "prefetch_results";
-
-// Controls whether to reuse prerendered Instant Search base page to commit any
-// search query.
-const char kReuseInstantSearchBasePage[] = "reuse_instant_search_base_page";
-#endif
-
 }  // namespace
 
 bool IsInstantExtendedAPIEnabled() {
-#if defined(OS_IOS)
+#if defined(OS_IOS) || defined(OS_ANDROID)
   return false;
-#elif defined(OS_ANDROID)
-  return EmbeddedSearchPageVersion() == kEmbeddedSearchEnabledVersion;
 #else
   return true;
-#endif  // defined(OS_IOS)
+#endif
 }
 
 // Determine what embedded search page version to request from the user's
@@ -113,38 +99,20 @@ bool GetFieldTrialInfo(FieldTrialFlags* flags) {
   return true;
 }
 
-// Given a FieldTrialFlags object, returns the string value of the provided
-// flag.
-std::string GetStringValueForFlagWithDefault(const std::string& flag,
-                                             const std::string& default_value,
-                                             const FieldTrialFlags& flags) {
-  FieldTrialFlags::const_iterator i;
-  for (i = flags.begin(); i != flags.end(); i++) {
-    if (i->first == flag)
-      return i->second;
-  }
-  return default_value;
-}
-
 // Given a FieldTrialFlags object, returns the uint64_t value of the provided
 // flag.
 uint64_t GetUInt64ValueForFlagWithDefault(const std::string& flag,
                                           uint64_t default_value,
                                           const FieldTrialFlags& flags) {
-  uint64_t value;
-  std::string str_value =
-      GetStringValueForFlagWithDefault(flag, std::string(), flags);
-  if (base::StringToUint64(str_value, &value))
-    return value;
+  for (const std::pair<std::string, std::string>& flag_and_value : flags) {
+    if (flag_and_value.first == flag) {
+      const std::string& str_value = flag_and_value.second;
+      uint64_t value;
+      if (base::StringToUint64(str_value, &value))
+        return value;
+    }
+  }
   return default_value;
-}
-
-// Given a FieldTrialFlags object, returns the boolean value of the provided
-// flag.
-bool GetBoolValueForFlagWithDefault(const std::string& flag,
-                                    bool default_value,
-                                    const FieldTrialFlags& flags) {
-  return !!GetUInt64ValueForFlagWithDefault(flag, default_value ? 1 : 0, flags);
 }
 
 std::string InstantExtendedEnabledParam() {
@@ -155,43 +123,6 @@ std::string InstantExtendedEnabledParam() {
 std::string ForceInstantResultsParam(bool for_prerender) {
   return (for_prerender || !IsInstantExtendedAPIEnabled()) ? "ion=1&"
                                                            : std::string();
-}
-
-bool ShouldPrefetchSearchResults() {
-  if (!IsInstantExtendedAPIEnabled())
-    return false;
-
-#if defined(OS_ANDROID)
-  FieldTrialFlags flags;
-  return GetFieldTrialInfo(&flags) &&
-         GetBoolValueForFlagWithDefault(kPrefetchSearchResultsFlagName, false,
-                                        flags);
-#else
-  return true;
-#endif
-}
-
-bool ShouldReuseInstantSearchBasePage() {
-  if (!ShouldPrefetchSearchResults())
-    return false;
-
-#if defined(OS_ANDROID)
-  FieldTrialFlags flags;
-  return GetFieldTrialInfo(&flags) &&
-         GetBoolValueForFlagWithDefault(kReuseInstantSearchBasePage, false,
-                                        flags);
-#else
-  return true;
-#endif
-}
-
-// |url| should either have a secure scheme or have a non-HTTPS base URL that
-// the user specified using --google-base-url. (This allows testers to use
-// --google-base-url to point at non-HTTPS servers, which eases testing.)
-bool IsSuitableURLForInstant(const GURL& url, const TemplateURL* template_url) {
-  return template_url->HasSearchTermsReplacementKey(url) &&
-         (url.SchemeIsCryptographic() ||
-          google_util::StartsWithCommandLineGoogleBaseURL(url));
 }
 
 }  // namespace search

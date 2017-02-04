@@ -241,25 +241,36 @@ void RunUpdateOnFileThread(
 
   enum FolderOperationResult {
     SUCCESS = 0,
-    DELETE_FAILED = 1 << 0,
+    DELETE_DEST_FAILED = 1 << 0,
     MOVE_FAILED = 1 << 1,
-    CREATE_DIR_FAILED = 1 << 2,
+    DELETE_SRC_FAILED = 1 << 2,
+    CREATE_SRC_FAILED = 1 << 3,
     // This value is beyond the sum of all bit fields above and
     // should remain last (shifted by one more than the last value)
-    END = 1 << 3
+    END = 1 << 4
   };
 
   // This variable records the status of three folder operations.
-  int folder_operation_status = FolderOperationResult::SUCCESS;
+  uint32_t folder_operation_status = FolderOperationResult::SUCCESS;
 
-  if (base::PathExists(icon_dir_old) && !base::DeleteFile(icon_dir_old, true))
-    folder_operation_status |= FolderOperationResult::DELETE_FAILED;
-  if (!base::Move(icon_dir, icon_dir_old))
+  if (!base::DeleteFile(icon_dir_old, true)) {
+    folder_operation_status |= FolderOperationResult::DELETE_DEST_FAILED;
+    // If deletion of |icon_dir_old| fails, do not move |icon_dir| to
+    // |icon_dir_old|, instead, delete |icon_dir| directly to avoid bloating
+    // |icon_dir_old| by moving more things to it.
+    if (!base::DeleteFile(icon_dir, true))
+      folder_operation_status |= FolderOperationResult::DELETE_SRC_FAILED;
+  } else if (!base::Move(icon_dir, icon_dir_old)) {
     folder_operation_status |= FolderOperationResult::MOVE_FAILED;
+    // If Move() fails, delete |icon_dir| to avoid file accumulation in this
+    // directory, which can eventually lead the folder to be huge.
+    if (!base::DeleteFile(icon_dir, true))
+      folder_operation_status |= FolderOperationResult::DELETE_SRC_FAILED;
+  }
   if (!base::CreateDirectory(icon_dir))
-    folder_operation_status |= FolderOperationResult::CREATE_DIR_FAILED;
+    folder_operation_status |= FolderOperationResult::CREATE_SRC_FAILED;
 
-  UMA_HISTOGRAM_ENUMERATION("WinJumplist.FolderResults",
+  UMA_HISTOGRAM_ENUMERATION("WinJumplist.DetailedFolderResults",
                             folder_operation_status,
                             FolderOperationResult::END);
 

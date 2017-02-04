@@ -9,17 +9,6 @@
 
 namespace blink {
 
-// TODO(sunjian): Move this logic into PerformanceBase
-static double monotonicTimeToDOMHighResTimeStamp(double timeOrigin,
-                                                 double seconds) {
-  DCHECK(seconds >= 0.0);
-  if (!seconds || !timeOrigin)
-    return 0.0;
-  if (seconds < timeOrigin)
-    return 0.0;
-  return PerformanceBase::clampTimeResolution(seconds - timeOrigin) * 1000.0;
-}
-
 PerformanceNavigationTiming::PerformanceNavigationTiming(
     double timeOrigin,
     double unloadEventStart,
@@ -36,7 +25,7 @@ PerformanceNavigationTiming::PerformanceNavigationTiming(
     double redirectEnd,
     double fetchStart,
     double responseEnd,
-    bool hasCrossOriginRedirect,
+    bool allowRedirectDetails,
     bool hasSameOriginAsPreviousDocument,
     ResourceLoadTiming* timing,
     double lastRedirectEndTime,
@@ -45,7 +34,7 @@ PerformanceNavigationTiming::PerformanceNavigationTiming(
     unsigned long long encodedBodyLength,
     unsigned long long decodedBodyLength,
     bool didReuseConnection)
-    : PerformanceResourceTiming("",
+    : PerformanceResourceTiming("navigation",
                                 timeOrigin,
                                 timing,
                                 lastRedirectEndTime,
@@ -57,7 +46,7 @@ PerformanceNavigationTiming::PerformanceNavigationTiming(
                                 true /*allowTimingDetails*/,  // TODO(sunjian):
                                                               // Create an enum
                                                               // for this.
-                                !hasCrossOriginRedirect,
+                                allowRedirectDetails,
                                 "document",
                                 "navigation",
                                 timeOrigin),
@@ -76,88 +65,101 @@ PerformanceNavigationTiming::PerformanceNavigationTiming(
       m_redirectEnd(redirectEnd),
       m_fetchStart(fetchStart),
       m_responseEnd(responseEnd),
-      m_hasCrossOriginRedirect(hasCrossOriginRedirect),
+      m_allowRedirectDetails(allowRedirectDetails),
       m_hasSameOriginAsPreviousDocument(hasSameOriginAsPreviousDocument) {}
 
 PerformanceNavigationTiming::~PerformanceNavigationTiming() {}
 
-double PerformanceNavigationTiming::unloadEventStart() const {
-  if (m_hasCrossOriginRedirect || !m_hasSameOriginAsPreviousDocument)
+DOMHighResTimeStamp PerformanceNavigationTiming::unloadEventStart() const {
+  if (!m_allowRedirectDetails || !m_hasSameOriginAsPreviousDocument)
     return 0;
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_unloadEventStart);
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(
+      m_timeOrigin, m_unloadEventStart);
 }
 
-double PerformanceNavigationTiming::unloadEventEnd() const {
-  if (m_hasCrossOriginRedirect || !m_hasSameOriginAsPreviousDocument)
+DOMHighResTimeStamp PerformanceNavigationTiming::unloadEventEnd() const {
+  if (!m_allowRedirectDetails || !m_hasSameOriginAsPreviousDocument)
     return 0;
 
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_unloadEventEnd);
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
+                                                             m_unloadEventEnd);
 }
 
-double PerformanceNavigationTiming::domInteractive() const {
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_domInteractive);
+DOMHighResTimeStamp PerformanceNavigationTiming::domInteractive() const {
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
+                                                             m_domInteractive);
 }
 
-double PerformanceNavigationTiming::domContentLoadedEventStart() const {
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
-                                            m_domContentLoadedEventStart);
+DOMHighResTimeStamp PerformanceNavigationTiming::domContentLoadedEventStart()
+    const {
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(
+      m_timeOrigin, m_domContentLoadedEventStart);
 }
 
-double PerformanceNavigationTiming::domContentLoadedEventEnd() const {
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
-                                            m_domContentLoadedEventEnd);
+DOMHighResTimeStamp PerformanceNavigationTiming::domContentLoadedEventEnd()
+    const {
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(
+      m_timeOrigin, m_domContentLoadedEventEnd);
 }
 
-double PerformanceNavigationTiming::domComplete() const {
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_domComplete);
+DOMHighResTimeStamp PerformanceNavigationTiming::domComplete() const {
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
+                                                             m_domComplete);
 }
 
-double PerformanceNavigationTiming::loadEventStart() const {
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_loadEventStart);
+DOMHighResTimeStamp PerformanceNavigationTiming::loadEventStart() const {
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
+                                                             m_loadEventStart);
 }
 
-double PerformanceNavigationTiming::loadEventEnd() const {
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_loadEventEnd);
+DOMHighResTimeStamp PerformanceNavigationTiming::loadEventEnd() const {
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
+                                                             m_loadEventEnd);
 }
 
 AtomicString PerformanceNavigationTiming::type() const {
-  // TODO(sunjian) Right now NavigationType doesn't seem to have a Prerender
-  // type yet, need to look into this crbug/663217
   switch (m_type) {
-    case NavigationTypeReload:
+    case NavigationType::Reload:
       return "reload";
-    case NavigationTypeBackForward:
+    case NavigationType::BackForward:
       return "back_forward";
-    default:
+    case NavigationType::Prerender:
+      return "prerender";
+    case NavigationType::Navigate:
       return "navigate";
   }
+  NOTREACHED();
+  return "navigate";
 }
 
 unsigned short PerformanceNavigationTiming::redirectCount() const {
-  // TODO(sunjian): Also check response headers to allow opt-in crbugs/665160
-  if (m_hasCrossOriginRedirect)
+  if (!m_allowRedirectDetails)
     return 0;
   return m_redirectCount;
 }
 
-double PerformanceNavigationTiming::fetchStart() const {
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_fetchStart);
+DOMHighResTimeStamp PerformanceNavigationTiming::fetchStart() const {
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
+                                                             m_fetchStart);
 }
 
-double PerformanceNavigationTiming::redirectStart() const {
-  if (m_hasCrossOriginRedirect)
+DOMHighResTimeStamp PerformanceNavigationTiming::redirectStart() const {
+  if (!m_allowRedirectDetails)
     return 0;
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_redirectStart);
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
+                                                             m_redirectStart);
 }
 
-double PerformanceNavigationTiming::redirectEnd() const {
-  if (m_hasCrossOriginRedirect)
+DOMHighResTimeStamp PerformanceNavigationTiming::redirectEnd() const {
+  if (!m_allowRedirectDetails)
     return 0;
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_redirectEnd);
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
+                                                             m_redirectEnd);
 }
 
-double PerformanceNavigationTiming::responseEnd() const {
-  return monotonicTimeToDOMHighResTimeStamp(m_timeOrigin, m_responseEnd);
+DOMHighResTimeStamp PerformanceNavigationTiming::responseEnd() const {
+  return PerformanceBase::monotonicTimeToDOMHighResTimeStamp(m_timeOrigin,
+                                                             m_responseEnd);
 }
 
 void PerformanceNavigationTiming::buildJSONValue(

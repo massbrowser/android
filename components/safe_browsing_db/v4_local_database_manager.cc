@@ -17,6 +17,7 @@
 #include "components/safe_browsing_db/v4_feature_list.h"
 #include "components/safe_browsing_db/v4_protocol_manager_util.h"
 #include "content/public/browser/browser_thread.h"
+#include "crypto/sha2.h"
 
 using content::BrowserThread;
 using base::TimeTicks;
@@ -39,31 +40,39 @@ ListInfos GetListInfos() {
   //   for it, it can be changed to true.
   // - The list doesn't have hash prefixes to match. All requests lead to full
   //   hash checks. For instance: GetChromeUrlApiId()
+
+#if defined(GOOGLE_CHROME_BUILD)
+  const bool kSyncOnlyOnChromeBuilds = true;
+#else
+  const bool kSyncOnlyOnChromeBuilds = false;
+#endif
+  const bool kSyncAlways = true;
+  const bool kSyncNever = false;
   return ListInfos({
-      ListInfo(false, "CertCsdDownloadWhitelist.store",
+      ListInfo(kSyncOnlyOnChromeBuilds, "CertCsdDownloadWhitelist.store",
                GetCertCsdDownloadWhitelistId(), SB_THREAT_TYPE_UNUSED),
-      ListInfo(false, "ChromeFilenameClientIncident.store",
+      ListInfo(kSyncOnlyOnChromeBuilds, "ChromeFilenameClientIncident.store",
                GetChromeFilenameClientIncidentId(), SB_THREAT_TYPE_UNUSED),
-      ListInfo(true, "IpMalware.store", GetIpMalwareId(),
+      ListInfo(kSyncAlways, "IpMalware.store", GetIpMalwareId(),
                SB_THREAT_TYPE_UNUSED),
-      ListInfo(false, "UrlCsdDownloadWhitelist.store",
+      ListInfo(kSyncOnlyOnChromeBuilds, "UrlCsdDownloadWhitelist.store",
                GetUrlCsdDownloadWhitelistId(), SB_THREAT_TYPE_UNUSED),
-      ListInfo(false, "UrlCsdWhitelist.store", GetUrlCsdWhitelistId(),
-               SB_THREAT_TYPE_UNUSED),
-      ListInfo(true, "UrlSoceng.store", GetUrlSocEngId(),
+      ListInfo(kSyncOnlyOnChromeBuilds, "UrlCsdWhitelist.store",
+               GetUrlCsdWhitelistId(), SB_THREAT_TYPE_UNUSED),
+      ListInfo(kSyncAlways, "UrlSoceng.store", GetUrlSocEngId(),
                SB_THREAT_TYPE_URL_PHISHING),
-      ListInfo(true, "UrlMalware.store", GetUrlMalwareId(),
+      ListInfo(kSyncAlways, "UrlMalware.store", GetUrlMalwareId(),
                SB_THREAT_TYPE_URL_MALWARE),
-      ListInfo(true, "UrlUws.store", GetUrlUwsId(),
+      ListInfo(kSyncAlways, "UrlUws.store", GetUrlUwsId(),
                SB_THREAT_TYPE_URL_UNWANTED),
-      ListInfo(true, "UrlMalBin.store", GetUrlMalBinId(),
+      ListInfo(kSyncAlways, "UrlMalBin.store", GetUrlMalBinId(),
                SB_THREAT_TYPE_BINARY_MALWARE_URL),
-      ListInfo(true, "ChromeExtMalware.store", GetChromeExtensionMalwareId(),
+      ListInfo(kSyncAlways, "ChromeExtMalware.store", GetChromeExtMalwareId(),
                SB_THREAT_TYPE_EXTENSION),
-      ListInfo(false, "ChromeUrlClientIncident.store",
+      ListInfo(kSyncOnlyOnChromeBuilds, "ChromeUrlClientIncident.store",
                GetChromeUrlClientIncidentId(),
                SB_THREAT_TYPE_BLACKLISTED_RESOURCE),
-      ListInfo(false, "", GetChromeUrlApiId(), SB_THREAT_TYPE_API_ABUSE),
+      ListInfo(kSyncNever, "", GetChromeUrlApiId(), SB_THREAT_TYPE_API_ABUSE),
   });
 }
 
@@ -73,13 +82,15 @@ ThreatSeverity GetThreatSeverity(const ListIdentifier& list_id) {
   switch (list_id.threat_type()) {
     case MALWARE_THREAT:
     case SOCIAL_ENGINEERING_PUBLIC:
+    case MALICIOUS_BINARY:
       return 0;
     case UNWANTED_SOFTWARE:
       return 1;
     case API_ABUSE:
       return 2;
     default:
-      NOTREACHED() << "Unexpected ThreatType encountered in GetThreatSeverity";
+      NOTREACHED() << "Unexpected ThreatType encountered: "
+                   << list_id.threat_type();
       return kLeastSeverity;
   }
 }
@@ -117,17 +128,21 @@ V4LocalDatabaseManager::PendingCheck::~PendingCheck() {}
 
 // static
 scoped_refptr<V4LocalDatabaseManager> V4LocalDatabaseManager::Create(
-    const base::FilePath& base_path) {
+    const base::FilePath& base_path,
+    ExtendedReportingLevelCallback extended_reporting_level_callback) {
   if (!V4FeatureList::IsLocalDatabaseManagerEnabled()) {
     return nullptr;
   }
 
-  return make_scoped_refptr(new V4LocalDatabaseManager(base_path));
+  return make_scoped_refptr(
+      new V4LocalDatabaseManager(base_path, extended_reporting_level_callback));
 }
 
-V4LocalDatabaseManager::V4LocalDatabaseManager(const base::FilePath& base_path)
+V4LocalDatabaseManager::V4LocalDatabaseManager(
+    const base::FilePath& base_path,
+    ExtendedReportingLevelCallback extended_reporting_level_callback)
     : base_path_(base_path),
-      enabled_(false),
+      extended_reporting_level_callback_(extended_reporting_level_callback),
       list_infos_(GetListInfos()),
       weak_factory_(this) {
   DCHECK(!base_path_.empty());
@@ -149,9 +164,11 @@ void V4LocalDatabaseManager::CancelCheck(Client* client) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(enabled_);
 
-  auto it = pending_clients_.find(client);
-  if (it != pending_clients_.end()) {
-    pending_clients_.erase(it);
+  auto pending_it = std::find_if(
+      std::begin(pending_checks_), std::end(pending_checks_),
+      [client](const PendingCheck* check) { return check->client == client; });
+  if (pending_it != pending_checks_.end()) {
+    pending_checks_.erase(pending_it);
   }
 
   auto queued_it =
@@ -221,7 +238,7 @@ bool V4LocalDatabaseManager::CheckExtensionIDs(
 
   std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
       client, ClientCallbackType::CHECK_EXTENSION_IDS,
-      StoresToCheck({GetChromeExtensionMalwareId()}), extension_ids);
+      StoresToCheck({GetChromeExtMalwareId()}), extension_ids);
 
   return HandleCheck(std::move(check));
 }
@@ -229,13 +246,19 @@ bool V4LocalDatabaseManager::CheckExtensionIDs(
 bool V4LocalDatabaseManager::CheckResourceUrl(const GURL& url, Client* client) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  if (!enabled_ || !CanCheckUrl(url)) {
+  StoresToCheck stores_to_check({GetChromeUrlClientIncidentId()});
+
+  if (!CanCheckUrl(url) || !AreStoresAvailableNow(stores_to_check)) {
+    // Fail open: Mark resource as safe immediately.
+    // TODO(nparker): This should queue the request if the DB isn't yet
+    // loaded, and later decide if this store is available.
+    // Currently this is the only store that requires full-hash-checks
+    // AND isn't supported on Chromium, so it's unique.
     return true;
   }
 
   std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
-      client, ClientCallbackType::CHECK_RESOURCE_URL,
-      StoresToCheck({GetChromeUrlClientIncidentId()}),
+      client, ClientCallbackType::CHECK_RESOURCE_URL, stores_to_check,
       std::vector<GURL>(1, url));
 
   return HandleCheck(std::move(check));
@@ -243,25 +266,49 @@ bool V4LocalDatabaseManager::CheckResourceUrl(const GURL& url, Client* client) {
 
 bool V4LocalDatabaseManager::MatchCsdWhitelistUrl(const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  return HandleUrlSynchronously(url, StoresToCheck({GetUrlCsdWhitelistId()}));
+
+  StoresToCheck stores_to_check({GetUrlCsdWhitelistId()});
+  if (!AreStoresAvailableNow(stores_to_check)) {
+    // Fail open: Whitelist everything. Otherwise we may run the
+    // CSD phishing/malware detector on popular domains and generate
+    // undue load on the client and server. This has the effect of disabling
+    // CSD phishing/malware detection until the store is first synced.
+    return true;
+  }
+
+  return HandleUrlSynchronously(url, stores_to_check);
 }
 
 bool V4LocalDatabaseManager::MatchDownloadWhitelistString(
     const std::string& str) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  return HandleHashSynchronously(
-      str, StoresToCheck({GetCertCsdDownloadWhitelistId()}));
+
+  StoresToCheck stores_to_check({GetCertCsdDownloadWhitelistId()});
+  if (!AreStoresAvailableNow(stores_to_check)) {
+    // Fail close: Whitelist nothing. This may generate download-protection
+    // pings for whitelisted binaries, but that's fine.
+    return false;
+  }
+
+  return HandleHashSynchronously(str, stores_to_check);
 }
 
 bool V4LocalDatabaseManager::MatchDownloadWhitelistUrl(const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  return HandleUrlSynchronously(
-      url, StoresToCheck({GetUrlCsdDownloadWhitelistId()}));
+
+  StoresToCheck stores_to_check({GetUrlCsdDownloadWhitelistId()});
+  if (!AreStoresAvailableNow(stores_to_check)) {
+    // Fail close: Whitelist nothing. This may generate download-protection
+    // pings for whitelisted domains, but that's fine.
+    return false;
+  }
+
+  return HandleUrlSynchronously(url, stores_to_check);
 }
 
 bool V4LocalDatabaseManager::MatchMalwareIP(const std::string& ip_address) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (!enabled_) {
+  if (!enabled_ || !v4_database_) {
     return false;
   }
 
@@ -278,8 +325,17 @@ bool V4LocalDatabaseManager::MatchMalwareIP(const std::string& ip_address) {
 bool V4LocalDatabaseManager::MatchModuleWhitelistString(
     const std::string& str) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  return HandleHashSynchronously(
-      str, StoresToCheck({GetChromeFilenameClientIncidentId()}));
+
+  StoresToCheck stores_to_check({GetChromeFilenameClientIncidentId()});
+  if (!AreStoresAvailableNow(stores_to_check)) {
+    // Fail open: Whitelist everything.  This has the effect of marking
+    // all DLLs as safe until the DB is synced and loaded.
+    return true;
+  }
+
+  // str is the module's filename.  Convert to hash.
+  FullHash hash = crypto::SHA256HashString(str);
+  return HandleHashSynchronously(hash, stores_to_check);
 }
 
 ThreatSource V4LocalDatabaseManager::GetThreatSource() const {
@@ -325,7 +381,7 @@ void V4LocalDatabaseManager::StopOnIOThread(bool shutdown) {
 
   enabled_ = false;
 
-  pending_clients_.clear();
+  pending_checks_.clear();
 
   RespondSafeToQueuedChecks();
 
@@ -403,6 +459,7 @@ bool V4LocalDatabaseManager::GetPrefixMatches(
   const base::TimeTicks before = TimeTicks::Now();
   if (check->client_callback_type == ClientCallbackType::CHECK_BROWSE_URL ||
       check->client_callback_type == ClientCallbackType::CHECK_DOWNLOAD_URLS ||
+      check->client_callback_type == ClientCallbackType::CHECK_RESOURCE_URL ||
       check->client_callback_type == ClientCallbackType::CHECK_EXTENSION_IDS ||
       check->client_callback_type == ClientCallbackType::CHECK_OTHER) {
     DCHECK(!check->full_hashes.empty());
@@ -418,7 +475,7 @@ bool V4LocalDatabaseManager::GetPrefixMatches(
       }
     }
   } else {
-    NOTREACHED() << "Unexpected client_callback_type encountered";
+    NOTREACHED() << "Unexpected client_callback_type encountered.";
   }
 
   // TODO(vakh): Only log SafeBrowsing.V4GetPrefixMatches.Time once PVer3 code
@@ -437,9 +494,11 @@ bool V4LocalDatabaseManager::GetPrefixMatches(
 void V4LocalDatabaseManager::GetSeverestThreatTypeAndMetadata(
     SBThreatType* result_threat_type,
     ThreatMetadata* metadata,
+    FullHash* matching_full_hash,
     const std::vector<FullHashInfo>& full_hash_infos) {
   DCHECK(result_threat_type);
   DCHECK(metadata);
+  DCHECK(matching_full_hash);
 
   ThreatSeverity most_severe_yet = kLeastSeverity;
   for (const FullHashInfo& fhi : full_hash_infos) {
@@ -448,6 +507,7 @@ void V4LocalDatabaseManager::GetSeverestThreatTypeAndMetadata(
       most_severe_yet = severity;
       *result_threat_type = GetSBThreatTypeForList(fhi.list_id);
       *metadata = fhi.metadata;
+      *matching_full_hash = fhi.full_hash;
     }
   }
 }
@@ -483,6 +543,11 @@ bool V4LocalDatabaseManager::HandleCheck(std::unique_ptr<PendingCheck> check) {
     return true;
   }
 
+  // Add check to pending_checks_ before scheduling PerformFullHashCheck so that
+  // even if the client calls CancelCheck before PerformFullHashCheck gets
+  // called, the check can be found in pending_checks_.
+  pending_checks_.insert(check.get());
+
   // Post on the IO thread to enforce async behavior.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -498,10 +563,6 @@ bool V4LocalDatabaseManager::HandleHashSynchronously(
     const StoresToCheck& stores_to_check) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  if (!enabled_ || !v4_database_) {
-    return false;
-  }
-
   std::set<FullHash> hashes{hash};
   std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
       nullptr, ClientCallbackType::CHECK_OTHER, stores_to_check, hashes);
@@ -515,10 +576,6 @@ bool V4LocalDatabaseManager::HandleUrlSynchronously(
     const StoresToCheck& stores_to_check) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  if (!enabled_ || !v4_database_) {
-    return false;
-  }
-
   std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
       nullptr, ClientCallbackType::CHECK_OTHER, stores_to_check,
       std::vector<GURL>(1, url));
@@ -528,27 +585,27 @@ bool V4LocalDatabaseManager::HandleUrlSynchronously(
 }
 
 void V4LocalDatabaseManager::OnFullHashResponse(
-    std::unique_ptr<PendingCheck> pending_check,
+    std::unique_ptr<PendingCheck> check,
     const std::vector<FullHashInfo>& full_hash_infos) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!enabled_) {
-    DCHECK(pending_clients_.empty());
+    DCHECK(pending_checks_.empty());
     return;
   }
 
-  const auto it = pending_clients_.find(pending_check->client);
-  if (it == pending_clients_.end()) {
+  const auto it = pending_checks_.find(check.get());
+  if (it == pending_checks_.end()) {
     // The check has since been cancelled.
     return;
   }
 
   // Find out the most severe threat, if any, to report to the client.
-  GetSeverestThreatTypeAndMetadata(&pending_check->result_threat_type,
-                                   &pending_check->url_metadata,
-                                   full_hash_infos);
-  pending_clients_.erase(it);
-  RespondToClient(std::move(pending_check));
+  GetSeverestThreatTypeAndMetadata(&check->result_threat_type,
+                                   &check->url_metadata,
+                                   &check->matching_full_hash, full_hash_infos);
+  pending_checks_.erase(it);
+  RespondToClient(std::move(check));
 }
 
 void V4LocalDatabaseManager::PerformFullHashCheck(
@@ -560,8 +617,6 @@ void V4LocalDatabaseManager::PerformFullHashCheck(
   DCHECK(enabled_);
   DCHECK(!full_hash_to_store_and_hash_prefixes.empty());
 
-  pending_clients_.insert(check->client);
-
   v4_get_hash_protocol_manager_->GetFullHashes(
       full_hash_to_store_and_hash_prefixes,
       base::Bind(&V4LocalDatabaseManager::OnFullHashResponse,
@@ -570,49 +625,65 @@ void V4LocalDatabaseManager::PerformFullHashCheck(
 
 void V4LocalDatabaseManager::ProcessQueuedChecks() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  for (auto& it : queued_checks_) {
+
+  // Steal the queue to protect against reentrant CancelCheck() calls.
+  QueuedChecks checks;
+  checks.swap(queued_checks_);
+
+  for (auto& it : checks) {
     FullHashToStoreAndHashPrefixesMap full_hash_to_store_and_hash_prefixes;
     if (!GetPrefixMatches(it, &full_hash_to_store_and_hash_prefixes)) {
       RespondToClient(std::move(it));
     } else {
+      pending_checks_.insert(it.get());
       PerformFullHashCheck(std::move(it), full_hash_to_store_and_hash_prefixes);
     }
   }
-  queued_checks_.clear();
 }
 
 void V4LocalDatabaseManager::RespondSafeToQueuedChecks() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  for (std::unique_ptr<PendingCheck>& it : queued_checks_) {
+
+  // Steal the queue to protect against reentrant CancelCheck() calls.
+  QueuedChecks checks;
+  checks.swap(queued_checks_);
+
+  for (std::unique_ptr<PendingCheck>& it : checks) {
     RespondToClient(std::move(it));
   }
-  queued_checks_.clear();
 }
 
 void V4LocalDatabaseManager::RespondToClient(
     std::unique_ptr<PendingCheck> check) {
   DCHECK(check.get());
 
-  if (check->client_callback_type == ClientCallbackType::CHECK_BROWSE_URL) {
-    DCHECK_EQ(1u, check->urls.size());
-    // TODO(vakh): Remove these CHECKs after fixing bugs 660293, 660359.
-    CHECK(check.get());
-    CHECK(check->client);
-    CHECK_LE(1u, check->urls.size());
-    CHECK(check->urls[0].is_valid());
-    check->client->OnCheckBrowseUrlResult(
-        check->urls[0], check->result_threat_type, check->url_metadata);
-  } else if (check->client_callback_type ==
-             ClientCallbackType::CHECK_DOWNLOAD_URLS) {
-    check->client->OnCheckDownloadUrlResult(check->urls,
-                                            check->result_threat_type);
-  } else if (check->client_callback_type ==
-             ClientCallbackType::CHECK_EXTENSION_IDS) {
-    const std::set<FullHash> extension_ids(check->full_hashes.begin(),
-                                           check->full_hashes.end());
-    check->client->OnCheckExtensionsResult(extension_ids);
-  } else {
-    NOTREACHED() << "Unexpected client_callback_type encountered";
+  switch (check->client_callback_type) {
+    case ClientCallbackType::CHECK_BROWSE_URL:
+      DCHECK_EQ(1u, check->urls.size());
+      check->client->OnCheckBrowseUrlResult(
+          check->urls[0], check->result_threat_type, check->url_metadata);
+      break;
+
+    case ClientCallbackType::CHECK_DOWNLOAD_URLS:
+      check->client->OnCheckDownloadUrlResult(check->urls,
+                                              check->result_threat_type);
+      break;
+
+    case ClientCallbackType::CHECK_RESOURCE_URL:
+      DCHECK_EQ(1u, check->urls.size());
+      check->client->OnCheckResourceUrlResult(
+          check->urls[0], check->result_threat_type, check->matching_full_hash);
+      break;
+
+    case ClientCallbackType::CHECK_EXTENSION_IDS: {
+      const std::set<FullHash> extension_ids(check->full_hashes.begin(),
+                                             check->full_hashes.end());
+      check->client->OnCheckExtensionsResult(extension_ids);
+      break;
+    }
+
+    case ClientCallbackType::CHECK_OTHER:
+      NOTREACHED() << "Unexpected client_callback_type encountered";
   }
 }
 
@@ -641,12 +712,13 @@ void V4LocalDatabaseManager::SetupDatabase() {
 void V4LocalDatabaseManager::SetupUpdateProtocolManager(
     net::URLRequestContextGetter* request_context_getter,
     const V4ProtocolConfig& config) {
-  V4UpdateCallback callback =
+  V4UpdateCallback update_callback =
       base::Bind(&V4LocalDatabaseManager::UpdateRequestCompleted,
                  weak_factory_.GetWeakPtr());
 
-  v4_update_protocol_manager_ =
-      V4UpdateProtocolManager::Create(request_context_getter, config, callback);
+  v4_update_protocol_manager_ = V4UpdateProtocolManager::Create(
+      request_context_getter, config, update_callback,
+      extended_reporting_level_callback_);
 }
 
 void V4LocalDatabaseManager::UpdateRequestCompleted(
@@ -654,6 +726,12 @@ void V4LocalDatabaseManager::UpdateRequestCompleted(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   v4_database_->ApplyUpdate(std::move(parsed_server_response),
                             db_updated_callback_);
+}
+
+bool V4LocalDatabaseManager::AreStoresAvailableNow(
+    const StoresToCheck& stores_to_check) const {
+  return enabled_ && v4_database_ &&
+         v4_database_->AreStoresAvailable(stores_to_check);
 }
 
 }  // namespace safe_browsing

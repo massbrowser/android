@@ -39,6 +39,7 @@
 #include "core/paint/PaintLayer.h"
 #include "core/style/ComputedStyle.h"
 #include "platform/LengthFunctions.h"
+#include "wtf/AutoReset.h"
 #include "wtf/MathExtras.h"
 #include <limits>
 
@@ -68,8 +69,11 @@ LayoutFlexibleBox::LayoutFlexibleBox(Element* element)
     : LayoutBlock(element),
       m_orderIterator(this),
       m_numberOfInFlowChildrenOnFirstLine(-1),
-      m_hasDefiniteHeight(SizeDefiniteness::Unknown) {
+      m_hasDefiniteHeight(SizeDefiniteness::Unknown),
+      m_inLayout(false) {
   DCHECK(!childrenInline());
+  if (!isAnonymous())
+    UseCounter::count(document(), UseCounter::CSSFlexibleBox);
 }
 
 LayoutFlexibleBox::~LayoutFlexibleBox() {}
@@ -265,30 +269,30 @@ IntSize LayoutFlexibleBox::originAdjustmentForScrollbars() const {
   WritingMode writingMode = style()->getWritingMode();
 
   if (flexDirection == FlowRow) {
-    if (textDirection == RTL) {
-      if (writingMode == TopToBottomWritingMode)
+    if (textDirection == TextDirection::kRtl) {
+      if (blink::isHorizontalWritingMode(writingMode))
         size.expand(adjustmentWidth, 0);
       else
         size.expand(0, adjustmentHeight);
     }
-    if (writingMode == RightToLeftWritingMode)
+    if (isFlippedBlocksWritingMode(writingMode))
       size.expand(adjustmentWidth, 0);
   } else if (flexDirection == FlowRowReverse) {
-    if (textDirection == LTR) {
-      if (writingMode == TopToBottomWritingMode)
+    if (textDirection == TextDirection::kLtr) {
+      if (blink::isHorizontalWritingMode(writingMode))
         size.expand(adjustmentWidth, 0);
       else
         size.expand(0, adjustmentHeight);
     }
-    if (writingMode == RightToLeftWritingMode)
+    if (isFlippedBlocksWritingMode(writingMode))
       size.expand(adjustmentWidth, 0);
   } else if (flexDirection == FlowColumn) {
-    if (writingMode == RightToLeftWritingMode)
+    if (isFlippedBlocksWritingMode(writingMode))
       size.expand(adjustmentWidth, 0);
   } else {
-    if (writingMode == TopToBottomWritingMode)
+    if (blink::isHorizontalWritingMode(writingMode))
       size.expand(0, adjustmentHeight);
-    else if (writingMode == LeftToRightWritingMode)
+    else if (isFlippedLinesWritingMode(writingMode))
       size.expand(adjustmentWidth, 0);
   }
   return size;
@@ -312,7 +316,7 @@ bool LayoutFlexibleBox::hasLeftOverflow() const {
 
 void LayoutFlexibleBox::removeChild(LayoutObject* child) {
   LayoutBlock::removeChild(child);
-  m_intrinsicSizeAlongMainAxis.remove(child);
+  m_intrinsicSizeAlongMainAxis.erase(child);
 }
 
 // TODO (lajava): Is this function still needed ? Every time the flex
@@ -351,6 +355,8 @@ void LayoutFlexibleBox::layoutBlock(bool relayoutChildren) {
     return;
 
   m_relaidOutChildren.clear();
+  WTF::AutoReset<bool> reset1(&m_inLayout, true);
+  DCHECK_EQ(m_hasDefiniteHeight, SizeDefiniteness::Unknown);
 
   if (updateLogicalWidthAndColumnWidth())
     relayoutChildren = true;
@@ -389,15 +395,16 @@ void LayoutFlexibleBox::layoutBlock(bool relayoutChildren) {
 
   updateLayerTransformAfterLayout();
 
+  // We have to reset this, because changes to our ancestors' style can affect
+  // this value. Also, this needs to be before we call updateAfterLayout, as
+  // that function may re-enter this one.
+  m_hasDefiniteHeight = SizeDefiniteness::Unknown;
+
   // Update our scroll information if we're overflow:auto/scroll/hidden now
   // that we know if we overflow or not.
   updateAfterLayout();
 
   clearNeedsLayout();
-
-  // We have to reset this, because changes to our ancestors' style can affect
-  // this value.
-  m_hasDefiniteHeight = SizeDefiniteness::Unknown;
 }
 
 void LayoutFlexibleBox::paintChildren(const PaintInfo& paintInfo,
@@ -452,9 +459,10 @@ bool LayoutFlexibleBox::isHorizontalFlow() const {
 }
 
 bool LayoutFlexibleBox::isLeftToRightFlow() const {
-  if (isColumnFlow())
-    return style()->getWritingMode() == TopToBottomWritingMode ||
-           style()->getWritingMode() == LeftToRightWritingMode;
+  if (isColumnFlow()) {
+    return blink::isHorizontalWritingMode(style()->getWritingMode()) ||
+           isFlippedLinesWritingMode(style()->getWritingMode());
+  }
   return style()->isLeftToRightDirection() ^
          (style()->flexDirection() == FlowRowReverse);
 }
@@ -603,23 +611,23 @@ LayoutFlexibleBox::getTransformedWritingMode() const {
   WritingMode mode = style()->getWritingMode();
   if (!isColumnFlow()) {
     static_assert(
-        static_cast<TransformedWritingMode>(TopToBottomWritingMode) ==
+        static_cast<TransformedWritingMode>(WritingMode::kHorizontalTb) ==
                 TransformedWritingMode::TopToBottomWritingMode &&
-            static_cast<TransformedWritingMode>(LeftToRightWritingMode) ==
+            static_cast<TransformedWritingMode>(WritingMode::kVerticalLr) ==
                 TransformedWritingMode::LeftToRightWritingMode &&
-            static_cast<TransformedWritingMode>(RightToLeftWritingMode) ==
+            static_cast<TransformedWritingMode>(WritingMode::kVerticalRl) ==
                 TransformedWritingMode::RightToLeftWritingMode,
         "WritingMode and TransformedWritingMode must match values.");
     return static_cast<TransformedWritingMode>(mode);
   }
 
   switch (mode) {
-    case TopToBottomWritingMode:
+    case WritingMode::kHorizontalTb:
       return style()->isLeftToRightDirection()
                  ? TransformedWritingMode::LeftToRightWritingMode
                  : TransformedWritingMode::RightToLeftWritingMode;
-    case LeftToRightWritingMode:
-    case RightToLeftWritingMode:
+    case WritingMode::kVerticalLr:
+    case WritingMode::kVerticalRl:
       return style()->isLeftToRightDirection()
                  ? TransformedWritingMode::TopToBottomWritingMode
                  : TransformedWritingMode::BottomToTopWritingMode;
@@ -830,8 +838,12 @@ bool LayoutFlexibleBox::mainAxisLengthIsDefinite(
     if (m_hasDefiniteHeight == SizeDefiniteness::Indefinite)
       return false;
     bool definite = child.computePercentageLogicalHeight(flexBasis) != -1;
-    m_hasDefiniteHeight =
-        definite ? SizeDefiniteness::Definite : SizeDefiniteness::Indefinite;
+    if (m_inLayout) {
+      // We can reach this code even while we're not laying ourselves out, such
+      // as from mainSizeForPercentageResolution.
+      m_hasDefiniteHeight =
+          definite ? SizeDefiniteness::Definite : SizeDefiniteness::Indefinite;
+    }
     return definite;
   }
   return true;
@@ -872,11 +884,11 @@ void LayoutFlexibleBox::cacheChildMainSize(const LayoutBox& child) {
                child.scrollbarLogicalWidth() - child.scrollbarLogicalWidth();
   }
   m_intrinsicSizeAlongMainAxis.set(&child, mainSize);
-  m_relaidOutChildren.add(&child);
+  m_relaidOutChildren.insert(&child);
 }
 
 void LayoutFlexibleBox::clearCachedMainSizeForChild(const LayoutBox& child) {
-  m_intrinsicSizeAlongMainAxis.remove(&child);
+  m_intrinsicSizeAlongMainAxis.erase(&child);
 }
 
 DISABLE_CFI_PERF
@@ -935,11 +947,6 @@ void LayoutFlexibleBox::layoutFlexItems(bool relayoutChildren,
   PaintLayerScrollableArea::PreventRelayoutScope preventRelayoutScope(
       layoutScope);
 
-  // Fieldsets need to find their legend and position it inside the border of
-  // the object. The legend then gets skipped during normal layout. It
-  // doesn't get included in the normal layout process but is instead skipped.
-  LayoutObject* childToExclude =
-      layoutSpecialExcludedChild(relayoutChildren, layoutScope);
 
   // Set up our master list of flex items. All of the rest of the algorithm
   // should work off this list of a subset.
@@ -949,9 +956,6 @@ void LayoutFlexibleBox::layoutFlexItems(bool relayoutChildren,
   m_orderIterator.first();
   for (LayoutBox* child = m_orderIterator.currentChild(); child;
        child = m_orderIterator.next()) {
-    if (childToExclude == child)
-      continue;  // Skip this child, since it will be positioned by the
-                 // specialized subclass (fieldsets runs).
 
     if (child->isOutOfFlowPositioned()) {
       // Out-of-flow children are not flex items, so we skip them here.
@@ -959,7 +963,7 @@ void LayoutFlexibleBox::layoutFlexItems(bool relayoutChildren,
       continue;
     }
 
-    allItems.append(constructFlexItem(*child, layoutType));
+    allItems.push_back(constructFlexItem(*child, layoutType));
   }
 
   const LayoutUnit lineBreakLength = mainAxisContentExtent(LayoutUnit::max());
@@ -1222,7 +1226,7 @@ LayoutUnit LayoutFlexibleBox::adjustChildSizeForMinAndMax(
     // percentage min size, but we have an indefinite size in that axis.
     minExtent = std::max(LayoutUnit(), minExtent);
   } else if (min.isAuto() && !child.styleRef().containsSize() &&
-             mainAxisOverflowForChild(child) == OverflowVisible &&
+             mainAxisOverflowForChild(child) == EOverflow::kVisible &&
              !(isColumnFlow() && child.isFlexibleBox())) {
     // TODO(cbiesinger): For now, we do not handle min-height: auto for nested
     // column flexboxes. We need to implement
@@ -1416,7 +1420,7 @@ void LayoutFlexibleBox::freezeInflexibleItems(FlexSign flexSign,
         (flexSign == NegativeFlexibility &&
          flexItem.flexBaseContentSize < flexItem.hypotheticalMainContentSize)) {
       flexItem.flexedContentSize = flexItem.hypotheticalMainContentSize;
-      newInflexibleItems.append(&flexItem);
+      newInflexibleItems.push_back(&flexItem);
     }
   }
   freezeViolations(newInflexibleItems, remainingFreeSpace, totalFlexGrow,
@@ -1477,9 +1481,9 @@ bool LayoutFlexibleBox::resolveFlexibleLengths(
 
     LayoutUnit violation = adjustedChildSize - childSize;
     if (violation > 0)
-      minViolations.append(&flexItem);
+      minViolations.push_back(&flexItem);
     else if (violation < 0)
-      maxViolations.append(&flexItem);
+      maxViolations.push_back(&flexItem);
     totalViolation += violation;
   }
 
@@ -1823,7 +1827,7 @@ void LayoutFlexibleBox::layoutAndPlaceChildren(
     if (!child->needsLayout())
       markChildForPaginationRelayoutIfNeeded(*child, layoutScope);
     if (child->needsLayout())
-      m_relaidOutChildren.add(child);
+      m_relaidOutChildren.insert(child);
     child->layoutIfNeeded();
 
     updateAutoMarginsInMainAxis(*child, autoMarginOffset);
@@ -1888,8 +1892,8 @@ void LayoutFlexibleBox::layoutAndPlaceChildren(
 
   if (m_numberOfInFlowChildrenOnFirstLine == -1)
     m_numberOfInFlowChildrenOnFirstLine = children.size();
-  lineContexts.append(LineContext(crossAxisOffset, maxChildCrossAxisExtent,
-                                  maxAscent, std::move(children)));
+  lineContexts.push_back(LineContext(crossAxisOffset, maxChildCrossAxisExtent,
+                                     maxAscent, std::move(children)));
   crossAxisOffset += maxChildCrossAxisExtent;
 }
 
@@ -2059,7 +2063,7 @@ void LayoutFlexibleBox::alignChildren(const Vector<LineContext>& lineContexts) {
                                         offset);
       }
     }
-    minMarginAfterBaselines.append(minMarginAfterBaseline);
+    minMarginAfterBaselines.push_back(minMarginAfterBaseline);
   }
 
   if (style()->flexWrap() != FlexWrapReverse)
@@ -2129,8 +2133,8 @@ void LayoutFlexibleBox::applyStretchAlignmentToChild(
     LayoutUnit childWidth =
         (lineCrossAxisExtent - crossAxisMarginExtentForChild(child))
             .clampNegativeToZero();
-    childWidth =
-        child.constrainLogicalWidthByMinMax(childWidth, childWidth, this);
+    childWidth = child.constrainLogicalWidthByMinMax(
+        childWidth, crossAxisContentExtent(), this);
 
     if (childWidth != child.logicalWidth()) {
       child.setOverrideLogicalContentWidth(

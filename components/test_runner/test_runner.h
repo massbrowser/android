@@ -117,6 +117,7 @@ class TestRunner : public WebTestRunner {
   void ShowDevTools(const std::string& settings,
                     const std::string& frontend_url);
   void ClearDevToolsLocalStorage();
+  void SetV8CacheDisabled(bool);
   void setShouldDumpAsText(bool);
   void setShouldDumpAsMarkup(bool);
   void setCustomTextOutput(const std::string& text);
@@ -154,6 +155,7 @@ class TestRunner : public WebTestRunner {
   // pending load requests in WorkQueue).
   bool tryToClearTopLoadingFrame(blink::WebFrame*);
 
+  blink::WebFrame* mainFrame() const;
   blink::WebFrame* topLoadingFrame() const;
   void policyDelegateDone();
   bool policyDelegateEnabled() const;
@@ -656,6 +658,9 @@ class TestRunner : public WebTestRunner {
 
   // An effective connection type settable by layout tests.
   blink::WebEffectiveConnectionType effective_connection_type_;
+
+  // Forces v8 compilation cache to be disabled (used for inspector tests).
+  bool disable_v8_cache_ = false;
 
   base::WeakPtrFactory<TestRunner> weak_factory_;
 

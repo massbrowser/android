@@ -236,6 +236,10 @@ ResourceProvider::Resource::Resource(GLuint texture_id,
       read_lock_fences_enabled(false),
       has_shared_bitmap_id(false),
       is_overlay_candidate(false),
+#if defined(OS_ANDROID)
+      is_backed_by_surface_texture(false),
+      wants_promotion_hint(false),
+#endif
       read_lock_fence(nullptr),
       size(size),
       origin(origin),
@@ -248,7 +252,8 @@ ResourceProvider::Resource::Resource(GLuint texture_id,
       type(type),
       usage(gfx::BufferUsage::GPU_READ_CPU_READ_WRITE),
       format(format),
-      shared_bitmap(nullptr) {}
+      shared_bitmap(nullptr) {
+}
 
 ResourceProvider::Resource::Resource(uint8_t* pixels,
                                      SharedBitmap* bitmap,
@@ -272,6 +277,10 @@ ResourceProvider::Resource::Resource(uint8_t* pixels,
       read_lock_fences_enabled(false),
       has_shared_bitmap_id(!!bitmap),
       is_overlay_candidate(false),
+#if defined(OS_ANDROID)
+      is_backed_by_surface_texture(false),
+      wants_promotion_hint(false),
+#endif
       read_lock_fence(nullptr),
       size(size),
       origin(origin),
@@ -310,6 +319,10 @@ ResourceProvider::Resource::Resource(const SharedBitmapId& bitmap_id,
       read_lock_fences_enabled(false),
       has_shared_bitmap_id(true),
       is_overlay_candidate(false),
+#if defined(OS_ANDROID)
+      is_backed_by_surface_texture(false),
+      wants_promotion_hint(false),
+#endif
       read_lock_fence(nullptr),
       size(size),
       origin(origin),
@@ -322,7 +335,8 @@ ResourceProvider::Resource::Resource(const SharedBitmapId& bitmap_id,
       type(RESOURCE_TYPE_BITMAP),
       format(RGBA_8888),
       shared_bitmap_id(bitmap_id),
-      shared_bitmap(nullptr) {}
+      shared_bitmap(nullptr) {
+}
 
 ResourceProvider::Resource::Resource(Resource&& other) = default;
 
@@ -384,43 +398,73 @@ ResourceProvider::Child::Child(const Child& other) = default;
 
 ResourceProvider::Child::~Child() {}
 
+ResourceProvider::Settings::Settings(
+    ContextProvider* compositor_context_provider,
+    bool delegated_sync_points_required,
+    bool use_gpu_memory_buffer_resources,
+    bool enable_color_correct_rendering)
+    : default_resource_type(use_gpu_memory_buffer_resources
+                                ? RESOURCE_TYPE_GPU_MEMORY_BUFFER
+                                : RESOURCE_TYPE_GL_TEXTURE),
+      enable_color_correct_rendering(enable_color_correct_rendering),
+      delegated_sync_points_required(delegated_sync_points_required) {
+  if (!compositor_context_provider) {
+    default_resource_type = RESOURCE_TYPE_BITMAP;
+    // Pick an arbitrary limit here similar to what hardware might.
+    max_texture_size = 16 * 1024;
+    best_texture_format = RGBA_8888;
+    return;
+  }
+
+  DCHECK(IsGpuResourceType(default_resource_type));
+
+  const auto& caps = compositor_context_provider->ContextCapabilities();
+  use_texture_storage_ext = caps.texture_storage;
+  use_texture_format_bgra = caps.texture_format_bgra8888;
+  use_texture_usage_hint = caps.texture_usage;
+  use_sync_query = caps.sync_query;
+
+  if (caps.disable_one_component_textures) {
+    yuv_resource_format = yuv_highbit_resource_format = RGBA_8888;
+  } else {
+    yuv_resource_format = caps.texture_rg ? RED_8 : LUMINANCE_8;
+    yuv_highbit_resource_format =
+        caps.texture_half_float_linear ? LUMINANCE_F16 : yuv_resource_format;
+  }
+
+  GLES2Interface* gl = compositor_context_provider->ContextGL();
+  gl->GetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+
+  best_texture_format =
+      PlatformColor::BestSupportedTextureFormat(use_texture_format_bgra);
+  best_render_buffer_format = PlatformColor::BestSupportedTextureFormat(
+      caps.render_buffer_format_bgra8888);
+}
+
 ResourceProvider::ResourceProvider(
     ContextProvider* compositor_context_provider,
     SharedBitmapManager* shared_bitmap_manager,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     BlockingTaskRunner* blocking_main_thread_task_runner,
-    int highp_threshold_min,
     size_t id_allocation_chunk_size,
     bool delegated_sync_points_required,
     bool use_gpu_memory_buffer_resources,
     bool enable_color_correct_rendering,
     const BufferToTextureTargetMap& buffer_to_texture_target_map)
-    : compositor_context_provider_(compositor_context_provider),
+    : settings_(compositor_context_provider,
+                delegated_sync_points_required,
+                use_gpu_memory_buffer_resources,
+                enable_color_correct_rendering),
+      compositor_context_provider_(compositor_context_provider),
       shared_bitmap_manager_(shared_bitmap_manager),
       gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
       blocking_main_thread_task_runner_(blocking_main_thread_task_runner),
       lost_context_provider_(false),
-      highp_threshold_min_(highp_threshold_min),
       next_id_(1),
       next_child_(1),
-      delegated_sync_points_required_(delegated_sync_points_required),
-      default_resource_type_(use_gpu_memory_buffer_resources
-                                 ? RESOURCE_TYPE_GPU_MEMORY_BUFFER
-                                 : RESOURCE_TYPE_GL_TEXTURE),
-      use_texture_storage_ext_(false),
-      use_texture_format_bgra_(false),
-      use_texture_usage_hint_(false),
-      use_compressed_texture_etc1_(false),
-      yuv_resource_format_(LUMINANCE_8),
-      max_texture_size_(0),
-      best_texture_format_(RGBA_8888),
-      best_render_buffer_format_(RGBA_8888),
-      enable_color_correct_rendering_(enable_color_correct_rendering),
-      id_allocation_chunk_size_(id_allocation_chunk_size),
-      use_sync_query_(false),
       buffer_to_texture_target_map_(buffer_to_texture_target_map),
       tracing_id_(g_next_resource_provider_tracing_id.GetNext()) {
-  DCHECK(id_allocation_chunk_size_);
+  DCHECK(id_allocation_chunk_size);
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // In certain cases, ThreadTaskRunnerHandle isn't set (Android Webview).
@@ -431,49 +475,16 @@ ResourceProvider::ResourceProvider(
         this, "cc::ResourceProvider", base::ThreadTaskRunnerHandle::Get());
   }
 
-  if (!compositor_context_provider_) {
-    default_resource_type_ = RESOURCE_TYPE_BITMAP;
-    // Pick an arbitrary limit here similar to what hardware might.
-    max_texture_size_ = 16 * 1024;
-    best_texture_format_ = RGBA_8888;
+  if (!compositor_context_provider)
     return;
-  }
 
   DCHECK(!texture_id_allocator_);
   DCHECK(!buffer_id_allocator_);
-
-  const auto& caps = compositor_context_provider_->ContextCapabilities();
-
-  DCHECK(IsGpuResourceType(default_resource_type_));
-  use_texture_storage_ext_ = caps.texture_storage;
-  use_texture_format_bgra_ = caps.texture_format_bgra8888;
-  use_texture_usage_hint_ = caps.texture_usage;
-  use_compressed_texture_etc1_ = caps.texture_format_etc1;
-
-  if (caps.disable_one_component_textures) {
-    yuv_resource_format_ = yuv_highbit_resource_format_ = RGBA_8888;
-  } else {
-    yuv_resource_format_ = caps.texture_rg ? RED_8 : LUMINANCE_8;
-    yuv_highbit_resource_format_ =
-        caps.texture_half_float_linear ? LUMINANCE_F16 : yuv_resource_format_;
-  }
-
-  use_sync_query_ = caps.sync_query;
-
   GLES2Interface* gl = ContextGL();
-
-  max_texture_size_ = 0;  // Context expects cleared value.
-  gl->GetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size_);
-  best_texture_format_ =
-      PlatformColor::BestSupportedTextureFormat(use_texture_format_bgra_);
-
-  best_render_buffer_format_ = PlatformColor::BestSupportedTextureFormat(
-      caps.render_buffer_format_bgra8888);
-
   texture_id_allocator_.reset(
-      new TextureIdAllocator(gl, id_allocation_chunk_size_));
+      new TextureIdAllocator(gl, id_allocation_chunk_size));
   buffer_id_allocator_.reset(
-      new BufferIdAllocator(gl, id_allocation_chunk_size_));
+      new BufferIdAllocator(gl, id_allocation_chunk_size));
 }
 
 ResourceProvider::~ResourceProvider() {
@@ -486,7 +497,7 @@ ResourceProvider::~ResourceProvider() {
     DeleteResourceInternal(resources_.begin(), FOR_SHUTDOWN);
 
   GLES2Interface* gl = ContextGL();
-  if (!IsGpuResourceType(default_resource_type_)) {
+  if (!IsGpuResourceType(settings_.default_resource_type)) {
     // We are not in GL mode, but double check before returning.
     DCHECK(!gl);
     return;
@@ -551,9 +562,9 @@ void ResourceProvider::LoseResourceForTesting(ResourceId id) {
 
 ResourceFormat ResourceProvider::YuvResourceFormat(int bits) const {
   if (bits > 8) {
-    return yuv_highbit_resource_format_;
+    return settings_.yuv_highbit_resource_format;
   } else {
-    return yuv_resource_format_;
+    return settings_.yuv_resource_format;
   }
 }
 
@@ -563,7 +574,7 @@ ResourceId ResourceProvider::CreateResource(
     ResourceFormat format,
     const gfx::ColorSpace& color_space) {
   DCHECK(!size.IsEmpty());
-  switch (default_resource_type_) {
+  switch (settings_.default_resource_type) {
     case RESOURCE_TYPE_GPU_MEMORY_BUFFER:
       // GPU memory buffers don't support LUMINANCE_F16.
       if (format != LUMINANCE_F16) {
@@ -593,7 +604,7 @@ ResourceId ResourceProvider::CreateGpuMemoryBufferResource(
     gfx::BufferUsage usage,
     const gfx::ColorSpace& color_space) {
   DCHECK(!size.IsEmpty());
-  switch (default_resource_type_) {
+  switch (settings_.default_resource_type) {
     case RESOURCE_TYPE_GPU_MEMORY_BUFFER:
     case RESOURCE_TYPE_GL_TEXTURE: {
       return CreateGLTexture(size, hint, RESOURCE_TYPE_GPU_MEMORY_BUFFER,
@@ -615,8 +626,8 @@ ResourceId ResourceProvider::CreateGLTexture(
     ResourceFormat format,
     gfx::BufferUsage usage,
     const gfx::ColorSpace& color_space) {
-  DCHECK_LE(size.width(), max_texture_size_);
-  DCHECK_LE(size.height(), max_texture_size_);
+  DCHECK_LE(size.width(), settings_.max_texture_size);
+  DCHECK_LE(size.height(), settings_.max_texture_size);
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // TODO(crbug.com/590317): We should not assume that all resources created by
@@ -687,6 +698,13 @@ ResourceId ResourceProvider::CreateResourceFromTextureMailbox(
                  base::Owned(release_callback_impl.release()));
   resource->read_lock_fences_enabled = read_lock_fences_enabled;
   resource->is_overlay_candidate = mailbox.is_overlay_candidate();
+#if defined(OS_ANDROID)
+  resource->is_backed_by_surface_texture =
+      mailbox.is_backed_by_surface_texture();
+  resource->wants_promotion_hint = mailbox.wants_promotion_hint();
+  if (resource->wants_promotion_hint)
+    wants_promotion_hints_set_.insert(id);
+#endif
   resource->color_space = mailbox.color_space();
 
   return id;
@@ -722,6 +740,13 @@ void ResourceProvider::DeleteResourceInternal(ResourceMap::iterator it,
   TRACE_EVENT0("cc", "ResourceProvider::DeleteResourceInternal");
   Resource* resource = &it->second;
   DCHECK(resource->exported_count == 0 || style != NORMAL);
+
+#if defined(OS_ANDROID)
+  // If this resource was interested in promotion hints, then remove it from
+  // the set of resources that we'll notify.
+  if (resource->wants_promotion_hint)
+    wants_promotion_hints_set_.erase(it->first);
+#endif
 
   // Exported resources are lost on shutdown.
   bool exported_resource_lost =
@@ -796,9 +821,6 @@ void ResourceProvider::DeleteResourceInternal(ResourceMap::iterator it,
     DCHECK(gl);
     gl->DeleteTextures(1, &resource->gl_id);
     resource->gl_id = 0;
-    // Shallow flush after deleting a texture to make sure the memory is freed
-    // as soon as possible.
-    gl->ShallowFlushCHROMIUM();
   }
   if (resource->shared_bitmap) {
     DCHECK(resource->origin != Resource::EXTERNAL);
@@ -819,6 +841,11 @@ void ResourceProvider::DeleteResourceInternal(ResourceMap::iterator it,
   resources_.erase(it);
 }
 
+void ResourceProvider::FlushPendingDeletions() const {
+  if (auto* gl = ContextGL())
+    gl->ShallowFlushCHROMIUM();
+}
+
 ResourceProvider::ResourceType ResourceProvider::GetResourceType(
     ResourceId id) {
   return GetResource(id)->type;
@@ -829,7 +856,7 @@ GLenum ResourceProvider::GetResourceTextureTarget(ResourceId id) {
 }
 
 bool ResourceProvider::IsImmutable(ResourceId id) {
-  if (IsGpuResourceType(default_resource_type_)) {
+  if (IsGpuResourceType(settings_.default_resource_type)) {
     return GetTextureHint(id) == TEXTURE_HINT_IMMUTABLE;
   } else {
     // Software resources are immutable; they cannot change format or be
@@ -844,7 +871,7 @@ ResourceProvider::TextureHint ResourceProvider::GetTextureHint(ResourceId id) {
 
 sk_sp<SkColorSpace> ResourceProvider::GetResourceSkColorSpace(
     const Resource* resource) const {
-  if (!enable_color_correct_rendering_)
+  if (!settings_.enable_color_correct_rendering)
     return nullptr;
   return resource->color_space.ToSkColorSpace();
 }
@@ -942,6 +969,17 @@ void ResourceProvider::GenerateSyncTokenForResources(
       resource->SetSynchronized();
     }
   }
+}
+
+gpu::SyncToken ResourceProvider::GetSyncTokenForResources(
+    const ResourceIdArray& resource_ids) {
+  gpu::SyncToken latest_sync_token;
+  for (ResourceId id : resource_ids) {
+    const gpu::SyncToken& sync_token = GetResource(id)->mailbox().sync_token();
+    if (sync_token.release_count() > latest_sync_token.release_count())
+      latest_sync_token = sync_token;
+  }
+  return latest_sync_token;
 }
 
 ResourceProvider::Resource* ResourceProvider::InsertResource(
@@ -1050,6 +1088,21 @@ bool ResourceProvider::IsOverlayCandidate(ResourceId id) {
   Resource* resource = GetResource(id);
   return resource->is_overlay_candidate;
 }
+
+#if defined(OS_ANDROID)
+bool ResourceProvider::IsBackedBySurfaceTexture(ResourceId id) {
+  Resource* resource = GetResource(id);
+  return resource->is_backed_by_surface_texture;
+}
+
+bool ResourceProvider::WantsPromotionHint(ResourceId id) {
+  return wants_promotion_hints_set_.count(id) > 0;
+}
+
+size_t ResourceProvider::CountPromotionHintRequestsForTesting() {
+  return wants_promotion_hints_set_.size();
+}
+#endif
 
 void ResourceProvider::UnlockForWrite(Resource* resource) {
   DCHECK(resource->locked_for_write);
@@ -1162,6 +1215,7 @@ ResourceProvider::ScopedSkSurfaceProvider::ScopedSkSurfaceProvider(
     bool use_mailbox,
     bool use_distance_field_text,
     bool can_use_lcd_text,
+    bool ignore_color_space,
     int msaa_sample_count)
     : texture_provider_(context_provider->ContextGL(),
                         resource_lock,
@@ -1188,7 +1242,8 @@ ResourceProvider::ScopedSkSurfaceProvider::ScopedSkSurfaceProvider(
         SkSurfaceProps(flags, SkSurfaceProps::kLegacyFontHost_InitType);
   }
   sk_surface_ = SkSurface::MakeFromBackendTextureAsRenderTarget(
-      context_provider->GrContext(), desc, resource_lock->sk_color_space(),
+      context_provider->GrContext(), desc,
+      ignore_color_space ? nullptr : resource_lock->sk_color_space(),
       &surface_props);
 }
 
@@ -1296,7 +1351,7 @@ ResourceProvider::ScopedWriteLockGpuMemoryBuffer::
   Resource* resource = resource_provider_->GetResource(resource_id_);
   DCHECK(resource);
   if (gpu_memory_buffer_) {
-    if (resource_provider_->enable_color_correct_rendering_)
+    if (resource_provider_->settings_.enable_color_correct_rendering)
       gpu_memory_buffer_->SetColorSpaceForScanout(resource->color_space);
     DCHECK(!resource->gpu_memory_buffer);
     resource_provider_->LazyCreate(resource);
@@ -1418,12 +1473,12 @@ void ResourceProvider::PrepareSendToParent(const ResourceIdArray& resource_ids,
     // are required. The only case where we allow a sync token to not be set is
     // the case where the image is dirty. In that case we will bind the image
     // lazily and generate a sync token at that point.
-    DCHECK(!delegated_sync_points_required_ || resource->dirty_image ||
+    DCHECK(!settings_.delegated_sync_points_required || resource->dirty_image ||
            !resource->needs_sync_token());
 
     // If we are validating the resource to be sent, the resource cannot be
     // in a LOCALLY_USED state. It must have been properly synchronized.
-    DCHECK(!delegated_sync_points_required_ ||
+    DCHECK(!settings_.delegated_sync_points_required ||
            Resource::LOCALLY_USED != resource->synchronization_state());
 
     resources.push_back(resource);
@@ -1438,7 +1493,7 @@ void ResourceProvider::PrepareSendToParent(const ResourceIdArray& resource_ids,
 
     CreateMailboxAndBindResource(gl, resource);
 
-    if (delegated_sync_points_required_) {
+    if (settings_.delegated_sync_points_required) {
       if (resource->needs_sync_token()) {
         need_synchronization_resources.push_back(resource);
       } else if (resource->mailbox().HasSyncToken() &&
@@ -1451,7 +1506,7 @@ void ResourceProvider::PrepareSendToParent(const ResourceIdArray& resource_ids,
   // Insert sync point to synchronize the mailbox creation or bound textures.
   gpu::SyncToken new_sync_token;
   if (!need_synchronization_resources.empty()) {
-    DCHECK(delegated_sync_points_required_);
+    DCHECK(settings_.delegated_sync_points_required);
     DCHECK(gl);
     const uint64_t fence_sync = gl->InsertFenceSyncCHROMIUM();
     gl->OrderingBarrierCHROMIUM();
@@ -1460,7 +1515,7 @@ void ResourceProvider::PrepareSendToParent(const ResourceIdArray& resource_ids,
   }
 
   if (!unverified_sync_tokens.empty()) {
-    DCHECK(delegated_sync_points_required_);
+    DCHECK(settings_.delegated_sync_points_required);
     DCHECK(gl);
     gl->VerifySyncTokensCHROMIUM(unverified_sync_tokens.data(),
                                  unverified_sync_tokens.size());
@@ -1479,8 +1534,9 @@ void ResourceProvider::PrepareSendToParent(const ResourceIdArray& resource_ids,
     Resource* source = resources[i];
     const ResourceId id = resource_ids[i];
 
-    DCHECK(!delegated_sync_points_required_ || !source->needs_sync_token());
-    DCHECK(!delegated_sync_points_required_ ||
+    DCHECK(!settings_.delegated_sync_points_required ||
+           !source->needs_sync_token());
+    DCHECK(!settings_.delegated_sync_points_required ||
            Resource::LOCALLY_USED != source->synchronization_state());
 
     TransferableResource resource;
@@ -1536,6 +1592,12 @@ void ResourceProvider::ReceiveFromChild(
                                            it->mailbox_holder.texture_target));
       resource->read_lock_fences_enabled = it->read_lock_fences_enabled;
       resource->is_overlay_candidate = it->is_overlay_candidate;
+#if defined(OS_ANDROID)
+      resource->is_backed_by_surface_texture = it->is_backed_by_surface_texture;
+      resource->wants_promotion_hint = it->wants_promotion_hint;
+      if (resource->wants_promotion_hint)
+        wants_promotion_hints_set_.insert(local_id);
+#endif
       resource->color_space = it->color_space;
     }
     resource->child_id = child;
@@ -1624,6 +1686,38 @@ void ResourceProvider::ReceiveReturnsFromParent(
   }
 }
 
+#if defined(OS_ANDROID)
+void ResourceProvider::SendPromotionHints(
+    const OverlayCandidateList::PromotionHintInfoMap& promotion_hints) {
+  GLES2Interface* gl = ContextGL();
+  if (!gl)
+    return;
+
+  for (const auto& id : wants_promotion_hints_set_) {
+    const ResourceMap::iterator it = resources_.find(id);
+    if (it == resources_.end())
+      continue;
+
+    if (it->second.marked_for_deletion)
+      continue;
+
+    const Resource* resource = LockForRead(id);
+    DCHECK(resource->wants_promotion_hint);
+
+    // Insist that this is backed by a GPU texture.
+    if (IsGpuResourceType(resource->type)) {
+      DCHECK(resource->gl_id);
+      auto iter = promotion_hints.find(id);
+      bool promotable = iter != promotion_hints.end();
+      gl->OverlayPromotionHintCHROMIUM(resource->gl_id, promotable,
+                                       promotable ? iter->second.x() : 0,
+                                       promotable ? iter->second.y() : 0);
+    }
+    UnlockForRead(id);
+  }
+}
+#endif
+
 void ResourceProvider::CreateMailboxAndBindResource(
     gpu::gles2::GLES2Interface* gl,
     Resource* resource) {
@@ -1663,6 +1757,10 @@ void ResourceProvider::TransferResource(Resource* source,
   resource->size = source->size;
   resource->read_lock_fences_enabled = source->read_lock_fences_enabled;
   resource->is_overlay_candidate = source->is_overlay_candidate;
+#if defined(OS_ANDROID)
+  resource->is_backed_by_surface_texture = source->is_backed_by_surface_texture;
+  resource->wants_promotion_hint = source->wants_promotion_hint;
+#endif
   resource->color_space = source->color_space;
 
   if (source->type == RESOURCE_TYPE_BITMAP) {
@@ -1852,7 +1950,8 @@ void ResourceProvider::LazyCreate(Resource* resource) {
                     resource->original_filter);
   gl->TexParameteri(resource->target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   gl->TexParameteri(resource->target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  if (use_texture_usage_hint_ && (resource->hint & TEXTURE_HINT_FRAMEBUFFER)) {
+  if (settings_.use_texture_usage_hint &&
+      (resource->hint & TEXTURE_HINT_FRAMEBUFFER)) {
     gl->TexParameteri(resource->target, GL_TEXTURE_USAGE_ANGLE,
                       GL_FRAMEBUFFER_ATTACHMENT_ANGLE);
   }
@@ -1879,7 +1978,8 @@ void ResourceProvider::LazyAllocate(Resource* resource) {
         gpu_memory_buffer_manager_->CreateGpuMemoryBuffer(
             size, BufferFormat(format), resource->usage,
             gpu::kNullSurfaceHandle);
-    if (resource->gpu_memory_buffer && enable_color_correct_rendering_) {
+    if (resource->gpu_memory_buffer &&
+        settings_.enable_color_correct_rendering) {
       resource->gpu_memory_buffer->SetColorSpaceForScanout(
           resource->color_space);
     }
@@ -1891,8 +1991,9 @@ void ResourceProvider::LazyAllocate(Resource* resource) {
     // Read lock fences are required to ensure that we're not trying to map a
     // buffer that is currently in-use by the GPU.
     resource->read_lock_fences_enabled = true;
-  } else if (use_texture_storage_ext_ &&
-             IsFormatSupportedForStorage(format, use_texture_format_bgra_) &&
+  } else if (settings_.use_texture_storage_ext &&
+             IsFormatSupportedForStorage(format,
+                                         settings_.use_texture_format_bgra) &&
              (resource->hint & TEXTURE_HINT_IMMUTABLE)) {
     GLenum storage_format = TextureToStorageFormat(format);
     gl->TexStorage2DEXT(resource->target, 1, storage_format, size.width(),

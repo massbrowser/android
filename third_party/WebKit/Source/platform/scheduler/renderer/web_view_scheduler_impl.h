@@ -79,6 +79,12 @@ class BLINK_PLATFORM_EXPORT WebViewSchedulerImpl : public WebViewScheduler {
   static const char* VirtualTimePolicyToString(
       VirtualTimePolicy virtual_time_policy);
 
+  // Depending on page visibility, either turns throttling off, or schedules a
+  // call to enable it after a grace period.
+  void UpdateBackgroundThrottlingState();
+
+  void EnableBackgroundThrottling();
+
   std::set<WebFrameSchedulerImpl*> frame_schedulers_;
   std::set<unsigned long> pending_loads_;
   WebScheduler::InterventionReporter* intervention_reporter_;  // Not owned.
@@ -86,6 +92,7 @@ class BLINK_PLATFORM_EXPORT WebViewSchedulerImpl : public WebViewScheduler {
   VirtualTimePolicy virtual_time_policy_;
   int background_parser_count_;
   bool page_visible_;
+  bool should_throttle_frames_;
   bool disable_background_timer_throttling_;
   bool allow_virtual_time_to_advance_;
   bool have_seen_loading_task_;
@@ -94,6 +101,7 @@ class BLINK_PLATFORM_EXPORT WebViewSchedulerImpl : public WebViewScheduler {
   bool reported_background_throttling_since_navigation_;
   TaskQueueThrottler::TimeBudgetPool*
       background_time_budget_pool_;  // Not owned.
+  CancelableClosureHolder delayed_background_throttling_enabler_;
   WebViewScheduler::WebViewSchedulerSettings* settings_;  // Not owned.
 
   DISALLOW_COPY_AND_ASSIGN(WebViewSchedulerImpl);

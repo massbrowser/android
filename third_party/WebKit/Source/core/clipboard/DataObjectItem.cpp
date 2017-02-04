@@ -51,6 +51,15 @@ DataObjectItem* DataObjectItem::createFromFile(File* file) {
   return item;
 }
 
+DataObjectItem* DataObjectItem::createFromFileWithFileSystemId(
+    File* file,
+    const String& fileSystemId) {
+  DataObjectItem* item = new DataObjectItem(FileKind, file->type());
+  item->m_file = file;
+  item->m_fileSystemId = fileSystemId;
+  return item;
+}
+
 DataObjectItem* DataObjectItem::createFromURL(const String& url,
                                               const String& title) {
   DataObjectItem* item = new DataObjectItem(StringKind, mimeTypeTextURIList);
@@ -97,7 +106,7 @@ DataObjectItem::DataObjectItem(ItemKind kind,
       m_type(type),
       m_sequenceNumber(sequenceNumber) {}
 
-Blob* DataObjectItem::getAsFile() const {
+File* DataObjectItem::getAsFile() const {
   if (kind() != FileKind)
     return nullptr;
 
@@ -117,7 +126,8 @@ Blob* DataObjectItem::getAsFile() const {
         WebClipboard::BufferStandard);
     if (blobInfo.size() < 0)
       return nullptr;
-    return Blob::create(BlobDataHandle::create(blobInfo.uuid(), blobInfo.type(),
+    return File::create("image.png", currentTimeMS(),
+                        BlobDataHandle::create(blobInfo.uuid(), blobInfo.type(),
                                                blobInfo.size()));
   }
 
@@ -159,6 +169,14 @@ bool DataObjectItem::isFilename() const {
   // support File dragout, we'll need to make sure this works as expected for
   // DragDataChromium.
   return m_kind == FileKind && m_file;
+}
+
+bool DataObjectItem::hasFileSystemId() const {
+  return m_kind == FileKind && !m_fileSystemId.isEmpty();
+}
+
+String DataObjectItem::fileSystemId() const {
+  return m_fileSystemId;
 }
 
 DEFINE_TRACE(DataObjectItem) {

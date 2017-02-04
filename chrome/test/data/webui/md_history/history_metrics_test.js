@@ -76,9 +76,9 @@ suite('Metrics', function() {
       assertEquals(1, histogram[HistoryPageViewHistogram.SYNCED_TABS]);
       app.selectedPage_ = 'history';
       assertEquals(2, histogram[HistoryPageViewHistogram.HISTORY]);
-      app.set('queryState_.range', HistoryRange.WEEK);
+      app.fire('change-query', {range: HistoryRange.WEEK});
       assertEquals(1, histogram[HistoryPageViewHistogram.GROUPED_WEEK]);
-      app.set('queryState_.range', HistoryRange.MONTH);
+      app.fire('change-query', {range: HistoryRange.MONTH});
       assertEquals(1, histogram[HistoryPageViewHistogram.GROUPED_MONTH]);
     });
   });
@@ -102,7 +102,7 @@ suite('Metrics', function() {
       assertEquals(1, histogramMap['HistoryPage.ClickPosition'][1]);
       assertEquals(1, histogramMap['HistoryPage.ClickPositionSubset'][1]);
 
-      app.set('queryState_.searchTerm', 'goog');
+      app.fire('change-query', {search: 'goog'});
       assertEquals(1, actionMap['Search']);
       app.set('queryState_.incremental', true);
       app.historyResult(createHistoryInfo('goog'), [
@@ -151,6 +151,7 @@ suite('Metrics', function() {
   test('synced-device-manager', function() {
     app.selectedPage_ = 'syncedTabs';
     var histogram;
+    var menuButton;
     return PolymerTest.flushTasks().then(() => {
       histogram = histogramMap[SYNCED_TABS_HISTOGRAM_NAME];
       assertEquals(1, histogram[SyncedTabsHistogram.INITIALIZED]);
@@ -168,7 +169,7 @@ suite('Metrics', function() {
             ]
         ),
       ];
-      setForeignSessions(sessionList, true);
+      setForeignSessions(sessionList);
       return PolymerTest.flushTasks();
     }).then(() => {
       assertEquals(1, histogram[SyncedTabsHistogram.HAS_FOREIGN_DATA]);
@@ -183,12 +184,16 @@ suite('Metrics', function() {
       MockInteractions.tap(polymerSelectAll(cards[0], '.website-title')[0]);
       assertEquals(1, histogram[SyncedTabsHistogram.LINK_CLICKED]);
 
-      MockInteractions.tap(cards[0].$['menu-button']);
+      menuButton = cards[0].$['menu-button'];
+      MockInteractions.tap(menuButton);
       return PolymerTest.flushTasks();
     }).then(() => {
       MockInteractions.tap(app.$$('#synced-devices').$$('#menuOpenButton'));
       assertEquals(1, histogram[SyncedTabsHistogram.OPEN_ALL]);
 
+      MockInteractions.tap(menuButton);
+      return PolymerTest.flushTasks();
+    }).then(() => {
       MockInteractions.tap(app.$$('#synced-devices').$$('#menuDeleteButton'));
       assertEquals(1, histogram[SyncedTabsHistogram.HIDE_FOR_NOW]);
     });

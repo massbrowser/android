@@ -35,6 +35,8 @@ blink_core_sources("workers") {
     "SharedWorkerThread.h",
     "ThreadedMessagingProxyBase.cpp",
     "ThreadedMessagingProxyBase.h",
+    "ThreadedObjectProxyBase.cpp",
+    "ThreadedObjectProxyBase.h",
     "ThreadedWorkletGlobalScope.cpp",
     "ThreadedWorkletGlobalScope.h",
     "ThreadedWorkletMessagingProxy.cpp",
@@ -58,6 +60,7 @@ blink_core_sources("workers") {
     "WorkerLocation.h",
     "WorkerNavigator.cpp",
     "WorkerNavigator.h",
+    "WorkerOrWorkletGlobalScope.cpp",
     "WorkerOrWorkletGlobalScope.h",
     "WorkerReportingProxy.h",
     "WorkerScriptLoader.cpp",
@@ -74,8 +77,6 @@ blink_core_sources("workers") {
     "Worklet.h",
     "WorkletGlobalScope.cpp",
     "WorkletGlobalScope.h",
-    "WorkletScriptLoader.cpp",
-    "WorkletScriptLoader.h",
     "WorkletThreadHolder.h",
   ]
 

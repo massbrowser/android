@@ -56,12 +56,12 @@
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/lifetime/keep_alive_registry.h"
 #include "chrome/browser/lifetime/keep_alive_types.h"
 #include "chrome/browser/lifetime/scoped_keep_alive.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/memory/tab_manager_web_contents_data.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/pepper_broker_infobar_delegate.h"
@@ -123,7 +123,6 @@
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/javascript_dialogs/javascript_dialog_tab_helper.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/media_utils.h"
 #include "chrome/browser/ui/search/search_delegate.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
@@ -137,7 +136,6 @@
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/browser/ui/validation_message_bubble.h"
@@ -151,7 +149,6 @@
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
-#include "chrome/common/search/search_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -163,7 +160,6 @@
 #include "components/bubble/bubble_controller.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/favicon/content/content_favicon_driver.h"
-#include "components/history/core/browser/top_sites.h"
 #include "components/prefs/pref_service.h"
 #include "components/search/search.h"
 #include "components/security_state/content/content_utils.h"
@@ -262,6 +258,23 @@ BrowserWindow* CreateBrowserWindow(Browser* browser) {
 bool IsFastTabUnloadEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableFastUnload);
+}
+
+const extensions::Extension* GetExtensionForOrigin(
+    Profile* profile,
+    const GURL& security_origin) {
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  if (!security_origin.SchemeIs(extensions::kExtensionScheme))
+    return nullptr;
+
+  const extensions::Extension* extension =
+      extensions::ExtensionRegistry::Get(profile)->enabled_extensions().GetByID(
+          security_origin.host());
+  DCHECK(extension);
+  return extension;
+#else
+  return nullptr;
+#endif
 }
 
 }  // namespace
@@ -395,7 +408,7 @@ Browser::Browser(const CreateParams& params)
   registrar_.Add(this,
                  extensions::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
                  content::NotificationService::AllSources());
-#if defined(ENABLE_THEMES)
+#if !defined(OS_ANDROID)
   registrar_.Add(
       this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
       content::Source<ThemeService>(
@@ -577,16 +590,24 @@ gfx::Image Browser::GetCurrentPageIcon() const {
 
 base::string16 Browser::GetWindowTitleForCurrentTab(
     bool include_app_name) const {
-  WebContents* contents = tab_strip_model_->GetActiveWebContents();
+  return GetWindowTitleFromWebContents(
+      include_app_name, tab_strip_model_->GetActiveWebContents());
+}
+
+base::string16 Browser::GetWindowTitleForTab(bool include_app_name,
+                                             int index) const {
+  return GetWindowTitleFromWebContents(
+      include_app_name, tab_strip_model_->GetWebContentsAt(index));
+}
+
+base::string16 Browser::GetWindowTitleFromWebContents(
+    bool include_app_name,
+    content::WebContents* contents) const {
   base::string16 title;
 
   // |contents| can be NULL because GetWindowTitleForCurrentTab is called by the
   // window during the window's creation (before tabs have been added).
   if (contents) {
-    // The web app frame uses the host instead of the title.
-    if (ShouldUseWebAppFrame())
-      return base::UTF8ToUTF16(contents->GetURL().host());
-
     title = contents->GetTitle();
     FormatTitleForDisplay(&title);
   }
@@ -958,6 +979,7 @@ void Browser::TabClosingAt(TabStripModel* tab_strip_model,
       SessionServiceFactory::GetForProfile(profile_);
   if (session_service)
     session_service->TabClosing(contents);
+  HideValidationMessage(contents);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_CLOSING,
       content::Source<NavigationController>(&contents->GetController()),
@@ -1257,9 +1279,9 @@ bool Browser::PreHandleGestureEvent(content::WebContents* source,
                                     const blink::WebGestureEvent& event) {
   // Disable pinch zooming in undocked dev tools window due to poor UX.
   if (app_name() == DevToolsWindow::kDevToolsApp)
-    return event.type == blink::WebGestureEvent::GesturePinchBegin ||
-           event.type == blink::WebGestureEvent::GesturePinchUpdate ||
-           event.type == blink::WebGestureEvent::GesturePinchEnd;
+    return event.type() == blink::WebGestureEvent::GesturePinchBegin ||
+           event.type() == blink::WebGestureEvent::GesturePinchUpdate ||
+           event.type() == blink::WebGestureEvent::GesturePinchEnd;
 
   return false;
 }
@@ -1546,6 +1568,11 @@ void Browser::BeforeUnloadFired(WebContents* web_contents,
 }
 
 bool Browser::ShouldFocusLocationBarByDefault(WebContents* source) {
+  // Navigations in background tabs shouldn't change the focus state of the
+  // omnibox, since it's associated with the foreground tab.
+  if (source != tab_strip_model_->GetActiveWebContents())
+    return false;
+
   const content::NavigationEntry* entry =
       source->GetController().GetActiveEntry();
   if (entry) {
@@ -1580,11 +1607,13 @@ void Browser::ShowRepostFormWarningDialog(WebContents* source) {
 }
 
 bool Browser::ShouldCreateWebContents(
-    WebContents* web_contents,
+    content::WebContents* web_contents,
+    content::SiteInstance* source_site_instance,
     int32_t route_id,
     int32_t main_frame_route_id,
     int32_t main_frame_widget_route_id,
     WindowContainerType window_container_type,
+    const GURL& opener_url,
     const std::string& frame_name,
     const GURL& target_url,
     const std::string& partition_id,
@@ -1592,8 +1621,9 @@ bool Browser::ShouldCreateWebContents(
   if (window_container_type == WINDOW_CONTAINER_TYPE_BACKGROUND) {
     // If a BackgroundContents is created, suppress the normal WebContents.
     return !MaybeCreateBackgroundContents(
-        route_id, main_frame_route_id, main_frame_widget_route_id, web_contents,
-        frame_name, target_url, partition_id, session_storage_namespace);
+        source_site_instance, opener_url, route_id, main_frame_route_id,
+        main_frame_widget_route_id, frame_name, target_url, partition_id,
+        session_storage_namespace);
   }
 
   return true;
@@ -1807,13 +1837,30 @@ void Browser::RequestMediaAccessPermission(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback) {
-  ::RequestMediaAccessPermission(web_contents, profile_, request, callback);
+  const extensions::Extension* extension =
+      GetExtensionForOrigin(profile_, request.security_origin);
+  MediaCaptureDevicesDispatcher::GetInstance()->ProcessMediaAccessRequest(
+      web_contents, request, callback, extension);
 }
 
 bool Browser::CheckMediaAccessPermission(content::WebContents* web_contents,
                                          const GURL& security_origin,
                                          content::MediaStreamType type) {
-  return ::CheckMediaAccessPermission(web_contents, security_origin, type);
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  const extensions::Extension* extension =
+      GetExtensionForOrigin(profile, security_origin);
+  return MediaCaptureDevicesDispatcher::GetInstance()
+      ->CheckMediaAccessPermission(web_contents, security_origin, type,
+                                   extension);
+}
+
+std::string Browser::GetDefaultMediaDeviceID(content::WebContents* web_contents,
+                                             content::MediaStreamType type) {
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  return MediaCaptureDevicesDispatcher::GetInstance()
+      ->GetDefaultDeviceIDForProfile(profile, type);
 }
 
 bool Browser::RequestPpapiBrokerPermission(
@@ -1888,17 +1935,6 @@ void Browser::OnWebContentsInstantSupportDisabled(
 
 OmniboxView* Browser::GetOmniboxView() {
   return window_->GetLocationBar()->GetOmniboxView();
-}
-
-std::set<std::string> Browser::GetOpenUrls() {
-  scoped_refptr<history::TopSites> top_sites =
-      TopSitesFactory::GetForProfile(profile_);
-  if (!top_sites)  // NULL for Incognito profiles.
-    return std::set<std::string>();
-
-  std::set<std::string> open_urls;
-  chrome::GetOpenUrls(*tab_strip_model_, *top_sites, &open_urls);
-  return open_urls;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1991,7 +2027,7 @@ void Browser::Observe(int type,
       break;
     }
 
-#if defined(ENABLE_THEMES)
+#if !defined(OS_ANDROID)
     case chrome::NOTIFICATION_BROWSER_THEME_CHANGED:
       window()->UserChangedTheme();
       break;
@@ -2405,20 +2441,9 @@ bool Browser::SupportsLocationBar() const {
   if (!is_app())
     return !is_trusted_source();
 
+  // Hosted apps always support a location bar.
   if (hosted_app_controller_)
-    return hosted_app_controller_->SupportsLocationBar();
-
-  return false;
-}
-
-bool Browser::ShouldUseWebAppFrame() const {
-  // Only use the web app frame for apps in ash, and only if the web app frame
-  // is enabled.
-  if (!is_app())
-    return false;
-
-  if (hosted_app_controller_)
-    return hosted_app_controller_->should_use_web_app_frame();
+    return true;
 
   return false;
 }
@@ -2444,9 +2469,6 @@ bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
 
     if (SupportsLocationBar())
       features |= FEATURE_LOCATIONBAR;
-
-    if (ShouldUseWebAppFrame())
-      features |= FEATURE_WEBAPPFRAME;
   }
   return !!(features & feature);
 }
@@ -2519,21 +2541,19 @@ bool Browser::ShouldStartShutdown() const {
 }
 
 bool Browser::MaybeCreateBackgroundContents(
+    content::SiteInstance* source_site_instance,
+    const GURL& opener_url,
     int32_t route_id,
     int32_t main_frame_route_id,
     int32_t main_frame_widget_route_id,
-    WebContents* opener_web_contents,
     const std::string& frame_name,
     const GURL& target_url,
     const std::string& partition_id,
     content::SessionStorageNamespace* session_storage_namespace) {
-  GURL opener_url = opener_web_contents->GetURL();
   ExtensionService* extensions_service =
       extensions::ExtensionSystem::Get(profile_)->extension_service();
 
-  if (!opener_url.is_valid() ||
-      frame_name.empty() ||
-      !extensions_service ||
+  if (!opener_url.is_valid() || frame_name.empty() || !extensions_service ||
       !extensions_service->is_ready())
     return false;
 
@@ -2554,11 +2574,10 @@ bool Browser::MaybeCreateBackgroundContents(
     return false;
 
   // Ensure that we're trying to open this from the extension's process.
-  SiteInstance* opener_site_instance = opener_web_contents->GetSiteInstance();
   extensions::ProcessMap* process_map = extensions::ProcessMap::Get(profile_);
-  if (!opener_site_instance->GetProcess() ||
-      !process_map->Contains(
-          extension->id(), opener_site_instance->GetProcess()->GetID())) {
+  if (!source_site_instance->GetProcess() ||
+      !process_map->Contains(extension->id(),
+                             source_site_instance->GetProcess()->GetID())) {
     return false;
   }
 
@@ -2576,28 +2595,33 @@ bool Browser::MaybeCreateBackgroundContents(
     delete existing;
   }
 
-  // If script access is not allowed, create the the background contents in a
-  // new SiteInstance, so that a separate process is used.
-  scoped_refptr<content::SiteInstance> site_instance =
-      allow_js_access ?
-      opener_site_instance :
-      content::SiteInstance::Create(opener_web_contents->GetBrowserContext());
-
   // Passed all the checks, so this should be created as a BackgroundContents.
-  BackgroundContents* contents = service->CreateBackgroundContents(
-      site_instance.get(), route_id, main_frame_route_id,
-      main_frame_widget_route_id, profile_, frame_name,
-      base::ASCIIToUTF16(extension->id()), partition_id,
-      session_storage_namespace);
+  BackgroundContents* contents = nullptr;
+  if (allow_js_access) {
+    contents = service->CreateBackgroundContents(
+        source_site_instance, route_id, main_frame_route_id,
+        main_frame_widget_route_id, profile_, frame_name,
+        base::ASCIIToUTF16(extension->id()), partition_id,
+        session_storage_namespace);
+  } else {
+    // If script access is not allowed, create the the background contents in a
+    // new SiteInstance, so that a separate process is used. We must not use any
+    // of the passed-in routing IDs, as they are objects in the opener's
+    // process.
+    contents = service->CreateBackgroundContents(
+        content::SiteInstance::Create(
+            source_site_instance->GetBrowserContext()),
+        MSG_ROUTING_NONE, MSG_ROUTING_NONE, MSG_ROUTING_NONE, profile_,
+        frame_name, base::ASCIIToUTF16(extension->id()), partition_id,
+        session_storage_namespace);
 
-  // When a separate process is used, the original renderer cannot access the
-  // new window later, thus we need to navigate the window now.
-  if (contents && !allow_js_access) {
-    contents->web_contents()->GetController().LoadURL(
-        target_url,
-        content::Referrer(),
-        ui::PAGE_TRANSITION_LINK,
-        std::string());  // No extra headers.
+    // When a separate process is used, the original renderer cannot access the
+    // new window later, thus we need to navigate the window now.
+    if (contents) {
+      contents->web_contents()->GetController().LoadURL(
+          target_url, content::Referrer(), ui::PAGE_TRANSITION_LINK,
+          std::string());  // No extra headers.
+    }
   }
 
   return contents != NULL;

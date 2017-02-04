@@ -37,7 +37,6 @@
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/signin/core/common/signin_switches.h"
-#include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -73,9 +72,7 @@ ChromeSigninClient::ChromeSigninClient(
     : OAuth2TokenService::Consumer("chrome_signin_client"),
       profile_(profile),
       signin_error_controller_(signin_error_controller),
-      is_force_signin_enabled_(IsForceSigninEnabled()),
-      request_context_pointer_(nullptr),
-      number_of_request_context_pointer_changes_(0) {
+      is_force_signin_enabled_(IsForceSigninEnabled()) {
   signin_error_controller_->AddObserver(this);
 #if !defined(OS_CHROMEOS)
   net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
@@ -202,34 +199,7 @@ void ChromeSigninClient::OnSignedOut() {
 }
 
 net::URLRequestContextGetter* ChromeSigninClient::GetURLRequestContext() {
-  net::URLRequestContextGetter* getter = profile_->GetRequestContext();
-  scoped_refptr<net::URLRequestContextGetter> scoped_getter(getter);
-  content::BrowserThread::PostTaskAndReplyWithResult(
-      content::BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&net::URLRequestContextGetter::GetURLRequestContext,
-                 scoped_getter),
-      base::Bind(&ChromeSigninClient::RequestContextPointerReply,
-                 base::Unretained(this)));
-  return getter;
-}
-
-void ChromeSigninClient::RequestContextPointerReply(
-    net::URLRequestContext* pointer) {
-  // Because this function runs in the UI thread, it is not possible to
-  // dereference the pointer.  The pointer is used only for its value.
-  if (request_context_pointer_ != nullptr &&
-      pointer != request_context_pointer_) {
-    ++number_of_request_context_pointer_changes_;
-
-    // In theory, |request_context_pointer_changed_| should never be > 0.
-    // Adding a DCHECK here to catch it in debug builds.  In release builds
-    // requests to gaia will be tagged with a special source= parameter.
-    DCHECK_EQ(0, number_of_request_context_pointer_changes_)
-        << "If you hit this DCHECK, open a bug for rogerta@chromium.org";
-  }
-
-  request_context_pointer_ = pointer;
+  return profile_->GetRequestContext();
 }
 
 bool ChromeSigninClient::ShouldMergeSigninCredentialsIntoCookieJar() {
@@ -308,7 +278,7 @@ void ChromeSigninClient::PostSignedIn(const std::string& account_id,
 void ChromeSigninClient::PreSignOut(const base::Callback<void()>& sign_out) {
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   if (is_force_signin_enabled_ && !profile_->IsSystemProfile() &&
-      !profile_->IsGuestSession()) {
+      !profile_->IsGuestSession() && !profile_->IsSupervised()) {
     BrowserList::CloseAllBrowsersWithProfile(
         profile_, base::Bind(&ChromeSigninClient::OnCloseBrowsersSuccess,
                              base::Unretained(this), sign_out),
@@ -455,10 +425,6 @@ void ChromeSigninClient::AfterCredentialsCopied() {
     // the new profile soon.
     should_display_user_manager_ = false;
   }
-}
-
-int ChromeSigninClient::number_of_request_context_pointer_changes() const {
-  return number_of_request_context_pointer_changes_;
 }
 
 void ChromeSigninClient::OnCloseBrowsersSuccess(

@@ -25,10 +25,13 @@ template <>
 struct TypeConverter<PaymentAppOptionPtr, blink::PaymentAppOption> {
   static PaymentAppOptionPtr Convert(const blink::PaymentAppOption& input) {
     PaymentAppOptionPtr output = PaymentAppOption::New();
-    output->label = input.hasLabel() ? input.label() : WTF::emptyString();
+    output->name = input.hasName() ? input.name() : WTF::emptyString;
     output->icon = input.hasIcon() ? input.icon() : WTF::String();
-    output->id = input.hasId() ? input.id() : WTF::emptyString();
-    output->enabled_methods = WTF::Vector<WTF::String>(input.enabledMethods());
+    output->id = input.hasId() ? input.id() : WTF::emptyString;
+    if (input.hasEnabledMethods()) {
+      output->enabled_methods =
+          WTF::Vector<WTF::String>(input.enabledMethods());
+    }
     return output;
   }
 };
@@ -37,11 +40,11 @@ template <>
 struct TypeConverter<PaymentAppManifestPtr, blink::PaymentAppManifest> {
   static PaymentAppManifestPtr Convert(const blink::PaymentAppManifest& input) {
     PaymentAppManifestPtr output = PaymentAppManifest::New();
-    output->label = input.hasLabel() ? input.label() : WTF::emptyString();
+    output->name = input.hasName() ? input.name() : WTF::emptyString;
     output->icon = input.hasIcon() ? input.icon() : WTF::String();
     if (input.hasOptions()) {
       for (size_t i = 0; i < input.options().size(); ++i) {
-        output->options.append(PaymentAppOption::From(input.options()[i]));
+        output->options.push_back(PaymentAppOption::From(input.options()[i]));
       }
     }
     return output;
@@ -52,11 +55,11 @@ template <>
 struct TypeConverter<blink::PaymentAppManifest, PaymentAppManifestPtr> {
   static blink::PaymentAppManifest Convert(const PaymentAppManifestPtr& input) {
     blink::PaymentAppManifest output;
-    output.setLabel(input->label);
+    output.setName(input->name);
     output.setIcon(input->icon);
     blink::HeapVector<blink::PaymentAppOption> options;
     for (const auto& option : input->options) {
-      options.append(mojo::ConvertTo<blink::PaymentAppOption>(option));
+      options.push_back(mojo::ConvertTo<blink::PaymentAppOption>(option));
     }
     output.setOptions(options);
     return output;
@@ -67,12 +70,12 @@ template <>
 struct TypeConverter<blink::PaymentAppOption, PaymentAppOptionPtr> {
   static blink::PaymentAppOption Convert(const PaymentAppOptionPtr& input) {
     blink::PaymentAppOption output;
-    output.setLabel(input->label);
+    output.setName(input->name);
     output.setIcon(input->icon);
     output.setId(input->id);
     Vector<WTF::String> enabledMethods;
     for (const auto& method : input->enabled_methods) {
-      enabledMethods.append(method);
+      enabledMethods.push_back(method);
     }
     output.setEnabledMethods(enabledMethods);
     return output;
@@ -84,13 +87,8 @@ struct TypeConverter<blink::PaymentAppOption, PaymentAppOptionPtr> {
 namespace blink {
 
 PaymentAppManager* PaymentAppManager::create(
-    ScriptState* scriptState,
     ServiceWorkerRegistration* registration) {
-  return new PaymentAppManager(scriptState, registration);
-}
-
-void PaymentAppManager::contextDestroyed() {
-  m_manager.reset();
+  return new PaymentAppManager(registration);
 }
 
 ScriptPromise PaymentAppManager::setManifest(
@@ -106,7 +104,6 @@ ScriptPromise PaymentAppManager::setManifest(
   ScriptPromise promise = resolver->promise();
 
   m_manager->SetManifest(
-      m_registration->scope(),
       payments::mojom::blink::PaymentAppManifest::From(manifest),
       convertToBaseCallback(WTF::bind(&PaymentAppManager::onSetManifest,
                                       wrapPersistent(this),
@@ -125,29 +122,27 @@ ScriptPromise PaymentAppManager::getManifest(ScriptState* scriptState) {
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
   ScriptPromise promise = resolver->promise();
 
-  m_manager->GetManifest(m_registration->scope(),
-                         convertToBaseCallback(WTF::bind(
-                             &PaymentAppManager::onGetManifest,
-                             wrapPersistent(this), wrapPersistent(resolver))));
+  m_manager->GetManifest(convertToBaseCallback(
+      WTF::bind(&PaymentAppManager::onGetManifest, wrapPersistent(this),
+                wrapPersistent(resolver))));
 
   return promise;
 }
 
 DEFINE_TRACE(PaymentAppManager) {
   visitor->trace(m_registration);
-  ContextLifecycleObserver::trace(visitor);
 }
 
-PaymentAppManager::PaymentAppManager(ScriptState* scriptState,
-                                     ServiceWorkerRegistration* registration)
-    : ContextLifecycleObserver(scriptState->getExecutionContext()),
-      m_registration(registration) {
+PaymentAppManager::PaymentAppManager(ServiceWorkerRegistration* registration)
+    : m_registration(registration) {
   DCHECK(registration);
   Platform::current()->interfaceProvider()->getInterface(
-      mojo::GetProxy(&m_manager));
+      mojo::MakeRequest(&m_manager));
 
   m_manager.set_connection_error_handler(convertToBaseCallback(WTF::bind(
       &PaymentAppManager::onServiceConnectionError, wrapWeakPersistent(this))));
+
+  m_manager->Init(m_registration->scope());
 }
 
 void PaymentAppManager::onSetManifest(

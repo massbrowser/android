@@ -28,7 +28,7 @@
 #include "components/password_manager/core/browser/password_manager_constants.h"
 #include "components/password_manager/core/browser/statistics_table.h"
 #include "components/password_manager/core/common/credential_manager_types.h"
-#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_handle.h"
 
 using password_manager::PasswordFormManager;
 
@@ -263,16 +263,19 @@ void ManagePasswordsUIController::OnBubbleHidden() {
     UpdateBubbleAndIconVisibility();
 }
 
-void ManagePasswordsUIController::OnNoInteractionOnUpdate() {
-  if (GetState() != password_manager::ui::PENDING_PASSWORD_UPDATE_STATE) {
+void ManagePasswordsUIController::OnNoInteraction() {
+  if (GetState() != password_manager::ui::PENDING_PASSWORD_UPDATE_STATE &&
+      GetState() != password_manager::ui::PENDING_PASSWORD_STATE) {
     // Do nothing if the state was changed. It can happen for example when the
-    // update bubble is active and a page navigation happens.
+    // bubble is active and a page navigation happens.
     return;
   }
+  bool is_update =
+      GetState() == password_manager::ui::PENDING_PASSWORD_UPDATE_STATE;
   password_manager::PasswordFormManager* form_manager =
       passwords_data_.form_manager();
   DCHECK(form_manager);
-  form_manager->OnNoInteractionOnUpdate();
+  form_manager->OnNoInteraction(is_update);
 }
 
 void ManagePasswordsUIController::OnNopeUpdateClicked() {
@@ -318,15 +321,6 @@ void ManagePasswordsUIController::ChooseCredential(
   passwords_data_.ChooseCredential(&copy_form);
   passwords_data_.TransitionToState(password_manager::ui::MANAGE_STATE);
   UpdateBubbleAndIconVisibility();
-}
-
-void ManagePasswordsUIController::NavigateToExternalPasswordManager() {
-  chrome::NavigateParams params(
-      chrome::FindBrowserWithWebContents(web_contents()),
-      GURL(password_manager::kPasswordManagerAccountDashboardURL),
-      ui::PAGE_TRANSITION_LINK);
-  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-  chrome::Navigate(&params);
 }
 
 void ManagePasswordsUIController::NavigateToSmartLockHelpPage() {
@@ -382,14 +376,14 @@ void ManagePasswordsUIController::NeverSavePasswordInternal() {
   password_manager::PasswordFormManager* form_manager =
       passwords_data_.form_manager();
   DCHECK(form_manager);
-  form_manager->PermanentlyBlacklist();
+  form_manager->OnNeverClicked();
 }
 
 void ManagePasswordsUIController::UpdateBubbleAndIconVisibility() {
   // If we're not on a "webby" URL (e.g. "chrome://sign-in"), we shouldn't
   // display either the bubble or the icon.
-  if (!BrowsingDataHelper::IsWebScheme(
-          web_contents()->GetLastCommittedURL().scheme())) {
+  if (!ChromePasswordManagerClient::CanShowBubbleOnURL(
+          web_contents()->GetLastCommittedURL())) {
     passwords_data_.OnInactive();
   }
 
@@ -415,12 +409,14 @@ bool ManagePasswordsUIController::HasBrowserWindow() const {
   return chrome::FindBrowserWithWebContents(web_contents()) != nullptr;
 }
 
-void ManagePasswordsUIController::DidNavigateMainFrame(
-    const content::LoadCommittedDetails& details,
-    const content::FrameNavigateParams& params) {
-  // Don't react to in-page (fragment) navigations.
-  if (details.is_in_page)
+void ManagePasswordsUIController::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame() ||
+      !navigation_handle->HasCommitted() ||
+      // Don't react to in-page (fragment) navigations.
+      navigation_handle->IsSamePage()) {
     return;
+  }
 
   // It is possible that the user was not able to interact with the password
   // bubble.

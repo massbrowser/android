@@ -22,6 +22,7 @@
 #include "components/metrics/profiler/tracking_synchronizer_observer.h"
 #include "components/metrics/proto/system_profile.pb.h"
 #include "components/omnibox/browser/omnibox_event_global_tracker.h"
+#include "components/ukm/observers/history_delete_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ppapi/features/features.h"
@@ -30,6 +31,7 @@ class AntiVirusMetricsProvider;
 class ChromeOSMetricsProvider;
 class GoogleUpdateMetricsProviderWin;
 class PluginMetricsProvider;
+class Profile;
 class PrefRegistrySimple;
 
 namespace browser_watcher {
@@ -45,10 +47,10 @@ class ProfilerMetricsProvider;
 
 // ChromeMetricsServiceClient provides an implementation of MetricsServiceClient
 // that depends on chrome/.
-class ChromeMetricsServiceClient
-    : public metrics::MetricsServiceClient,
-      public metrics::TrackingSynchronizerObserver,
-      public content::NotificationObserver {
+class ChromeMetricsServiceClient : public metrics::MetricsServiceClient,
+                                   public metrics::TrackingSynchronizerObserver,
+                                   public content::NotificationObserver,
+                                   public ukm::HistoryDeleteObserver {
  public:
   ~ChromeMetricsServiceClient() override;
 
@@ -61,6 +63,7 @@ class ChromeMetricsServiceClient
 
   // metrics::MetricsServiceClient:
   metrics::MetricsService* GetMetricsService() override;
+  ukm::UkmService* GetUkmService() override;
   void SetMetricsClientId(const std::string& client_id) override;
   int32_t GetProduct() override;
   std::string GetApplicationLocale() override;
@@ -68,12 +71,13 @@ class ChromeMetricsServiceClient
   metrics::SystemProfileProto::Channel GetChannel() override;
   std::string GetVersionString() override;
   void OnEnvironmentUpdate(std::string* serialized_environment) override;
-  void OnLogUploadComplete() override;
   void OnLogCleanShutdown() override;
   void InitializeSystemProfileMetrics(
       const base::Closure& done_callback) override;
   void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
   std::unique_ptr<metrics::MetricsLogUploader> CreateUploader(
+      const std::string& server_url,
+      const std::string& mime_type,
       const base::Callback<void(int)>& on_upload_complete) override;
   base::TimeDelta GetStandardUploadInterval() override;
   base::string16 GetRegistryBackupKey() override;
@@ -81,6 +85,9 @@ class ChromeMetricsServiceClient
   bool IsReportingPolicyManaged() override;
   metrics::EnableMetricsDefault GetMetricsReportingDefaultState() override;
   bool IsUMACellularUploadLogicEnabled() override;
+
+  // ukm::HistoryDeleteObserver
+  void OnHistoryDeleted() override;
 
   // Persistent browser metrics need to be persisted somewhere. This constant
   // provides a known string to be used for both the allocator's internal name
@@ -115,7 +122,6 @@ class ChromeMetricsServiceClient
   // Callbacks for various stages of final log info collection. Do not call
   // these directly.
   void CollectFinalHistograms();
-  void MergeHistogramDeltas();
   void OnMemoryDetailCollectionDone();
   void OnHistogramSynchronizationDone();
 
@@ -127,6 +133,9 @@ class ChromeMetricsServiceClient
   // until the machine becomes active, such as precluding UMA uploads unless
   // there was recent activity.
   void RegisterForNotifications();
+
+  // Call to listen for history deletions by the selected profile.
+  void RegisterForHistoryDeletions(Profile* profile);
 
   // content::NotificationObserver:
   void Observe(int type,
@@ -149,6 +158,9 @@ class ChromeMetricsServiceClient
 
   // The MetricsService that |this| is a client of.
   std::unique_ptr<metrics::MetricsService> metrics_service_;
+
+  // The UkmService that |this| is a client of.
+  std::unique_ptr<ukm::UkmService> ukm_service_;
 
   content::NotificationRegistrar registrar_;
 

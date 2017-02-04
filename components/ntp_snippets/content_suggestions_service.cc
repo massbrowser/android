@@ -25,13 +25,16 @@ ContentSuggestionsService::ContentSuggestionsService(
     State state,
     SigninManagerBase* signin_manager,
     history::HistoryService* history_service,
-    PrefService* pref_service)
+    PrefService* pref_service,
+    std::unique_ptr<CategoryRanker> category_ranker)
     : state_(state),
       signin_observer_(this),
       history_service_observer_(this),
-      ntp_snippets_service_(nullptr),
+      remote_suggestions_provider_(nullptr),
+      remote_suggestions_scheduler_(nullptr),
       pref_service_(pref_service),
-      user_classifier_(pref_service) {
+      user_classifier_(pref_service),
+      category_ranker_(std::move(category_ranker)) {
   // Can be null in tests.
   if (signin_manager) {
     signin_observer_.Add(signin_manager);
@@ -47,7 +50,8 @@ ContentSuggestionsService::ContentSuggestionsService(
 ContentSuggestionsService::~ContentSuggestionsService() = default;
 
 void ContentSuggestionsService::Shutdown() {
-  ntp_snippets_service_ = nullptr;
+  remote_suggestions_provider_ = nullptr;
+  remote_suggestions_scheduler_ = nullptr;
   suggestions_by_category_.clear();
   providers_by_category_.clear();
   categories_.clear();
@@ -62,6 +66,15 @@ void ContentSuggestionsService::Shutdown() {
 void ContentSuggestionsService::RegisterProfilePrefs(
     PrefRegistrySimple* registry) {
   registry->RegisterListPref(prefs::kDismissedCategories);
+}
+
+std::vector<Category> ContentSuggestionsService::GetCategories() const {
+  std::vector<Category> sorted_categories = categories_;
+  std::sort(sorted_categories.begin(), sorted_categories.end(),
+            [this](const Category& left, const Category& right) {
+              return category_ranker_->Compare(left, right);
+            });
+  return sorted_categories;
 }
 
 CategoryStatus ContentSuggestionsService::GetCategoryStatus(
@@ -117,6 +130,12 @@ void ContentSuggestionsService::ClearHistory(
   for (const auto& provider : providers_) {
     provider->ClearHistory(begin, end, filter);
   }
+  category_ranker_->ClearHistory(begin, end);
+  // This potentially removed personalized data which we shouldn't display
+  // anymore.
+  for (Observer& observer : observers_) {
+    observer.OnFullRefreshRequired();
+  }
 }
 
 void ContentSuggestionsService::ClearAllCachedSuggestions() {
@@ -167,11 +186,10 @@ void ContentSuggestionsService::DismissSuggestion(
   providers_by_category_[suggestion_id.category()]->DismissSuggestion(
       suggestion_id);
 
-  // Remove the suggestion locally.
-  bool removed = RemoveSuggestionByID(suggestion_id);
-  DCHECK(removed) << "The dismissed suggestion " << suggestion_id
-                  << " has already been removed. Providers must not call"
-                  << " OnNewSuggestions in response to DismissSuggestion.";
+  // Remove the suggestion locally if it is present. A suggestion may be missing
+  // localy e.g. if it was sent to UI through |Fetch| or it has been dismissed
+  // from a different NTP.
+  RemoveSuggestionByID(suggestion_id);
 }
 
 void ContentSuggestionsService::DismissCategory(Category category) {
@@ -185,6 +203,8 @@ void ContentSuggestionsService::DismissCategory(Category category) {
 
   dismissed_providers_by_category_[category] = provider;
   StoreDismissedCategoriesToPrefs();
+
+  category_ranker_->OnCategoryDismissed(category);
 }
 
 void ContentSuggestionsService::RestoreDismissedCategories() {
@@ -222,6 +242,12 @@ void ContentSuggestionsService::Fetch(
   }
 
   providers_it->second->Fetch(category, known_suggestion_ids, callback);
+}
+
+void ContentSuggestionsService::ReloadSuggestions() {
+  for (const auto& provider : providers_) {
+    provider->ReloadSuggestions();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -316,28 +342,22 @@ void ContentSuggestionsService::OnURLsDeleted(
     return;
   }
 
-  // Redirect to ClearHistory().
   if (all_history) {
-    base::Time begin = base::Time();
-    base::Time end = base::Time::Max();
     base::Callback<bool(const GURL& url)> filter =
         base::Bind([](const GURL& url) { return true; });
-    ClearHistory(begin, end, filter);
+    ClearHistory(base::Time(), base::Time::Max(), filter);
   } else {
-    if (deleted_rows.empty()) {
+    // If a user deletes a single URL, we don't consider this a clear user
+    // intend to clear our data.
+    // TODO(tschumann): Single URL deletions should be handled on a case-by-case
+    // basis. However this depends on the provider's details and thus cannot be
+    // done here. Introduce a OnURLsDeleted() method on the providers to move
+    // this decision further down.
+    if (deleted_rows.size() < 2) {
       return;
     }
-
-    base::Time begin = deleted_rows[0].last_visit();
-    base::Time end = deleted_rows[0].last_visit();
     std::set<GURL> deleted_urls;
     for (const history::URLRow& row : deleted_rows) {
-      if (row.last_visit() < begin) {
-        begin = row.last_visit();
-      }
-      if (row.last_visit() > end) {
-        end = row.last_visit();
-      }
       deleted_urls.insert(row.url());
     }
     base::Callback<bool(const GURL& url)> filter = base::Bind(
@@ -345,7 +365,10 @@ void ContentSuggestionsService::OnURLsDeleted(
           return set.count(url) != 0;
         },
         deleted_urls);
-    ClearHistory(begin, end, filter);
+    // We usually don't have any time-related information (the URLRow objects
+    // usually don't provide a |last_visit()| timestamp. Hence we simply clear
+    // the whole history for the selected URLs.
+    ClearHistory(base::Time(), base::Time::Max(), filter);
   }
 }
 
@@ -388,7 +411,6 @@ void ContentSuggestionsService::RegisterCategory(
 
   providers_by_category_[category] = provider;
   categories_.push_back(category);
-  SortCategories();
   if (IsCategoryStatusAvailable(provider->GetCategoryStatus(category))) {
     suggestions_by_category_.insert(
         std::make_pair(category, std::vector<ContentSuggestion>()));
@@ -447,13 +469,6 @@ void ContentSuggestionsService::OnSignInStateChanged() {
   }
 }
 
-void ContentSuggestionsService::SortCategories() {
-  std::sort(categories_.begin(), categories_.end(),
-            [this](const Category& left, const Category& right) {
-              return category_factory_.CompareCategories(left, right);
-            });
-}
-
 bool ContentSuggestionsService::IsCategoryDismissed(Category category) const {
   return base::ContainsKey(dismissed_providers_by_category_, category);
 }
@@ -487,8 +502,7 @@ void ContentSuggestionsService::RestoreDismissedCategoriesFromPrefs() {
     }
 
     // When the provider is registered, it will be stored in this map.
-    dismissed_providers_by_category_[category_factory()->FromIDValue(id)] =
-        nullptr;
+    dismissed_providers_by_category_[Category::FromIDValue(id)] = nullptr;
   }
 }
 

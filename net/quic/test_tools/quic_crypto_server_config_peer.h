@@ -13,22 +13,25 @@ namespace test {
 // Peer for accessing otherwise private members of a QuicCryptoServerConfig.
 class QuicCryptoServerConfigPeer {
  public:
-  explicit QuicCryptoServerConfigPeer(
-      const QuicCryptoServerConfig* server_config)
+  explicit QuicCryptoServerConfigPeer(QuicCryptoServerConfig* server_config)
       : server_config_(server_config) {}
 
   // Returns the proof source.
   ProofSource* GetProofSource();
 
   // Returns the primary config.
-  scoped_refptr<QuicCryptoServerConfig::Config> GetPrimaryConfig();
+  QuicReferenceCountedPointer<QuicCryptoServerConfig::Config>
+  GetPrimaryConfig();
 
   // Returns the config associated with |config_id|.
-  scoped_refptr<QuicCryptoServerConfig::Config> GetConfig(
+  QuicReferenceCountedPointer<QuicCryptoServerConfig::Config> GetConfig(
       std::string config_id);
 
   // Returns a pointer to the ProofSource object.
   ProofSource* GetProofSource() const;
+
+  // Reset the proof_source_ member.
+  void ResetProofSource(std::unique_ptr<ProofSource> proof_source);
 
   // Generates a new valid source address token.
   std::string NewSourceAddressToken(
@@ -58,8 +61,7 @@ class QuicCryptoServerConfigPeer {
 
   // CheckConfigs compares the state of the Configs in |server_config_| to the
   // description given as arguments. The arguments are given as
-  // nullptr-terminated std:pairs. The first of each std:pair is the server
-  // config ID of
+  // nullptr-terminated pairs. The first of each pair is the server config ID of
   // a Config. The second is a boolean describing whether the config is the
   // primary. For example:
   //   CheckConfigs(nullptr);  // checks that no Configs are loaded.
@@ -73,8 +75,7 @@ class QuicCryptoServerConfigPeer {
   //     nullptr);
   void CheckConfigs(const char* server_config_id1, ...);
 
-  // ConfigsDebug returns a std::string that contains debugging information
-  // about
+  // ConfigsDebug returns a string that contains debugging information about
   // the set of Configs loaded in |server_config_| and their status.
   std::string ConfigsDebug();
 
@@ -82,7 +83,7 @@ class QuicCryptoServerConfigPeer {
 
   static std::string CompressChain(
       QuicCompressedCertsCache* compressed_certs_cache,
-      const scoped_refptr<ProofSource::Chain>& chain,
+      const QuicReferenceCountedPointer<ProofSource::Chain>& chain,
       const std::string& client_common_set_hashes,
       const std::string& client_cached_cert_hashes,
       const CommonCertSets* common_sets);
@@ -92,7 +93,7 @@ class QuicCryptoServerConfigPeer {
   uint32_t source_address_token_lifetime_secs();
 
  private:
-  const QuicCryptoServerConfig* server_config_;
+  QuicCryptoServerConfig* server_config_;
 };
 
 }  // namespace test

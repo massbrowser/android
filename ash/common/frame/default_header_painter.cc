@@ -7,10 +7,10 @@
 #include "ash/common/ash_layout_constants.h"
 #include "ash/common/frame/caption_buttons/frame_caption_button_container_view.h"
 #include "ash/common/frame/header_painter_util.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "base/debug/leak_annotations.h"
 #include "base/logging.h"  // DCHECK
 #include "grit/ash_resources.h"
-#include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/animation/slide_animation.h"
@@ -21,7 +21,6 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/gfx/skia_util.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/native_widget_aura.h"
 #include "ui/views/widget/widget.h"
@@ -45,7 +44,7 @@ const int kActivationCrossfadeDurationMs = 200;
 
 // Tiles an image into an area, rounding the top corners.
 void TileRoundRect(gfx::Canvas* canvas,
-                   const SkPaint& paint,
+                   const cc::PaintFlags& paint,
                    const gfx::Rect& bounds,
                    int corner_radius) {
   SkRect rect = gfx::RectToSkRect(bounds);
@@ -139,11 +138,11 @@ void DefaultHeaderPainter::PaintHeader(gfx::Canvas* canvas, Mode mode) {
                           ? 0
                           : HeaderPainterUtil::GetTopCornerRadiusWhenRestored();
 
-  SkPaint paint;
+  cc::PaintFlags paint;
   int active_alpha = activation_animation_->CurrentValueBetween(0, 255);
   paint.setColor(color_utils::AlphaBlend(active_frame_color_,
                                          inactive_frame_color_, active_alpha));
-
+  paint.setAntiAlias(true);
   TileRoundRect(canvas, paint, GetLocalBounds(), corner_radius);
 
   if (!frame_->IsMaximized() && !frame_->IsFullscreen() &&
@@ -270,7 +269,7 @@ void DefaultHeaderPainter::PaintHeaderContentSeparator(gfx::Canvas* canvas) {
   gfx::ScopedCanvas scoped_canvas(canvas);
   const float scale = canvas->UndoDeviceScaleFactor();
   gfx::RectF rect(0, painted_height_ * scale - 1, view_->width() * scale, 1);
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setColor((mode_ == MODE_ACTIVE) ? kHeaderContentSeparatorColor
                                         : kHeaderContentSeparatorInactiveColor);
   canvas->sk_canvas()->drawRect(gfx::RectFToSkRect(rect), paint);
@@ -283,29 +282,27 @@ bool DefaultHeaderPainter::ShouldUseLightImages() {
 
 void DefaultHeaderPainter::UpdateAllButtonImages() {
   caption_button_container_->SetUseLightImages(ShouldUseLightImages());
-  caption_button_container_->SetButtonImage(
-      CAPTION_BUTTON_ICON_MINIMIZE, gfx::VectorIconId::WINDOW_CONTROL_MINIMIZE);
+  caption_button_container_->SetButtonImage(CAPTION_BUTTON_ICON_MINIMIZE,
+                                            kWindowControlMinimizeIcon);
 
   UpdateSizeButtonImages();
 
-  caption_button_container_->SetButtonImage(
-      CAPTION_BUTTON_ICON_CLOSE, gfx::VectorIconId::WINDOW_CONTROL_CLOSE);
+  caption_button_container_->SetButtonImage(CAPTION_BUTTON_ICON_CLOSE,
+                                            kWindowControlCloseIcon);
 
-  caption_button_container_->SetButtonImage(
-      CAPTION_BUTTON_ICON_LEFT_SNAPPED,
-      gfx::VectorIconId::WINDOW_CONTROL_LEFT_SNAPPED);
+  caption_button_container_->SetButtonImage(CAPTION_BUTTON_ICON_LEFT_SNAPPED,
+                                            kWindowControlLeftSnappedIcon);
 
-  caption_button_container_->SetButtonImage(
-      CAPTION_BUTTON_ICON_RIGHT_SNAPPED,
-      gfx::VectorIconId::WINDOW_CONTROL_RIGHT_SNAPPED);
+  caption_button_container_->SetButtonImage(CAPTION_BUTTON_ICON_RIGHT_SNAPPED,
+                                            kWindowControlRightSnappedIcon);
 }
 
 void DefaultHeaderPainter::UpdateSizeButtonImages() {
-  gfx::VectorIconId icon_id = frame_->IsMaximized() || frame_->IsFullscreen()
-                                  ? gfx::VectorIconId::WINDOW_CONTROL_RESTORE
-                                  : gfx::VectorIconId::WINDOW_CONTROL_MAXIMIZE;
+  const gfx::VectorIcon& icon = frame_->IsMaximized() || frame_->IsFullscreen()
+                                    ? kWindowControlRestoreIcon
+                                    : kWindowControlMaximizeIcon;
   caption_button_container_->SetButtonImage(
-      CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE, icon_id);
+      CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE, icon);
 }
 
 gfx::Rect DefaultHeaderPainter::GetLocalBounds() const {

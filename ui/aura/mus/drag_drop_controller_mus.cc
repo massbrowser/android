@@ -9,8 +9,10 @@
 #include <vector>
 
 #include "base/auto_reset.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "mojo/public/cpp/bindings/map.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
 #include "services/ui/public/interfaces/window_tree_constants.mojom.h"
 #include "ui/aura/client/drag_drop_delegate.h"
@@ -198,7 +200,7 @@ DragDropControllerMus::CreateDropTargetEvent(Window* window,
                                              uint32_t effect_bitmask) {
   DCHECK(window->GetHost());
   gfx::Point root_location = screen_location;
-  window->GetHost()->ConvertPointFromNativeScreen(&root_location);
+  window->GetHost()->ConvertScreenInPixelsToDIP(&root_location);
   gfx::Point location = root_location;
   Window::ConvertPointToTarget(window->GetRootWindow(), window, &location);
   std::unique_ptr<ui::DropTargetEvent> event =

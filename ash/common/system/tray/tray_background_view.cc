@@ -11,7 +11,6 @@
 #include "ash/common/shelf/shelf_constants.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/shelf/wm_shelf_util.h"
-#include "ash/common/system/status_area_widget.h"
 #include "ash/common/system/tray/system_tray.h"
 #include "ash/common/system/tray/tray_constants.h"
 #include "ash/common/system/tray/tray_event_filter.h"
@@ -19,6 +18,7 @@
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "base/memory/ptr_util.h"
 #include "grit/ash_resources.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/nine_image_painter_factory.h"
@@ -114,15 +114,6 @@ class TrayBackgroundView::TrayWidgetObserver : public views::WidgetObserver {
 
 class TrayBackground : public views::Background {
  public:
-  const static int kImageTypeDefault = 0;
-  const static int kImageTypeOnBlack = 1;
-  const static int kImageTypePressed = 2;
-  const static int kNumStates = 3;
-
-  const static int kImageHorizontal = 0;
-  const static int kImageVertical = 1;
-  const static int kNumOrientations = 2;
-
   TrayBackground(TrayBackgroundView* tray_background_view, bool draws_active)
       : tray_background_view_(tray_background_view),
         draws_active_(draws_active),
@@ -136,8 +127,8 @@ class TrayBackground : public views::Background {
   WmShelf* GetShelf() const { return tray_background_view_->shelf(); }
 
   void PaintMaterial(gfx::Canvas* canvas, views::View* view) const {
-    SkPaint background_paint;
-    background_paint.setFlags(SkPaint::kAntiAlias_Flag);
+    cc::PaintFlags background_paint;
+    background_paint.setFlags(cc::PaintFlags::kAntiAlias_Flag);
     background_paint.setColor(SkColorSetA(kShelfBaseColor, alpha_));
     gfx::Insets insets =
         GetMirroredBackgroundInsets(GetShelf()->GetAlignment());
@@ -146,15 +137,27 @@ class TrayBackground : public views::Background {
     canvas->DrawRoundRect(bounds, kTrayRoundedBorderRadius, background_paint);
 
     if (draws_active_ && tray_background_view_->is_active()) {
-      SkPaint highlight_paint;
-      highlight_paint.setFlags(SkPaint::kAntiAlias_Flag);
+      cc::PaintFlags highlight_paint;
+      highlight_paint.setFlags(cc::PaintFlags::kAntiAlias_Flag);
       highlight_paint.setColor(kShelfButtonActivatedHighlightColor);
       canvas->DrawRoundRect(bounds, kTrayRoundedBorderRadius, highlight_paint);
     }
   }
 
   void PaintNonMaterial(gfx::Canvas* canvas, views::View* view) const {
+    const static int kImageTypeDefault = 0;
+    // TODO(estade): leftover type which should be removed along with the rest
+    // of pre-MD code.
+    // const static int kImageTypeOnBlack = 1;
+    const static int kImageTypePressed = 2;
+    const static int kNumStates = 3;
+
+    const static int kImageHorizontal = 0;
+    const static int kImageVertical = 1;
+    const static int kNumOrientations = 2;
+
     const int kGridSizeForPainter = 9;
+
     const int kImages[kNumOrientations][kNumStates][kGridSizeForPainter] = {
         {
             // Horizontal
@@ -177,8 +180,6 @@ class TrayBackground : public views::Background {
     int state = kImageTypeDefault;
     if (draws_active_ && tray_background_view_->is_active())
       state = kImageTypePressed;
-    else if (shelf->IsDimmed())
-      state = kImageTypeOnBlack;
     else
       state = kImageTypeDefault;
 
@@ -290,7 +291,7 @@ TrayBackgroundView::TrayBackgroundView(WmShelf* wm_shelf)
       shelf_alignment_(SHELF_ALIGNMENT_BOTTOM),
       background_(NULL),
       is_active_(false),
-      is_separator_visible_(false),
+      separator_visible_(true),
       widget_observer_(new TrayWidgetObserver(this)) {
   DCHECK(wm_shelf_);
   set_notify_enter_exit_on_child(true);
@@ -301,7 +302,7 @@ TrayBackgroundView::TrayBackgroundView(WmShelf* wm_shelf)
   SetContents(tray_container_);
   tray_event_filter_.reset(new TrayEventFilter);
 
-  SetPaintToLayer(true);
+  SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
   // Start the tray items not visible, because visibility changes are animated.
   views::View::SetVisible(false);
@@ -376,7 +377,6 @@ void TrayBackgroundView::SetVisible(bool visible) {
     layer()->SetVisible(false);
     HideTransformation();
   }
-  wm_shelf_->GetStatusAreaWidget()->OnTrayVisibilityChanged(this);
 }
 
 const char* TrayBackgroundView::GetClassName() const {
@@ -402,13 +402,23 @@ void TrayBackgroundView::AboutToRequestFocusFromTabTraversal(bool reverse) {
 std::unique_ptr<views::InkDropRipple> TrayBackgroundView::CreateInkDropRipple()
     const {
   return base::MakeUnique<views::FloodFillInkDropRipple>(
-      GetInkDropBounds(), GetInkDropCenterBasedOnLastEvent(),
+      size(), GetBackgroundInsets(), GetInkDropCenterBasedOnLastEvent(),
       GetInkDropBaseColor(), ink_drop_visible_opacity());
 }
 
 std::unique_ptr<views::InkDropHighlight>
 TrayBackgroundView::CreateInkDropHighlight() const {
-  gfx::Rect bounds = GetInkDropBounds();
+  gfx::Rect bounds = GetBackgroundBounds();
+  // Currently, we don't handle view resize. To compensate for that, enlarge the
+  // bounds by two tray icons so that the hightlight looks good even if two more
+  // icons are added when it is visible. Note that ink drop mask handles resize
+  // correctly, so the extra highlight would be clipped.
+  // TODO(mohsen): Remove this extra size when resize is handled properly (see
+  // https://crbug.com/669253).
+  const int icon_size =
+      kTrayIconSize + 2 * GetTrayConstant(TRAY_IMAGE_ITEM_PADDING);
+  bounds.set_width(bounds.width() + 2 * icon_size);
+  bounds.set_height(bounds.height() + 2 * icon_size);
   std::unique_ptr<views::InkDropHighlight> highlight(
       new views::InkDropHighlight(bounds.size(), 0,
                                   gfx::RectF(bounds).CenterPoint(),
@@ -511,11 +521,6 @@ void TrayBackgroundView::UpdateShelfItemBackground(int alpha) {
   }
 }
 
-void TrayBackgroundView::SetSeparatorVisibility(bool is_shown) {
-  is_separator_visible_ = is_shown;
-  SchedulePaint();
-}
-
 views::View* TrayBackgroundView::GetBubbleAnchor() const {
   return tray_container_;
 }
@@ -523,20 +528,12 @@ views::View* TrayBackgroundView::GetBubbleAnchor() const {
 gfx::Insets TrayBackgroundView::GetBubbleAnchorInsets() const {
   gfx::Insets anchor_insets = GetBubbleAnchor()->GetInsets();
   gfx::Insets tray_bg_insets = GetInsets();
-  // TODO(estade): for reasons I don't understand, BubbleBorder distances the
-  // bubble by the arrow's "interior" thickness even when the paint type is
-  // PAINT_NONE.
-  const int kBigShadowArrowInteriorThickness = 9;
   if (GetAnchorAlignment() == TrayBubbleView::ANCHOR_ALIGNMENT_BOTTOM) {
-    return gfx::Insets(kBigShadowArrowInteriorThickness - tray_bg_insets.top(),
-                       anchor_insets.left(), -tray_bg_insets.bottom(),
-                       anchor_insets.right());
+    return gfx::Insets(-tray_bg_insets.top(), anchor_insets.left(),
+                       -tray_bg_insets.bottom(), anchor_insets.right());
   } else {
-    return gfx::Insets(
-        anchor_insets.top(),
-        kBigShadowArrowInteriorThickness - tray_bg_insets.left(),
-        anchor_insets.bottom(),
-        kBigShadowArrowInteriorThickness - tray_bg_insets.right());
+    return gfx::Insets(anchor_insets.top(), -tray_bg_insets.left(),
+                       anchor_insets.bottom(), -tray_bg_insets.right());
   }
 }
 
@@ -565,17 +562,20 @@ void TrayBackgroundView::HandlePerformActionResult(bool action_performed,
   ActionableView::HandlePerformActionResult(action_performed, event);
 }
 
-gfx::Rect TrayBackgroundView::GetFocusBounds() {
+void TrayBackgroundView::OnPaintFocus(gfx::Canvas* canvas) {
   // The tray itself expands to the right and bottom edge of the screen to make
   // sure clicking on the edges brings up the popup. However, the focus border
   // should be only around the container.
-  return GetContentsBounds();
-}
-
-void TrayBackgroundView::OnPaintFocus(gfx::Canvas* canvas) {
-  gfx::Rect paint_bounds(GetFocusBounds());
-  paint_bounds.Inset(2, -2, 3, -2);
-  canvas->DrawSolidFocusRect(paint_bounds, kFocusBorderColor);
+  gfx::RectF paint_bounds;
+  if (MaterialDesignController::IsShelfMaterial()) {
+    paint_bounds = gfx::RectF(GetBackgroundBounds());
+    paint_bounds.Inset(gfx::Insets(-kFocusBorderThickness));
+  } else {
+    paint_bounds = gfx::RectF(GetContentsBounds());
+    paint_bounds.Inset(gfx::Insets(1));
+  }
+  canvas->DrawSolidFocusRect(paint_bounds, kFocusBorderColor,
+                             kFocusBorderThickness);
 }
 
 void TrayBackgroundView::OnPaint(gfx::Canvas* canvas) {
@@ -583,7 +583,7 @@ void TrayBackgroundView::OnPaint(gfx::Canvas* canvas) {
   if (!MaterialDesignController::IsShelfMaterial() ||
       shelf()->GetBackgroundType() ==
           ShelfBackgroundType::SHELF_BACKGROUND_DEFAULT ||
-      !is_separator_visible_) {
+      !separator_visible_) {
     return;
   }
   //  In the given |canvas|, for a horizontal shelf draw a separator line to the
@@ -600,7 +600,7 @@ void TrayBackgroundView::OnPaint(gfx::Canvas* canvas) {
   const int y = (GetShelfConstant(SHELF_SIZE) - kTrayItemSize) / 2;
   gfx::ScopedCanvas scoped_canvas(canvas);
   const float scale = canvas->UndoDeviceScaleFactor();
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setColor(kSeparatorColor);
   paint.setAntiAlias(true);
 
@@ -632,20 +632,10 @@ gfx::Insets TrayBackgroundView::GetBackgroundInsets() const {
   return insets;
 }
 
-gfx::Rect TrayBackgroundView::GetInkDropBounds() const {
+gfx::Rect TrayBackgroundView::GetBackgroundBounds() const {
   gfx::Insets insets = GetBackgroundInsets();
   gfx::Rect bounds = GetLocalBounds();
   bounds.Inset(insets);
-  // Currently, we don't handle view resize. To compensate for that, enlarge the
-  // bounds by two tray icons so that ripple looks good even if two more icons
-  // are added when ripple is active. Note that ink drop mask handles resize
-  // correctly, so the extra ripple would be clipped.
-  // TODO(mohsen): Remove this extra size when resize is handled properly (see
-  // https://crbug.com/666175).
-  const int icon_size =
-      kTrayIconSize + 2 * GetTrayConstant(TRAY_IMAGE_ITEM_PADDING);
-  bounds.set_width(bounds.width() + 2 * icon_size);
-  bounds.set_height(bounds.height() + 2 * icon_size);
   return bounds;
 }
 

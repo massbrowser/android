@@ -65,9 +65,6 @@ void Surface::QueueFrame(CompositorFrame frame, const DrawCallback& callback) {
 
   previous_frame_surface_id_ = surface_id();
 
-  std::vector<SurfaceId> new_referenced_surfaces;
-  new_referenced_surfaces = current_frame_->metadata.referenced_surfaces;
-
   if (previous_frame)
     UnrefFrameResources(*previous_frame);
 
@@ -75,19 +72,7 @@ void Surface::QueueFrame(CompositorFrame frame, const DrawCallback& callback) {
     draw_callback_.Run();
   draw_callback_ = callback;
 
-  bool referenced_surfaces_changed =
-      (referenced_surfaces_ != new_referenced_surfaces);
-  referenced_surfaces_ = new_referenced_surfaces;
-  std::vector<uint32_t> satisfies_sequences =
-      std::move(current_frame_->metadata.satisfies_sequences);
-
-  if (referenced_surfaces_changed || !satisfies_sequences.empty()) {
-    // Notify the manager that sequences were satisfied either if some new
-    // sequences were satisfied, or if the set of referenced surfaces changed
-    // to force a GC to happen.
-    factory_->manager()->DidSatisfySequences(surface_id_.frame_sink_id(),
-                                             &satisfies_sequences);
-  }
+  referenced_surfaces_ = current_frame_->metadata.referenced_surfaces;
 }
 
 void Surface::EvictFrame() {
@@ -101,14 +86,15 @@ void Surface::RequestCopyOfOutput(
     std::vector<std::unique_ptr<CopyOutputRequest>>& copy_requests =
         current_frame_->render_pass_list.back()->copy_requests;
 
-    if (void* source = copy_request->source()) {
+    if (copy_request->has_source()) {
+      const base::UnguessableToken& source = copy_request->source();
       // Remove existing CopyOutputRequests made on the Surface by the same
       // source.
-      auto to_remove =
-          std::remove_if(copy_requests.begin(), copy_requests.end(),
-                         [source](const std::unique_ptr<CopyOutputRequest>& x) {
-                           return x->source() == source;
-                         });
+      auto to_remove = std::remove_if(
+          copy_requests.begin(), copy_requests.end(),
+          [&source](const std::unique_ptr<CopyOutputRequest>& x) {
+            return x->has_source() && x->source() == source;
+          });
       copy_requests.erase(to_remove, copy_requests.end());
     }
     copy_requests.push_back(std::move(copy_request));
@@ -118,8 +104,7 @@ void Surface::RequestCopyOfOutput(
 }
 
 void Surface::TakeCopyOutputRequests(
-    std::multimap<RenderPassId, std::unique_ptr<CopyOutputRequest>>*
-        copy_requests) {
+    std::multimap<int, std::unique_ptr<CopyOutputRequest>>* copy_requests) {
   DCHECK(copy_requests->empty());
   if (current_frame_) {
     for (const auto& render_pass : current_frame_->render_pass_list) {
@@ -132,7 +117,7 @@ void Surface::TakeCopyOutputRequests(
   }
 }
 
-const CompositorFrame& Surface::GetEligibleFrame() {
+const CompositorFrame& Surface::GetEligibleFrame() const {
   DCHECK(current_frame_);
   return current_frame_.value();
 }

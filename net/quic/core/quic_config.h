@@ -2,17 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_CONFIG_H_
-#define NET_QUIC_QUIC_CONFIG_H_
+#ifndef NET_QUIC_CORE_QUIC_CONFIG_H_
+#define NET_QUIC_CORE_QUIC_CONFIG_H_
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
-#include "net/base/net_export.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_time.h"
+#include "net/quic/platform/api/quic_export.h"
 
 namespace net {
 
@@ -41,7 +40,7 @@ enum HelloType {
 
 // An abstract base class that stores a value that can be sent in CHLO/SHLO
 // message. These values can be OPTIONAL or REQUIRED, depending on |presence_|.
-class NET_EXPORT_PRIVATE QuicConfigValue {
+class QUIC_EXPORT_PRIVATE QuicConfigValue {
  public:
   QuicConfigValue(QuicTag tag, QuicConfigPresence presence);
   virtual ~QuicConfigValue();
@@ -61,7 +60,7 @@ class NET_EXPORT_PRIVATE QuicConfigValue {
   const QuicConfigPresence presence_;
 };
 
-class NET_EXPORT_PRIVATE QuicNegotiableValue : public QuicConfigValue {
+class QUIC_EXPORT_PRIVATE QuicNegotiableValue : public QuicConfigValue {
  public:
   QuicNegotiableValue(QuicTag tag, QuicConfigPresence presence);
   ~QuicNegotiableValue() override;
@@ -75,7 +74,7 @@ class NET_EXPORT_PRIVATE QuicNegotiableValue : public QuicConfigValue {
   bool negotiated_;
 };
 
-class NET_EXPORT_PRIVATE QuicNegotiableUint32 : public QuicNegotiableValue {
+class QUIC_EXPORT_PRIVATE QuicNegotiableUint32 : public QuicNegotiableValue {
   // TODO(fayang): some negotiated values use uint32 as bool (e.g., silent
   // close). Consider adding a QuicNegotiableBool type.
  public:
@@ -115,7 +114,7 @@ class NET_EXPORT_PRIVATE QuicNegotiableUint32 : public QuicNegotiableValue {
 };
 
 // Stores uint32_t from CHLO or SHLO messages that are not negotiated.
-class NET_EXPORT_PRIVATE QuicFixedUint32 : public QuicConfigValue {
+class QUIC_EXPORT_PRIVATE QuicFixedUint32 : public QuicConfigValue {
  public:
   QuicFixedUint32(QuicTag name, QuicConfigPresence presence);
   ~QuicFixedUint32() override;
@@ -148,7 +147,7 @@ class NET_EXPORT_PRIVATE QuicFixedUint32 : public QuicConfigValue {
 };
 
 // Stores tag from CHLO or SHLO messages that are not negotiated.
-class NET_EXPORT_PRIVATE QuicFixedTagVector : public QuicConfigValue {
+class QUIC_EXPORT_PRIVATE QuicFixedTagVector : public QuicConfigValue {
  public:
   QuicFixedTagVector(QuicTag name, QuicConfigPresence presence);
   QuicFixedTagVector(const QuicFixedTagVector& other);
@@ -184,7 +183,7 @@ class NET_EXPORT_PRIVATE QuicFixedTagVector : public QuicConfigValue {
 };
 
 // Stores QuicSocketAddress from CHLO or SHLO messages that are not negotiated.
-class NET_EXPORT_PRIVATE QuicFixedSocketAddress : public QuicConfigValue {
+class QUIC_EXPORT_PRIVATE QuicFixedSocketAddress : public QuicConfigValue {
  public:
   QuicFixedSocketAddress(QuicTag tag, QuicConfigPresence presence);
   ~QuicFixedSocketAddress() override;
@@ -216,7 +215,7 @@ class NET_EXPORT_PRIVATE QuicFixedSocketAddress : public QuicConfigValue {
 
 // QuicConfig contains non-crypto configuration options that are negotiated in
 // the crypto handshake.
-class NET_EXPORT_PRIVATE QuicConfig {
+class QUIC_EXPORT_PRIVATE QuicConfig {
  public:
   QuicConfig();
   QuicConfig(const QuicConfig& other);
@@ -241,8 +240,18 @@ class NET_EXPORT_PRIVATE QuicConfig {
 
   // Returns true if the client is sending or the server has received a
   // connection option.
+  // TODO(ianswett): Rename to HasClientRequestedSharedOption
   bool HasClientSentConnectionOption(QuicTag tag,
                                      Perspective perspective) const;
+
+  void SetClientConnectionOptions(
+      const QuicTagVector& client_connection_options);
+
+  // Returns true if the client has requested the specified connection option.
+  // Checks the client connection options if the |perspective| is client and
+  // connection options if the |perspective| is the server.
+  bool HasClientRequestedIndependentOption(QuicTag tag,
+                                           Perspective perspective) const;
 
   void SetIdleNetworkTimeout(QuicTime::Delta max_idle_network_timeout,
                              QuicTime::Delta default_idle_network_timeout);
@@ -361,6 +370,10 @@ class NET_EXPORT_PRIVATE QuicConfig {
 
   bool ForceHolBlocking(Perspective perspective) const;
 
+  void SetSupportMaxHeaderListSize();
+
+  bool SupportMaxHeaderListSize() const;
+
   bool negotiated() const;
 
   // ToHandshakeMessage serialises the settings in this object as a series of
@@ -387,8 +400,11 @@ class NET_EXPORT_PRIVATE QuicConfig {
   // Maximum number of undecryptable packets stored before CHLO/SHLO.
   size_t max_undecryptable_packets_;
 
-  // Connection options.
+  // Connection options which affect the server side.  May also affect the
+  // client side in cases when identical behavior is desirable.
   QuicFixedTagVector connection_options_;
+  // Connection options which only affect the client side.
+  QuicFixedTagVector client_connection_options_;
   // Idle network timeout in seconds.
   QuicNegotiableUint32 idle_network_timeout_seconds_;
   // Whether to use silent close.  Defaults to 0 (false) and is otherwise true.
@@ -423,8 +439,11 @@ class NET_EXPORT_PRIVATE QuicConfig {
 
   // Force HOL blocking for measurement purposes.
   QuicFixedUint32 force_hol_blocking_;
+
+  // Whether support HTTP/2 SETTINGS_MAX_HEADER_LIST_SIZE SETTINGS frame.
+  QuicFixedUint32 support_max_header_list_size_;
 };
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_CONFIG_H_
+#endif  // NET_QUIC_CORE_QUIC_CONFIG_H_

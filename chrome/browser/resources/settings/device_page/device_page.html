@@ -1,25 +1,26 @@
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
+<link rel="import" href="chrome://resources/html/md_select_css.html">
 <link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/neon-animatable.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
-<link rel="import" href="/device_page/device_page_browser_proxy.html">
-<link rel="import" href="/device_page/display.html">
-<link rel="import" href="/device_page/keyboard.html">
-<link rel="import" href="/device_page/pointers.html">
-<link rel="import" href="/device_page/storage.html">
-<link rel="import" href="/device_page/stylus.html">
-<link rel="import" href="/icons.html">
-<link rel="import" href="/prefs/prefs.html">
-<link rel="import" href="/route.html">
-<link rel="import" href="/settings_page/settings_animated_pages.html">
-<link rel="import" href="/settings_page/settings_subpage.html">
-<link rel="import" href="/settings_shared_css.html">
+<link rel="import" href="device_page_browser_proxy.html">
+<link rel="import" href="display.html">
+<link rel="import" href="keyboard.html">
+<link rel="import" href="pointers.html">
+<link rel="import" href="storage.html">
+<link rel="import" href="stylus.html">
+<link rel="import" href="../icons.html">
+<link rel="import" href="../prefs/prefs.html">
+<link rel="import" href="../route.html">
+<link rel="import" href="../settings_page/settings_animated_pages.html">
+<link rel="import" href="../settings_page/settings_subpage.html">
+<link rel="import" href="../settings_shared_css.html">
 
 <dom-module id="settings-device-page">
   <template>
-    <style include="settings-shared"></style>
+    <style include="settings-shared md-select"></style>
     <settings-animated-pages id="pages" section="device">
       <neon-animatable id="main" route-path="default">
         <div id="pointersRow" class="settings-box first"
@@ -57,6 +58,35 @@
           <div class="middle">$i18n{storageTitle}</div>
           <button class="subpage-arrow" is="paper-icon-button-light"></button>
         </div>
+        <template is="dom-if" if="[[enablePowerSettings_]]">
+          <div id="powerRow" class="settings-box two-line">
+            <iron-icon icon="[[batteryIcon_]]"></iron-icon>
+            <div class="middle">
+              <div>[[powerLabel_]]</div>
+              <div class="secondary">[[batteryStatus_.statusText]]</div>
+            </div>
+            <div class="md-select-wrapper"
+                hidden$="[[!showPowerDropdown_]]">
+              <select id="powerSource" class="md-select"
+                  on-change="onPowerSourceChange_">
+                <option value=""
+                    selected$="[[isEqual_('', selectedPowerSourceId_)]]">
+                  $i18n{powerSourceBattery}
+                </option>
+                <template is="dom-repeat" items="[[powerSources_]]">
+                  <option value="[[item.id]]"
+                      selected$="[[isEqual_(item.id, selectedPowerSourceId_)]]">
+                    [[item.description]]
+                  </option>
+                </template>
+              </select>
+              <span class="md-select-underline"></span>
+            </div>
+            <div hidden$="[[showPowerDropdown_]]">
+              [[powerSourceName_]]
+            </div>
+          </div>
+        </template>
       </neon-animatable>
       <template is="dom-if" route-path="/pointer-overlay">
         <settings-subpage

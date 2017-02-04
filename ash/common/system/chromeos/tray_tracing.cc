@@ -16,12 +16,12 @@
 #include "ash/common/system/tray/tray_popup_utils.h"
 #include "ash/common/system/tray/tri_view.h"
 #include "ash/common/wm_shell.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
@@ -38,20 +38,25 @@ class DefaultTracingView : public ActionableView {
     SetLayoutManager(new views::FillLayout);
     TriView* tri_view = TrayPopupUtils::CreateDefaultRowView();
     AddChildView(tri_view);
-    image_ = TrayPopupUtils::CreateMainImageView();
-    tri_view->AddView(TriView::Container::START, image_);
+    auto image = TrayPopupUtils::CreateMainImageView();
+    tri_view->AddView(TriView::Container::START, image);
 
-    label_ = TrayPopupUtils::CreateDefaultLabel();
-    label_->SetMultiLine(true);
-    label_->SetText(bundle.GetLocalizedString(IDS_ASH_STATUS_TRAY_TRACING));
-    tri_view->AddView(TriView::Container::CENTER, label_);
+    auto label = TrayPopupUtils::CreateDefaultLabel();
+    label->SetMultiLine(true);
+    label->SetText(bundle.GetLocalizedString(IDS_ASH_STATUS_TRAY_TRACING));
+    tri_view->AddView(TriView::Container::CENTER, label);
 
     if (MaterialDesignController::UseMaterialDesignSystemIcons()) {
-      UpdateStyle();
+      TrayPopupItemStyle style(
+          TrayPopupItemStyle::FontStyle::DEFAULT_VIEW_LABEL);
+      style.SetupLabel(label);
+      image->SetImage(
+          gfx::CreateVectorIcon(kSystemMenuTracingIcon, style.GetIconColor()));
+
       SetInkDropMode(InkDropHostView::InkDropMode::ON);
     } else {
       // The icon doesn't change in non-md.
-      image_->SetImage(
+      image->SetImage(
           bundle.GetImageNamed(IDR_AURA_UBER_TRAY_TRACING).ToImageSkia());
     }
   }
@@ -59,27 +64,6 @@ class DefaultTracingView : public ActionableView {
   ~DefaultTracingView() override {}
 
  private:
-  // Update text and image color based on the current theme of the system.
-  void UpdateStyle() {
-    TrayPopupItemStyle style(GetNativeTheme(),
-                             TrayPopupItemStyle::FontStyle::DEFAULT_VIEW_LABEL);
-    style.SetupLabel(label_);
-
-    // TODO(tdanderson): Update the icon used for tracing or remove it from
-    // the system menu. See crbug.com/625691.
-    image_->SetImage(CreateVectorIcon(gfx::VectorIconId::CODE, kMenuIconSize,
-                                      style.GetIconColor()));
-  }
-
-  // ActionableView:
-  void OnNativeThemeChanged(const ui::NativeTheme* theme) override {
-    ActionableView::OnNativeThemeChanged(theme);
-
-    if (!MaterialDesignController::IsSystemTrayMenuMaterial())
-      return;
-    UpdateStyle();
-  }
-
   bool PerformAction(const ui::Event& event) override {
     WmShell::Get()->RecordUserMetricsAction(
         UMA_STATUS_AREA_TRACING_DEFAULT_SELECTED);
@@ -87,9 +71,6 @@ class DefaultTracingView : public ActionableView {
     CloseSystemBubble();
     return true;
   }
-
-  views::ImageView* image_;
-  views::Label* label_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultTracingView);
 };

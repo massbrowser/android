@@ -35,6 +35,8 @@ enum class UMAWebBluetoothFunction {
   REMOTE_GATT_SERVER_DISCONNECT = 8,
   SERVICE_GET_CHARACTERISTICS = 9,
   GET_PRIMARY_SERVICES = 10,
+  DESCRIPTOR_READ_VALUE = 11,
+  DESCRIPTOR_WRITE_VALUE = 12,
   // NOTE: Add new actions immediately above this line. Make sure to update
   // the enum list in tools/metrics/histograms/histograms.xml accordingly.
   COUNT
@@ -51,6 +53,7 @@ enum class CacheQueryOutcome {
   NO_DEVICE = 2,
   NO_SERVICE = 3,
   NO_CHARACTERISTIC = 4,
+  NO_DESCRIPTOR = 5,
 };
 
 // requestDevice() Metrics
@@ -236,6 +239,8 @@ enum class UMAGATTOperation {
   CHARACTERISTIC_READ,
   CHARACTERISTIC_WRITE,
   START_NOTIFICATIONS,
+  DESCRIPTOR_READ,
+  DESCRIPTOR_WRITE,
   // Note: Add new GATT Operations immediately above this line.
   COUNT
 };
@@ -276,6 +281,26 @@ void RecordStartNotificationsOutcome(UMAGATTOperationOutcome outcome);
 // called if QueryCacheForCharacteristic fails.
 void RecordStartNotificationsOutcome(CacheQueryOutcome outcome);
 
+// Descriptor.readValue() Metrics
+// There should be a call to this function for every call to
+// Send(BluetoothMsg_ReadDescriptorValueSuccess) and
+// Send(BluetoothMsg_ReadDescriptorValueError).
+void RecordDescriptorReadValueOutcome(UMAGATTOperationOutcome error);
+
+// Records the outcome of a cache query for readValue. Should only be called if
+// QueryCacheForDescriptor fails.
+void RecordDescriptorReadValueOutcome(CacheQueryOutcome outcome);
+
+// Descriptor.writeValue() Metrics
+// There should be a call to this function for every call to
+// Send(BluetoothMsg_ReadDescriptorValueSuccess) and
+// Send(BluetoothMsg_ReadDescriptorValueError).
+void RecordDescriptorWriteValueOutcome(UMAGATTOperationOutcome error);
+
+// Records the outcome of a cache query for writeValue. Should only be called if
+// QueryCacheForDescriptor fails.
+void RecordDescriptorWriteValueOutcome(CacheQueryOutcome outcome);
+
 enum class UMARSSISignalStrengthLevel {
   LESS_THAN_OR_EQUAL_TO_MIN_RSSI,
   LEVEL_0,
@@ -293,6 +318,11 @@ enum class UMARSSISignalStrengthLevel {
 // called.
 void RecordRSSISignalStrength(int rssi);
 void RecordRSSISignalStrengthLevel(UMARSSISignalStrengthLevel level);
+
+// In the case of not accepting all devices in the options that are given
+// to WebBluetooth requestDevice(), records the number of devices in the
+// chooser when a device is paired.
+void RecordNumOfDevices(bool accept_all_devices, size_t num_of_devices);
 
 }  // namespace content
 

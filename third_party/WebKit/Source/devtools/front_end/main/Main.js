@@ -99,26 +99,24 @@ Main.Main = class {
     Runtime.experiments.register('blackboxJSFramesOnTimeline', 'Blackbox JavaScript frames on Timeline', true);
     Runtime.experiments.register('colorContrastRatio', 'Contrast ratio line in color picker', true);
     Runtime.experiments.register('continueToFirstInvocation', 'Continue to first invocation', true);
+    Runtime.experiments.register('cssTrackerPanel', 'Panel that tracks the usage of CSS rules.');
     Runtime.experiments.register('emptySourceMapAutoStepping', 'Empty sourcemap auto-stepping');
     Runtime.experiments.register('inputEventsOnTimelineOverview', 'Input events on Timeline overview', true);
-    Runtime.experiments.register('layoutEditor', 'Layout editor', true);
-    Runtime.experiments.register('inspectTooltip', 'Dark inspect element tooltip');
     Runtime.experiments.register('liveSASS', 'Live SASS');
-    Runtime.experiments.register('nodeDebugging', 'Node debugging', true);
+    Runtime.experiments.register('networkGroupingRequests', 'Network request groups support', true);
+    Runtime.experiments.register('objectPreviews', 'Object previews', true);
     Runtime.experiments.register('persistence2', 'Persistence 2.0');
-    Runtime.experiments.register('privateScriptInspection', 'Private script inspection');
+    Runtime.experiments.register('persistenceValidation', 'Validate persistence bindings');
     Runtime.experiments.register('requestBlocking', 'Request blocking', true);
-    Runtime.experiments.register('resolveVariableNames', 'Resolve variable names');
     Runtime.experiments.register('timelineShowAllEvents', 'Show all events on Timeline', true);
     Runtime.experiments.register('timelineShowAllProcesses', 'Show all processes on Timeline', true);
-    Runtime.experiments.register('securityPanel', 'Security panel');
+    Runtime.experiments.register('timelinePaintTimingMarkers', 'Show paint timing markers on Timeline', true);
     Runtime.experiments.register('sourceDiff', 'Source diff');
     Runtime.experiments.register('terminalInDrawer', 'Terminal in drawer', true);
     Runtime.experiments.register('timelineInvalidationTracking', 'Timeline invalidation tracking', true);
-    Runtime.experiments.register('timelineRecordingPerspectives', 'Timeline recording perspectives UI');
+    Runtime.experiments.register('timelineMultipleMainViews', 'Timeline with multiple main views');
     Runtime.experiments.register('timelineTracingJSProfile', 'Timeline tracing based JS profiler', true);
     Runtime.experiments.register('timelineV8RuntimeCallStats', 'V8 Runtime Call Stats on Timeline', true);
-    Runtime.experiments.register('timelineRuleUsageRecording', 'Track CSS rules usage while recording Timeline.');
     Runtime.experiments.register('timelinePerFrameTrack', 'Show track per frame on Timeline', true);
 
     Runtime.experiments.cleanUpStaleExperiments();
@@ -126,17 +124,15 @@ Main.Main = class {
     if (Host.isUnderTest(prefs)) {
       var testPath = JSON.parse(prefs['testPath'] || '""');
       // Enable experiments for testing.
-      if (testPath.indexOf('layers/') !== -1)
-        Runtime.experiments.enableForTest('layersPanel');
-      if (testPath.indexOf('timeline/') !== -1 || testPath.indexOf('layers/') !== -1)
-        Runtime.experiments.enableForTest('layersPanel');
-      if (testPath.indexOf('security/') !== -1)
-        Runtime.experiments.enableForTest('securityPanel');
       if (testPath.indexOf('accessibility/') !== -1)
         Runtime.experiments.enableForTest('accessibilityInspection');
+      if (testPath.indexOf('css_tracker') !== -1)
+        Runtime.experiments.enableForTest('cssTrackerPanel');
+      if (testPath.indexOf('audits2/') !== -1)
+        Runtime.experiments.enableForTest('audits2');
     }
 
-    Runtime.experiments.setDefaultExperiments(['inspectTooltip', 'securityPanel', 'resolveVariableNames']);
+    Runtime.experiments.setDefaultExperiments(['persistenceValidation', 'timelineMultipleMainViews']);
   }
 
   /**
@@ -170,12 +166,12 @@ Main.Main = class {
     SDK.targetManager.addEventListener(
         SDK.TargetManager.Events.SuspendStateChanged, this._onSuspendStateChanged.bind(this));
 
-    Components.shortcutsScreen = new Components.ShortcutsScreen();
+    UI.shortcutsScreen = new UI.ShortcutsScreen();
     // set order of some sections explicitly
-    Components.shortcutsScreen.section(Common.UIString('Elements Panel'));
-    Components.shortcutsScreen.section(Common.UIString('Styles Pane'));
-    Components.shortcutsScreen.section(Common.UIString('Debugger'));
-    Components.shortcutsScreen.section(Common.UIString('Console'));
+    UI.shortcutsScreen.section(Common.UIString('Elements Panel'));
+    UI.shortcutsScreen.section(Common.UIString('Styles Pane'));
+    UI.shortcutsScreen.section(Common.UIString('Debugger'));
+    UI.shortcutsScreen.section(Common.UIString('Console'));
 
     Workspace.fileManager = new Workspace.FileManager();
     Workspace.workspace = new Workspace.Workspace();
@@ -190,13 +186,12 @@ Main.Main = class {
         new Bindings.BreakpointManager(null, Workspace.workspace, SDK.targetManager, Bindings.debuggerWorkspaceBinding);
     Extensions.extensionServer = new Extensions.ExtensionServer();
 
-    var fileSystemWorkspaceBinding =
-        new Persistence.FileSystemWorkspaceBinding(Workspace.isolatedFileSystemManager, Workspace.workspace);
+    new Persistence.FileSystemWorkspaceBinding(Workspace.isolatedFileSystemManager, Workspace.workspace);
     Persistence.persistence =
         new Persistence.Persistence(Workspace.workspace, Bindings.breakpointManager, Workspace.fileSystemMapping);
 
     new Main.OverlayController();
-    new Components.ExecutionContextSelector(SDK.targetManager, UI.context);
+    new Main.ExecutionContextSelector(SDK.targetManager, UI.context);
     Bindings.blackboxManager = new Bindings.BlackboxManager(Bindings.debuggerWorkspaceBinding);
 
     new Main.Main.PauseListener();
@@ -208,7 +203,7 @@ Main.Main = class {
 
     UI.actionRegistry = new UI.ActionRegistry();
     UI.shortcutRegistry = new UI.ShortcutRegistry(UI.actionRegistry, document);
-    Components.ShortcutsScreen.registerShortcuts();
+    UI.ShortcutsScreen.registerShortcuts();
     this._registerForwardedShortcuts();
     this._registerMessageSinkListener();
     new Main.Main.InspectorDomainObserver();
@@ -336,18 +331,12 @@ Main.Main = class {
 
   _registerShortcuts() {
     var shortcut = UI.KeyboardShortcut;
-    var section = Components.shortcutsScreen.section(Common.UIString('All Panels'));
+    var section = UI.shortcutsScreen.section(Common.UIString('All Panels'));
     var keys = [
       shortcut.makeDescriptor('[', shortcut.Modifiers.CtrlOrMeta),
       shortcut.makeDescriptor(']', shortcut.Modifiers.CtrlOrMeta)
     ];
     section.addRelatedKeys(keys, Common.UIString('Go to the panel to the left/right'));
-
-    keys = [
-      shortcut.makeDescriptor('[', shortcut.Modifiers.CtrlOrMeta | shortcut.Modifiers.Alt),
-      shortcut.makeDescriptor(']', shortcut.Modifiers.CtrlOrMeta | shortcut.Modifiers.Alt)
-    ];
-    section.addRelatedKeys(keys, Common.UIString('Go back/forward in panel history'));
 
     var toggleConsoleLabel = Common.UIString('Show console');
     section.addKey(shortcut.makeDescriptor(shortcut.Keys.Tilde, shortcut.Modifiers.Ctrl), toggleConsoleLabel);
@@ -605,7 +594,6 @@ Main.Main.WarningErrorCounter = class {
     var shadowRoot = UI.createShadowRootWithCoreStyles(this._counter, 'main/errorWarningCounter.css');
 
     this._errors = this._createItem(shadowRoot, 'smallicon-error');
-    this._revokedErrors = this._createItem(shadowRoot, 'smallicon-revoked-error');
     this._warnings = this._createItem(shadowRoot, 'smallicon-warning');
     this._titles = [];
 
@@ -645,25 +633,18 @@ Main.Main.WarningErrorCounter = class {
 
   _update() {
     var errors = 0;
-    var revokedErrors = 0;
     var warnings = 0;
     var targets = SDK.targetManager.targets();
     for (var i = 0; i < targets.length; ++i) {
       errors += targets[i].consoleModel.errors();
-      revokedErrors += targets[i].consoleModel.revokedErrors();
       warnings += targets[i].consoleModel.warnings();
     }
 
     this._titles = [];
-    this._toolbarItem.setVisible(!!(errors || revokedErrors || warnings));
+    this._toolbarItem.setVisible(!!(errors || warnings));
     this._updateItem(this._errors, errors, false, Common.UIString(errors === 1 ? '%d error' : '%d errors', errors));
     this._updateItem(
-        this._revokedErrors, revokedErrors, !errors,
-        Common.UIString(
-            revokedErrors === 1 ? '%d handled promise rejection' : '%d handled promise rejections', revokedErrors));
-    this._updateItem(
-        this._warnings, warnings, !errors && !revokedErrors,
-        Common.UIString(warnings === 1 ? '%d warning' : '%d warnings', warnings));
+        this._warnings, warnings, !errors, Common.UIString(warnings === 1 ? '%d warning' : '%d warnings', warnings));
     this._counter.title = this._titles.join(', ');
     UI.inspectorView.toolbarItemResized();
   }
@@ -684,7 +665,7 @@ Main.Main.WarningErrorCounter = class {
 Main.Main.MainMenuItem = class {
   constructor() {
     this._item = new UI.ToolbarButton(Common.UIString('Customize and control DevTools'), 'largeicon-menu');
-    this._item.addEventListener('mousedown', this._mouseDown, this);
+    this._item.addEventListener(UI.ToolbarButton.Events.MouseDown, this._mouseDown, this);
   }
 
   /**
@@ -716,13 +697,21 @@ Main.Main.MainMenuItem = class {
       var undock = new UI.ToolbarToggle(Common.UIString('Undock into separate window'), 'largeicon-undock');
       var bottom = new UI.ToolbarToggle(Common.UIString('Dock to bottom'), 'largeicon-dock-to-bottom');
       var right = new UI.ToolbarToggle(Common.UIString('Dock to right'), 'largeicon-dock-to-right');
-      undock.addEventListener('mouseup', setDockSide.bind(null, Components.DockController.State.Undocked));
-      bottom.addEventListener('mouseup', setDockSide.bind(null, Components.DockController.State.DockedToBottom));
-      right.addEventListener('mouseup', setDockSide.bind(null, Components.DockController.State.DockedToRight));
+      var left = new UI.ToolbarToggle(Common.UIString('Dock to left'), 'largeicon-dock-to-left');
+      undock.addEventListener(
+          UI.ToolbarButton.Events.MouseUp, setDockSide.bind(null, Components.DockController.State.Undocked));
+      bottom.addEventListener(
+          UI.ToolbarButton.Events.MouseUp, setDockSide.bind(null, Components.DockController.State.DockedToBottom));
+      right.addEventListener(
+          UI.ToolbarButton.Events.MouseUp, setDockSide.bind(null, Components.DockController.State.DockedToRight));
+      left.addEventListener(
+          UI.ToolbarButton.Events.MouseUp, setDockSide.bind(null, Components.DockController.State.DockedToLeft));
       undock.setToggled(Components.dockController.dockSide() === Components.DockController.State.Undocked);
       bottom.setToggled(Components.dockController.dockSide() === Components.DockController.State.DockedToBottom);
       right.setToggled(Components.dockController.dockSide() === Components.DockController.State.DockedToRight);
+      left.setToggled(Components.dockController.dockSide() === Components.DockController.State.DockedToLeft);
       dockItemToolbar.appendToolbarItem(undock);
+      dockItemToolbar.appendToolbarItem(left);
       dockItemToolbar.appendToolbarItem(bottom);
       dockItemToolbar.appendToolbarItem(right);
       contextMenu.appendCustomItem(dockItemElement);
@@ -771,12 +760,15 @@ Main.NetworkPanelIndicator = class {
     updateVisibility();
 
     function updateVisibility() {
-      if (manager.isThrottling())
-        UI.inspectorView.setPanelIcon('network', 'smallicon-warning', Common.UIString('Network throttling is enabled'));
-      else if (blockedURLsSetting.get().length)
-        UI.inspectorView.setPanelIcon('network', 'smallicon-warning', Common.UIString('Requests may be blocked'));
-      else
-        UI.inspectorView.setPanelIcon('network', '', '');
+      var icon = null;
+      if (manager.isThrottling()) {
+        icon = UI.Icon.create('smallicon-warning');
+        icon.title = Common.UIString('Network throttling is enabled');
+      } else if (blockedURLsSetting.get().length) {
+        icon = UI.Icon.create('smallicon-warning');
+        icon.title = Common.UIString('Requests may be blocked');
+      }
+      UI.inspectorView.setPanelIcon('network', icon);
     }
   }
 };
@@ -790,11 +782,13 @@ Main.SourcesPanelIndicator = class {
     javaScriptDisabledChanged();
 
     function javaScriptDisabledChanged() {
+      var icon = null;
       var javaScriptDisabled = Common.moduleSetting('javaScriptDisabled').get();
-      if (javaScriptDisabled)
-        UI.inspectorView.setPanelIcon('sources', 'smallicon-warning', Common.UIString('JavaScript is disabled'));
-      else
-        UI.inspectorView.setPanelIcon('sources', '', '');
+      if (javaScriptDisabled) {
+        icon = UI.Icon.create('smallicon-warning');
+        icon.title = Common.UIString('JavaScript is disabled');
+      }
+      UI.inspectorView.setPanelIcon('sources', icon);
     }
   }
 };
@@ -814,8 +808,8 @@ Main.Main.PauseListener = class {
   _debuggerPaused(event) {
     SDK.targetManager.removeModelListener(
         SDK.DebuggerModel, SDK.DebuggerModel.Events.DebuggerPaused, this._debuggerPaused, this);
-    var debuggerPausedDetails = /** @type {!SDK.DebuggerPausedDetails} */ (event.data);
-    var debuggerModel = /** @type {!SDK.DebuggerModel} */ (event.target);
+    var debuggerModel = /** @type {!SDK.DebuggerModel} */ (event.data);
+    var debuggerPausedDetails = debuggerModel.debuggerPausedDetails();
     UI.context.setFlavor(SDK.Target, debuggerModel.target());
     Common.Revealer.reveal(debuggerPausedDetails);
   }
@@ -845,7 +839,7 @@ Main.Main.InspectedNodeRevealer = class {
  */
 Main.sendOverProtocol = function(method, params) {
   return new Promise((resolve, reject) => {
-    InspectorBackendClass.sendRawMessageForTesting(method, params, (err, result) => {
+    Protocol.InspectorBackend.sendRawMessageForTesting(method, params, (err, result) => {
       if (err)
         return reject(err);
       return resolve(result);
@@ -868,7 +862,7 @@ Main.RemoteDebuggingTerminatedScreen = class extends UI.VBox {
     message.createChild('span', 'reason').textContent = reason;
     this.contentElement.createChild('div', 'message').textContent =
         Common.UIString('Reconnect when ready by reopening DevTools.');
-    var button = createTextButton(Common.UIString('Reconnect DevTools'), () => window.location.reload());
+    var button = UI.createTextButton(Common.UIString('Reconnect DevTools'), () => window.location.reload());
     this.contentElement.createChild('div', 'button').appendChild(button);
   }
 
@@ -911,7 +905,7 @@ Main.TargetCrashedScreen = class extends UI.VBox {
     dialog.setWrapsContent(true);
     dialog.addCloseButton();
     dialog.setDimmed(true);
-    var hideBound = dialog.detach.bind(dialog);
+    var hideBound = dialog.detach.bind(dialog, false);
     debuggerModel.addEventListener(SDK.DebuggerModel.Events.GlobalObjectCleared, hideBound);
 
     new Main.TargetCrashedScreen(onHide).show(dialog.element);

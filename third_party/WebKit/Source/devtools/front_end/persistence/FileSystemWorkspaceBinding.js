@@ -93,7 +93,8 @@ Persistence.FileSystemWorkspaceBinding = class {
       return Common.resourceTypes.Image;
     if (Persistence.FileSystemWorkspaceBinding._scriptExtensions.has(extension))
       return Common.resourceTypes.Script;
-    return Common.resourceTypes.Other;
+    return Persistence.FileSystemWorkspaceBinding._binaryExtensions.has(extension) ? Common.resourceTypes.Other :
+                                                                                     Common.resourceTypes.Document;
   }
 
   /**
@@ -177,6 +178,17 @@ Persistence.FileSystemWorkspaceBinding._scriptExtensions = new Set([
 
 Persistence.FileSystemWorkspaceBinding._imageExtensions = Workspace.IsolatedFileSystem.ImageExtensions;
 
+Persistence.FileSystemWorkspaceBinding._binaryExtensions = new Set([
+  // Executable extensions, roughly taken from https://en.wikipedia.org/wiki/Comparison_of_executable_file_formats
+  'cmd', 'com', 'exe',
+  // Archive extensions, roughly taken from https://en.wikipedia.org/wiki/List_of_archive_formats
+  'a', 'ar', 'iso', 'tar', 'bz2', 'gz', 'lz', 'lzma', 'z', '7z', 'apk', 'arc', 'cab', 'dmg', 'jar', 'pak', 'rar', 'zip',
+  // Audio file extensions, roughly taken from https://en.wikipedia.org/wiki/Audio_file_format#List_of_formats
+  '3gp', 'aac', 'aiff', 'flac', 'm4a', 'mmf', 'mp3', 'ogg', 'oga', 'raw', 'sln', 'wav', 'wma', 'webm',
+  // Video file extensions, roughly taken from https://en.wikipedia.org/wiki/Video_file_format
+  'mkv', 'flv', 'vob', 'ogv', 'gif', 'gifv', 'avi', 'mov', 'qt', 'mp4', 'm4p', 'm4v', 'mpg', 'mpeg'
+]);
+
 
 /**
  * @implements {Workspace.Project}
@@ -198,6 +210,7 @@ Persistence.FileSystemWorkspaceBinding.FileSystem = class extends Workspace.Proj
 
     this._fileSystem = isolatedFileSystem;
     this._fileSystemBaseURL = this._fileSystem.path() + '/';
+    this._fileSystemParentURL = this._fileSystemBaseURL.substr(0, fileSystemPath.lastIndexOf('/') + 1);
     this._fileSystemWorkspaceBinding = fileSystemWorkspaceBinding;
     this._fileSystemPath = fileSystemPath;
 
@@ -225,6 +238,14 @@ Persistence.FileSystemWorkspaceBinding.FileSystem = class extends Workspace.Proj
    */
   _filePathForUISourceCode(uiSourceCode) {
     return uiSourceCode.url().substring(this._fileSystemPath.length);
+  }
+
+  /**
+   * @override
+   * @return {boolean}
+   */
+  isServiceProject() {
+    return false;
   }
 
   /**
@@ -293,6 +314,17 @@ Persistence.FileSystemWorkspaceBinding.FileSystem = class extends Workspace.Proj
   setFileContent(uiSourceCode, newContent, callback) {
     var filePath = this._filePathForUISourceCode(uiSourceCode);
     this._fileSystem.setFileContent(filePath, newContent, callback.bind(this, ''));
+  }
+
+  /**
+   * @override
+   * @param {!Workspace.UISourceCode} uiSourceCode
+   * @return {string}
+   */
+  fullDisplayName(uiSourceCode) {
+    var baseURL =
+        /** @type {!Persistence.FileSystemWorkspaceBinding.FileSystem}*/ (uiSourceCode.project())._fileSystemParentURL;
+    return uiSourceCode.url().substring(baseURL.length);
   }
 
   /**

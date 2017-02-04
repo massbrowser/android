@@ -237,7 +237,7 @@ InspectorLayerTreeAgent::buildLayerTree() {
                              ->id();
   bool haveBlockingWheelEventHandlers =
       m_inspectedFrames->root()->chromeClient().eventListenerProperties(
-          WebEventListenerClass::MouseWheel) ==
+          m_inspectedFrames->root(), WebEventListenerClass::MouseWheel) ==
       WebEventListenerProperties::Blocking;
 
   gatherGraphicsLayers(rootGraphicsLayer(), layerIdToNodeIdMap, layers,
@@ -373,7 +373,7 @@ Response InspectorLayerTreeAgent::makeSnapshot(const String& layerId,
   context.beginRecording(interestRect);
   layer->getPaintController().paintArtifact().replay(context);
   RefPtr<PictureSnapshot> snapshot =
-      adoptRef(new PictureSnapshot(context.endRecording()));
+      adoptRef(new PictureSnapshot(ToSkPicture(context.endRecording())));
 
   *snapshotId = String::number(++s_lastSnapshotId);
   bool newEntry = m_snapshotById.add(*snapshotId, snapshot).isNewEntry;
@@ -495,7 +495,7 @@ Response InspectorLayerTreeAgent::snapshotCommandLog(
 }
 
 void InspectorLayerTreeAgent::willAddPageOverlay(const GraphicsLayer* layer) {
-  m_pageOverlayLayerIds.append(layer->platformLayer()->id());
+  m_pageOverlayLayerIds.push_back(layer->platformLayer()->id());
 }
 
 void InspectorLayerTreeAgent::didRemovePageOverlay(const GraphicsLayer* layer) {

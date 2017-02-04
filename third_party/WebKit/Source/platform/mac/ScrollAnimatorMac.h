@@ -85,14 +85,12 @@ class PLATFORM_EXPORT ScrollAnimatorMac : public ScrollAnimatorBase {
 
   void sendContentAreaScrolledTask();
   TaskHandle m_sendContentAreaScrolledTaskHandle;
-  std::unique_ptr<WebTaskRunner> m_taskRunner;
+  RefPtr<WebTaskRunner> m_taskRunner;
   ScrollOffset m_contentAreaScrolledTimerScrollDelta;
 
   ScrollResult userScroll(ScrollGranularity,
                           const ScrollOffset& delta) override;
   void scrollToOffsetWithoutAnimation(const ScrollOffset&) override;
-
-  void handleWheelEventPhase(PlatformWheelEventPhase) override;
 
   void cancelAnimation() override;
 
@@ -105,9 +103,6 @@ class PLATFORM_EXPORT ScrollAnimatorMac : public ScrollAnimatorBase {
   void contentsResized() const override;
   void contentAreaDidShow() const override;
   void contentAreaDidHide() const override;
-  void didBeginScrollGesture() const;
-  void didEndScrollGesture() const;
-  void mayBeginScrollGesture() const;
 
   void finishCurrentScrollAnimations() override;
 

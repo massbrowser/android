@@ -14,13 +14,13 @@
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/google/core/browser/google_switches.h"
-#include "components/pref_registry/testing_pref_service_syncable.h"
 #include "components/search_engines/prepopulated_engines.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_data_util.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
@@ -46,7 +46,7 @@ class TemplateURLPrepopulateDataTest : public testing::Test {
   }
 
  protected:
-  user_prefs::TestingPrefServiceSyncable prefs_;
+  sync_preferences::TestingPrefServiceSyncable prefs_;
 };
 
 // Verifies the set of prepopulate data doesn't contain entries with duplicate
@@ -105,10 +105,8 @@ TEST_F(TemplateURLPrepopulateDataTest, UniqueIDs) {
 
   for (size_t i = 0; i < arraysize(kCountryIds); ++i) {
     prefs_.SetInteger(prefs::kCountryIDAtInstall, kCountryIds[i]);
-    size_t default_index;
     std::vector<std::unique_ptr<TemplateURLData>> urls =
-        TemplateURLPrepopulateData::GetPrepopulatedEngines(&prefs_,
-                                                           &default_index);
+        TemplateURLPrepopulateData::GetPrepopulatedEngines(&prefs_, nullptr);
     std::set<int> unique_ids;
     for (size_t turl_i = 0; turl_i < urls.size(); ++turl_i) {
       ASSERT_TRUE(unique_ids.find(urls[turl_i]->prepopulate_id) ==

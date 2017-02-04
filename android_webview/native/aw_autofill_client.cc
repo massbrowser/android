@@ -79,7 +79,7 @@ IdentityProvider* AwAutofillClient::GetIdentityProvider() {
   return nullptr;
 }
 
-rappor::RapporService* AwAutofillClient::GetRapporService() {
+rappor::RapporServiceImpl* AwAutofillClient::GetRapporServiceImpl() {
   return nullptr;
 }
 
@@ -209,6 +209,8 @@ bool AwAutofillClient::ShouldShowSigninPromo() {
 }
 
 void AwAutofillClient::StartSigninFlow() {}
+
+void AwAutofillClient::ShowHttpNotSecureExplanation() {}
 
 void AwAutofillClient::Dismissed(JNIEnv* env,
                                  const JavaParamRef<jobject>& obj) {

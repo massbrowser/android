@@ -20,18 +20,18 @@ ProofSource* QuicCryptoServerConfigPeer::GetProofSource() {
   return server_config_->proof_source_.get();
 }
 
-scoped_refptr<QuicCryptoServerConfig::Config>
+QuicReferenceCountedPointer<QuicCryptoServerConfig::Config>
 QuicCryptoServerConfigPeer::GetPrimaryConfig() {
-  base::AutoLock locked(server_config_->configs_lock_);
-  return scoped_refptr<QuicCryptoServerConfig::Config>(
+  QuicReaderMutexLock locked(&server_config_->configs_lock_);
+  return QuicReferenceCountedPointer<QuicCryptoServerConfig::Config>(
       server_config_->primary_config_);
 }
 
-scoped_refptr<QuicCryptoServerConfig::Config>
+QuicReferenceCountedPointer<QuicCryptoServerConfig::Config>
 QuicCryptoServerConfigPeer::GetConfig(string config_id) {
-  base::AutoLock locked(server_config_->configs_lock_);
+  QuicReaderMutexLock locked(&server_config_->configs_lock_);
   if (config_id == "<primary>") {
-    return scoped_refptr<QuicCryptoServerConfig::Config>(
+    return QuicReferenceCountedPointer<QuicCryptoServerConfig::Config>(
         server_config_->primary_config_);
   } else {
     return server_config_->GetConfigWithScid(config_id);
@@ -40,6 +40,11 @@ QuicCryptoServerConfigPeer::GetConfig(string config_id) {
 
 ProofSource* QuicCryptoServerConfigPeer::GetProofSource() const {
   return server_config_->proof_source_.get();
+}
+
+void QuicCryptoServerConfigPeer::ResetProofSource(
+    std::unique_ptr<ProofSource> proof_source) {
+  server_config_->proof_source_ = std::move(proof_source);
 }
 
 string QuicCryptoServerConfigPeer::NewSourceAddressToken(
@@ -120,12 +125,13 @@ void QuicCryptoServerConfigPeer::CheckConfigs(const char* server_config_id1,
 
   va_end(ap);
 
-  base::AutoLock locked(server_config_->configs_lock_);
+  QuicReaderMutexLock locked(&server_config_->configs_lock_);
 
   ASSERT_EQ(expected.size(), server_config_->configs_.size()) << ConfigsDebug();
 
-  for (const std::pair<const ServerConfigID,
-                       scoped_refptr<QuicCryptoServerConfig::Config>>& i :
+  for (const std::pair<
+           const ServerConfigID,
+           QuicReferenceCountedPointer<QuicCryptoServerConfig::Config>>& i :
        server_config_->configs_) {
     bool found = false;
     for (std::pair<ServerConfigID, bool>& j : expected) {
@@ -152,7 +158,8 @@ string QuicCryptoServerConfigPeer::ConfigsDebug() {
   string s;
 
   for (const auto& i : server_config_->configs_) {
-    const scoped_refptr<QuicCryptoServerConfig::Config> config = i.second;
+    const QuicReferenceCountedPointer<QuicCryptoServerConfig::Config> config =
+        i.second;
     if (config->is_primary) {
       s += "(primary) ";
     } else {
@@ -166,14 +173,14 @@ string QuicCryptoServerConfigPeer::ConfigsDebug() {
 }
 
 void QuicCryptoServerConfigPeer::SelectNewPrimaryConfig(int seconds) {
-  base::AutoLock locked(server_config_->configs_lock_);
+  QuicWriterMutexLock locked(&server_config_->configs_lock_);
   server_config_->SelectNewPrimaryConfig(
       QuicWallTime::FromUNIXSeconds(seconds));
 }
 
 string QuicCryptoServerConfigPeer::CompressChain(
     QuicCompressedCertsCache* compressed_certs_cache,
-    const scoped_refptr<ProofSource::Chain>& chain,
+    const QuicReferenceCountedPointer<ProofSource::Chain>& chain,
     const string& client_common_set_hashes,
     const string& client_cached_cert_hashes,
     const CommonCertSets* common_sets) {

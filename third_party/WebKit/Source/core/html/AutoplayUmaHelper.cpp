@@ -10,6 +10,7 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLMediaElement.h"
 #include "platform/Histogram.h"
+#include "public/platform/Platform.h"
 #include "wtf/CurrentTime.h"
 
 namespace blink {
@@ -78,7 +79,7 @@ void AutoplayUmaHelper::onAutoplayInitiated(AutoplaySource source) {
       RuntimeEnabledFeatures::autoplayMutedVideosEnabled()) {
     bool dataSaverEnabled =
         m_element->document().settings() &&
-        m_element->document().settings()->dataSaverEnabled();
+        m_element->document().settings()->getDataSaverEnabled();
     bool blockedBySetting = !m_element->isAutoplayAllowedPerSettings();
 
     if (dataSaverEnabled && blockedBySetting) {
@@ -92,6 +93,84 @@ void AutoplayUmaHelper::onAutoplayInitiated(AutoplaySource source) {
   }
 
   m_element->addEventListener(EventTypeNames::playing, this, false);
+}
+
+void AutoplayUmaHelper::recordCrossOriginAutoplayResult(
+    CrossOriginAutoplayResult result) {
+  DEFINE_STATIC_LOCAL(
+      EnumerationHistogram, autoplayResultHistogram,
+      ("Media.Autoplay.CrossOrigin.Result",
+       static_cast<int>(CrossOriginAutoplayResult::NumberOfResults)));
+
+  if (!m_element->isHTMLVideoElement())
+    return;
+  if (!m_element->isInCrossOriginFrame())
+    return;
+
+  // Record each metric only once per element, since the metric focuses on the
+  // site distribution. If a page calls play() multiple times, it will be
+  // recorded only once.
+  if (m_recordedCrossOriginAutoplayResults.count(result))
+    return;
+
+  switch (result) {
+    case CrossOriginAutoplayResult::AutoplayAllowed:
+      // Record metric
+      Platform::current()->recordRapporURL(
+          "Media.Autoplay.CrossOrigin.Allowed.ChildFrame",
+          m_element->document().url());
+      Platform::current()->recordRapporURL(
+          "Media.Autoplay.CrossOrigin.Allowed.TopLevelFrame",
+          m_element->document().topDocument().url());
+      autoplayResultHistogram.count(static_cast<int>(result));
+      m_recordedCrossOriginAutoplayResults.insert(result);
+      break;
+    case CrossOriginAutoplayResult::AutoplayBlocked:
+      Platform::current()->recordRapporURL(
+          "Media.Autoplay.CrossOrigin.Blocked.ChildFrame",
+          m_element->document().url());
+      Platform::current()->recordRapporURL(
+          "Media.Autoplay.CrossOrigin.Blocked.TopLevelFrame",
+          m_element->document().topDocument().url());
+      autoplayResultHistogram.count(static_cast<int>(result));
+      m_recordedCrossOriginAutoplayResults.insert(result);
+      break;
+    case CrossOriginAutoplayResult::PlayedWithGesture:
+      // Record this metric only when the video has been blocked from autoplay
+      // previously. This is to record the sites having videos that are blocked
+      // to autoplay but the user starts the playback by gesture.
+      if (!m_recordedCrossOriginAutoplayResults.count(
+              CrossOriginAutoplayResult::AutoplayBlocked)) {
+        return;
+      }
+      Platform::current()->recordRapporURL(
+          "Media.Autoplay.CrossOrigin.PlayedWithGestureAfterBlock.ChildFrame",
+          m_element->document().url());
+      Platform::current()->recordRapporURL(
+          "Media.Autoplay.CrossOrigin.PlayedWithGestureAfterBlock."
+          "TopLevelFrame",
+          m_element->document().topDocument().url());
+      autoplayResultHistogram.count(static_cast<int>(result));
+      m_recordedCrossOriginAutoplayResults.insert(result);
+      break;
+    case CrossOriginAutoplayResult::UserPaused:
+      if (!shouldRecordUserPausedAutoplayingCrossOriginVideo())
+        return;
+      if (m_element->ended() || m_element->seeking())
+        return;
+      Platform::current()->recordRapporURL(
+          "Media.Autoplay.CrossOrigin.UserPausedAutoplayingVideo.ChildFrame",
+          m_element->document().url());
+      Platform::current()->recordRapporURL(
+          "Media.Autoplay.CrossOrigin.UserPausedAutoplayingVideo."
+          "TopLevelFrame",
+          m_element->document().topDocument().url());
+      autoplayResultHistogram.count(static_cast<int>(result));
+      m_recordedCrossOriginAutoplayResults.insert(result);
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 void AutoplayUmaHelper::recordAutoplayUnmuteStatus(
@@ -154,9 +233,10 @@ void AutoplayUmaHelper::handlePlayingEvent() {
 
 void AutoplayUmaHelper::handlePauseEvent() {
   maybeStopRecordingMutedVideoOffscreenDuration();
+  maybeRecordUserPausedAutoplayingCrossOriginVideo();
 }
 
-void AutoplayUmaHelper::contextDestroyed() {
+void AutoplayUmaHelper::contextDestroyed(ExecutionContext*) {
   handleContextDestroyed();
 }
 
@@ -243,8 +323,13 @@ void AutoplayUmaHelper::maybeStopRecordingMutedVideoOffscreenDuration() {
   m_mutedVideoOffscreenDurationVisibilityObserver->stop();
   m_mutedVideoOffscreenDurationVisibilityObserver = nullptr;
   m_mutedVideoAutoplayOffscreenDurationMS = 0;
-  m_element->removeEventListener(EventTypeNames::pause, this, false);
+  maybeUnregisterMediaElementPauseListener();
   maybeUnregisterContextDestroyedObserver();
+}
+
+void AutoplayUmaHelper::maybeRecordUserPausedAutoplayingCrossOriginVideo() {
+  recordCrossOriginAutoplayResult(CrossOriginAutoplayResult::UserPaused);
+  maybeUnregisterMediaElementPauseListener();
 }
 
 void AutoplayUmaHelper::maybeUnregisterContextDestroyedObserver() {
@@ -253,9 +338,25 @@ void AutoplayUmaHelper::maybeUnregisterContextDestroyedObserver() {
   }
 }
 
+void AutoplayUmaHelper::maybeUnregisterMediaElementPauseListener() {
+  if (m_mutedVideoOffscreenDurationVisibilityObserver)
+    return;
+  if (shouldRecordUserPausedAutoplayingCrossOriginVideo())
+    return;
+  m_element->removeEventListener(EventTypeNames::pause, this, false);
+}
+
 bool AutoplayUmaHelper::shouldListenToContextDestroyed() const {
   return m_mutedVideoPlayMethodVisibilityObserver ||
          m_mutedVideoOffscreenDurationVisibilityObserver;
+}
+
+bool AutoplayUmaHelper::shouldRecordUserPausedAutoplayingCrossOriginVideo()
+    const {
+  return m_element->isInCrossOriginFrame() && m_element->isHTMLVideoElement() &&
+         m_source != AutoplaySource::NumberOfSources &&
+         !m_recordedCrossOriginAutoplayResults.count(
+             CrossOriginAutoplayResult::UserPaused);
 }
 
 DEFINE_TRACE(AutoplayUmaHelper) {

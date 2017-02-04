@@ -7,13 +7,15 @@
 #include <memory>
 
 #include "android_webview/browser/aw_content_browser_client.h"
+#include "android_webview/browser/aw_safe_browsing_config_helper.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/command_line_helper.h"
 #include "android_webview/browser/deferred_gpu_command_service.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
 #include "android_webview/common/aw_descriptors.h"
+#include "android_webview/common/aw_paths.h"
 #include "android_webview/common/aw_switches.h"
-#include "android_webview/crash_reporter/aw_microdump_crash_reporter.h"
+#include "android_webview/common/crash_reporter/aw_microdump_crash_reporter.h"
 #include "android_webview/gpu/aw_content_gpu_client.h"
 #include "android_webview/native/aw_locale_manager_impl.h"
 #include "android_webview/native/aw_media_url_interceptor.h"
@@ -30,6 +32,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "cc/base/switches.h"
 #include "components/crash/content/app/breakpad_linux.h"
+#include "components/safe_browsing_db/android/safe_browsing_api_handler_bridge.h"
 #include "components/spellcheck/common/spellcheck_features.h"
 #include "content/public/browser/android/browser_media_player_manager_register.h"
 #include "content/public/browser/browser_main_runner.h"
@@ -108,6 +111,14 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // https://crbug.com/521319
   cl->AppendSwitch(switches::kDisablePresentationAPI);
 
+  // WebView doesn't support Remote Playback API for the same reason as the
+  // Presentation API, see https://crbug.com/521319.
+  cl->AppendSwitch(switches::kDisableRemotePlaybackAPI);
+
+  // WebView does not support MediaSession API since there's no UI for media
+  // metadata and controls.
+  cl->AppendSwitch(switches::kDisableMediaSessionAPI);
+
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
   if (cl->GetSwitchValueASCII(switches::kProcessType).empty()) {
     // Browser process (no type specified).
@@ -136,13 +147,22 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   if (cl->HasSwitch(switches::kWebViewSandboxedRenderer)) {
     cl->AppendSwitch(switches::kInProcessGPU);
     cl->AppendSwitchASCII(switches::kRendererProcessLimit, "1");
-    cl->AppendSwitch(switches::kDisableRendererBackgrounding);
+    cl->AppendSwitch(switches::kDisableRendererPriorityManagement);
   }
 
   CommandLineHelper::AddEnabledFeature(
       *cl, spellcheck::kAndroidSpellCheckerNonLowEnd.name);
 
   CommandLineHelper::AddDisabledFeature(*cl, features::kWebPayments.name);
+
+  android_webview::RegisterPathProvider();
+
+  if (AwSafeBrowsingConfigHelper::GetSafeBrowsingEnabled()) {
+    safe_browsing_api_handler_.reset(
+        new safe_browsing::SafeBrowsingApiHandlerBridge());
+    safe_browsing::SafeBrowsingApiHandler::SetInstance(
+        safe_browsing_api_handler_.get());
+  }
 
   return false;
 }
@@ -189,7 +209,7 @@ void AwMainDelegate::PreSandboxStartup() {
     }
   }
 
-  crash_reporter::EnableMicrodumpCrashReporter(process_type, crash_signal_fd);
+  crash_reporter::EnableCrashReporter(process_type, crash_signal_fd);
 }
 
 int AwMainDelegate::RunProcess(

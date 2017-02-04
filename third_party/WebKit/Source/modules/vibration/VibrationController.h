@@ -68,8 +68,8 @@ class MODULES_EXPORT VibrationController final
   DECLARE_VIRTUAL_TRACE();
 
  private:
-  // Inherited from ContextLifecycleObserver AND PageVisibilityObserver.
-  void contextDestroyed() override;
+  // Inherited from ContextLifecycleObserver.
+  void contextDestroyed(ExecutionContext*) override;
 
   // Inherited from PageVisibilityObserver.
   void pageVisibilityChanged() override;
@@ -81,7 +81,7 @@ class MODULES_EXPORT VibrationController final
   // Timer for calling |doVibrate| after a delay. It is safe to call
   // |startOneshot| when the timer is already running: it may affect the time
   // at which it fires, but |doVibrate| will still be called only once.
-  Timer<VibrationController> m_timerDoVibrate;
+  TaskRunnerTimer<VibrationController> m_timerDoVibrate;
 
   // Whether a pattern is being processed. The vibration hardware may
   // currently be active, or during a pause it may be inactive.

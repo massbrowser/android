@@ -40,7 +40,7 @@ inline AudioNodeInput::AudioNodeInput(AudioHandler& handler)
 }
 
 std::unique_ptr<AudioNodeInput> AudioNodeInput::create(AudioHandler& handler) {
-  return wrapUnique(new AudioNodeInput(handler));
+  return WTF::wrapUnique(new AudioNodeInput(handler));
 }
 
 void AudioNodeInput::connect(AudioNodeOutput& output) {
@@ -51,7 +51,7 @@ void AudioNodeInput::connect(AudioNodeOutput& output) {
     return;
 
   output.addInput(*this);
-  m_outputs.add(&output);
+  m_outputs.insert(&output);
   changedOutputs();
 }
 
@@ -84,7 +84,7 @@ void AudioNodeInput::disable(AudioNodeOutput& output) {
   ASSERT(deferredTaskHandler().isGraphOwner());
   DCHECK(m_outputs.contains(&output));
 
-  m_disabledOutputs.add(&output);
+  m_disabledOutputs.insert(&output);
   m_outputs.remove(&output);
   changedOutputs();
 
@@ -96,7 +96,7 @@ void AudioNodeInput::enable(AudioNodeOutput& output) {
   ASSERT(deferredTaskHandler().isGraphOwner());
 
   // Move output from disabled list to active list.
-  m_outputs.add(&output);
+  m_outputs.insert(&output);
   if (m_disabledOutputs.size() > 0) {
     DCHECK(m_disabledOutputs.contains(&output));
     m_disabledOutputs.remove(&output);

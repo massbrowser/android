@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "content/browser/bad_message.h"
@@ -26,7 +25,6 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_url_parameters.h"
 #include "content/public/common/content_constants.h"
-#include "content/public/common/content_switches.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/cookie_options.h"
@@ -56,8 +54,6 @@ namespace {
 #if BUILDFLAG(ENABLE_PLUGINS)
 const int kPluginsRefreshThresholdInSeconds = 3;
 #endif
-
-const char kEnforceStrictSecureExperiment[] = "StrictSecureCookies";
 
 void CreateChildFrameOnUI(int process_id,
                           int parent_routing_id,
@@ -270,6 +266,7 @@ void RenderFrameMessageFilter::DownloadUrl(int render_view_id,
                                            int render_frame_id,
                                            const GURL& url,
                                            const Referrer& referrer,
+                                           const url::Origin& initiator,
                                            const base::string16& suggested_name,
                                            const bool use_prompt) const {
   if (!resource_context_)
@@ -282,6 +279,7 @@ void RenderFrameMessageFilter::DownloadUrl(int render_view_id,
   parameters->set_suggested_name(suggested_name);
   parameters->set_prompt(use_prompt);
   parameters->set_referrer(referrer);
+  parameters->set_initiator(initiator);
 
   if (url.SchemeIsBlob()) {
     ChromeBlobStorageContext* blob_context =
@@ -342,12 +340,9 @@ void RenderFrameMessageFilter::CheckPolicyForCookies(
 }
 
 void RenderFrameMessageFilter::OnDownloadUrl(
-    int render_view_id,
-    int render_frame_id,
-    const GURL& url,
-    const Referrer& referrer,
-    const base::string16& suggested_name) {
-  DownloadUrl(render_view_id, render_frame_id, url, referrer, suggested_name,
+    const FrameHostMsg_DownloadUrl_Params& params) {
+  DownloadUrl(params.render_view_id, params.render_frame_id, params.url,
+              params.referrer, params.initiator_origin, params.suggested_name,
               false);
 }
 
@@ -364,7 +359,7 @@ void RenderFrameMessageFilter::OnSaveImageFromDataURL(
     return;
 
   DownloadUrl(render_view_id, render_frame_id, data_url, Referrer(),
-              base::string16(), true);
+              url::Origin(), base::string16(), true);
 }
 
 void RenderFrameMessageFilter::OnAre3DAPIsBlocked(int render_frame_id,
@@ -397,16 +392,6 @@ void RenderFrameMessageFilter::SetCookie(int32_t render_frame_id,
   }
 
   net::CookieOptions options;
-  bool experimental_web_platform_features_enabled =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalWebPlatformFeatures);
-  const std::string enforce_strict_secure_group =
-      base::FieldTrialList::FindFullName(kEnforceStrictSecureExperiment);
-  if (experimental_web_platform_features_enabled ||
-      base::StartsWith(enforce_strict_secure_group, "Enabled",
-                       base::CompareCase::INSENSITIVE_ASCII)) {
-    options.set_enforce_strict_secure();
-  }
   if (GetContentClient()->browser()->AllowSetCookie(
           url, first_party_for_cookies, cookie, resource_context_,
           render_process_id_, render_frame_id, options)) {

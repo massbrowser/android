@@ -17,6 +17,8 @@ _EXCLUDED_PATHS = (
     # LayoutTests/imported is excluded because these files are automatically
     # imported, so we do not have direct control over their content.
     r'^third_party[\\\/]WebKit[\\\/]LayoutTests[\\\/]imported[\\\/].*',
+    # Also created and imported via a script:
+    r'^third_party[\\\/]WebKit[\\\/]Tools[\\\/]Scripts[\\\/]webkitpy[\\\/]thirdparty[\\\/]wpt[\\\/]wpt[\\\/].*',
 )
 
 
@@ -269,7 +271,7 @@ def _CheckForForbiddenNamespace(input_api, output_api):
     # This list is not exhaustive, but covers likely ones.
     chromium_namespaces = ["base", "cc", "content", "gfx", "net", "ui"]
     chromium_forbidden_classes = ["scoped_refptr"]
-    chromium_allowed_classes = ["gfx::CubicBezier"]
+    chromium_allowed_classes = ["gfx::ColorSpace", "gfx::CubicBezier"]
 
     def source_file_filter(path):
         return input_api.FilterSourceFile(path,

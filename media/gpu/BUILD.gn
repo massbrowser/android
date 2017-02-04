@@ -8,6 +8,12 @@ import("//media/gpu/args.gni")
 import("//media/media_options.gni")
 import("//testing/test.gni")
 
+declare_args() {
+  # A temporary arg for building MCVD while it's being implemented.
+  # See http://crbug.com/660942
+  enable_media_codec_video_decoder = false
+}
+
 if (is_mac) {
   import("//build/config/mac/mac_sdk.gni")
 }
@@ -190,6 +196,13 @@ component("gpu") {
       ]
     }
 
+    if (enable_media_codec_video_decoder) {
+      sources += [
+        "android/media_codec_video_decoder.cc",
+        "android/media_codec_video_decoder.h",
+      ]
+    }
+
     # TODO(xhwang): This is needed for AVDA to access the CDM directly.
     # Remove this dependency after VDAs are also running as part of the mojo
     # media service. See http://crbug.com/522298
@@ -198,13 +211,17 @@ component("gpu") {
     }
   }
 
-  if (is_chromeos) {
+  if (is_chromeos || is_win) {
     sources += [
       "accelerated_video_decoder.h",
       "h264_decoder.cc",
       "h264_decoder.h",
       "h264_dpb.cc",
       "h264_dpb.h",
+    ]
+  }
+  if (is_chromeos) {
+    sources += [
       "vp8_decoder.cc",
       "vp8_decoder.h",
       "vp8_picture.cc",
@@ -292,6 +309,10 @@ component("gpu") {
 
   if (is_win) {
     sources += [
+      "d3d11_h264_accelerator.cc",
+      "d3d11_h264_accelerator.h",
+      "d3d11_video_decode_accelerator_win.cc",
+      "d3d11_video_decode_accelerator_win.h",
       "dxva_picture_buffer_win.cc",
       "dxva_picture_buffer_win.h",
       "dxva_video_decode_accelerator_win.cc",
@@ -335,12 +356,19 @@ if (is_win || is_android || is_chromeos) {
       "video_accelerator_unittest_helpers.h",
     ]
 
+    data = [
+      "//media/test/data/",
+    ]
+
     deps = [
       ":gpu",
       "//base",
+      "//base/test:test_support",
       "//media",
+      "//media/base:test_support",
       "//testing/gtest",
       "//ui/base",
+      "//ui/display/manager",
       "//ui/gfx",
       "//ui/gfx:test_support",
       "//ui/gfx/geometry",
@@ -406,8 +434,12 @@ source_set("android_video_decode_accelerator_unittests") {
       "android_video_decode_accelerator_unittest.cc",
       "avda_codec_allocator_unittest.cc",
     ]
+    if (enable_media_codec_video_decoder) {
+      sources += [ "android/media_codec_video_decoder_unittest.cc" ]
+    }
     deps = [
       ":gpu",
+      "//base/test:test_support",
       "//gpu:test_support",
       "//media/base/android",
       "//testing/gmock",

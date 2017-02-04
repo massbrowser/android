@@ -20,12 +20,15 @@
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_synthetic_delay.h"
 #include "build/build_config.h"
+#include "cc/animation/animation_host.h"
 #include "cc/output/compositor_frame_sink.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/scheduler/begin_frame_source.h"
+#include "cc/trees/layer_tree_host.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/drag_event_source_info.h"
 #include "content/common/drag_messages.h"
@@ -35,10 +38,12 @@
 #include "content/common/swapped_out_messages.h"
 #include "content/common/text_input_state.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/drop_data.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/cursor_utils.h"
 #include "content/renderer/devtools/render_widget_screen_metrics_emulator.h"
 #include "content/renderer/drop_data_builder.h"
@@ -61,9 +66,11 @@
 #include "ipc/ipc_sync_message.h"
 #include "ppapi/features/features.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/public/platform/FilePathConversion.h"
 #include "third_party/WebKit/public/platform/WebCursorInfo.h"
 #include "third_party/WebKit/public/platform/WebDragData.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
+#include "third_party/WebKit/public/platform/WebMouseEvent.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
@@ -93,6 +100,7 @@
 
 #if defined(OS_ANDROID)
 #include <android/keycodes.h>
+#include "base/time/time.h"
 #endif
 
 #if defined(OS_POSIX)
@@ -101,8 +109,7 @@
 #endif  // defined(OS_POSIX)
 
 #if defined(USE_AURA)
-#include "content/public/common/service_manager_connection.h"
-#include "content/renderer/mus/render_widget_mus_connection.h"
+#include "content/renderer/mus/renderer_window_tree_client.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -121,7 +128,6 @@ using blink::WebImage;
 using blink::WebInputEvent;
 using blink::WebInputEventResult;
 using blink::WebInputMethodController;
-using blink::WebKeyboardEvent;
 using blink::WebLocalFrame;
 using blink::WebMouseEvent;
 using blink::WebMouseWheelEvent;
@@ -177,22 +183,6 @@ bool IsDateTimeInput(ui::TextInputType type) {
          type == ui::TEXT_INPUT_TYPE_TIME || type == ui::TEXT_INPUT_TYPE_WEEK;
 }
 
-content::RenderWidgetInputHandlerDelegate* GetRenderWidgetInputHandlerDelegate(
-    content::RenderWidget* widget) {
-#if defined(USE_AURA)
-  const base::CommandLine& cmdline = *base::CommandLine::ForCurrentProcess();
-  if (content::ServiceManagerConnection::GetForProcess() &&
-      cmdline.HasSwitch(switches::kUseMusInRenderer)) {
-    return content::RenderWidgetMusConnection::GetOrCreate(
-        widget->routing_id());
-  }
-#endif
-  // If we don't have a connection to the Service Manager, then we want to route
-  // IPCs back to the browser process rather than Mus so we use the |widget| as
-  // the RenderWidgetInputHandlerDelegate.
-  return widget;
-}
-
 WebDragData DropMetaDataToWebDragData(
     const std::vector<DropData::Metadata>& drop_meta_data) {
   std::vector<WebDragData::Item> item_list;
@@ -200,7 +190,7 @@ WebDragData DropMetaDataToWebDragData(
     if (meta_data_item.kind == DropData::Kind::STRING) {
       WebDragData::Item item;
       item.storageType = WebDragData::Item::StorageTypeString;
-      item.stringType = meta_data_item.mime_type;
+      item.stringType = WebString::fromUTF16(meta_data_item.mime_type);
       // Have to pass a dummy URL here instead of an empty URL because the
       // DropData received by browser_plugins goes through a round trip:
       // DropData::MetaData --> WebDragData-->DropData. In the end, DropData
@@ -221,7 +211,7 @@ WebDragData DropMetaDataToWebDragData(
         !meta_data_item.filename.empty()) {
       WebDragData::Item item;
       item.storageType = WebDragData::Item::StorageTypeFilename;
-      item.filenameData = meta_data_item.filename.AsUTF16Unsafe();
+      item.filenameData = blink::FilePathToWebString(meta_data_item.filename);
       item_list.push_back(item);
       continue;
     }
@@ -253,7 +243,7 @@ WebDragData DropDataToWebDragData(const DropData& drop_data) {
     WebDragData::Item item;
     item.storageType = WebDragData::Item::StorageTypeString;
     item.stringType = WebString::fromUTF8(ui::Clipboard::kMimeTypeText);
-    item.stringData = drop_data.text.string();
+    item.stringData = WebString::fromUTF16(drop_data.text.string());
     item_list.push_back(item);
   }
 
@@ -262,7 +252,7 @@ WebDragData DropDataToWebDragData(const DropData& drop_data) {
     item.storageType = WebDragData::Item::StorageTypeString;
     item.stringType = WebString::fromUTF8(ui::Clipboard::kMimeTypeURIList);
     item.stringData = WebString::fromUTF8(drop_data.url.spec());
-    item.title = drop_data.url_title;
+    item.title = WebString::fromUTF16(drop_data.url_title);
     item_list.push_back(item);
   }
 
@@ -270,7 +260,7 @@ WebDragData DropDataToWebDragData(const DropData& drop_data) {
     WebDragData::Item item;
     item.storageType = WebDragData::Item::StorageTypeString;
     item.stringType = WebString::fromUTF8(ui::Clipboard::kMimeTypeHTML);
-    item.stringData = drop_data.html.string();
+    item.stringData = WebString::fromUTF16(drop_data.html.string());
     item.baseURL = drop_data.html_base_url;
     item_list.push_back(item);
   }
@@ -281,8 +271,9 @@ WebDragData DropDataToWebDragData(const DropData& drop_data) {
        ++it) {
     WebDragData::Item item;
     item.storageType = WebDragData::Item::StorageTypeFilename;
-    item.filenameData = it->path.AsUTF16Unsafe();
-    item.displayNameData = it->display_name.AsUTF16Unsafe();
+    item.filenameData = blink::FilePathToWebString(it->path);
+    item.displayNameData =
+        blink::FilePathToWebString(base::FilePath(it->display_name));
     item_list.push_back(item);
   }
 
@@ -294,6 +285,7 @@ WebDragData DropDataToWebDragData(const DropData& drop_data) {
     item.storageType = WebDragData::Item::StorageTypeFileSystemFile;
     item.fileSystemURL = it->url;
     item.fileSystemFileSize = it->size;
+    item.fileSystemId = blink::WebString::fromASCII(it->filesystem_id);
     item_list.push_back(item);
   }
 
@@ -303,15 +295,15 @@ WebDragData DropDataToWebDragData(const DropData& drop_data) {
        ++it) {
     WebDragData::Item item;
     item.storageType = WebDragData::Item::StorageTypeString;
-    item.stringType = it->first;
-    item.stringData = it->second;
+    item.stringType = WebString::fromUTF16(it->first);
+    item.stringData = WebString::fromUTF16(it->second);
     item_list.push_back(item);
   }
 
   WebDragData result;
   result.initialize();
   result.setItems(item_list);
-  result.setFilesystemId(drop_data.filesystem_id);
+  result.setFilesystemId(WebString::fromUTF16(drop_data.filesystem_id));
   return result;
 }
 
@@ -372,27 +364,22 @@ RenderWidget::RenderWidget(int32_t widget_routing_id,
       pending_window_rect_count_(0),
       screen_info_(screen_info),
       device_scale_factor_(screen_info_.device_scale_factor),
-#if defined(OS_ANDROID)
-      text_field_is_dirty_(false),
-#endif
       monitor_composition_info_(false),
       popup_origin_scale_for_emulation_(0.f),
       frame_swap_message_queue_(new FrameSwapMessageQueue()),
       resizing_mode_selector_(new ResizingModeSelector()),
       has_host_context_menu_location_(false),
+      has_added_input_handler_(false),
       has_focus_(false),
 #if defined(OS_MACOSX)
       text_input_client_observer_(new TextInputClientObserver(this)),
 #endif
-      focused_pepper_plugin_(nullptr) {
+      focused_pepper_plugin_(nullptr),
+      weak_ptr_factory_(this) {
   DCHECK_NE(routing_id_, MSG_ROUTING_NONE);
   if (!swapped_out)
     RenderProcess::current()->AddRefProcess();
   DCHECK(RenderThread::Get());
-  device_color_profile_.push_back('0');
-#if defined(OS_ANDROID)
-  text_input_info_history_.push_back(blink::WebTextInputInfo());
-#endif
 
   // In tests there may not be a RenderThreadImpl.
   if (RenderThreadImpl::current()) {
@@ -401,6 +388,12 @@ RenderWidget::RenderWidget(int32_t widget_routing_id,
                                           ->NewRenderWidgetSchedulingState();
     render_widget_scheduling_state_->SetHidden(is_hidden_);
   }
+#if defined(USE_AURA)
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kNoUseMusInRenderer)) {
+    RendererWindowTreeClient::Create(routing_id_);
+  }
+#endif
 }
 
 RenderWidget::~RenderWidget() {
@@ -409,6 +402,15 @@ RenderWidget::~RenderWidget() {
   // If we are swapped out, we have released already.
   if (!is_swapped_out_ && RenderProcess::current())
     RenderProcess::current()->ReleaseProcess();
+#if defined(USE_AURA)
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kNoUseMusInRenderer)) {
+    // It is possible for a RenderWidget to be destroyed before it was embedded
+    // in a mus window. The RendererWindowTreeClient will leak in such cases. So
+    // explicitly delete it here.
+    RendererWindowTreeClient::Destroy(routing_id_);
+  }
+#endif
 }
 
 // static
@@ -437,7 +439,7 @@ RenderWidget* RenderWidget::CreateForPopup(
       new RenderWidget(routing_id, compositor_deps, popup_type, screen_info,
                        false, false, false));
   ShowCallback opener_callback =
-      base::Bind(&RenderViewImpl::ShowCreatedPopupWidget, opener->AsWeakPtr());
+      base::Bind(&RenderViewImpl::ShowCreatedPopupWidget, opener->GetWeakPtr());
   widget->Init(opener_callback, RenderWidget::CreateWebWidget(widget.get()));
   DCHECK(!widget->HasOneRef());  // RenderWidget::Init() adds a reference.
   return widget.get();
@@ -527,8 +529,7 @@ void RenderWidget::Init(const ShowCallback& show_callback,
   DCHECK(!webwidget_internal_);
   DCHECK_NE(routing_id_, MSG_ROUTING_NONE);
 
-  input_handler_.reset(new RenderWidgetInputHandler(
-      GetRenderWidgetInputHandlerDelegate(this), this));
+  input_handler_ = base::MakeUnique<RenderWidgetInputHandler>(this, this);
 
   show_callback_ = show_callback;
 
@@ -622,11 +623,12 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_SetTextDirection, OnSetTextDirection)
     IPC_MESSAGE_HANDLER(ViewMsg_Move_ACK, OnRequestMoveAck)
     IPC_MESSAGE_HANDLER(ViewMsg_UpdateScreenRects, OnUpdateScreenRects)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetViewportIntersection,
+                        OnSetViewportIntersection)
     IPC_MESSAGE_HANDLER(ViewMsg_WaitForNextFrameForTests,
                         OnWaitNextFrameForTests)
     IPC_MESSAGE_HANDLER(InputMsg_RequestCompositionUpdate,
                         OnRequestCompositionUpdate)
-    IPC_MESSAGE_HANDLER(ViewMsg_HandleCompositorProto, OnHandleCompositorProto)
     IPC_MESSAGE_HANDLER(DragMsg_TargetDragEnter, OnDragTargetDragEnter)
     IPC_MESSAGE_HANDLER(DragMsg_TargetDragOver, OnDragTargetDragOver)
     IPC_MESSAGE_HANDLER(DragMsg_TargetDragLeave, OnDragTargetDragLeave)
@@ -635,7 +637,6 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(DragMsg_SourceSystemDragEnded,
                         OnDragSourceSystemDragEnded)
 #if defined(OS_ANDROID)
-    IPC_MESSAGE_HANDLER(InputMsg_ImeEventAck, OnImeEventAck)
     IPC_MESSAGE_HANDLER(InputMsg_RequestTextInputStateUpdate,
                         OnRequestTextInputStateUpdate)
 #endif
@@ -664,6 +665,10 @@ bool RenderWidget::Send(IPC::Message* message) {
 void RenderWidget::SendOrCrash(IPC::Message* message) {
   bool result = Send(message);
   CHECK(closing_ || result) << "Failed to send message";
+}
+
+bool RenderWidget::ShouldHandleImeEvents() const {
+  return GetWebWidget()->isWebFrameWidget() && has_focus_;
 }
 
 void RenderWidget::SetWindowRectSynchronously(
@@ -795,12 +800,17 @@ GURL RenderWidget::GetURLForGraphicsContext3D() {
   return GURL();
 }
 
-void RenderWidget::OnHandleInputEvent(const blink::WebInputEvent* input_event,
-                                      const ui::LatencyInfo& latency_info,
-                                      InputEventDispatchType dispatch_type) {
+void RenderWidget::OnHandleInputEvent(
+    const blink::WebInputEvent* input_event,
+    const std::vector<const blink::WebInputEvent*>& coalesced_events,
+    const ui::LatencyInfo& latency_info,
+    InputEventDispatchType dispatch_type) {
   if (!input_event)
     return;
-  input_handler_->HandleInputEvent(*input_event, latency_info, dispatch_type);
+
+  input_handler_->HandleInputEvent(
+      blink::WebCoalescedInputEvent(*input_event, coalesced_events),
+      latency_info, dispatch_type);
 }
 
 void RenderWidget::OnCursorVisibilityChange(bool is_visible) {
@@ -861,13 +871,14 @@ void RenderWidget::BeginMainFrame(double frame_time_sec) {
 }
 
 std::unique_ptr<cc::CompositorFrameSink>
-RenderWidget::CreateCompositorFrameSink(bool fallback) {
+RenderWidget::CreateCompositorFrameSink(const cc::FrameSinkId& frame_sink_id,
+                                        bool fallback) {
   DCHECK(GetWebWidget());
   // For widgets that are never visible, we don't start the compositor, so we
   // never get a request for a cc::CompositorFrameSink.
   DCHECK(!compositor_never_visible_);
   return RenderThreadImpl::current()->CreateCompositorFrameSink(
-      fallback, routing_id_, frame_swap_message_queue_,
+      frame_sink_id, fallback, routing_id_, frame_swap_message_queue_,
       GetURLForGraphicsContext3D());
 }
 
@@ -908,10 +919,6 @@ void RenderWidget::DidReceiveCompositorFrameAck() {
   need_update_rect_for_auto_resize_ = false;
 }
 
-void RenderWidget::ForwardCompositorProto(const std::vector<uint8_t>& proto) {
-  Send(new ViewHostMsg_ForwardCompositorProto(routing_id_, proto));
-}
-
 bool RenderWidget::IsClosing() const {
   return host_closing_;
 }
@@ -930,7 +937,7 @@ void RenderWidget::WillBeginCompositorFrame() {
   // The UpdateTextInputState can result in further layout and possibly
   // enable GPU acceleration so they need to be called before any painting
   // is done.
-  UpdateTextInputState(ShowIme::HIDE_IME, ChangeSource::FROM_NON_IME);
+  UpdateTextInputState();
   UpdateSelectionBounds();
 
   for (auto& observer : render_frame_proxies_)
@@ -1005,13 +1012,14 @@ void RenderWidget::OnInputEventAck(
 
 void RenderWidget::NotifyInputEventHandled(
     blink::WebInputEvent::Type handled_type,
+    blink::WebInputEventResult result,
     InputEventAckState ack_result) {
   RenderThreadImpl* render_thread = RenderThreadImpl::current();
   InputHandlerManager* input_handler_manager =
       render_thread ? render_thread->input_handler_manager() : NULL;
   if (input_handler_manager) {
     input_handler_manager->NotifyInputEventHandledOnMainThread(
-        routing_id_, handled_type, ack_result);
+        routing_id_, handled_type, result, ack_result);
   }
 }
 
@@ -1022,15 +1030,25 @@ void RenderWidget::SetInputHandler(RenderWidgetInputHandler* input_handler) {
   DCHECK(!input_handler_);
 }
 
-void RenderWidget::UpdateTextInputState(ShowIme show_ime,
-                                        ChangeSource change_source) {
+void RenderWidget::ShowVirtualKeyboard() {
+  UpdateTextInputStateInternal(true, false);
+}
+
+void RenderWidget::UpdateTextInputState() {
+  UpdateTextInputStateInternal(false, false);
+}
+
+void RenderWidget::UpdateTextInputStateInternal(bool show_virtual_keyboard,
+                                                bool reply_to_request) {
   TRACE_EVENT0("renderer", "RenderWidget::UpdateTextInputState");
+
   if (ime_event_guard_) {
-    // show_ime should still be effective even if it was set inside the IME
+    DCHECK(!reply_to_request);
+    // show_virtual_keyboard should still be effective even if it was set inside
+    // the IME
     // event guard.
-    if (show_ime == ShowIme::IF_NEEDED) {
-      ime_event_guard_->set_show_ime(true);
-    }
+    if (show_virtual_keyboard)
+      ime_event_guard_->set_show_virtual_keyboard(true);
     return;
   }
 
@@ -1039,8 +1057,8 @@ void RenderWidget::UpdateTextInputState(ShowIme show_ime,
     return;  // Not considered as a text input field in WebKit/Chromium.
 
   blink::WebTextInputInfo new_info;
-  if (GetWebWidget())
-    new_info = GetWebWidget()->textInputInfo();
+  if (auto* controller = GetInputMethodController())
+    new_info = controller->textInputInfo();
   const ui::TextInputMode new_mode =
       ConvertWebTextInputMode(new_info.inputMode);
 
@@ -1048,15 +1066,10 @@ void RenderWidget::UpdateTextInputState(ShowIme show_ime,
 
   // Only sends text input params if they are changed or if the ime should be
   // shown.
-  if (show_ime == ShowIme::IF_NEEDED ||
-      (IsUsingImeThread() && change_source == ChangeSource::FROM_IME) ||
-      (text_input_type_ != new_type || text_input_mode_ != new_mode ||
-       text_input_info_ != new_info ||
-       can_compose_inline_ != new_can_compose_inline)
-#if defined(OS_ANDROID)
-      || text_field_is_dirty_
-#endif
-      ) {
+  if (show_virtual_keyboard || reply_to_request ||
+      text_input_type_ != new_type || text_input_mode_ != new_mode ||
+      text_input_info_ != new_info ||
+      can_compose_inline_ != new_can_compose_inline) {
     TextInputState params;
     params.type = new_type;
     params.mode = new_mode;
@@ -1067,17 +1080,10 @@ void RenderWidget::UpdateTextInputState(ShowIme show_ime,
     params.composition_start = new_info.compositionStart;
     params.composition_end = new_info.compositionEnd;
     params.can_compose_inline = new_can_compose_inline;
-    params.show_ime_if_needed = (show_ime == ShowIme::IF_NEEDED);
-#if defined(USE_AURA)
-    params.is_non_ime_change = true;
-#endif
-#if defined(OS_ANDROID)
-    params.is_non_ime_change =
-        (change_source == ChangeSource::FROM_NON_IME) || text_field_is_dirty_;
-    if (params.is_non_ime_change)
-      OnImeEventSentForAck(new_info);
-    text_field_is_dirty_ = false;
-#endif
+    // TODO(changwan): change instances of show_ime_if_needed to
+    // show_virtual_keyboard.
+    params.show_ime_if_needed = show_virtual_keyboard;
+    params.reply_to_request = reply_to_request;
     Send(new ViewHostMsg_TextInputStateChanged(routing_id(), params));
 
     text_input_info_ = new_info;
@@ -1233,11 +1239,19 @@ void RenderWidget::AutoResizeCompositor()  {
     compositor_->setViewportSize(physical_backing_size_);
 }
 
-void RenderWidget::initializeLayerTreeView() {
+blink::WebLayerTreeView* RenderWidget::initializeLayerTreeView() {
   DCHECK(!host_closing_);
 
-  compositor_ = RenderWidgetCompositor::Create(this, device_scale_factor_,
-                                               compositor_deps_);
+  compositor_ = RenderWidgetCompositor::Create(this, compositor_deps_);
+  auto animation_host = cc::AnimationHost::CreateMainInstance();
+
+  auto layer_tree_host = RenderWidgetCompositor::CreateLayerTreeHost(
+      compositor_.get(), compositor_.get(), animation_host.get(),
+      compositor_deps_, device_scale_factor_, screen_info_);
+  compositor_->Initialize(std::move(layer_tree_host),
+                          std::move(animation_host));
+
+  compositor_->SetIsForOopif(for_oopif_);
   compositor_->setViewportSize(physical_backing_size_);
   OnDeviceScaleFactorChanged();
   compositor_->SetDeviceColorSpace(screen_info_.icc_profile.GetColorSpace());
@@ -1250,6 +1264,20 @@ void RenderWidget::initializeLayerTreeView() {
   DCHECK_NE(MSG_ROUTING_NONE, routing_id_);
   compositor_->SetFrameSinkId(
       cc::FrameSinkId(RenderThread::Get()->GetClientId(), routing_id_));
+
+  RenderThreadImpl* render_thread = RenderThreadImpl::current();
+  // render_thread may be NULL in tests.
+  InputHandlerManager* input_handler_manager =
+      render_thread ? render_thread->input_handler_manager() : NULL;
+  if (input_handler_manager) {
+    input_handler_manager->AddInputHandler(
+        routing_id_, compositor()->GetInputHandler(),
+        weak_ptr_factory_.GetWeakPtr(),
+        compositor_deps_->IsScrollAnimatorEnabled());
+    has_added_input_handler_ = true;
+  }
+
+  return compositor_.get();
 }
 
 void RenderWidget::WillCloseLayerTreeView() {
@@ -1263,10 +1291,6 @@ void RenderWidget::WillCloseLayerTreeView() {
   // being created, even if one hasn't been created yet.
   if (blink::WebWidget* widget = GetWebWidget())
     widget->willCloseLayerTreeView();
-}
-
-blink::WebLayerTreeView* RenderWidget::layerTreeView() {
-  return compositor_.get();
 }
 
 void RenderWidget::didMeaningfulLayout(blink::WebMeaningfulLayout layout_type) {
@@ -1371,6 +1395,7 @@ void RenderWidget::show(WebNavigationPolicy policy) {
 
   // The opener is responsible for actually showing this widget.
   show_callback_.Run(this, policy, initial_rect_);
+  show_callback_.Reset();
 
   // NOTE: initial_rect_ may still have its default values at this point, but
   // that's okay.  It'll be ignored if as_popup is false, or the browser
@@ -1484,7 +1509,7 @@ WebRect RenderWidget::viewRect() {
 
 void RenderWidget::setToolTipText(const blink::WebString& text,
                                   WebTextDirection hint) {
-  Send(new ViewHostMsg_SetTooltipText(routing_id_, text, hint));
+  Send(new ViewHostMsg_SetTooltipText(routing_id_, text.utf16(), hint));
 }
 
 void RenderWidget::setWindowRect(const WebRect& rect_in_screen) {
@@ -1520,6 +1545,9 @@ void RenderWidget::OnImeSetComposition(
     const std::vector<WebCompositionUnderline>& underlines,
     const gfx::Range& replacement_range,
     int selection_start, int selection_end) {
+  if (!ShouldHandleImeEvents())
+    return;
+
 #if BUILDFLAG(ENABLE_PLUGINS)
   if (focused_pepper_plugin_) {
     focused_pepper_plugin_->render_frame()->OnImeSetComposition(
@@ -1532,14 +1560,14 @@ void RenderWidget::OnImeSetComposition(
         WebRange(replacement_range.start(), replacement_range.length()));
   }
 
-  if (!ShouldHandleImeEvent())
+  if (!GetWebWidget())
     return;
   ImeEventGuard guard(this);
   blink::WebInputMethodController* controller = GetInputMethodController();
-  DCHECK(controller);
   if (!controller ||
       !controller->setComposition(
-          text, WebVector<WebCompositionUnderline>(underlines), selection_start,
+          WebString::fromUTF16(text),
+          WebVector<WebCompositionUnderline>(underlines), selection_start,
           selection_end)) {
     // If we failed to set the composition text, then we need to let the browser
     // process to cancel the input method's ongoing composition session, to make
@@ -1549,9 +1577,14 @@ void RenderWidget::OnImeSetComposition(
   UpdateCompositionInfo(false /* not an immediate request */);
 }
 
-void RenderWidget::OnImeCommitText(const base::string16& text,
-                                   const gfx::Range& replacement_range,
-                                   int relative_cursor_pos) {
+void RenderWidget::OnImeCommitText(
+    const base::string16& text,
+    const std::vector<WebCompositionUnderline>& underlines,
+    const gfx::Range& replacement_range,
+    int relative_cursor_pos) {
+  if (!ShouldHandleImeEvents())
+    return;
+
 #if BUILDFLAG(ENABLE_PLUGINS)
   if (focused_pepper_plugin_) {
     focused_pepper_plugin_->render_frame()->OnImeCommitText(
@@ -1564,17 +1597,22 @@ void RenderWidget::OnImeCommitText(const base::string16& text,
         WebRange(replacement_range.start(), replacement_range.length()));
   }
 
-  if (!ShouldHandleImeEvent())
+  if (!GetWebWidget())
     return;
   ImeEventGuard guard(this);
   input_handler_->set_handling_input_event(true);
   if (auto* controller = GetInputMethodController())
-    controller->commitText(text, relative_cursor_pos);
+    controller->commitText(WebString::fromUTF16(text),
+                           WebVector<WebCompositionUnderline>(underlines),
+                           relative_cursor_pos);
   input_handler_->set_handling_input_event(false);
   UpdateCompositionInfo(false /* not an immediate request */);
 }
 
 void RenderWidget::OnImeFinishComposingText(bool keep_selection) {
+  if (!ShouldHandleImeEvents())
+    return;
+
 #if BUILDFLAG(ENABLE_PLUGINS)
   if (focused_pepper_plugin_) {
     focused_pepper_plugin_->render_frame()->OnImeFinishComposingText(
@@ -1583,7 +1621,7 @@ void RenderWidget::OnImeFinishComposingText(bool keep_selection) {
   }
 #endif
 
-  if (!ShouldHandleImeEvent())
+  if (!GetWebWidget())
     return;
   ImeEventGuard guard(this);
   input_handler_->set_handling_input_event(true);
@@ -1653,9 +1691,13 @@ void RenderWidget::OnUpdateWindowScreenRect(
     window_screen_rect_ = window_screen_rect;
 }
 
-void RenderWidget::OnHandleCompositorProto(const std::vector<uint8_t>& proto) {
-  if (compositor_)
-    compositor_->OnHandleCompositorProto(proto);
+void RenderWidget::OnSetViewportIntersection(
+    const gfx::Rect& viewport_intersection) {
+  if (GetWebWidget() && GetWebWidget()->isWebFrameWidget()) {
+    DCHECK(popup_type_ == WebPopupType::WebPopupTypeNone);
+    static_cast<WebFrameWidget*>(GetWebWidget())
+        ->setRemoteViewportIntersection(viewport_intersection);
+  }
 }
 
 void RenderWidget::OnDragTargetDragEnter(
@@ -1729,10 +1771,8 @@ void RenderWidget::OnDragSourceSystemDragEnded() {
   static_cast<WebFrameWidget*>(GetWebWidget())->dragSourceSystemDragEnded();
 }
 
-void RenderWidget::showImeIfNeeded() {
-#if defined(OS_ANDROID) || defined(USE_AURA)
-  UpdateTextInputState(ShowIme::IF_NEEDED, ChangeSource::FROM_NON_IME);
-#endif
+void RenderWidget::showVirtualKeyboardOnElementFocus() {
+  ShowVirtualKeyboard();
 
 // TODO(rouslan): Fix ChromeOS and Windows 8 behavior of autofill popup with
 // virtual keyboard.
@@ -1746,8 +1786,8 @@ ui::TextInputType RenderWidget::GetTextInputType() {
   if (focused_pepper_plugin_)
     return focused_pepper_plugin_->text_input_type();
 #endif
-  if (GetWebWidget())
-    return ConvertWebTextInputType(GetWebWidget()->textInputType());
+  if (auto* controller = GetInputMethodController())
+    return ConvertWebTextInputType(controller->textInputType());
   return ui::TEXT_INPUT_TYPE_NONE;
 }
 
@@ -1801,19 +1841,10 @@ void RenderWidget::convertWindowToViewport(blink::WebFloatRect* rect) {
 }
 
 #if defined(OS_ANDROID)
-void RenderWidget::OnImeEventSentForAck(const blink::WebTextInputInfo& info) {
-  text_input_info_history_.push_back(info);
-}
-
-void RenderWidget::OnImeEventAck() {
-  DCHECK_GE(text_input_info_history_.size(), 1u);
-  text_input_info_history_.pop_front();
-}
-
 void RenderWidget::OnRequestTextInputStateUpdate() {
   DCHECK(!ime_event_guard_);
   UpdateSelectionBounds();
-  UpdateTextInputState(ShowIme::HIDE_IME, ChangeSource::FROM_IME);
+  UpdateTextInputStateInternal(false, true /* reply_to_request */);
 }
 #endif
 
@@ -1823,29 +1854,6 @@ void RenderWidget::OnRequestCompositionUpdate(bool immediate_request,
   if (!immediate_request)
     return;
   UpdateCompositionInfo(true /* immediate request */);
-}
-
-bool RenderWidget::ShouldHandleImeEvent() {
-#if defined(OS_ANDROID)
-  if (!GetWebWidget())
-    return false;
-  if (IsUsingImeThread())
-    return true;
-
-  // We cannot handle IME events if there is any chance that the event we are
-  // receiving here from the browser is based on the state that is different
-  // from our current one as indicated by |text_input_info_|.
-  // The states the browser might be in are:
-  // text_input_info_history_[0] - current state ack'd by browser
-  // text_input_info_history_[1...N] - pending state changes
-  for (size_t i = 0u; i < text_input_info_history_.size() - 1u; ++i) {
-    if (text_input_info_history_[i] != text_input_info_)
-      return false;
-  }
-  return true;
-#else
-  return !!GetWebWidget();
-#endif
 }
 
 void RenderWidget::OnSetDeviceScaleFactor(float device_scale_factor) {
@@ -1858,19 +1866,6 @@ void RenderWidget::OnSetDeviceScaleFactor(float device_scale_factor) {
   ScheduleComposite();
 
   physical_backing_size_ = gfx::ScaleToCeiledSize(size_, device_scale_factor_);
-}
-
-bool RenderWidget::SetDeviceColorProfile(
-    const std::vector<char>& color_profile) {
-  if (device_color_profile_ == color_profile)
-    return false;
-
-  device_color_profile_ = color_profile;
-
-  if (owner_delegate_)
-    owner_delegate_->RenderWidgetDidSetColorProfile(color_profile);
-
-  return true;
 }
 
 void RenderWidget::OnOrientationChange() {
@@ -1916,14 +1911,6 @@ void RenderWidget::set_next_paint_is_repaint_ack() {
   next_paint_flags_ |= ViewHostMsg_UpdateRect_Flags::IS_REPAINT_ACK;
 }
 
-bool RenderWidget::IsUsingImeThread() {
-#if defined(OS_ANDROID)
-  return base::FeatureList::IsEnabled(features::kImeThread);
-#else
-  return false;
-#endif
-}
-
 void RenderWidget::OnImeEventGuardStart(ImeEventGuard* guard) {
   if (!ime_event_guard_)
     ime_event_guard_ = guard;
@@ -1931,15 +1918,7 @@ void RenderWidget::OnImeEventGuardStart(ImeEventGuard* guard) {
 
 void RenderWidget::OnImeEventGuardFinish(ImeEventGuard* guard) {
   if (ime_event_guard_ != guard) {
-#if defined(OS_ANDROID)
-    // In case a from-IME event (e.g. touch) ends up in not-from-IME event
-    // (e.g. long press gesture), we want to treat it as not-from-IME event
-    // so that ReplicaInputConnection can make changes to its Editable model.
-    // Therefore, we want to mark this text state update as 'from IME' only
-    // when all the nested events are all originating from IME.
-    ime_event_guard_->set_from_ime(
-        ime_event_guard_->from_ime() && guard->from_ime());
-#endif
+    DCHECK(!ime_event_guard_->reply_to_request());
     return;
   }
   ime_event_guard_ = nullptr;
@@ -1949,9 +1928,10 @@ void RenderWidget::OnImeEventGuardFinish(ImeEventGuard* guard) {
   // ime event.
   UpdateSelectionBounds();
 #if defined(OS_ANDROID)
-  UpdateTextInputState(
-      guard->show_ime() ? ShowIme::IF_NEEDED : ShowIme::HIDE_IME,
-      guard->from_ime() ? ChangeSource::FROM_IME : ChangeSource::FROM_NON_IME);
+  if (guard->show_virtual_keyboard())
+    ShowVirtualKeyboard();
+  else
+    UpdateTextInputState();
 #endif
 }
 
@@ -2015,11 +1995,6 @@ void RenderWidget::UpdateSelectionBounds() {
   UpdateCompositionInfo(false /* not an immediate request */);
 }
 
-void RenderWidget::SetDeviceColorProfileForTesting(
-    const std::vector<char>& color_profile) {
-  SetDeviceColorProfile(color_profile);
-}
-
 void RenderWidget::DidAutoResize(const gfx::Size& new_size) {
   WebRect new_size_in_window(0, 0, new_size.width(), new_size.height());
   convertViewportToWindow(&new_size_in_window);
@@ -2080,6 +2055,8 @@ void RenderWidget::GetCompositionRange(gfx::Range* range) {
 bool RenderWidget::ShouldUpdateCompositionInfo(
     const gfx::Range& range,
     const std::vector<gfx::Rect>& bounds) {
+  if (!range.IsValid())
+    return false;
   if (composition_range_ != range)
     return true;
   if (bounds.size() != composition_character_bounds_.size())
@@ -2102,6 +2079,7 @@ bool RenderWidget::CanComposeInline() {
 blink::WebScreenInfo RenderWidget::screenInfo() {
   blink::WebScreenInfo web_screen_info;
   web_screen_info.deviceScaleFactor = screen_info_.device_scale_factor;
+  web_screen_info.iccProfile = screen_info_.icc_profile;
   web_screen_info.depth = screen_info_.depth;
   web_screen_info.depthPerComponent = screen_info_.depth_per_component;
   web_screen_info.isMonochrome = screen_info_.is_monochrome;
@@ -2135,17 +2113,7 @@ blink::WebScreenInfo RenderWidget::screenInfo() {
 
 void RenderWidget::resetInputMethod() {
   ImeEventGuard guard(this);
-  // If the last text input type is not None, then we should finish any
-  // ongoing composition regardless of the new text input type.
-  if (text_input_type_ != ui::TEXT_INPUT_TYPE_NONE) {
-    // If a composition text exists, then we need to let the browser process
-    // to cancel the input method's ongoing composition session.
-    blink::WebInputMethodController* controller = GetInputMethodController();
-    if (controller &&
-        controller->finishComposingText(
-            WebInputMethodController::DoNotKeepSelection))
-      Send(new InputHostMsg_ImeCancelComposition(routing_id()));
-  }
+  Send(new InputHostMsg_ImeCancelComposition(routing_id()));
 
   UpdateCompositionInfo(false /* not an immediate request */);
 }
@@ -2172,15 +2140,31 @@ void RenderWidget::didHandleGestureEvent(
 #if defined(OS_ANDROID) || defined(USE_AURA)
   if (event_cancelled)
     return;
-  if (event.type == WebInputEvent::GestureTap) {
-    UpdateTextInputState(ShowIme::IF_NEEDED, ChangeSource::FROM_NON_IME);
-  } else if (event.type == WebInputEvent::GestureLongPress) {
+  if (event.type() == WebInputEvent::GestureTap) {
+    ShowVirtualKeyboard();
+  } else if (event.type() == WebInputEvent::GestureLongPress) {
     DCHECK(GetWebWidget());
-    if (GetWebWidget()->textInputInfo().value.isEmpty())
-      UpdateTextInputState(ShowIme::HIDE_IME, ChangeSource::FROM_NON_IME);
+    blink::WebInputMethodController* controller = GetInputMethodController();
+    if (!controller || controller->textInputInfo().value.isEmpty())
+      UpdateTextInputState();
     else
-      UpdateTextInputState(ShowIme::IF_NEEDED, ChangeSource::FROM_NON_IME);
+      ShowVirtualKeyboard();
   }
+// TODO(ananta): Piggyback off existing IPCs to communicate this information,
+// crbug/420130.
+#if defined(OS_WIN)
+  if (event.type() != blink::WebGestureEvent::GestureTap)
+    return;
+
+  // TODO(estade): hit test the event against focused node to make sure
+  // the tap actually hit the focused node.
+  blink::WebInputMethodController* controller = GetInputMethodController();
+  blink::WebTextInputType text_input_type =
+      controller ? controller->textInputType() : blink::WebTextInputTypeNone;
+
+  Send(new ViewHostMsg_FocusedNodeTouched(
+      routing_id_, text_input_type != blink::WebTextInputTypeNone));
+#endif
 #endif
 }
 
@@ -2221,7 +2205,6 @@ void RenderWidget::hasTouchEventHandlers(bool has_handlers) {
 
 void RenderWidget::setTouchAction(
     blink::WebTouchAction web_touch_action) {
-
   // Ignore setTouchAction calls that result from synthetic touch events (eg.
   // when blink is emulating touch with mouse).
   if (input_handler_->handling_event_type() != WebInputEvent::TouchStart)
@@ -2230,13 +2213,6 @@ void RenderWidget::setTouchAction(
    content::TouchAction content_touch_action =
        static_cast<content::TouchAction>(web_touch_action);
   Send(new InputHostMsg_SetTouchAction(routing_id_, content_touch_action));
-}
-
-void RenderWidget::didUpdateTextOfFocusedElementByNonUserInput() {
-#if defined(OS_ANDROID)
-  if (!IsUsingImeThread())
-    text_field_is_dirty_ = true;
-#endif
 }
 
 void RenderWidget::RegisterRenderFrameProxy(RenderFrameProxy* proxy) {
@@ -2308,9 +2284,14 @@ blink::WebWidget* RenderWidget::GetWebWidget() const {
 
 blink::WebInputMethodController* RenderWidget::GetInputMethodController()
     const {
-  // TODO(ekaramad): Remove this CHECK when GetWebWidget() is
-  // always a WebFrameWidget.
-  CHECK(GetWebWidget()->isWebFrameWidget());
+  if (!GetWebWidget()->isWebFrameWidget()) {
+    // TODO(ekaramad): We should not get here in response to IME IPC or updates
+    // when the RenderWidget is swapped out. We should top sending IPCs from the
+    // browser side (https://crbug.com/669219).
+    // If there is no WebFrameWidget, then there will be no
+    // InputMethodControllers for a WebLocalFrame.
+    return nullptr;
+  }
   return static_cast<blink::WebFrameWidget*>(GetWebWidget())
       ->getActiveWebInputMethodController();
 }

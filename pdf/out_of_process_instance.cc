@@ -428,7 +428,13 @@ void OutOfProcessInstance::HandleMessage(const pp::Var& message) {
       return;
     }
 
-    if (pinch_phase == PINCH_UPDATE_ZOOM_IN) {
+    // When zooming in, we set a layer transform to avoid unneeded rerasters.
+    // Also, if we're zooming out and the last time we rerastered was when
+    // we were even further zoomed out (i.e. we pinch zoomed in and are now
+    // pinch zooming back out in the same gesture), we update the layer
+    // transform instead of rerastering.
+    if (pinch_phase == PINCH_UPDATE_ZOOM_IN ||
+        (pinch_phase == PINCH_UPDATE_ZOOM_OUT && zoom_ratio > 1.0)) {
       if (!(dict.Get(pp::Var(kJSPinchX)).is_number() &&
             dict.Get(pp::Var(kJSPinchY)).is_number() &&
             dict.Get(pp::Var(kJSPinchVectorX)).is_number() &&
@@ -741,6 +747,12 @@ void OutOfProcessInstance::SendNextAccessibilityPage(int32_t page_index) {
     return;
 
   int char_count = engine_->GetCharCount(page_index);
+
+  // Treat a char count of -1 (error) as 0 (an empty page), since
+  // other pages might have valid content.
+  if (char_count < 0)
+    char_count = 0;
+
   PP_PrivateAccessibilityPageInfo page_info;
   page_info.page_index = page_index;
   page_info.bounds = engine_->GetPageBoundsRect(page_index);
@@ -943,8 +955,24 @@ void OutOfProcessInstance::OnPaint(
 }
 
 void OutOfProcessInstance::DidOpen(int32_t result) {
-  if (result != PP_OK || !engine_->HandleDocumentLoad(embed_loader_))
+  if (result == PP_OK) {
+    if (!engine_->HandleDocumentLoad(embed_loader_)) {
+      document_load_state_ = LOAD_STATE_LOADING;
+      DocumentLoadFailed();
+    }
+  } else if (result != PP_ERROR_ABORTED) { // Can happen in tests.
+    NOTREACHED();
     DocumentLoadFailed();
+  }
+
+  // If it's a progressive load, cancel the stream URL request so that requests
+  // can be made on the original URL.
+  // TODO(raymes): Make this clearer once the in-process plugin is deleted.
+  if (engine_->IsProgressiveLoad()) {
+    pp::VarDictionary message;
+    message.Set(kType, kJSCancelStreamUrlType);
+    PostMessage(message);
+  }
 }
 
 void OutOfProcessInstance::DidOpenPreview(int32_t result) {
@@ -1572,12 +1600,6 @@ bool OutOfProcessInstance::IsPrintPreview() {
 
 uint32_t OutOfProcessInstance::GetBackgroundColor() {
   return background_color_;
-}
-
-void OutOfProcessInstance::CancelBrowserDownload() {
-  pp::VarDictionary message;
-  message.Set(kType, kJSCancelStreamUrlType);
-  PostMessage(message);
 }
 
 void OutOfProcessInstance::IsSelectingChanged(bool is_selecting) {

@@ -20,18 +20,14 @@ namespace scheduler {
 class FakeWebTaskRunner : public WebTaskRunner {
  public:
   FakeWebTaskRunner();
-  ~FakeWebTaskRunner() override;
 
   void setTime(double new_time);
 
   // WebTaskRunner implementation:
-  void postTask(const WebTraceLocation&, Task*) override;
-  void postDelayedTask(const WebTraceLocation&, Task*, double) override;
   void postDelayedTask(const WebTraceLocation&,
                        const base::Closure&,
                        double) override;
   bool runsTasksOnCurrentThread() override;
-  std::unique_ptr<WebTaskRunner> clone() override;
   double virtualTimeSeconds() const override;
   double monotonicallyIncreasingVirtualTimeSeconds() const override;
   SingleThreadTaskRunner* toSingleThreadTaskRunner() override;
@@ -40,6 +36,8 @@ class FakeWebTaskRunner : public WebTaskRunner {
   std::deque<base::Closure> takePendingTasksForTesting();
 
  private:
+  ~FakeWebTaskRunner() override;
+
   class Data;
   class BaseTaskRunner;
   RefPtr<Data> data_;

@@ -9,7 +9,7 @@
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/login/auth/key.h"
-#include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "crypto/random.h"
 
@@ -56,12 +56,9 @@ base::TimeDelta QuickUnlockPasswordConfirmationFrequencyToTimeDelta(
 }  // namespace
 
 // static
-void PinStorage::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterStringPref(prefs::kQuickUnlockPinSalt, "",
-                               user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterStringPref(prefs::kQuickUnlockPinSecret, "",
-                               user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+void PinStorage::RegisterProfilePrefs(PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kQuickUnlockPinSalt, "");
+  registry->RegisterStringPref(prefs::kQuickUnlockPinSecret, "");
 }
 
 PinStorage::PinStorage(PrefService* pref_service)

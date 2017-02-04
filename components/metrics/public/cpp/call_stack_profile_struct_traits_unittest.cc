@@ -89,7 +89,7 @@ class CallStackProfileCollectorTestImpl
 
 class CallStackProfileStructTraitsTest : public testing::Test {
  public:
-  CallStackProfileStructTraitsTest() : impl_(GetProxy(&proxy_)) {}
+  CallStackProfileStructTraitsTest() : impl_(MakeRequest(&proxy_)) {}
 
  protected:
   base::MessageLoop message_loop_;
@@ -129,18 +129,6 @@ TEST_F(CallStackProfileStructTraitsTest, Module) {
     {
       Module(0x10, "", base::FilePath(base::FilePath::kCurrentDirectory)),
       true
-    },
-    // Module id at the length limit.
-    {
-      Module(0x10, std::string(40, ' '),
-             base::FilePath(base::FilePath::kCurrentDirectory)),
-      true
-    },
-    // Module id beyond the length limit.
-    {
-      Module(0x10, std::string(41, ' '),
-             base::FilePath(base::FilePath::kCurrentDirectory)),
-      false
     },
   };
 

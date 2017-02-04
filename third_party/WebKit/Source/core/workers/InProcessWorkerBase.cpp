@@ -6,18 +6,17 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/events/MessageEvent.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/workers/InProcessWorkerMessagingProxy.h"
 #include "core/workers/WorkerScriptLoader.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include <memory>
 
 namespace blink {
 
 InProcessWorkerBase::InProcessWorkerBase(ExecutionContext* context)
     : AbstractWorker(context),
-      ActiveScriptWrappable(this),
       m_contextProxy(nullptr) {}
 
 InProcessWorkerBase::~InProcessWorkerBase() {
@@ -44,8 +43,6 @@ void InProcessWorkerBase::postMessage(ExecutionContext* context,
 bool InProcessWorkerBase::initialize(ExecutionContext* context,
                                      const String& url,
                                      ExceptionState& exceptionState) {
-  suspendIfNeeded();
-
   // TODO(mkwst): Revisit the context as
   // https://drafts.css-houdini.org/worklets/ evolves.
   KURL scriptURL =
@@ -70,7 +67,7 @@ void InProcessWorkerBase::terminate() {
     m_contextProxy->terminateGlobalScope();
 }
 
-void InProcessWorkerBase::contextDestroyed() {
+void InProcessWorkerBase::contextDestroyed(ExecutionContext*) {
   if (m_scriptLoader)
     m_scriptLoader->cancel();
   terminate();
@@ -98,7 +95,7 @@ void InProcessWorkerBase::onFinished() {
         m_scriptLoader->url(), getExecutionContext()->userAgent(),
         m_scriptLoader->script(),
         m_scriptLoader->releaseContentSecurityPolicy(),
-        m_scriptLoader->referrerPolicy());
+        m_scriptLoader->getReferrerPolicy());
     InspectorInstrumentation::scriptImported(getExecutionContext(),
                                              m_scriptLoader->identifier(),
                                              m_scriptLoader->script());

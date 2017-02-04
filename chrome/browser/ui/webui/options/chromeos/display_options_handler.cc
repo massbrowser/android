@@ -30,8 +30,8 @@
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/display/display.h"
-#include "ui/display/manager/display_layout.h"
-#include "ui/display/manager/display_layout_builder.h"
+#include "ui/display/display_layout.h"
+#include "ui/display/display_layout_builder.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/display/types/display_constants.h"
@@ -80,21 +80,21 @@ int64_t GetDisplayIdFromDictionary(const base::DictionaryValue* dictionary,
   return GetDisplayIdFromValue(arg);
 }
 
-base::string16 GetColorProfileName(ui::ColorCalibrationProfile profile) {
+base::string16 GetColorProfileName(display::ColorCalibrationProfile profile) {
   switch (profile) {
-    case ui::COLOR_PROFILE_STANDARD:
+    case display::COLOR_PROFILE_STANDARD:
       return l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_COLOR_PROFILE_STANDARD);
-    case ui::COLOR_PROFILE_DYNAMIC:
+    case display::COLOR_PROFILE_DYNAMIC:
       return l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_COLOR_PROFILE_DYNAMIC);
-    case ui::COLOR_PROFILE_MOVIE:
+    case display::COLOR_PROFILE_MOVIE:
       return l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_COLOR_PROFILE_MOVIE);
-    case ui::COLOR_PROFILE_READING:
+    case display::COLOR_PROFILE_READING:
       return l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_COLOR_PROFILE_READING);
-    case ui::NUM_COLOR_PROFILES:
+    case display::NUM_COLOR_PROFILES:
       break;
   }
 
@@ -358,8 +358,10 @@ void DisplayOptionsHandler::SendAllDisplayInfo() {
     js_display->Set("availableColorProfiles", available_color_profiles);
 
     if (display_manager->GetNumDisplays() > 1) {
+      // The settings UI must use the resolved display layout to show the
+      // actual applied layout.
       const display::DisplayPlacement placement =
-          display_manager->GetCurrentDisplayLayout().FindPlacementById(
+          display_manager->GetCurrentResolvedDisplayLayout().FindPlacementById(
               display.id());
       if (placement.display_id != display::kInvalidDisplayId) {
         js_display->SetString(
@@ -558,8 +560,8 @@ void DisplayOptionsHandler::HandleSetColorProfile(const base::ListValue* args) {
     return;
   }
 
-  if (profile_id < ui::COLOR_PROFILE_STANDARD ||
-      profile_id > ui::COLOR_PROFILE_READING) {
+  if (profile_id < display::COLOR_PROFILE_STANDARD ||
+      profile_id > display::COLOR_PROFILE_READING) {
     LOG(ERROR) << "Invalid profile_id: " << profile_id;
     return;
   }
@@ -567,7 +569,7 @@ void DisplayOptionsHandler::HandleSetColorProfile(const base::ListValue* args) {
   content::RecordAction(
       base::UserMetricsAction("Options_DisplaySetColorProfile"));
   GetDisplayManager()->SetColorCalibrationProfile(
-      display_id, static_cast<ui::ColorCalibrationProfile>(profile_id));
+      display_id, static_cast<display::ColorCalibrationProfile>(profile_id));
 
   SendAllDisplayInfo();
 }

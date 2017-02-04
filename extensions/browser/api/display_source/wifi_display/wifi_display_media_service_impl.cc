@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/big_endian.h"
+#include "base/memory/ptr_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/base/net_errors.h"
@@ -19,7 +20,7 @@ namespace extensions {
 
 class WiFiDisplayMediaServiceImpl::PacketIOBuffer : public net::IOBuffer {
  public:
-  explicit PacketIOBuffer(mojo::Array<uint8_t> array);
+  explicit PacketIOBuffer(std::vector<uint8_t> array);
 
   int size() const { return packet_data_.size(); }
 
@@ -30,7 +31,7 @@ class WiFiDisplayMediaServiceImpl::PacketIOBuffer : public net::IOBuffer {
 };
 
 WiFiDisplayMediaServiceImpl::PacketIOBuffer::PacketIOBuffer(
-    mojo::Array<uint8_t> array) {
+    std::vector<uint8_t> array) {
   array.Swap(&packet_data_);
   data_ = reinterpret_cast<char*>(packet_data_.data());
 }

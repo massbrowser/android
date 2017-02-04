@@ -5,8 +5,29 @@
 #include "core/timing/PerformanceLongTaskTiming.h"
 
 #include "core/frame/DOMWindow.h"
+#include "core/timing/TaskAttributionTiming.h"
 
 namespace blink {
+
+namespace {
+
+double clampToMillisecond(double timeInMillis) {
+  // Long task times are clamped to 1 millisecond for security.
+  return floor(timeInMillis);
+}
+
+}  // namespace
+
+// static
+PerformanceLongTaskTiming* PerformanceLongTaskTiming::create(double startTime,
+                                                             double endTime,
+                                                             String name,
+                                                             String frameSrc,
+                                                             String frameId,
+                                                             String frameName) {
+  return new PerformanceLongTaskTiming(startTime, endTime, name, frameSrc,
+                                       frameId, frameName);
+}
 
 PerformanceLongTaskTiming::PerformanceLongTaskTiming(double startTime,
                                                      double endTime,
@@ -14,26 +35,25 @@ PerformanceLongTaskTiming::PerformanceLongTaskTiming(double startTime,
                                                      String culpritFrameSrc,
                                                      String culpritFrameId,
                                                      String culpritFrameName)
-    : PerformanceEntry(name, "longtask", startTime, endTime),
-      m_culpritFrameSrc(culpritFrameSrc),
-      m_culpritFrameId(culpritFrameId),
-      m_culpritFrameName(culpritFrameName) {}
+    : PerformanceEntry(name,
+                       "longtask",
+                       clampToMillisecond(startTime),
+                       clampToMillisecond(endTime)) {
+  // Only one possible task type exists currently: "script"
+  // Only one possible container type exists currently: "iframe"
+  TaskAttributionTiming* attributionEntry = TaskAttributionTiming::create(
+      "script", "iframe", culpritFrameSrc, culpritFrameId, culpritFrameName);
+  m_attribution.push_back(*attributionEntry);
+}
 
 PerformanceLongTaskTiming::~PerformanceLongTaskTiming() {}
 
-String PerformanceLongTaskTiming::culpritFrameSrc() const {
-  return m_culpritFrameSrc;
-}
-
-String PerformanceLongTaskTiming::culpritFrameId() const {
-  return m_culpritFrameId;
-}
-
-String PerformanceLongTaskTiming::culpritFrameName() const {
-  return m_culpritFrameName;
+TaskAttributionVector PerformanceLongTaskTiming::attribution() const {
+  return m_attribution;
 }
 
 DEFINE_TRACE(PerformanceLongTaskTiming) {
+  visitor->trace(m_attribution);
   PerformanceEntry::trace(visitor);
 }
 

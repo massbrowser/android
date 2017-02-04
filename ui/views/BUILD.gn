@@ -5,10 +5,59 @@
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
+import("//ui/base/ui_features.gni")
 import("//ui/ozone/ozone.gni")
 
 config("flags") {
   defines = [ "TOOLKIT_VIEWS=1" ]
+}
+
+action("aggregate_vector_icons") {
+  visibility = [ ":*" ]
+
+  script = "//ui/gfx/vector_icons/aggregate_vector_icons.py"
+
+  icons = [
+    "vector_icons/checkbox_active.icon",
+    "vector_icons/checkbox_normal.icon",
+    "vector_icons/menu_check.1x.icon",
+    "vector_icons/menu_check.icon",
+    "vector_icons/menu_radio_empty.icon",
+    "vector_icons/menu_radio_selected.icon",
+    "vector_icons/radio_button_active.icon",
+    "vector_icons/radio_button_normal.icon",
+    "vector_icons/submenu_arrow.1x.icon",
+    "vector_icons/submenu_arrow.icon",
+  ]
+
+  if (is_mac) {
+    icons += [
+      "vector_icons/combobox_arrow_mac_enabled.icon",
+      "vector_icons/combobox_arrow_mac_disabled.icon",
+    ]
+  }
+
+  output_cc = "$target_gen_dir/vector_icons.cc"
+  output_h = "$target_gen_dir/vector_icons.h"
+
+  inputs = icons
+  inputs += [
+    "vector_icons/vector_icons.cc.template",
+    "vector_icons/vector_icons.h.template",
+  ]
+  outputs = [
+    output_cc,
+    output_h,
+  ]
+
+  response_file_contents = rebase_path(icons, root_build_dir)
+
+  args = [
+    "--working_directory=" + rebase_path("./vector_icons"),
+    "--file_list={{response_file_name}}",
+    "--output_cc=" + rebase_path(output_cc, root_build_dir),
+    "--output_h=" + rebase_path(output_h, root_build_dir),
+  ]
 }
 
 component("views") {
@@ -177,9 +226,8 @@ component("views") {
     "controls/menu/menu_runner_impl_interface.h",
     "controls/menu/menu_scroll_view_container.cc",
     "controls/menu/menu_scroll_view_container.h",
+    "controls/menu/menu_separator.cc",
     "controls/menu/menu_separator.h",
-    "controls/menu/menu_separator_views.cc",
-    "controls/menu/menu_separator_win.cc",
     "controls/menu/menu_types.h",
     "controls/menu/native_menu_win.cc",
     "controls/menu/native_menu_win.h",
@@ -385,6 +433,8 @@ component("views") {
     "word_lookup_client.h",
   ]
 
+  sources += get_target_outputs(":aggregate_vector_icons")
+
   configs += [
     "//build/config:precompiled_headers",
 
@@ -395,8 +445,11 @@ component("views") {
   defines = [ "VIEWS_IMPLEMENTATION" ]
 
   deps = [
+    ":aggregate_vector_icons",
     "//base:i18n",
     "//base/third_party/dynamic_annotations",
+    "//cc/paint",
+    "//services/ui/public/interfaces",
     "//skia",
     "//third_party/icu",
     "//ui/accessibility",
@@ -561,6 +614,7 @@ component("views") {
       "widget/window_reorderer.h",
     ]
     deps += [
+      "//services/ui/public/interfaces",
       "//ui/aura",
       "//ui/touch_selection",
       "//ui/wm",
@@ -661,6 +715,8 @@ static_library("test_support_internal") {
     "animation/test/test_ink_drop_ripple_observer.h",
     "controls/textfield/textfield_test_api.cc",
     "controls/textfield/textfield_test_api.h",
+    "corewm/test/tooltip_aura_test_api.cc",
+    "corewm/test/tooltip_aura_test_api.h",
     "test/capture_tracking_view.cc",
     "test/capture_tracking_view.h",
     "test/combobox_test_api.cc",
@@ -756,6 +812,7 @@ static_library("test_support_internal") {
     deps += [
       "//ui/aura",
       "//ui/aura:test_support",
+      "//ui/views/mus",
       "//ui/wm",
     ]
     if (use_x11 && !is_chromeos) {
@@ -840,6 +897,7 @@ source_set("views_unittests_sources") {
     "controls/scrollbar/scrollbar_unittest.cc",
     "controls/slider_unittest.cc",
     "controls/styled_label_unittest.cc",
+    "controls/tabbed_pane/tabbed_pane_accessibility_mac_unittest.mm",
     "controls/tabbed_pane/tabbed_pane_unittest.cc",
     "controls/table/table_utils_unittest.cc",
     "controls/table/table_view_unittest.cc",
@@ -854,6 +912,7 @@ source_set("views_unittests_sources") {
     "layout/fill_layout_unittest.cc",
     "layout/grid_layout_unittest.cc",
     "rect_based_targeting_utils_unittest.cc",
+    "test/widget_test_unittest.cc",
     "view_model_unittest.cc",
     "view_model_utils_unittest.cc",
     "view_targeter_unittest.cc",
@@ -879,6 +938,7 @@ source_set("views_unittests_sources") {
     "//base:i18n",
     "//base/test:test_support",
     "//cc",
+    "//services/ui/public/interfaces",
     "//skia",
     "//testing/gtest",
     "//third_party/icu",

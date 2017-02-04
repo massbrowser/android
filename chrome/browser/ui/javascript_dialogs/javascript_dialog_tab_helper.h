@@ -53,17 +53,24 @@ class JavaScriptDialogTabHelper
                               bool accept,
                               const base::string16* prompt_override) override;
   void CancelDialogs(content::WebContents* web_contents,
-                     bool suppress_callbacks,
                      bool reset_state) override;
 
   // WebContentsObserver:
   void WasHidden() override;
+  void DidStartNavigation(
+      content::NavigationHandle* navigation_handle) override;
+  void DidStartNavigationToPendingEntry(
+      const GURL& url,
+      content::ReloadType reload_type) override;
 
   // BrowserListObserver:
   void OnBrowserSetLastActive(Browser* browser) override;
 
  private:
   friend class content::WebContentsUserData<JavaScriptDialogTabHelper>;
+  enum class DismissalCause;
+
+  void LogDialogDismissalCause(DismissalCause cause);
 
   // Wrapper around a DialogClosedCallback so that we can intercept it before
   // passing it onto the original callback.
@@ -71,14 +78,18 @@ class JavaScriptDialogTabHelper
                       bool success,
                       const base::string16& user_input);
 
-  void CloseDialog(bool suppress_callback,
-                   bool success,
-                   const base::string16& user_input);
+  void CloseDialog(bool success,
+                   const base::string16& user_input,
+                   DismissalCause cause);
 
   void ClearDialogInfo();
 
   // The dialog being displayed on the observed WebContents.
   base::WeakPtr<JavaScriptDialog> dialog_;
+
+  // The type of dialog being displayed. Only valid when |dialog_| is non-null.
+  content::JavaScriptMessageType message_type_ =
+      content::JavaScriptMessageType::JAVASCRIPT_MESSAGE_TYPE_ALERT;
 
   // The callback provided for when the dialog is closed. Usually the dialog
   // itself calls it, but in the cases where the dialog is closed not by the

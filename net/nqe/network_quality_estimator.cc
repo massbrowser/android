@@ -28,6 +28,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/network_interfaces.h"
+#include "net/base/trace_constants.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
@@ -44,39 +45,39 @@
 #include "net/android/network_library.h"
 #endif  // OS_ANDROID
 
+namespace net {
+
 namespace {
 
 // Returns the histogram that should be used to record the given statistic.
 // |max_limit| is the maximum value that can be stored in the histogram.
-base::HistogramBase* GetHistogram(
-    const std::string& statistic_name,
-    net::NetworkChangeNotifier::ConnectionType type,
-    int32_t max_limit) {
+base::HistogramBase* GetHistogram(const std::string& statistic_name,
+                                  NetworkChangeNotifier::ConnectionType type,
+                                  int32_t max_limit) {
   const base::LinearHistogram::Sample kLowerLimit = 1;
   DCHECK_GT(max_limit, kLowerLimit);
   const size_t kBucketCount = 50;
 
   return base::Histogram::FactoryGet(
-      "NQE." + statistic_name +
-          net::nqe::internal::GetNameForConnectionType(type),
+      "NQE." + statistic_name + nqe::internal::GetNameForConnectionType(type),
       kLowerLimit, max_limit, kBucketCount,
       base::HistogramBase::kUmaTargetedHistogramFlag);
 }
 
-net::NetworkQualityObservationSource ProtocolSourceToObservationSource(
-    net::SocketPerformanceWatcherFactory::Protocol protocol) {
+NetworkQualityObservationSource ProtocolSourceToObservationSource(
+    SocketPerformanceWatcherFactory::Protocol protocol) {
   switch (protocol) {
-    case net::SocketPerformanceWatcherFactory::PROTOCOL_TCP:
-      return net::NETWORK_QUALITY_OBSERVATION_SOURCE_TCP;
-    case net::SocketPerformanceWatcherFactory::PROTOCOL_QUIC:
-      return net::NETWORK_QUALITY_OBSERVATION_SOURCE_QUIC;
+    case SocketPerformanceWatcherFactory::PROTOCOL_TCP:
+      return NETWORK_QUALITY_OBSERVATION_SOURCE_TCP;
+    case SocketPerformanceWatcherFactory::PROTOCOL_QUIC:
+      return NETWORK_QUALITY_OBSERVATION_SOURCE_QUIC;
   }
   NOTREACHED();
-  return net::NETWORK_QUALITY_OBSERVATION_SOURCE_TCP;
+  return NETWORK_QUALITY_OBSERVATION_SOURCE_TCP;
 }
 
 // Returns true if the scheme of the |request| is either HTTP or HTTPS.
-bool RequestSchemeIsHTTPOrHTTPS(const net::URLRequest& request) {
+bool RequestSchemeIsHTTPOrHTTPS(const URLRequest& request) {
   return request.url().is_valid() && request.url().SchemeIsHTTPOrHTTPS();
 }
 
@@ -139,6 +140,7 @@ static_assert(32 >= kBitsPerMetric * 4,
 int32_t FitInKBitsPerMetricBits(int32_t metric) {
   // Remove the last kTrimBits. This will allow the metric to fit within
   // kBitsPerMetric while losing only the least significant bits.
+  DCHECK_LE(0, metric);
   metric = metric >> kTrimBits;
 
   // kLargestValuePossible is the largest value that can be recorded using
@@ -148,7 +150,7 @@ int32_t FitInKBitsPerMetricBits(int32_t metric) {
     // Fit |metric| in kBitsPerMetric by clamping it down.
     metric = kLargestValuePossible;
   }
-  DCHECK_EQ(0, metric >> kBitsPerMetric);
+  DCHECK_EQ(0, metric >> kBitsPerMetric) << metric;
   return metric;
 }
 
@@ -188,38 +190,55 @@ void RecordEffectiveConnectionTypeAccuracy(
     const char* prefix,
     int32_t metric,
     base::TimeDelta measuring_duration,
-    net::EffectiveConnectionType observed_effective_connection_type) {
-  const std::string histogram_name =
-      base::StringPrintf("%s.EstimatedObservedDiff.%s.%d.%s", prefix,
-                         metric >= 0 ? "Positive" : "Negative",
-                         static_cast<int32_t>(measuring_duration.InSeconds()),
-                         net::GetNameForEffectiveConnectionType(
-                             observed_effective_connection_type));
+    EffectiveConnectionType observed_effective_connection_type) {
+  const std::string histogram_name = base::StringPrintf(
+      "%s.EstimatedObservedDiff.%s.%d.%s", prefix,
+      metric >= 0 ? "Positive" : "Negative",
+      static_cast<int32_t>(measuring_duration.InSeconds()),
+      GetNameForEffectiveConnectionType(observed_effective_connection_type));
 
   base::HistogramBase* histogram = base::Histogram::FactoryGet(
-      histogram_name, 0, net::EFFECTIVE_CONNECTION_TYPE_LAST,
-      net::EFFECTIVE_CONNECTION_TYPE_LAST /* Number of buckets */,
+      histogram_name, 0, EFFECTIVE_CONNECTION_TYPE_LAST,
+      EFFECTIVE_CONNECTION_TYPE_LAST /* Number of buckets */,
       base::HistogramBase::kUmaTargetedHistogramFlag);
   histogram->Add(std::abs(metric));
 }
 
 }  // namespace
 
-namespace net {
-
 NetworkQualityEstimator::NetworkQualityEstimator(
     std::unique_ptr<ExternalEstimateProvider> external_estimates_provider,
-    const std::map<std::string, std::string>& variation_params)
+    const std::map<std::string, std::string>& variation_params,
+    NetLog* net_log)
     : NetworkQualityEstimator(std::move(external_estimates_provider),
                               variation_params,
                               false,
-                              false) {}
+                              false,
+                              net_log) {}
 
 NetworkQualityEstimator::NetworkQualityEstimator(
     std::unique_ptr<ExternalEstimateProvider> external_estimates_provider,
     const std::map<std::string, std::string>& variation_params,
     bool use_local_host_requests_for_tests,
-    bool use_smaller_responses_for_tests)
+    bool use_smaller_responses_for_tests,
+    NetLog* net_log)
+    : NetworkQualityEstimator(
+          std::move(external_estimates_provider),
+          variation_params,
+          use_local_host_requests_for_tests,
+          use_smaller_responses_for_tests,
+          true,
+          NetLogWithSource::Make(
+              net_log,
+              net::NetLogSourceType::NETWORK_QUALITY_ESTIMATOR)) {}
+
+NetworkQualityEstimator::NetworkQualityEstimator(
+    std::unique_ptr<ExternalEstimateProvider> external_estimates_provider,
+    const std::map<std::string, std::string>& variation_params,
+    bool use_local_host_requests_for_tests,
+    bool use_smaller_responses_for_tests,
+    bool add_default_platform_observations,
+    const NetLogWithSource& net_log)
     : algorithm_name_to_enum_({{"HttpRTTAndDownstreamThroughput",
                                 EffectiveConnectionTypeAlgorithm::
                                     HTTP_RTT_AND_DOWNSTREAM_THROUGHOUT},
@@ -228,25 +247,30 @@ NetworkQualityEstimator::NetworkQualityEstimator(
                                     TRANSPORT_RTT_OR_DOWNSTREAM_THROUGHOUT}}),
       use_localhost_requests_(use_local_host_requests_for_tests),
       use_small_responses_(use_smaller_responses_for_tests),
+      disable_offline_check_(false),
+      add_default_platform_observations_(add_default_platform_observations),
       weight_multiplier_per_second_(
           nqe::internal::GetWeightMultiplierPerSecond(variation_params)),
+      weight_multiplier_per_dbm_(
+          nqe::internal::GetWeightMultiplierPerDbm(variation_params)),
       effective_connection_type_algorithm_(
           algorithm_name_to_enum_.find(
-              net::nqe::internal::GetEffectiveConnectionTypeAlgorithm(
+              nqe::internal::GetEffectiveConnectionTypeAlgorithm(
                   variation_params)) == algorithm_name_to_enum_.end()
               ? kDefaultEffectiveConnectionTypeAlgorithm
               : algorithm_name_to_enum_
-                    .find(
-                        net::nqe::internal::GetEffectiveConnectionTypeAlgorithm(
-                            variation_params))
+                    .find(nqe::internal::GetEffectiveConnectionTypeAlgorithm(
+                        variation_params))
                     ->second),
       tick_clock_(new base::DefaultTickClock()),
       last_connection_change_(tick_clock_->NowTicks()),
       current_network_id_(nqe::internal::NetworkID(
           NetworkChangeNotifier::ConnectionType::CONNECTION_UNKNOWN,
           std::string())),
-      downstream_throughput_kbps_observations_(weight_multiplier_per_second_),
-      rtt_observations_(weight_multiplier_per_second_),
+      downstream_throughput_kbps_observations_(weight_multiplier_per_second_,
+                                               weight_multiplier_per_dbm_),
+      rtt_observations_(weight_multiplier_per_second_,
+                        weight_multiplier_per_dbm_),
       effective_connection_type_at_last_main_frame_(
           EFFECTIVE_CONNECTION_TYPE_UNKNOWN),
       external_estimate_provider_(std::move(external_estimates_provider)),
@@ -255,6 +279,7 @@ NetworkQualityEstimator::NetworkQualityEstimator(
       rtt_observations_size_at_last_ect_computation_(0),
       throughput_observations_size_at_last_ect_computation_(0),
       effective_connection_type_(EFFECTIVE_CONNECTION_TYPE_UNKNOWN),
+      signal_strength_dbm_(INT32_MIN),
       min_signal_strength_since_connection_change_(INT32_MAX),
       max_signal_strength_since_connection_change_(INT32_MIN),
       correlation_uma_logging_probability_(
@@ -264,6 +289,7 @@ NetworkQualityEstimator::NetworkQualityEstimator(
               variation_params)),
       forced_effective_connection_type_(
           nqe::internal::forced_effective_connection_type(variation_params)),
+      event_creator_(net_log),
       weak_ptr_factory_(this) {
   // None of the algorithms can have an empty name.
   DCHECK(algorithm_name_to_enum_.end() ==
@@ -301,12 +327,10 @@ NetworkQualityEstimator::NetworkQualityEstimator(
       base::Bind(&NetworkQualityEstimator::OnUpdatedRTTAvailable,
                  base::Unretained(this))));
 
-  // Record accuracy at 3 different intervals. The values used here must remain
-  // in sync with the suffixes specified in
+  // Record accuracy after a 15 second interval. The values used here must
+  // remain in sync with the suffixes specified in
   // tools/metrics/histograms/histograms.xml.
   accuracy_recording_intervals_.push_back(base::TimeDelta::FromSeconds(15));
-  accuracy_recording_intervals_.push_back(base::TimeDelta::FromSeconds(30));
-  accuracy_recording_intervals_.push_back(base::TimeDelta::FromSeconds(60));
 }
 
 void NetworkQualityEstimator::ObtainOperatingParams(
@@ -322,12 +346,25 @@ void NetworkQualityEstimator::ObtainOperatingParams(
 void NetworkQualityEstimator::AddDefaultEstimates() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  if (!add_default_platform_observations_)
+    return;
+
   if (default_observations_[current_network_id_.type].http_rtt() !=
       nqe::internal::InvalidRTT()) {
     RttObservation rtt_observation(
         default_observations_[current_network_id_.type].http_rtt(),
-        tick_clock_->NowTicks(),
+        tick_clock_->NowTicks(), INT32_MIN,
         NETWORK_QUALITY_OBSERVATION_SOURCE_DEFAULT_HTTP_FROM_PLATFORM);
+    rtt_observations_.AddObservation(rtt_observation);
+    NotifyObserversOfRTT(rtt_observation);
+  }
+
+  if (default_observations_[current_network_id_.type].transport_rtt() !=
+      nqe::internal::InvalidRTT()) {
+    RttObservation rtt_observation(
+        default_observations_[current_network_id_.type].transport_rtt(),
+        tick_clock_->NowTicks(), INT32_MIN,
+        NETWORK_QUALITY_OBSERVATION_SOURCE_DEFAULT_TRANSPORT_FROM_PLATFORM);
     rtt_observations_.AddObservation(rtt_observation);
     NotifyObserversOfRTT(rtt_observation);
   }
@@ -337,7 +374,7 @@ void NetworkQualityEstimator::AddDefaultEstimates() {
     ThroughputObservation throughput_observation(
         default_observations_[current_network_id_.type]
             .downstream_throughput_kbps(),
-        tick_clock_->NowTicks(),
+        tick_clock_->NowTicks(), INT32_MIN,
         NETWORK_QUALITY_OBSERVATION_SOURCE_DEFAULT_HTTP_FROM_PLATFORM);
     downstream_throughput_kbps_observations_.AddObservation(
         throughput_observation);
@@ -367,7 +404,7 @@ void NetworkQualityEstimator::NotifyStartTransaction(
 }
 
 void NetworkQualityEstimator::NotifyHeadersReceived(const URLRequest& request) {
-  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("net"),
+  TRACE_EVENT0(kNetTracingCategory,
                "NetworkQualityEstimator::NotifyHeadersReceived");
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -380,6 +417,7 @@ void NetworkQualityEstimator::NotifyHeadersReceived(const URLRequest& request) {
 
   // Update |estimated_quality_at_last_main_frame_| if this is a main frame
   // request.
+  // TODO(tbansal): Refactor this to a separate method.
   if (request.load_flags() & LOAD_MAIN_FRAME_DEPRECATED) {
     last_main_frame_request_ = now;
 
@@ -403,7 +441,6 @@ void NetworkQualityEstimator::NotifyHeadersReceived(const URLRequest& request) {
                      weak_ptr_factory_.GetWeakPtr(), measuring_delay),
           measuring_delay);
     }
-    UpdateSignalStrength();
   }
 
   LoadTimingInfo load_timing_info;
@@ -430,6 +467,7 @@ void NetworkQualityEstimator::NotifyHeadersReceived(const URLRequest& request) {
   }
 
   RttObservation http_rtt_observation(observed_http_rtt, now,
+                                      signal_strength_dbm_,
                                       NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP);
   rtt_observations_.AddObservation(http_rtt_observation);
   NotifyObserversOfRTT(http_rtt_observation);
@@ -534,7 +572,7 @@ void NetworkQualityEstimator::RecordAccuracyAfterMainFrame(
 
 void NetworkQualityEstimator::NotifyRequestCompleted(const URLRequest& request,
                                                      int net_error) {
-  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("net"),
+  TRACE_EVENT0(kNetTracingCategory,
                "NetworkQualityEstimator::NotifyRequestCompleted");
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -580,7 +618,10 @@ void NetworkQualityEstimator::RecordCorrelationMetric(const URLRequest& request,
   if (load_timing_info.receive_headers_end < last_main_frame_request_)
     return;
 
-  const base::TimeTicks now = tick_clock_->NowTicks();
+  // Use the system clock instead of |tick_clock_| to compare the current
+  // timestamp with the |load_timing_info| timestamp since the latter is set by
+  // the system clock, and may be different from |tick_clock_| in tests.
+  const base::TimeTicks now = base::TimeTicks::Now();
   // Record UMA only for requests that started recently.
   if (now - last_main_frame_request_ > base::TimeDelta::FromSeconds(15))
     return;
@@ -693,9 +734,21 @@ void NetworkQualityEstimator::SetUseSmallResponsesForTesting(
   throughput_analyzer_->SetUseSmallResponsesForTesting(use_small_responses_);
 }
 
+void NetworkQualityEstimator::DisableOfflineCheckForTesting(
+    bool disable_offline_check) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  disable_offline_check_ = disable_offline_check;
+  network_quality_store_->DisableOfflineCheckForTesting(disable_offline_check_);
+}
+
 void NetworkQualityEstimator::ReportEffectiveConnectionTypeForTesting(
     EffectiveConnectionType effective_connection_type) {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  event_creator_.MaybeAddEffectiveConnectionTypeChangedEventToNetLog(
+      effective_connection_type_,
+      typical_network_quality_[effective_connection_type]);
+
   for (auto& observer : effective_connection_type_observer_list_)
     observer.OnEffectiveConnectionTypeChanged(effective_connection_type);
 
@@ -747,14 +800,25 @@ void NetworkQualityEstimator::OnConnectionTypeChanged(
         "NQE.CellularSignalStrengthAvailable",
         min_signal_strength_since_connection_change_ != INT32_MAX &&
             max_signal_strength_since_connection_change_ != INT32_MIN);
+
+    if (min_signal_strength_since_connection_change_ != INT32_MAX &&
+        max_signal_strength_since_connection_change_ != INT32_MIN) {
+      UMA_HISTOGRAM_COUNTS_100(
+          "NQE.CellularSignalStrengthDifference",
+          max_signal_strength_since_connection_change_ -
+              min_signal_strength_since_connection_change_);
+    }
   }
 #endif  // OS_ANDROID
+  signal_strength_dbm_ = INT32_MIN;
   min_signal_strength_since_connection_change_ = INT32_MAX;
   max_signal_strength_since_connection_change_ = INT32_MIN;
   network_quality_ = nqe::internal::NetworkQuality();
   effective_connection_type_ = EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
   effective_connection_type_at_last_main_frame_ =
       EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
+  rtt_observations_size_at_last_ect_computation_ = 0;
+  throughput_observations_size_at_last_ect_computation_ = 0;
 
   // Update the local state as part of preparation for the new connection.
   current_network_id_ = GetCurrentNetworkID();
@@ -769,7 +833,6 @@ void NetworkQualityEstimator::OnConnectionTypeChanged(
   estimated_quality_at_last_main_frame_ = nqe::internal::NetworkQuality();
   throughput_analyzer_->OnConnectionTypeChanged();
   MaybeComputeEffectiveConnectionType();
-  UpdateSignalStrength();
 }
 
 void NetworkQualityEstimator::MaybeQueryExternalEstimateProvider() const {
@@ -789,15 +852,14 @@ void NetworkQualityEstimator::MaybeQueryExternalEstimateProvider() const {
 
 void NetworkQualityEstimator::UpdateSignalStrength() {
 #if defined(OS_ANDROID)
-  int32_t signal_strength_dbm;
   if (!android::cellular_signal_strength::GetSignalStrengthDbm(
-          &signal_strength_dbm)) {
-    return;
+          &signal_strength_dbm_)) {
+    signal_strength_dbm_ = INT32_MIN;
   }
   min_signal_strength_since_connection_change_ = std::min(
-      min_signal_strength_since_connection_change_, signal_strength_dbm);
+      min_signal_strength_since_connection_change_, signal_strength_dbm_);
   max_signal_strength_since_connection_change_ = std::max(
-      max_signal_strength_since_connection_change_, signal_strength_dbm);
+      max_signal_strength_since_connection_change_, signal_strength_dbm_);
 #endif  // OS_ANDROID
 }
 
@@ -831,6 +893,10 @@ void NetworkQualityEstimator::RecordMetricsOnConnectionTypeChanged() const {
         NETWORK_QUALITY_OBSERVATION_SOURCE_TCP);
     disallowed_observation_sources.push_back(
         NETWORK_QUALITY_OBSERVATION_SOURCE_QUIC);
+    disallowed_observation_sources.push_back(
+        NETWORK_QUALITY_OBSERVATION_SOURCE_TRANSPORT_CACHED_ESTIMATE);
+    disallowed_observation_sources.push_back(
+        NETWORK_QUALITY_OBSERVATION_SOURCE_DEFAULT_TRANSPORT_FROM_PLATFORM);
     for (size_t i = 0; i < arraysize(kPercentiles); ++i) {
       rtt = GetRTTEstimateInternal(disallowed_observation_sources,
                                    base::TimeTicks(), kPercentiles[i]);
@@ -948,6 +1014,8 @@ void NetworkQualityEstimator::RecordMetricsOnMainFrameRequest() const {
 void NetworkQualityEstimator::ComputeEffectiveConnectionType() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  UpdateSignalStrength();
+
   const base::TimeTicks now = tick_clock_->NowTicks();
 
   const EffectiveConnectionType past_type = effective_connection_type_;
@@ -965,10 +1033,32 @@ void NetworkQualityEstimator::ComputeEffectiveConnectionType() {
   network_quality_ = nqe::internal::NetworkQuality(http_rtt, transport_rtt,
                                                    downstream_throughput_kbps);
 
+  UMA_HISTOGRAM_ENUMERATION("NQE.EffectiveConnectionType.OnECTComputation",
+                            effective_connection_type_,
+                            EFFECTIVE_CONNECTION_TYPE_LAST);
+  if (network_quality_.http_rtt() != nqe::internal::InvalidRTT()) {
+    UMA_HISTOGRAM_TIMES("NQE.RTT.OnECTComputation",
+                        network_quality_.http_rtt());
+  }
+
+  if (network_quality_.transport_rtt() != nqe::internal::InvalidRTT()) {
+    UMA_HISTOGRAM_TIMES("NQE.TransportRTT.OnECTComputation",
+                        network_quality_.transport_rtt());
+  }
+
+  if (network_quality_.downstream_throughput_kbps() !=
+      nqe::internal::INVALID_RTT_THROUGHPUT) {
+    UMA_HISTOGRAM_COUNTS_1M("NQE.Kbps.OnECTComputation",
+                            network_quality_.downstream_throughput_kbps());
+  }
+
   NotifyObserversOfRTTOrThroughputComputed();
 
   if (past_type != effective_connection_type_)
     NotifyObserversOfEffectiveConnectionTypeChanged();
+
+  event_creator_.MaybeAddEffectiveConnectionTypeChangedEventToNetLog(
+      effective_connection_type_, network_quality_);
 
   rtt_observations_size_at_last_ect_computation_ = rtt_observations_.Size();
   throughput_observations_size_at_last_ect_computation_ =
@@ -1067,8 +1157,11 @@ NetworkQualityEstimator::GetRecentEffectiveConnectionTypeUsingMetrics(
 
   // If the device is currently offline, then return
   // EFFECTIVE_CONNECTION_TYPE_OFFLINE.
-  if (current_network_id_.type == NetworkChangeNotifier::CONNECTION_NONE)
+
+  if (current_network_id_.type == NetworkChangeNotifier::CONNECTION_NONE &&
+      !disable_offline_check_) {
     return EFFECTIVE_CONNECTION_TYPE_OFFLINE;
+  }
 
   if (!GetRecentHttpRTT(start_time, http_rtt))
     *http_rtt = nqe::internal::InvalidRTT();
@@ -1195,6 +1288,10 @@ bool NetworkQualityEstimator::GetRecentHttpRTT(
       NETWORK_QUALITY_OBSERVATION_SOURCE_TCP);
   disallowed_observation_sources.push_back(
       NETWORK_QUALITY_OBSERVATION_SOURCE_QUIC);
+  disallowed_observation_sources.push_back(
+      NETWORK_QUALITY_OBSERVATION_SOURCE_TRANSPORT_CACHED_ESTIMATE);
+  disallowed_observation_sources.push_back(
+      NETWORK_QUALITY_OBSERVATION_SOURCE_DEFAULT_TRANSPORT_FROM_PLATFORM);
   *rtt = GetRTTEstimateInternal(disallowed_observation_sources, start_time, 50);
   return (*rtt != nqe::internal::InvalidRTT());
 }
@@ -1236,7 +1333,8 @@ base::TimeDelta NetworkQualityEstimator::GetRTTEstimateInternal(
   // RTT observations are sorted by duration from shortest to longest, thus
   // a higher percentile RTT will have a longer RTT than a lower percentile.
   base::TimeDelta rtt = nqe::internal::InvalidRTT();
-  if (!rtt_observations_.GetPercentile(start_time, &rtt, percentile,
+  if (!rtt_observations_.GetPercentile(start_time, signal_strength_dbm_, &rtt,
+                                       percentile,
                                        disallowed_observation_sources)) {
     return nqe::internal::InvalidRTT();
   }
@@ -1252,7 +1350,7 @@ int32_t NetworkQualityEstimator::GetDownlinkThroughputKbpsEstimateInternal(
   // thus a higher percentile throughput will be faster than a lower one.
   int32_t kbps = nqe::internal::kInvalidThroughput;
   if (!downstream_throughput_kbps_observations_.GetPercentile(
-          start_time, &kbps, 100 - percentile,
+          start_time, signal_strength_dbm_, &kbps, 100 - percentile,
           std::vector<NetworkQualityObservationSource>())) {
     return nqe::internal::kInvalidThroughput;
   }
@@ -1320,22 +1418,12 @@ bool NetworkQualityEstimator::ReadCachedNetworkQualityEstimate() {
 
   const base::TimeTicks now = tick_clock_->NowTicks();
 
-  if (effective_connection_type_ == EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {
-    // Read the effective connection type from the cached estimate.
-    last_effective_connection_type_computation_ = now;
-    network_quality_ = cached_network_quality.network_quality();
-    effective_connection_type_ =
-        cached_network_quality.effective_connection_type();
-
-    if (effective_connection_type_ != EFFECTIVE_CONNECTION_TYPE_UNKNOWN)
-      NotifyObserversOfEffectiveConnectionTypeChanged();
-  }
-
   if (cached_network_quality.network_quality().downstream_throughput_kbps() !=
       nqe::internal::kInvalidThroughput) {
     ThroughputObservation througphput_observation(
         cached_network_quality.network_quality().downstream_throughput_kbps(),
-        now, NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP_CACHED_ESTIMATE);
+        now, INT32_MIN,
+        NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP_CACHED_ESTIMATE);
     downstream_throughput_kbps_observations_.AddObservation(
         througphput_observation);
     NotifyObserversOfThroughput(througphput_observation);
@@ -1344,11 +1432,22 @@ bool NetworkQualityEstimator::ReadCachedNetworkQualityEstimate() {
   if (cached_network_quality.network_quality().http_rtt() !=
       nqe::internal::InvalidRTT()) {
     RttObservation rtt_observation(
-        cached_network_quality.network_quality().http_rtt(), now,
+        cached_network_quality.network_quality().http_rtt(), now, INT32_MIN,
         NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP_CACHED_ESTIMATE);
     rtt_observations_.AddObservation(rtt_observation);
     NotifyObserversOfRTT(rtt_observation);
   }
+
+  if (cached_network_quality.network_quality().transport_rtt() !=
+      nqe::internal::InvalidRTT()) {
+    RttObservation rtt_observation(
+        cached_network_quality.network_quality().transport_rtt(), now,
+        INT32_MIN,
+        NETWORK_QUALITY_OBSERVATION_SOURCE_TRANSPORT_CACHED_ESTIMATE);
+    rtt_observations_.AddObservation(rtt_observation);
+    NotifyObserversOfRTT(rtt_observation);
+  }
+  ComputeEffectiveConnectionType();
   return true;
 }
 
@@ -1369,7 +1468,7 @@ void NetworkQualityEstimator::OnUpdatedEstimateAvailable(
         EXTERNAL_ESTIMATE_PROVIDER_STATUS_RTT_AVAILABLE);
     UMA_HISTOGRAM_TIMES("NQE.ExternalEstimateProvider.RTT", rtt);
     rtt_observations_.AddObservation(RttObservation(
-        rtt, tick_clock_->NowTicks(),
+        rtt, tick_clock_->NowTicks(), signal_strength_dbm_,
         NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP_EXTERNAL_ESTIMATE));
     external_estimate_provider_quality_.set_http_rtt(rtt);
   }
@@ -1382,6 +1481,7 @@ void NetworkQualityEstimator::OnUpdatedEstimateAvailable(
     downstream_throughput_kbps_observations_.AddObservation(
         ThroughputObservation(
             downstream_throughput_kbps, tick_clock_->NowTicks(),
+            signal_strength_dbm_,
             NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP_EXTERNAL_ESTIMATE));
     external_estimate_provider_quality_.set_downstream_throughput_kbps(
         downstream_throughput_kbps);
@@ -1404,7 +1504,7 @@ void NetworkQualityEstimator::OnUpdatedRTTAvailable(
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_NE(nqe::internal::InvalidRTT(), rtt);
 
-  RttObservation observation(rtt, tick_clock_->NowTicks(),
+  RttObservation observation(rtt, tick_clock_->NowTicks(), signal_strength_dbm_,
                              ProtocolSourceToObservationSource(protocol));
   NotifyObserversOfRTT(observation);
   rtt_observations_.AddObservation(observation);
@@ -1455,7 +1555,7 @@ void NetworkQualityEstimator::OnNewThroughputObservationAvailable(
         downstream_kbps);
   }
   ThroughputObservation throughput_observation(
-      downstream_kbps, tick_clock_->NowTicks(),
+      downstream_kbps, tick_clock_->NowTicks(), signal_strength_dbm_,
       NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP);
   downstream_throughput_kbps_observations_.AddObservation(
       throughput_observation);
@@ -1559,9 +1659,74 @@ void NetworkQualityEstimator::OnPrefsRead(
     const std::map<nqe::internal::NetworkID,
                    nqe::internal::CachedNetworkQuality> read_prefs) {
   DCHECK(thread_checker_.CalledOnValidThread());
+
   UMA_HISTOGRAM_COUNTS("NQE.Prefs.ReadSize", read_prefs.size());
-  // TODO(tbansal): crbug.com/490870. Incorporate the network quality into the
-  // current estimates.
+  for (auto& it : read_prefs) {
+    EffectiveConnectionType effective_connection_type =
+        it.second.effective_connection_type();
+    if (effective_connection_type == EFFECTIVE_CONNECTION_TYPE_UNKNOWN ||
+        effective_connection_type == EFFECTIVE_CONNECTION_TYPE_OFFLINE) {
+      continue;
+    }
+
+    // RTT and throughput values are not set in the prefs.
+    DCHECK_EQ(nqe::internal::InvalidRTT(),
+              it.second.network_quality().http_rtt());
+    DCHECK_EQ(nqe::internal::InvalidRTT(),
+              it.second.network_quality().transport_rtt());
+    DCHECK_EQ(nqe::internal::kInvalidThroughput,
+              it.second.network_quality().downstream_throughput_kbps());
+
+    nqe::internal::NetworkQuality network_quality(
+        typical_network_quality_[effective_connection_type].http_rtt(),
+        typical_network_quality_[effective_connection_type].transport_rtt(),
+        typical_network_quality_[effective_connection_type]
+            .downstream_throughput_kbps());
+
+    nqe::internal::CachedNetworkQuality cached_network_quality(
+        base::TimeTicks::Now(), network_quality, effective_connection_type);
+
+    network_quality_store_->Add(it.first, cached_network_quality);
+    MaybeUpdateNetworkQualityFromCache(it.first, cached_network_quality);
+  }
+}
+
+void NetworkQualityEstimator::MaybeUpdateNetworkQualityFromCache(
+    const nqe::internal::NetworkID& network_id,
+    const nqe::internal::CachedNetworkQuality& cached_network_quality) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (network_id != current_network_id_)
+    return;
+
+  // Since the cached network quality is for the current network, add it to
+  // the current observations.
+  RttObservation http_rtt_observation(
+      cached_network_quality.network_quality().http_rtt(),
+      base::TimeTicks::Now(), INT32_MIN,
+      NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP_CACHED_ESTIMATE);
+  rtt_observations_.AddObservation(http_rtt_observation);
+  NotifyObserversOfRTT(http_rtt_observation);
+
+  RttObservation transport_rtt_observation(
+      cached_network_quality.network_quality().transport_rtt(),
+      base::TimeTicks::Now(), INT32_MIN,
+      NETWORK_QUALITY_OBSERVATION_SOURCE_TRANSPORT_CACHED_ESTIMATE);
+  rtt_observations_.AddObservation(transport_rtt_observation);
+  NotifyObserversOfRTT(transport_rtt_observation);
+
+  // TODO(tbansal): crbug.com/673977: Remove this check.
+  if (cached_network_quality.network_quality().downstream_throughput_kbps() !=
+      nqe::internal::kInvalidThroughput) {
+    ThroughputObservation throughput_observation(
+        cached_network_quality.network_quality().downstream_throughput_kbps(),
+        base::TimeTicks::Now(), INT32_MIN,
+        NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP_CACHED_ESTIMATE);
+    downstream_throughput_kbps_observations_.AddObservation(
+        throughput_observation);
+    NotifyObserversOfThroughput(throughput_observation);
+  }
+
+  ComputeEffectiveConnectionType();
 }
 
 }  // namespace net

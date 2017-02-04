@@ -21,24 +21,22 @@
 
 namespace blink {
 
+class TestingPlatformSupport;
 class WebData;
 class WebURLLoader;
 class WebURLLoaderMock;
 class WebURLLoaderTestDelegate;
 
 // A factory that creates WebURLLoaderMock to simulate resource loading in
-// tests.
-// You register files for specific URLs, the content of the file is then served
-// when these URLs are loaded.
-// In order to serve the asynchronous requests, you need to invoke
-// ServeAsynchronousRequest.
+// tests. Since there are restriction and rules to follow, please read comments
+// in WebURLLoaderMockFactory carefully to use this class correctly.
 class WebURLLoaderMockFactoryImpl : public WebURLLoaderMockFactory {
  public:
-  WebURLLoaderMockFactoryImpl();
-  virtual ~WebURLLoaderMockFactoryImpl();
+  WebURLLoaderMockFactoryImpl(TestingPlatformSupport*);
+  ~WebURLLoaderMockFactoryImpl() override;
 
   // WebURLLoaderMockFactory:
-  virtual WebURLLoader* createURLLoader(WebURLLoader* default_loader) override;
+  WebURLLoader* createURLLoader(WebURLLoader* default_loader) override;
   void registerURL(const WebURL& url,
                    const WebURLResponse& response,
                    const WebString& filePath = WebString()) override;
@@ -73,6 +71,8 @@ class WebURLLoaderMockFactoryImpl : public WebURLLoaderMockFactory {
     base::FilePath file_path;
   };
 
+  virtual void RunUntilIdle();
+
   // Loads the specified request and populates the response, error and data
   // accordingly.
   void LoadRequest(const WebURLRequest& request,
@@ -99,6 +99,8 @@ class WebURLLoaderMockFactoryImpl : public WebURLLoaderMockFactory {
   // Table of the registered URLs and the responses that they should receive.
   using URLToResponseMap = HashMap<KURL, ResponseInfo>;
   URLToResponseMap url_to_response_info_;
+
+  TestingPlatformSupport* m_platform;
 
   DISALLOW_COPY_AND_ASSIGN(WebURLLoaderMockFactoryImpl);
 };

@@ -13,6 +13,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "components/discardable_memory/service/discardable_shared_memory_manager.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/catalog/public/cpp/resource_loader.h"
 #include "services/catalog/public/interfaces/constants.mojom.h"
@@ -24,14 +25,14 @@
 #include "services/tracing/public/cpp/provider.h"
 #include "services/ui/clipboard/clipboard_impl.h"
 #include "services/ui/common/switches.h"
-#include "services/ui/display/platform_screen.h"
+#include "services/ui/display/screen_manager.h"
 #include "services/ui/ime/ime_registrar_impl.h"
 #include "services/ui/ime/ime_server_impl.h"
 #include "services/ui/ws/accessibility_manager.h"
 #include "services/ui/ws/display.h"
 #include "services/ui/ws/display_binding.h"
 #include "services/ui/ws/display_manager.h"
-#include "services/ui/ws/gpu_service_proxy.h"
+#include "services/ui/ws/gpu_host.h"
 #include "services/ui/ws/user_activity_monitor.h"
 #include "services/ui/ws/user_display_manager.h"
 #include "services/ui/ws/window_server.h"
@@ -87,7 +88,7 @@ struct Service::UserState {
 
 Service::Service()
     : test_config_(false),
-      platform_screen_(display::PlatformScreen::Create()),
+      screen_manager_(display::ScreenManager::Create()),
       ime_registrar_(&ime_server_) {}
 
 Service::~Service() {
@@ -108,7 +109,7 @@ void Service::InitializeResources(service_manager::Connector* connector) {
 
   catalog::ResourceLoader loader;
   filesystem::mojom::DirectoryPtr directory;
-  connector->ConnectToInterface(catalog::mojom::kServiceName, &directory);
+  connector->BindInterface(catalog::mojom::kServiceName, &directory);
   CHECK(loader.OpenFiles(std::move(directory), resource_paths));
 
   ui::RegisterPathProvider();
@@ -187,16 +188,12 @@ void Service::OnStart() {
   // so keep this line below both of those.
   input_device_server_.RegisterAsObserver();
 
-  // Gpu must be running before the PlatformScreen can be initialized.
   window_server_.reset(new ws::WindowServer(this));
 
-  // DeviceDataManager must be initialized before TouchController. On non-Linux
-  // platforms there is no DeviceDataManager so don't create touch controller.
-  if (ui::DeviceDataManager::HasInstance())
-    touch_controller_.reset(
-        new ws::TouchController(window_server_->display_manager()));
-
   ime_server_.Init(context()->connector(), test_config_);
+
+  discardable_shared_memory_manager_ =
+      base::MakeUnique<discardable_memory::DiscardableSharedMemoryManager>();
 }
 
 bool Service::OnConnect(const service_manager::ServiceInfo& remote_info,
@@ -204,7 +201,7 @@ bool Service::OnConnect(const service_manager::ServiceInfo& remote_info,
   registry->AddInterface<mojom::AccessibilityManager>(this);
   registry->AddInterface<mojom::Clipboard>(this);
   registry->AddInterface<mojom::DisplayManager>(this);
-  registry->AddInterface<mojom::GpuService>(this);
+  registry->AddInterface<mojom::Gpu>(this);
   registry->AddInterface<mojom::IMERegistrar>(this);
   registry->AddInterface<mojom::IMEServer>(this);
   registry->AddInterface<mojom::UserAccessManager>(this);
@@ -212,6 +209,9 @@ bool Service::OnConnect(const service_manager::ServiceInfo& remote_info,
   registry->AddInterface<WindowTreeHostFactory>(this);
   registry->AddInterface<mojom::WindowManagerWindowTreeFactory>(this);
   registry->AddInterface<mojom::WindowTreeFactory>(this);
+  registry
+      ->AddInterface<discardable_memory::mojom::DiscardableSharedMemoryManager>(
+          this);
   if (test_config_)
     registry->AddInterface<WindowServerTest>(this);
 
@@ -220,7 +220,7 @@ bool Service::OnConnect(const service_manager::ServiceInfo& remote_info,
   if (input_device_server_.IsRegisteredAsObserver())
     input_device_server_.AddInterface(registry);
 
-  platform_screen_->AddInterfaces(registry);
+  screen_manager_->AddInterfaces(registry);
 
 #if defined(USE_OZONE)
   ui::OzonePlatform::GetInstance()->AddInterfaces(registry);
@@ -230,7 +230,7 @@ bool Service::OnConnect(const service_manager::ServiceInfo& remote_info,
 }
 
 void Service::StartDisplayInit() {
-  platform_screen_->Init(window_server_->display_manager());
+  screen_manager_->Init(window_server_->display_manager());
 }
 
 void Service::OnFirstDisplayReady() {
@@ -254,11 +254,6 @@ void Service::OnNoMoreDisplays() {
 
 bool Service::IsTestConfig() const {
   return test_config_;
-}
-
-void Service::UpdateTouchTransforms() {
-  if (touch_controller_)
-    touch_controller_->UpdateTouchTransforms();
 }
 
 void Service::Create(const service_manager::Identity& remote_identity,
@@ -297,8 +292,8 @@ void Service::Create(const service_manager::Identity& remote_identity,
 }
 
 void Service::Create(const service_manager::Identity& remote_identity,
-                     mojom::GpuServiceRequest request) {
-  window_server_->gpu_proxy()->Add(std::move(request));
+                     mojom::GpuRequest request) {
+  window_server_->gpu_host()->Add(std::move(request));
 }
 
 void Service::Create(const service_manager::Identity& remote_identity,
@@ -357,6 +352,12 @@ void Service::Create(const service_manager::Identity& remote_identity,
         window_server_.get(), remote_identity.user_id()));
   }
   user_state->window_tree_host_factory->AddBinding(std::move(request));
+}
+
+void Service::Create(
+    const service_manager::Identity& remote_identity,
+    discardable_memory::mojom::DiscardableSharedMemoryManagerRequest request) {
+  discardable_shared_memory_manager_->Bind(std::move(request));
 }
 
 void Service::Create(const service_manager::Identity& remote_identity,

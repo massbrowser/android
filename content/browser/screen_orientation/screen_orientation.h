@@ -5,18 +5,17 @@
 #ifndef CONTENT_BROWSER_SCREEN_ORIENTATION_SCREEN_ORIENTATION_H
 #define CONTENT_BROWSER_SCREEN_ORIENTATION_SCREEN_ORIENTATION_H
 
-#include "base/callback.h"
 #include "base/memory/weak_ptr.h"
-#include "content/common/screen_orientation.mojom.h"
 #include "content/public/browser/web_contents_binding_set.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "device/screen_orientation/public/interfaces/screen_orientation.mojom.h"
 
 namespace content {
 
 class ScreenOrientationProvider;
 class WebContents;
 
-class ScreenOrientation : public mojom::ScreenOrientation,
+class ScreenOrientation : public device::mojom::ScreenOrientation,
                           public WebContentsObserver {
  public:
   explicit ScreenOrientation(WebContents* web_contents);
@@ -31,14 +30,10 @@ class ScreenOrientation : public mojom::ScreenOrientation,
   void UnlockOrientation() override;
 
   // WebContentsObserver:
-  void DidNavigateMainFrame(const LoadCommittedDetails& details,
-                            const FrameNavigateParams& params) override;
-
-  void NotifyLockResult(blink::mojom::ScreenOrientationLockResult result);
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
 
   std::unique_ptr<ScreenOrientationProvider> provider_;
-  LockOrientationCallback on_result_callback_;
-  WebContentsFrameBindingSet<mojom::ScreenOrientation> bindings_;
+  WebContentsFrameBindingSet<device::mojom::ScreenOrientation> bindings_;
   base::WeakPtrFactory<ScreenOrientation> weak_factory_;
 };
 

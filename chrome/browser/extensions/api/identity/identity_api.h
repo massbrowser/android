@@ -18,7 +18,10 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/identity/extension_token_key.h"
 #include "chrome/browser/extensions/api/identity/gaia_web_auth_flow.h"
+#include "chrome/browser/extensions/api/identity/identity_get_profile_user_info_function.h"
+#include "chrome/browser/extensions/api/identity/identity_launch_web_auth_flow_function.h"
 #include "chrome/browser/extensions/api/identity/identity_mint_queue.h"
+#include "chrome/browser/extensions/api/identity/identity_remove_cached_auth_token_function.h"
 #include "chrome/browser/extensions/api/identity/identity_signin_flow.h"
 #include "chrome/browser/extensions/api/identity/web_auth_flow.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
@@ -38,21 +41,8 @@ class BrowserContext;
 namespace extensions {
 
 class GetAuthTokenFunctionTest;
+class IdentityGetAuthTokenFunction;
 class MockGetAuthTokenFunction;
-
-namespace identity_constants {
-extern const char kInvalidClientId[];
-extern const char kInvalidScopes[];
-extern const char kAuthFailure[];
-extern const char kNoGrant[];
-extern const char kUserRejected[];
-extern const char kUserNotSignedIn[];
-extern const char kInteractionRequired[];
-extern const char kInvalidRedirect[];
-extern const char kOffTheRecord[];
-extern const char kPageLoadFailure[];
-extern const char kCanceled[];
-}  // namespace identity_constants
 
 class IdentityTokenCacheValue {
  public:
@@ -90,11 +80,6 @@ class IdentityAPI : public BrowserContextKeyedAPI,
  public:
   typedef std::map<ExtensionTokenKey, IdentityTokenCacheValue> CachedTokens;
 
-  class ShutdownObserver {
-   public:
-    virtual void OnShutdown() = 0;
-  };
-
   explicit IdentityAPI(content::BrowserContext* context);
   ~IdentityAPI() override;
 
@@ -125,10 +110,12 @@ class IdentityAPI : public BrowserContextKeyedAPI,
   void OnAccountSignInChanged(const gaia::AccountIds& ids,
                               bool is_signed_in) override;
 
-  void AddShutdownObserver(ShutdownObserver* observer);
-  void RemoveShutdownObserver(ShutdownObserver* observer);
-
   void SetAccountStateForTest(gaia::AccountIds ids, bool is_signed_in);
+
+  void set_get_auth_token_function(
+      IdentityGetAuthTokenFunction* get_auth_token_function) {
+    get_auth_token_function_ = get_auth_token_function;
+  }
 
  private:
   friend class BrowserContextKeyedAPIFactory<IdentityAPI>;
@@ -142,7 +129,9 @@ class IdentityAPI : public BrowserContextKeyedAPI,
   CachedTokens token_cache_;
   ProfileIdentityProvider profile_identity_provider_;
   gaia::AccountTracker account_tracker_;
-  base::ObserverList<ShutdownObserver> shutdown_observer_list_;
+
+  // May be null.
+  IdentityGetAuthTokenFunction* get_auth_token_function_;
 };
 
 template <>
@@ -184,8 +173,7 @@ class IdentityGetAuthTokenFunction : public ChromeAsyncExtensionFunction,
                                      public IdentityMintRequestQueue::Request,
                                      public OAuth2MintTokenFlow::Delegate,
                                      public IdentitySigninFlow::Delegate,
-                                     public OAuth2TokenService::Consumer,
-                                     public IdentityAPI::ShutdownObserver {
+                                     public OAuth2TokenService::Consumer {
  public:
   DECLARE_EXTENSION_FUNCTION("identity.getAuthToken",
                              EXPERIMENTAL_IDENTITY_GETAUTHTOKEN);
@@ -195,6 +183,8 @@ class IdentityGetAuthTokenFunction : public ChromeAsyncExtensionFunction,
   const ExtensionTokenKey* GetExtensionTokenKeyForTest() {
     return token_key_.get();
   }
+
+  void Shutdown();
 
  protected:
   ~IdentityGetAuthTokenFunction() override;
@@ -261,9 +251,6 @@ class IdentityGetAuthTokenFunction : public ChromeAsyncExtensionFunction,
   void OnMintTokenFailure(const GoogleServiceAuthError& error) override;
   void OnIssueAdviceSuccess(const IssueAdviceInfo& issue_advice) override;
 
-  // IdentityAPI::ShutdownObserver implementation:
-  void OnShutdown() override;
-
 #if defined(OS_CHROMEOS)
   // Starts a login access token request for device robot account. This method
   // will be called only in Chrome OS for:
@@ -301,61 +288,6 @@ class IdentityGetAuthTokenFunction : public ChromeAsyncExtensionFunction,
   IssueAdviceInfo issue_advice_;
   std::unique_ptr<GaiaWebAuthFlow> gaia_web_auth_flow_;
   std::unique_ptr<IdentitySigninFlow> signin_flow_;
-};
-
-class IdentityGetProfileUserInfoFunction
-    : public ChromeUIThreadExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("identity.getProfileUserInfo",
-                             IDENTITY_GETPROFILEUSERINFO);
-
-  IdentityGetProfileUserInfoFunction();
-
- private:
-  ~IdentityGetProfileUserInfoFunction() override;
-
-  // UIThreadExtensionFunction implementation.
-  ExtensionFunction::ResponseAction Run() override;
-};
-
-class IdentityRemoveCachedAuthTokenFunction : public UIThreadExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("identity.removeCachedAuthToken",
-                             EXPERIMENTAL_IDENTITY_REMOVECACHEDAUTHTOKEN)
-  IdentityRemoveCachedAuthTokenFunction();
-
- protected:
-  ~IdentityRemoveCachedAuthTokenFunction() override;
-
-  // ExtensionFunction:
-  ResponseAction Run() override;
-};
-
-class IdentityLaunchWebAuthFlowFunction : public ChromeAsyncExtensionFunction,
-                                          public WebAuthFlow::Delegate {
- public:
-  DECLARE_EXTENSION_FUNCTION("identity.launchWebAuthFlow",
-                             EXPERIMENTAL_IDENTITY_LAUNCHWEBAUTHFLOW);
-
-  IdentityLaunchWebAuthFlowFunction();
-
-  // Tests may override extension_id.
-  void InitFinalRedirectURLPrefixForTest(const std::string& extension_id);
-
- private:
-  ~IdentityLaunchWebAuthFlowFunction() override;
-  bool RunAsync() override;
-
-  // WebAuthFlow::Delegate implementation.
-  void OnAuthFlowFailure(WebAuthFlow::Failure failure) override;
-  void OnAuthFlowURLChange(const GURL& redirect_url) override;
-  void OnAuthFlowTitleChange(const std::string& title) override {}
-
-  // Helper to initialize final URL prefix.
-  void InitFinalRedirectURLPrefix(const std::string& extension_id);
-
-  std::unique_ptr<WebAuthFlow> auth_flow_;
-  GURL final_url_prefix_;
 };
 
 }  // namespace extensions

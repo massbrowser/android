@@ -26,10 +26,6 @@ class ImageSkia;
 class Rect;
 }
 
-namespace ui {
-class NativeTheme;
-}
-
 namespace views {
 namespace corewm {
 class Tooltip;
@@ -50,15 +46,19 @@ class VIEWS_EXPORT DesktopWindowTreeHost {
       internal::NativeWidgetDelegate* native_widget_delegate,
       DesktopNativeWidgetAura* desktop_native_widget_aura);
 
-  // Return the NativeTheme to use for |window|. WARNING: |window| may be NULL.
-  static ui::NativeTheme* GetNativeTheme(aura::Window* window);
-
   // Sets up resources needed before the WindowEventDispatcher has been created.
+  // It is expected this calls InitHost() on the WindowTreeHost.
   virtual void Init(aura::Window* content_window,
                     const Widget::InitParams& params) = 0;
 
   // Invoked once the DesktopNativeWidgetAura has been created.
   virtual void OnNativeWidgetCreated(const Widget::InitParams& params) = 0;
+
+  // Called from DesktopNativeWidgetAura::OnWidgetInitDone().
+  virtual void OnWidgetInitDone() = 0;
+
+  // Called from DesktopNativeWidgetAura::OnWindowActivated().
+  virtual void OnNativeWidgetActivationChanged(bool active) = 0;
 
   // Creates and returns the Tooltip implementation to use. Return value is
   // owned by DesktopNativeWidgetAura and lives as long as
@@ -158,6 +158,15 @@ class VIEWS_EXPORT DesktopWindowTreeHost {
 
   // Called when the window's size constraints change.
   virtual void SizeConstraintsChanged() = 0;
+
+  // Returns true if the transparency of the DesktopNativeWidgetAura's
+  // |content_window_| should change.
+  virtual bool ShouldUpdateWindowTransparency() const = 0;
+
+  // A return value of true indicates DesktopNativeCursorManager should be
+  // used, a return value of false indicates the DesktopWindowTreeHost manages
+  // cursors itself.
+  virtual bool ShouldUseDesktopNativeCursorManager() const = 0;
 };
 
 }  // namespace views

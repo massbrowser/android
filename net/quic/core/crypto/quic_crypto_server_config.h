@@ -2,33 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_CRYPTO_QUIC_CRYPTO_SERVER_CONFIG_H_
-#define NET_QUIC_CRYPTO_QUIC_CRYPTO_SERVER_CONFIG_H_
+#ifndef NET_QUIC_CORE_CRYPTO_QUIC_CRYPTO_SERVER_CONFIG_H_
+#define NET_QUIC_CORE_CRYPTO_QUIC_CRYPTO_SERVER_CONFIG_H_
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
 #include "base/strings/string_piece.h"
-#include "base/synchronization/lock.h"
-#include "net/base/ip_address.h"
-#include "net/base/ip_endpoint.h"
-#include "net/base/net_export.h"
 #include "net/quic/core/crypto/crypto_handshake.h"
 #include "net/quic/core/crypto/crypto_handshake_message.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
 #include "net/quic/core/crypto/crypto_secret_boxer.h"
 #include "net/quic/core/crypto/proof_source.h"
 #include "net/quic/core/crypto/quic_compressed_certs_cache.h"
+#include "net/quic/core/crypto/quic_crypto_proof.h"
 #include "net/quic/core/proto/cached_network_parameters.pb.h"
 #include "net/quic/core/proto/source_address_token.pb.h"
 #include "net/quic/core/quic_time.h"
+#include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_mutex.h"
+#include "net/quic/platform/api/quic_reference_counted.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 
 namespace net {
@@ -38,8 +36,6 @@ class EphemeralKeySource;
 class KeyExchange;
 class ProofSource;
 class QuicClock;
-class QuicDecrypter;
-class QuicEncrypter;
 class QuicRandom;
 class QuicServerConfigProtobuf;
 struct QuicSignedServerConfig;
@@ -84,11 +80,11 @@ class PrimaryConfigChangedCallback {
 };
 
 // Callback used to accept the result of the |client_hello| validation step.
-class NET_EXPORT_PRIVATE ValidateClientHelloResultCallback {
+class QUIC_EXPORT_PRIVATE ValidateClientHelloResultCallback {
  public:
   // Opaque token that holds information about the client_hello and
   // its validity.  Can be interpreted by calling ProcessClientHello.
-  struct NET_EXPORT_PRIVATE Result : public base::RefCountedThreadSafe<Result> {
+  struct QUIC_EXPORT_PRIVATE Result : public QuicReferenceCounted {
     Result(const CryptoHandshakeMessage& in_client_hello,
            QuicIpAddress in_client_ip,
            QuicWallTime in_now);
@@ -101,22 +97,21 @@ class NET_EXPORT_PRIVATE ValidateClientHelloResultCallback {
     // Populated if the CHLO STK contained a CachedNetworkParameters proto.
     CachedNetworkParameters cached_network_params;
 
-   private:
-    friend class base::RefCountedThreadSafe<Result>;
-    ~Result();
+   protected:
+    ~Result() override;
   };
 
   ValidateClientHelloResultCallback();
-  virtual void Run(scoped_refptr<Result> result,
-                   std::unique_ptr<ProofSource::Details> details) = 0;
   virtual ~ValidateClientHelloResultCallback();
+  virtual void Run(QuicReferenceCountedPointer<Result> result,
+                   std::unique_ptr<ProofSource::Details> details) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ValidateClientHelloResultCallback);
 };
 
 // Callback used to accept the result of the ProcessClientHello method.
-class NET_EXPORT_PRIVATE ProcessClientHelloResultCallback {
+class QUIC_EXPORT_PRIVATE ProcessClientHelloResultCallback {
  public:
   ProcessClientHelloResultCallback();
   virtual ~ProcessClientHelloResultCallback();
@@ -161,10 +156,10 @@ class RejectionObserver {
 // order to support clients resuming with a previous configuration.
 // TODO(agl): when adding configurations at runtime is added, this object will
 // need to consider locking.
-class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
+class QUIC_EXPORT_PRIVATE QuicCryptoServerConfig {
  public:
   // ConfigOptions contains options for generating server configs.
-  struct NET_EXPORT_PRIVATE ConfigOptions {
+  struct QUIC_EXPORT_PRIVATE ConfigOptions {
     ConfigOptions();
     ConfigOptions(const ConfigOptions& other);
     ~ConfigOptions();
@@ -262,8 +257,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // client_hello: the incoming client hello message.
   // client_ip: the IP address of the client, which is used to generate and
   //     validate source-address tokens.
-  // server_ip: the IP address of the server. The IP address may be used for
-  //     certificate selection.
+  // server_address: the IP address and port of the server. The IP address and
+  //     port may be used for certificate selection.
   // version: protocol version used for this connection.
   // clock: used to validate client nonces and ephemeral keys.
   // crypto_proof: in/out parameter to which will be written the crypto proof
@@ -277,10 +272,10 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   void ValidateClientHello(
       const CryptoHandshakeMessage& client_hello,
       const QuicIpAddress& client_ip,
-      const QuicIpAddress& server_ip,
+      const QuicSocketAddress& server_address,
       QuicVersion version,
       const QuicClock* clock,
-      scoped_refptr<QuicSignedServerConfig> crypto_proof,
+      QuicReferenceCountedPointer<QuicSignedServerConfig> crypto_proof,
       std::unique_ptr<ValidateClientHelloResultCallback> done_cb) const;
 
   // ProcessClientHello processes |client_hello| and decides whether to accept
@@ -313,11 +308,11 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // chlo_packet_size: the size, in bytes, of the CHLO packet
   // done_cb: the callback invoked on completion
   void ProcessClientHello(
-      scoped_refptr<ValidateClientHelloResultCallback::Result>
+      QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
           validate_chlo_result,
       bool reject_only,
       QuicConnectionId connection_id,
-      const QuicIpAddress& server_ip,
+      const QuicSocketAddress& server_address,
       const QuicSocketAddress& client_address,
       QuicVersion version,
       const QuicVersionVector& supported_versions,
@@ -326,8 +321,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       const QuicClock* clock,
       QuicRandom* rand,
       QuicCompressedCertsCache* compressed_certs_cache,
-      scoped_refptr<QuicCryptoNegotiatedParameters> params,
-      scoped_refptr<QuicSignedServerConfig> crypto_proof,
+      QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params,
+      QuicReferenceCountedPointer<QuicSignedServerConfig> crypto_proof,
       QuicByteCount total_framing_overhead,
       QuicByteCount chlo_packet_size,
       std::unique_ptr<ProcessClientHelloResultCallback> done_cb) const;
@@ -339,12 +334,13 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   //
   // |cached_network_params| is optional, and can be nullptr.
   //
-  // TODO(gredner): remove this when --FLAGS_enable_async_get_proof is removed.
+  // TODO(gredner): remove this when
+  // FLAGS_quic_reloadable_flag_enable_async_get_proof is removed.
   bool BuildServerConfigUpdateMessage(
       QuicVersion version,
       base::StringPiece chlo_hash,
       const SourceAddressTokens& previous_source_address_tokens,
-      const QuicIpAddress& server_ip,
+      const QuicSocketAddress& server_address,
       const QuicIpAddress& client_ip,
       const QuicClock* clock,
       QuicRandom* rand,
@@ -368,7 +364,7 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       QuicVersion version,
       base::StringPiece chlo_hash,
       const SourceAddressTokens& previous_source_address_tokens,
-      const QuicIpAddress& server_ip,
+      const QuicSocketAddress& server_address,
       const QuicIpAddress& client_ip,
       const QuicClock* clock,
       QuicRandom* rand,
@@ -429,8 +425,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
 
   // Config represents a server config: a collection of preferences and
   // Diffie-Hellman public values.
-  class NET_EXPORT_PRIVATE Config : public QuicCryptoConfig,
-                                    public base::RefCounted<Config> {
+  class QUIC_EXPORT_PRIVATE Config : public QuicCryptoConfig,
+                                     public QuicReferenceCounted {
    public:
     Config();
 
@@ -486,23 +482,24 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
     std::unique_ptr<CryptoSecretBoxer> source_address_token_boxer_storage;
 
    private:
-    friend class base::RefCounted<Config>;
-
-    virtual ~Config();
+    ~Config() override;
 
     DISALLOW_COPY_AND_ASSIGN(Config);
   };
 
-  typedef std::map<ServerConfigID, scoped_refptr<Config>> ConfigMap;
+  typedef std::map<ServerConfigID, QuicReferenceCountedPointer<Config>>
+      ConfigMap;
 
   // Get a ref to the config with a given server config id.
-  scoped_refptr<Config> GetConfigWithScid(
-      base::StringPiece requested_scid) const;
+  QuicReferenceCountedPointer<Config> GetConfigWithScid(
+      base::StringPiece requested_scid) const
+      SHARED_LOCKS_REQUIRED(configs_lock_);
 
   // ConfigPrimaryTimeLessThan returns true if a->primary_time <
   // b->primary_time.
-  static bool ConfigPrimaryTimeLessThan(const scoped_refptr<Config>& a,
-                                        const scoped_refptr<Config>& b);
+  static bool ConfigPrimaryTimeLessThan(
+      const QuicReferenceCountedPointer<Config>& a,
+      const QuicReferenceCountedPointer<Config>& b);
 
   // SelectNewPrimaryConfig reevaluates the primary config based on the
   // "primary_time" deadlines contained in each.
@@ -512,12 +509,12 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // whether it can be shown to be fresh (i.e. not a replay). The results are
   // written to |info|.
   void EvaluateClientHello(
-      const QuicIpAddress& server_ip,
+      const QuicSocketAddress& server_address,
       QuicVersion version,
-      scoped_refptr<Config> requested_config,
-      scoped_refptr<Config> primary_config,
-      scoped_refptr<QuicSignedServerConfig> crypto_proof,
-      scoped_refptr<ValidateClientHelloResultCallback::Result>
+      QuicReferenceCountedPointer<Config> requested_config,
+      QuicReferenceCountedPointer<Config> primary_config,
+      QuicReferenceCountedPointer<QuicSignedServerConfig> crypto_proof,
+      QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
           client_hello_state,
       std::unique_ptr<ValidateClientHelloResultCallback> done_cb) const;
 
@@ -535,12 +532,12 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       bool found_error,
       const QuicIpAddress& server_ip,
       QuicVersion version,
-      scoped_refptr<Config> requested_config,
-      scoped_refptr<Config> primary_config,
-      scoped_refptr<QuicSignedServerConfig> crypto_proof,
+      QuicReferenceCountedPointer<Config> requested_config,
+      QuicReferenceCountedPointer<Config> primary_config,
+      QuicReferenceCountedPointer<QuicSignedServerConfig> crypto_proof,
       std::unique_ptr<ProofSource::Details> proof_source_details,
       bool get_proof_failed,
-      scoped_refptr<ValidateClientHelloResultCallback::Result>
+      QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
           client_hello_state,
       std::unique_ptr<ValidateClientHelloResultCallback> done_cb) const;
 
@@ -564,30 +561,31 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       const QuicClock* clock,
       QuicRandom* rand,
       QuicCompressedCertsCache* compressed_certs_cache,
-      scoped_refptr<QuicCryptoNegotiatedParameters> params,
-      scoped_refptr<QuicSignedServerConfig> crypto_proof,
+      QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params,
+      QuicReferenceCountedPointer<QuicSignedServerConfig> crypto_proof,
       QuicByteCount total_framing_overhead,
       QuicByteCount chlo_packet_size,
-      const scoped_refptr<Config>& requested_config,
-      const scoped_refptr<Config>& primary_config,
+      const QuicReferenceCountedPointer<Config>& requested_config,
+      const QuicReferenceCountedPointer<Config>& primary_config,
       std::unique_ptr<ProcessClientHelloResultCallback> done_cb) const;
 
   // BuildRejection sets |out| to be a REJ message in reply to |client_hello|.
-  void BuildRejection(QuicVersion version,
-                      QuicWallTime now,
-                      const Config& config,
-                      const CryptoHandshakeMessage& client_hello,
-                      const ClientHelloInfo& info,
-                      const CachedNetworkParameters& cached_network_params,
-                      bool use_stateless_rejects,
-                      QuicConnectionId server_designated_connection_id,
-                      QuicRandom* rand,
-                      QuicCompressedCertsCache* compressed_certs_cache,
-                      scoped_refptr<QuicCryptoNegotiatedParameters> params,
-                      const QuicSignedServerConfig& crypto_proof,
-                      QuicByteCount total_framing_overhead,
-                      QuicByteCount chlo_packet_size,
-                      CryptoHandshakeMessage* out) const;
+  void BuildRejection(
+      QuicVersion version,
+      QuicWallTime now,
+      const Config& config,
+      const CryptoHandshakeMessage& client_hello,
+      const ClientHelloInfo& info,
+      const CachedNetworkParameters& cached_network_params,
+      bool use_stateless_rejects,
+      QuicConnectionId server_designated_connection_id,
+      QuicRandom* rand,
+      QuicCompressedCertsCache* compressed_certs_cache,
+      QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params,
+      const QuicSignedServerConfig& crypto_proof,
+      QuicByteCount total_framing_overhead,
+      QuicByteCount chlo_packet_size,
+      CryptoHandshakeMessage* out) const;
 
   // CompressChain compresses the certificates in |chain->certs| and returns a
   // compressed representation. |common_sets| contains the common certificate
@@ -596,15 +594,15 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // 64-bit, FNV-1a hashes of certificates that the peer already possesses.
   static std::string CompressChain(
       QuicCompressedCertsCache* compressed_certs_cache,
-      const scoped_refptr<ProofSource::Chain>& chain,
+      const QuicReferenceCountedPointer<ProofSource::Chain>& chain,
       const std::string& client_common_set_hashes,
       const std::string& client_cached_cert_hashes,
       const CommonCertSets* common_sets);
 
   // ParseConfigProtobuf parses the given config protobuf and returns a
-  // scoped_refptr<Config> if successful. The caller adopts the reference to the
-  // Config. On error, ParseConfigProtobuf returns nullptr.
-  scoped_refptr<Config> ParseConfigProtobuf(
+  // QuicReferenceCountedPointer<Config> if successful. The caller adopts the
+  // reference to the Config. On error, ParseConfigProtobuf returns nullptr.
+  QuicReferenceCountedPointer<Config> ParseConfigProtobuf(
       const std::unique_ptr<QuicServerConfigProtobuf>& protobuf);
 
   // NewSourceAddressToken returns a fresh source address token for the given
@@ -658,13 +656,12 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
 
   // ValidateExpectedLeafCertificate checks the |client_hello| to see if it has
   // an XLCT tag, and if so, verifies that its value matches the hash of the
-  // server's leaf certificate. The certs field of |crypto_proof| is used to
-  // compare against the XLCT value.  This method returns true if the XLCT tag
-  // is not present, or if the XLCT tag is present and valid. It returns false
-  // otherwise.
+  // server's leaf certificate. |certs| is used to compare against the XLCT
+  // value.  This method returns true if the XLCT tag is not present, or if the
+  // XLCT tag is present and valid. It returns false otherwise.
   bool ValidateExpectedLeafCertificate(
       const CryptoHandshakeMessage& client_hello,
-      const QuicSignedServerConfig& crypto_proof) const;
+      const std::vector<std::string>& certs) const;
 
   // Returns true if the PDMD field from the client hello demands an X509
   // certificate.
@@ -692,7 +689,7 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
         std::unique_ptr<BuildServerConfigUpdateMessageResultCallback> cb);
 
     void Run(bool ok,
-             const scoped_refptr<ProofSource::Chain>& chain,
+             const QuicReferenceCountedPointer<ProofSource::Chain>& chain,
              const QuicCryptoProof& proof,
              std::unique_ptr<ProofSource::Details> details) override;
 
@@ -719,7 +716,7 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       const std::string& client_cached_cert_hashes,
       bool sct_supported_by_client,
       bool ok,
-      const scoped_refptr<ProofSource::Chain>& chain,
+      const QuicReferenceCountedPointer<ProofSource::Chain>& chain,
       const std::string& signature,
       const std::string& leaf_cert_sct,
       std::unique_ptr<ProofSource::Details> details,
@@ -739,18 +736,20 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   //   1) configs_.empty() <-> primary_config_ == nullptr
   //   2) primary_config_ != nullptr -> primary_config_->is_primary
   //   3) ∀ c∈configs_, c->is_primary <-> c == primary_config_
-  mutable base::Lock configs_lock_;
+  mutable QuicMutex configs_lock_;
   // configs_ contains all active server configs. It's expected that there are
   // about half-a-dozen configs active at any one time.
-  ConfigMap configs_;
+  ConfigMap configs_ GUARDED_BY(configs_lock_);
   // primary_config_ points to a Config (which is also in |configs_|) which is
   // the primary config - i.e. the one that we'll give out to new clients.
-  mutable scoped_refptr<Config> primary_config_;
+  mutable QuicReferenceCountedPointer<Config> primary_config_
+      GUARDED_BY(configs_lock_);
   // next_config_promotion_time_ contains the nearest, future time when an
   // active config will be promoted to primary.
-  mutable QuicWallTime next_config_promotion_time_;
+  mutable QuicWallTime next_config_promotion_time_ GUARDED_BY(configs_lock_);
   // Callback to invoke when the primary config changes.
-  std::unique_ptr<PrimaryConfigChangedCallback> primary_config_changed_cb_;
+  std::unique_ptr<PrimaryConfigChangedCallback> primary_config_changed_cb_
+      GUARDED_BY(configs_lock_);
 
   // Used to protect the source-address tokens that are given to clients.
   CryptoSecretBoxer source_address_token_boxer_;
@@ -786,32 +785,21 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   DISALLOW_COPY_AND_ASSIGN(QuicCryptoServerConfig);
 };
 
-struct NET_EXPORT_PRIVATE QuicSignedServerConfig
-    : public base::RefCounted<QuicSignedServerConfig> {
+struct QUIC_EXPORT_PRIVATE QuicSignedServerConfig
+    : public QuicReferenceCounted {
   QuicSignedServerConfig();
 
-  // TODO(eranm): Have a QuicCryptoProof field instead of signature, cert_sct.
-  std::string signature;
-  scoped_refptr<ProofSource::Chain> chain;
-  std::string cert_sct;
+  QuicCryptoProof proof;
+  QuicReferenceCountedPointer<ProofSource::Chain> chain;
   // The server config that is used for this proof (and the rest of the
   // request).
-  scoped_refptr<QuicCryptoServerConfig::Config> config;
+  QuicReferenceCountedPointer<QuicCryptoServerConfig::Config> config;
   std::string primary_scid;
-  // Indication whether the Expect-CT header should be sent on the session
-  // this proof relates to (for background, see
-  // https://www.ietf.org/id/draft-stark-expect-ct-00.txt).
-  // NOTE: This field is intentionally independent from the |cert_sct| one
-  // and can be true even if |cert_sct| is empty.
-  // The goal of the Expect-CT header is uncover cases where valid SCTs are
-  // expected to be served, but aren't.
-  bool send_expect_ct_header;
 
- private:
-  friend class base::RefCounted<QuicSignedServerConfig>;
-  virtual ~QuicSignedServerConfig();
+ protected:
+  ~QuicSignedServerConfig() override;
 };
 
 }  // namespace net
 
-#endif  // NET_QUIC_CRYPTO_QUIC_CRYPTO_SERVER_CONFIG_H_
+#endif  // NET_QUIC_CORE_CRYPTO_QUIC_CRYPTO_SERVER_CONFIG_H_

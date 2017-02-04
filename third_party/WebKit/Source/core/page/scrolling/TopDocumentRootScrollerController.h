@@ -7,6 +7,7 @@
 
 #include "core/CoreExport.h"
 #include "core/page/scrolling/RootScrollerController.h"
+#include "platform/geometry/IntSize.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -17,6 +18,7 @@ class GraphicsLayer;
 class PaintLayer;
 class RootFrameViewport;
 class ScrollStateCallback;
+class ScrollableArea;
 class ViewportScrollCallback;
 
 // This class manages the the page level aspects of the root scroller.  That
@@ -35,6 +37,10 @@ class CORE_EXPORT TopDocumentRootScrollerController
   // This class needs to be informed of changes to compositing so that it can
   // update the compositor when the effective root scroller changes.
   void didUpdateCompositing();
+
+  // PaintLayerScrollableAreas need to notify this class when they're being
+  // disposed so that we can remove them as the root scroller.
+  void didDisposeScrollableArea(ScrollableArea&);
 
   // This method needs to be called to create a ViewportScrollCallback that
   // will be used to apply viewport scrolling actions like browser controls
@@ -60,6 +66,16 @@ class CORE_EXPORT TopDocumentRootScrollerController
   void didChangeRootScroller();
 
   void mainFrameViewResized();
+
+  // Returns the ScrollableArea associated with the globalRootScroller(). Note,
+  // this isn't necessarily the PLSA belonging to the root scroller Element's
+  // LayoutBox.  If the root scroller is the documentElement then we use the
+  // FrameView (or LayoutView if root-layer-scrolls).
+  ScrollableArea* rootScrollerArea() const;
+
+  // Returns the size we should use for the root scroller, accounting for top
+  // controls adjustment and using the root FrameView.
+  IntSize rootScrollerVisibleArea() const;
 
  private:
   TopDocumentRootScrollerController(FrameHost&);

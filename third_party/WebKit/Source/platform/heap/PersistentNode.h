@@ -23,7 +23,7 @@ class PersistentNode final {
  public:
   PersistentNode() : m_self(nullptr), m_trace(nullptr) { ASSERT(isUnused()); }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   ~PersistentNode() {
     // If you hit this assert, it means that the thread finished
     // without clearing persistent handles that the thread created.
@@ -169,7 +169,7 @@ class CrossThreadPersistentRegion final {
 
  public:
   CrossThreadPersistentRegion()
-      : m_persistentRegion(wrapUnique(new PersistentRegion)) {}
+      : m_persistentRegion(WTF::wrapUnique(new PersistentRegion)) {}
 
   void allocatePersistentNode(PersistentNode*& persistentNode,
                               void* self,
@@ -214,7 +214,7 @@ class CrossThreadPersistentRegion final {
 
   void tracePersistentNodes(Visitor* visitor) {
 // If this assert triggers, you're tracing without being in a LockScope.
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     DCHECK(m_mutex.locked());
 #endif
     m_persistentRegion->tracePersistentNodes(

@@ -84,7 +84,7 @@ void WebViewFrameWidget::themeChanged() {
 }
 
 WebInputEventResult WebViewFrameWidget::handleInputEvent(
-    const WebInputEvent& event) {
+    const WebCoalescedInputEvent& event) {
   return m_webView->handleInputEvent(event);
 }
 
@@ -117,14 +117,6 @@ void WebViewFrameWidget::setFocus(bool enable) {
 
 WebRange WebViewFrameWidget::compositionRange() {
   return m_webView->compositionRange();
-}
-
-WebTextInputInfo WebViewFrameWidget::textInputInfo() {
-  return m_webView->textInputInfo();
-}
-
-WebTextInputType WebViewFrameWidget::textInputType() {
-  return m_webView->textInputType();
 }
 
 bool WebViewFrameWidget::selectionBounds(WebRect& anchor,
@@ -235,14 +227,12 @@ void WebViewFrameWidget::setRootLayer(WebLayer* layer) {
   m_webView->setRootLayer(layer);
 }
 
-void WebViewFrameWidget::attachCompositorAnimationTimeline(
-    CompositorAnimationTimeline* compositorTimeline) {
-  m_webView->attachCompositorAnimationTimeline(compositorTimeline);
+WebLayerTreeView* WebViewFrameWidget::getLayerTreeView() const {
+  return m_webView->layerTreeView();
 }
 
-void WebViewFrameWidget::detachCompositorAnimationTimeline(
-    CompositorAnimationTimeline* compositorTimeline) {
-  m_webView->detachCompositorAnimationTimeline(compositorTimeline);
+CompositorAnimationHost* WebViewFrameWidget::animationHost() const {
+  return m_webView->animationHost();
 }
 
 HitTestResult WebViewFrameWidget::coreHitTestResultAt(const WebPoint& point) {

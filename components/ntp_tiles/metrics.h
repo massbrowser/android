@@ -9,6 +9,11 @@
 #include <vector>
 
 #include "components/ntp_tiles/ntp_tile.h"
+#include "url/gurl.h"
+
+namespace rappor {
+class RapporService;
+}  // namespace rappor
 
 namespace ntp_tiles {
 namespace metrics {
@@ -34,12 +39,27 @@ enum MostVisitedTileType {
   NUM_RECORDED_TILE_TYPES,
   // The item displays a thumbnail of the page. Used on desktop.
   THUMBNAIL,
+  // The tile type has not been determined yet. Used on iOS, until we can detect
+  // when all tiles have loaded.
+  UNKNOWN_TILE_TYPE,
+};
+
+struct TileImpression {
+  TileImpression(NTPTileSource source,
+                 MostVisitedTileType type,
+                 const GURL& url)
+      : source(source), type(type), url(url) {}
+
+  NTPTileSource source;
+  MostVisitedTileType type;
+  GURL url;
 };
 
 // Records an NTP impression, after all tiles have loaded.
-// Includes the visual types (see above) of all visible tiles.
-void RecordPageImpression(
-    const std::vector<std::pair<NTPTileSource, MostVisitedTileType>>& tiles);
+// Includes the visual types (see above) of all visible tiles. If
+// |rappor_service| is null, no rappor metrics will be reported.
+void RecordPageImpression(const std::vector<TileImpression>& tiles,
+                          rappor::RapporService* rappor_service);
 
 // Records a click on a tile.
 void RecordTileClick(int index,

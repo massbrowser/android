@@ -78,8 +78,12 @@ struct GPU_EXPORT Capabilities {
   int max_vertex_attribs;
   int max_vertex_texture_image_units;
   int max_vertex_uniform_vectors;
+  // MAX_VIEWPORT_DIMS[2]
+  int max_viewport_width;
+  int max_viewport_height;
   int num_compressed_texture_formats;
   int num_shader_binary_formats;
+  int num_stencil_bits;  // For the default framebuffer.
   int bind_generates_resource_chromium;
 
   int max_3d_texture_size;
@@ -139,6 +143,7 @@ struct GPU_EXPORT Capabilities {
   bool image_ycbcr_422;
   bool image_ycbcr_420v;
   bool render_buffer_format_bgra8888;
+  bool occlusion_query;
   bool occlusion_query_boolean;
   bool timer_queries;
   bool surfaceless;

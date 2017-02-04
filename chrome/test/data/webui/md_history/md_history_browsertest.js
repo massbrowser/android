@@ -66,7 +66,6 @@ MaterialHistoryBrowserServiceTest.prototype = {
 };
 
 TEST_F('MaterialHistoryBrowserServiceTest', 'All', function() {
-  md_history.browser_service_test.registerTests();
   mocha.run();
 });
 
@@ -81,7 +80,6 @@ MaterialHistoryDrawerTest.prototype = {
 };
 
 TEST_F('MaterialHistoryDrawerTest', 'All', function() {
-  md_history.history_drawer_test.registerTests();
   mocha.run();
 });
 
@@ -96,7 +94,6 @@ MaterialHistoryGroupedListTest.prototype = {
 };
 
 TEST_F('MaterialHistoryGroupedListTest', 'All', function() {
-  md_history.history_grouped_list_test.registerTests();
   mocha.run();
 });
 
@@ -176,7 +173,12 @@ function MaterialHistoryRoutingWithQueryParamTest() {}
 MaterialHistoryRoutingWithQueryParamTest.prototype = {
   __proto__: MaterialHistoryRoutingTest.prototype,
 
-  browsePreload: 'chrome://history?q=query',
+  browsePreload: 'chrome://history/history/week?q=query&offset=5',
+
+  commandLineSwitches:
+      MaterialHistoryBrowserTest.prototype.commandLineSwitches.concat([
+        {switchName: 'enable-grouped-history'}
+      ]),
 
   /** @override */
   setUp: function() {
@@ -214,8 +216,7 @@ MaterialHistorySyncedTabsTest.prototype = {
   ]),
 };
 
-// Fails on Mac, http://crbug.com/640862
-TEST_F('MaterialHistorySyncedTabsTest', 'DISABLED_All', function() {
+TEST_F('MaterialHistorySyncedTabsTest', 'All', function() {
   mocha.run();
 });
 
@@ -249,12 +250,6 @@ MaterialHistoryToolbarTest.prototype = {
   ]),
 };
 
-TEST_F('MaterialHistoryToolbarTest', 'Basic', function() {
-  md_history.history_toolbar_test.registerTests();
-  mocha.run();
-});
-
-TEST_F('MaterialHistoryToolbarTest', 'Focus', function() {
-  md_history.history_toolbar_focus_test.registerTests();
+TEST_F('MaterialHistoryToolbarTest', 'All', function() {
   mocha.run();
 });

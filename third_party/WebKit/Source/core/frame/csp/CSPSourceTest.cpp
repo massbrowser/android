@@ -53,6 +53,28 @@ TEST_F(CSPSourceTest, BasicMatching) {
   EXPECT_FALSE(source.matches(KURL(base, "HTTP://example.com:8000/FOO/BAR")));
 }
 
+TEST_F(CSPSourceTest, BasicPathMatching) {
+  KURL base;
+  CSPSource A(csp.get(), "http", "example.com", 8000, "/",
+              CSPSource::NoWildcard, CSPSource::NoWildcard);
+
+  EXPECT_TRUE(A.matches(KURL(base, "http://example.com:8000")));
+  EXPECT_TRUE(A.matches(KURL(base, "http://example.com:8000/")));
+  EXPECT_TRUE(A.matches(KURL(base, "http://example.com:8000/foo/bar")));
+
+  EXPECT_FALSE(A.matches(KURL(base, "http://example.com:8000path")));
+  EXPECT_FALSE(A.matches(KURL(base, "http://example.com:9000/")));
+
+  CSPSource B(csp.get(), "http", "example.com", 8000, "", CSPSource::NoWildcard,
+              CSPSource::NoWildcard);
+  EXPECT_TRUE(B.matches(KURL(base, "http://example.com:8000")));
+  EXPECT_TRUE(B.matches(KURL(base, "http://example.com:8000/")));
+  EXPECT_TRUE(A.matches(KURL(base, "http://example.com:8000/foo/bar")));
+
+  EXPECT_FALSE(B.matches(KURL(base, "http://example.com:8000path")));
+  EXPECT_FALSE(B.matches(KURL(base, "http://example.com:9000/")));
+}
+
 TEST_F(CSPSourceTest, WildcardMatching) {
   KURL base;
   CSPSource source(csp.get(), "http", "example.com", 0, "/",
@@ -194,6 +216,9 @@ TEST_F(CSPSourceTest, Subsumes) {
       {{"https", "/page1.html", 0}, {"https", "/page1.html", 0}, true, true},
       {{"http", "/page1.html", 70}, {"http", "/page1.html", 70}, true, true},
       {{"https", "/page1.html", 70}, {"https", "/page1.html", 70}, true, true},
+      {{"http", "/", 0}, {"http", "", 0}, true, true},
+      {{"http", "/", 80}, {"http", "", 80}, true, true},
+      {{"http", "/", 80}, {"https", "", 443}, false, true},
       // One stronger signal in the first CSPSource
       {{"https", "/", 0}, {"http", "/", 0}, true, false},
       {{"http", "/page1.html", 0}, {"http", "/", 0}, true, false},
@@ -388,6 +413,12 @@ TEST_F(CSPSourceTest, IsSimilar) {
        {"wss", "example.com", "/", 0},
        true},  // use default port
       {{"http", "example.com", "/", 80}, {"http", "example.com", "/", 0}, true},
+      {{"http", "example.com", "/", 80},
+       {"https", "example.com", "/", 443},
+       true},
+      {{"http", "example.com", "/", 80},
+       {"https", "example.com", "/", 444},
+       false},
       // Paths
       {{"http", "example.com", "/", 0},
        {"http", "example.com", "/1.html", 0},
@@ -512,18 +543,18 @@ TEST_F(CSPSourceTest, FirstSubsumesSecond) {
     // Setup default vectors.
     HeapVector<Member<CSPSource>> listA;
     HeapVector<Member<CSPSource>> listB;
-    listB.append(noWildcards);
+    listB.push_back(noWildcards);
     // Empty `listA` implies `none` is allowed.
     EXPECT_FALSE(CSPSource::firstSubsumesSecond(listA, listB));
 
-    listA.append(noWildcards);
+    listA.push_back(noWildcards);
     // Add CSPSources based on the current test.
-    listB.append(new CSPSource(csp.get(), test.sourceB.scheme,
-                               test.sourceB.host, 0, test.sourceB.path,
-                               CSPSource::NoWildcard, CSPSource::NoWildcard));
-    listA.append(new CSPSource(csp.get(), test.schemeA, "second-example.com", 0,
-                               "/", CSPSource::NoWildcard,
-                               CSPSource::NoWildcard));
+    listB.push_back(new CSPSource(
+        csp.get(), test.sourceB.scheme, test.sourceB.host, 0, test.sourceB.path,
+        CSPSource::NoWildcard, CSPSource::NoWildcard));
+    listA.push_back(new CSPSource(csp.get(), test.schemeA, "second-example.com",
+                                  0, "/", CSPSource::NoWildcard,
+                                  CSPSource::NoWildcard));
     // listB contains: ["http://example.com/", test.listB]
     // listA contains: ["http://example.com/",
     // test.schemeA + "://second-example.com/"]
@@ -531,27 +562,27 @@ TEST_F(CSPSourceTest, FirstSubsumesSecond) {
 
     // If we add another source to `listB` with a host wildcard,
     // then the result should definitely be false.
-    listB.append(hostWildcard);
+    listB.push_back(hostWildcard);
 
     // If we add another source to `listA` with a port wildcard,
     // it does not make `listB` to be subsumed under `listA`.
-    listB.append(portWildcard);
+    listB.push_back(portWildcard);
     EXPECT_FALSE(CSPSource::firstSubsumesSecond(listA, listB));
 
     // If however we add another source to `listA` with both wildcards,
     // that CSPSource is subsumed, so the answer should be as expected
     // before.
-    listA.append(bothWildcards);
+    listA.push_back(bothWildcards);
     EXPECT_EQ(test.expected, CSPSource::firstSubsumesSecond(listA, listB));
 
     // If we add a scheme-source expression of 'https' to `listB`, then it
     // should not be subsumed.
-    listB.append(httpsOnly);
+    listB.push_back(httpsOnly);
     EXPECT_FALSE(CSPSource::firstSubsumesSecond(listA, listB));
 
     // If we add a scheme-source expression of 'http' to `listA`, then it should
     // subsume all current epxression in `listB`.
-    listA.append(httpOnly);
+    listA.push_back(httpOnly);
     EXPECT_TRUE(CSPSource::firstSubsumesSecond(listA, listB));
   }
 }
@@ -599,6 +630,18 @@ TEST_F(CSPSourceTest, Intersect) {
        {"http", "example.com", "/", 0, CSPSource::NoWildcard,
         CSPSource::NoWildcard},
        {"http", "example.com", "/", 80, CSPSource::NoWildcard,
+        CSPSource::NoWildcard}},
+      {{"http", "example.com", "/", 80, CSPSource::NoWildcard,
+        CSPSource::NoWildcard},
+       {"https", "example.com", "/", 443, CSPSource::NoWildcard,
+        CSPSource::NoWildcard},
+       {"https", "example.com", "/", 443, CSPSource::NoWildcard,
+        CSPSource::NoWildcard}},
+      {{"https", "example.com", "/", 443, CSPSource::NoWildcard,
+        CSPSource::NoWildcard},
+       {"http", "example.com", "/", 80, CSPSource::NoWildcard,
+        CSPSource::NoWildcard},
+       {"https", "example.com", "/", 443, CSPSource::NoWildcard,
         CSPSource::NoWildcard}},
       // Paths
       {{"http", "example.com", "/", 0, CSPSource::NoWildcard,

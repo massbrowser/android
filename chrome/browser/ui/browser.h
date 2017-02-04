@@ -9,7 +9,6 @@
 
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -43,6 +42,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/page_navigator.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/page_zoom.h"
 #include "extensions/features/features.h"
@@ -138,7 +138,6 @@ class Browser : public TabStripModelObserver,
     FEATURE_BOOKMARKBAR = 16,
     FEATURE_INFOBAR = 32,
     FEATURE_DOWNLOADSHELF = 64,
-    FEATURE_WEBAPPFRAME = 128
   };
 
   // The context for a download blocked notification from
@@ -300,6 +299,16 @@ class Browser : public TabStripModelObserver,
   // Gets the title of the window based on the selected tab's title.
   // Disables additional formatting when |include_app_name| is false.
   base::string16 GetWindowTitleForCurrentTab(bool include_app_name) const;
+
+  // Gets the window title of the tab at |index|.
+  // Disables additional formatting when |include_app_name| is false.
+  base::string16 GetWindowTitleForTab(bool include_app_name, int index) const;
+
+  // Gets the window title from the provided WebContents.
+  // Disables additional formatting when |include_app_name| is false.
+  base::string16 GetWindowTitleFromWebContents(
+      bool include_app_name,
+      content::WebContents* contents) const;
 
   // Prepares a title string for display (removes embedded newlines, etc).
   static void FormatTitleForDisplay(base::string16* title);
@@ -608,10 +617,12 @@ class Browser : public TabStripModelObserver,
   void ShowRepostFormWarningDialog(content::WebContents* source) override;
   bool ShouldCreateWebContents(
       content::WebContents* web_contents,
+      content::SiteInstance* source_site_instance,
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
       WindowContainerType window_container_type,
+      const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
       const std::string& partition_id,
@@ -676,6 +687,8 @@ class Browser : public TabStripModelObserver,
   bool CheckMediaAccessPermission(content::WebContents* web_contents,
                                   const GURL& security_origin,
                                   content::MediaStreamType type) override;
+  std::string GetDefaultMediaDeviceID(content::WebContents* web_contents,
+                                      content::MediaStreamType type) override;
   bool RequestPpapiBrokerPermission(
       content::WebContents* web_contents,
       const GURL& url,
@@ -697,7 +710,6 @@ class Browser : public TabStripModelObserver,
   void OnWebContentsInstantSupportDisabled(
       const content::WebContents* web_contents) override;
   OmniboxView* GetOmniboxView() override;
-  std::set<std::string> GetOpenUrls() override;
 
   // Overridden from WebContentsModalDialogManagerDelegate:
   void SetWebContentsBlocked(content::WebContents* web_contents,
@@ -830,9 +842,6 @@ class Browser : public TabStripModelObserver,
   // Returns true if the Browser window should show the location bar.
   bool ShouldShowLocationBar() const;
 
-  // Returns true if the Browser window should use a web app style frame.
-  bool ShouldUseWebAppFrame() const;
-
   // Implementation of SupportsWindowFeature and CanSupportWindowFeature. If
   // |check_fullscreen| is true, the set of features reflect the actual state of
   // the browser, otherwise the set of features reflect the possible state of
@@ -853,10 +862,11 @@ class Browser : public TabStripModelObserver,
   // Creates a BackgroundContents if appropriate; return true if one was
   // created.
   bool MaybeCreateBackgroundContents(
+      content::SiteInstance* source_site_instance,
+      const GURL& opener_url,
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
-      content::WebContents* opener_web_contents,
       const std::string& frame_name,
       const GURL& target_url,
       const std::string& partition_id,

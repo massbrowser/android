@@ -15,10 +15,7 @@ class DisplayCompositor;
 }
 
 namespace ui {
-
 namespace ws {
-
-struct WindowId;
 
 class TestServerWindowDelegate : public ServerWindowDelegate {
  public:
@@ -30,15 +27,15 @@ class TestServerWindowDelegate : public ServerWindowDelegate {
  private:
   // ServerWindowDelegate:
   cc::mojom::DisplayCompositor* GetDisplayCompositor() override;
+  mojo::AssociatedGroup* GetDisplayCompositorAssociatedGroup() override;
   ServerWindow* GetRootWindow(const ServerWindow* window) override;
 
-  ServerWindow* root_window_;
+  ServerWindow* root_window_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(TestServerWindowDelegate);
 };
 
 }  // namespace ws
-
 }  // namespace ui
 
 #endif  // SERVICES_UI_WS_TEST_SERVER_WINDOW_DELEGATE_H_

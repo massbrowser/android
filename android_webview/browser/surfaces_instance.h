@@ -29,9 +29,7 @@ class Transform;
 
 namespace android_webview {
 
-class AwGLSurface;
 class ParentOutputSurface;
-class ScopedAppGLStateRestore;
 
 class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
                          public cc::DisplayClient,
@@ -75,11 +73,12 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
   cc::FrameSinkId frame_sink_id_;
 
   std::unique_ptr<cc::SurfaceManager> surface_manager_;
+  std::unique_ptr<cc::BeginFrameSource> begin_frame_source_;
   std::unique_ptr<cc::Display> display_;
   std::unique_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
   std::unique_ptr<cc::SurfaceFactory> surface_factory_;
 
-  cc::LocalFrameId root_id_;
+  cc::LocalSurfaceId root_id_;
   std::vector<cc::SurfaceId> child_ids_;
 
   // This is owned by |display_|.

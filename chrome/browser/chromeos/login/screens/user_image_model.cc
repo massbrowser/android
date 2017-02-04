@@ -12,16 +12,11 @@ const char UserImageModel::kContextKeyIsCameraPresent[] = "isCameraPresent";
 const char UserImageModel::kContextKeyProfilePictureDataURL[] =
     "profilePictureDataURL";
 const char UserImageModel::kContextKeySelectedImageURL[] = "selectedImageURL";
+const char UserImageModel::kContextKeyHasGaiaAccount[] = "hasGaiaAccount";
 
 UserImageModel::UserImageModel(BaseScreenDelegate* base_screen_delegate)
-    : BaseScreen(base_screen_delegate) {
-}
+    : BaseScreen(base_screen_delegate, OobeScreen::SCREEN_USER_IMAGE_PICKER) {}
 
-UserImageModel::~UserImageModel() {
-}
-
-std::string UserImageModel::GetName() const {
-  return WizardController::kUserImageScreenName;
-}
+UserImageModel::~UserImageModel() {}
 
 }  // namespace chromeos

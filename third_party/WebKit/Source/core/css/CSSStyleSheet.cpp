@@ -31,6 +31,7 @@
 #include "core/css/StyleRule.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/parser/CSSParser.h"
+#include "core/css/parser/CSSParserContext.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/Node.h"
@@ -101,8 +102,8 @@ CSSStyleSheet* CSSStyleSheet::createInline(Node& ownerNode,
                                            const KURL& baseURL,
                                            const TextPosition& startPosition,
                                            const String& encoding) {
-  CSSParserContext parserContext(ownerNode.document(), nullptr, baseURL,
-                                 encoding);
+  CSSParserContext* parserContext =
+      CSSParserContext::create(ownerNode.document(), baseURL, encoding);
   StyleSheetContents* sheet =
       StyleSheetContents::create(baseURL.getString(), parserContext);
   return new CSSStyleSheet(sheet, ownerNode, true, startPosition);
@@ -159,20 +160,15 @@ void CSSStyleSheet::didMutateRules() {
   DCHECK(m_contents->isMutable());
   DCHECK_LE(m_contents->clientSize(), 1u);
 
-  didMutate(PartialRuleUpdate);
+  didMutate();
 }
 
-void CSSStyleSheet::didMutate(StyleSheetUpdateType updateType) {
+void CSSStyleSheet::didMutate() {
   Document* owner = ownerDocument();
   if (!owner)
     return;
-
-  // Need FullStyleUpdate when insertRule or deleteRule,
-  // because StyleSheetCollection::analyzeStyleSheetChange cannot detect partial
-  // rule update.
-  StyleResolverUpdateMode updateMode =
-      updateType != PartialRuleUpdate ? AnalyzedStyleUpdate : FullStyleUpdate;
-  owner->styleEngine().setNeedsActiveStyleUpdate(this, updateMode);
+  if (ownerNode() && ownerNode()->isConnected())
+    owner->styleEngine().setNeedsActiveStyleUpdate(ownerNode()->treeScope());
 }
 
 void CSSStyleSheet::reattachChildRuleCSSOMWrappers() {
@@ -227,7 +223,7 @@ CSSRule* CSSStyleSheet::item(unsigned index) {
 }
 
 void CSSStyleSheet::clearOwnerNode() {
-  didMutate(EntireStyleSheetUpdate);
+  didMutate();
   if (m_ownerNode)
     m_contents->unregisterClient(this);
   m_ownerNode = nullptr;
@@ -268,8 +264,8 @@ unsigned CSSStyleSheet::insertRule(const String& ruleString,
                             String::number(length()) + ").");
     return 0;
   }
-  CSSParserContext context(m_contents->parserContext(),
-                           UseCounter::getFrom(this));
+  const CSSParserContext* context =
+      CSSParserContext::createWithStyleSheet(m_contents->parserContext(), this);
   StyleRuleBase* rule =
       CSSParser::parseRule(context, m_contents.get(), ruleString);
 

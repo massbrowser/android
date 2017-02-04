@@ -38,19 +38,12 @@ bool LayoutSVGForeignObject::isChildAllowed(LayoutObject* child,
                                             const ComputedStyle& style) const {
   // Disallow arbitary SVG content. Only allow proper <svg xmlns="svgNS">
   // subdocuments.
-  return !child->isSVG() || child->isSVGRoot();
+  return !child->isSVGChild();
 }
 
 void LayoutSVGForeignObject::paint(const PaintInfo& paintInfo,
                                    const LayoutPoint&) const {
   SVGForeignObjectPainter(*this).paint(paintInfo);
-}
-
-AffineTransform LayoutSVGForeignObject::localToSVGParentTransform() const {
-  // Unlike other viewport-defining SVG objects, here localSVGTransform applies
-  // to the viewport offset.
-  return localSVGTransform() *
-         AffineTransform::translation(location().x(), location().y());
 }
 
 LayoutUnit LayoutSVGForeignObject::elementX() const {
@@ -100,7 +93,8 @@ void LayoutSVGForeignObject::layout() {
 
   bool updateCachedBoundariesInParents = false;
   if (m_needsTransformUpdate) {
-    m_localTransform = foreign->calculateAnimatedLocalTransform();
+    m_localTransform =
+        foreign->calculateTransform(SVGElement::IncludeMotionTransform);
     m_needsTransformUpdate = false;
     updateCachedBoundariesInParents = true;
   }

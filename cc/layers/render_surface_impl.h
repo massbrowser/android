@@ -27,7 +27,6 @@ namespace cc {
 class DamageTracker;
 class FilterOperations;
 class Occlusion;
-class RenderPassId;
 class RenderPassSink;
 class LayerImpl;
 class LayerIterator;
@@ -144,26 +143,30 @@ class CC_EXPORT RenderSurfaceImpl {
   void NoteAncestorPropertyChanged();
 
   DamageTracker* damage_tracker() const { return damage_tracker_.get(); }
+  gfx::Rect GetDamageRect();
 
-  RenderPassId GetRenderPassId();
+  int GetRenderPassId();
 
   void AppendRenderPasses(RenderPassSink* pass_sink);
   void AppendQuads(RenderPass* render_pass, AppendQuadsData* append_quads_data);
 
   int TransformTreeIndex() const;
   int ClipTreeIndex() const;
+
+  void set_effect_tree_index(int index) { effect_tree_index_ = index; }
   int EffectTreeIndex() const;
 
  private:
   void SetContentRect(const gfx::Rect& content_rect);
   gfx::Rect CalculateClippedAccumulatedContentRect();
+  gfx::Rect CalculateExpandedClipForFilters(
+      const gfx::Transform& target_to_surface);
 
   const EffectNode* OwningEffectNode() const;
 
-  LayerImpl* owning_layer_;
-
   LayerTreeImpl* layer_tree_impl_;
   int stable_effect_id_;
+  int effect_tree_index_;
 
   // Container for properties that render surfaces need to compute before they
   // can be drawn.

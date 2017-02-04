@@ -8,8 +8,8 @@
 #include <stddef.h>
 
 #include "base/macros.h"
-#include "net/base/net_export.h"
 #include "net/quic/core/quic_packet_writer.h"
+#include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 
 namespace net {
@@ -18,7 +18,7 @@ struct WriteResult;
 
 
 // Default packet writer which wraps QuicSocketUtils WritePacket.
-class NET_EXPORT_PRIVATE QuicDefaultPacketWriter : public QuicPacketWriter {
+class QUIC_EXPORT_PRIVATE QuicDefaultPacketWriter : public QuicPacketWriter {
  public:
   explicit QuicDefaultPacketWriter(int fd);
   ~QuicDefaultPacketWriter() override;
@@ -38,7 +38,7 @@ class NET_EXPORT_PRIVATE QuicDefaultPacketWriter : public QuicPacketWriter {
   void set_fd(int fd) { fd_ = fd; }
 
  protected:
-  virtual void set_write_blocked(bool is_blocked);
+  void set_write_blocked(bool is_blocked);
   int fd() { return fd_; }
 
  private:

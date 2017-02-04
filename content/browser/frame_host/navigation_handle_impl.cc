@@ -4,13 +4,20 @@
 
 #include "content/browser/frame_host/navigation_handle_impl.h"
 
+#include <iterator>
+
 #include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
+#include "content/browser/appcache/appcache_navigation_handle.h"
+#include "content/browser/appcache/appcache_service_impl.h"
 #include "content/browser/browsing_data/clear_site_data_throttle.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
+#include "content/browser/frame_host/ancestor_throttle.h"
 #include "content/browser/frame_host/debug_urls.h"
 #include "content/browser/frame_host/frame_tree_node.h"
+#include "content/browser/frame_host/navigation_controller_impl.h"
+#include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/navigator_delegate.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
@@ -25,7 +32,9 @@
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
+#include "net/base/net_errors.h"
 #include "net/url_request/redirect_info.h"
+#include "third_party/WebKit/public/platform/WebMixedContentContextType.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
@@ -53,13 +62,13 @@ std::unique_ptr<NavigationHandleImpl> NavigationHandleImpl::Create(
     FrameTreeNode* frame_tree_node,
     bool is_renderer_initiated,
     bool is_same_page,
-    bool is_srcdoc,
     const base::TimeTicks& navigation_start,
     int pending_nav_entry_id,
     bool started_from_context_menu) {
   return std::unique_ptr<NavigationHandleImpl>(new NavigationHandleImpl(
-      url, frame_tree_node, is_renderer_initiated, is_same_page, is_srcdoc,
-      navigation_start, pending_nav_entry_id, started_from_context_menu));
+      url, frame_tree_node, is_renderer_initiated, is_same_page,
+      navigation_start, pending_nav_entry_id,
+      started_from_context_menu));
 }
 
 NavigationHandleImpl::NavigationHandleImpl(
@@ -67,7 +76,6 @@ NavigationHandleImpl::NavigationHandleImpl(
     FrameTreeNode* frame_tree_node,
     bool is_renderer_initiated,
     bool is_same_page,
-    bool is_srcdoc,
     const base::TimeTicks& navigation_start,
     int pending_nav_entry_id,
     bool started_from_context_menu)
@@ -79,7 +87,6 @@ NavigationHandleImpl::NavigationHandleImpl(
       render_frame_host_(nullptr),
       is_renderer_initiated_(is_renderer_initiated),
       is_same_page_(is_same_page),
-      is_srcdoc_(is_srcdoc),
       was_redirected_(false),
       connection_info_(net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN),
       original_url_(url),
@@ -90,16 +97,35 @@ NavigationHandleImpl::NavigationHandleImpl(
       navigation_start_(navigation_start),
       pending_nav_entry_id_(pending_nav_entry_id),
       request_context_type_(REQUEST_CONTEXT_TYPE_UNSPECIFIED),
+      mixed_content_context_type_(blink::WebMixedContentContextType::Blockable),
       should_replace_current_entry_(false),
       is_download_(false),
       is_stream_(false),
       started_from_context_menu_(started_from_context_menu),
+      reload_type_(ReloadType::NONE),
       weak_factory_(this) {
   DCHECK(!navigation_start.is_null());
   redirect_chain_.push_back(url);
 
   starting_site_instance_ =
       frame_tree_node_->current_frame_host()->GetSiteInstance();
+
+  if (pending_nav_entry_id_) {
+    NavigationControllerImpl* nav_controller =
+        static_cast<NavigationControllerImpl*>(
+            frame_tree_node_->navigator()->GetController());
+    NavigationEntryImpl* nav_entry =
+        nav_controller->GetEntryWithUniqueID(pending_nav_entry_id_);
+    if (!nav_entry &&
+        nav_controller->GetPendingEntry() &&
+        nav_controller->GetPendingEntry()->GetUniqueID() ==
+            pending_nav_entry_id_) {
+      nav_entry = nav_controller->GetPendingEntry();
+    }
+
+    if (nav_entry)
+      reload_type_ = nav_entry->reload_type();
+  }
 
   if (!IsRendererDebugURL(url_))
     GetDelegate()->DidStartNavigation(this);
@@ -140,11 +166,6 @@ NavigatorDelegate* NavigationHandleImpl::GetDelegate() const {
   return frame_tree_node_->navigator()->GetDelegate();
 }
 
-RequestContextType NavigationHandleImpl::GetRequestContextType() const {
-  DCHECK_GE(state_, WILL_SEND_REQUEST);
-  return request_context_type_;
-}
-
 const GURL& NavigationHandleImpl::GetURL() {
   return url_;
 }
@@ -168,12 +189,12 @@ bool NavigationHandleImpl::IsRendererInitiated() {
   return is_renderer_initiated_;
 }
 
-bool NavigationHandleImpl::IsSrcdoc() {
-  return is_srcdoc_;
-}
-
 bool NavigationHandleImpl::WasServerRedirect() {
   return was_redirected_;
+}
+
+const std::vector<GURL>& NavigationHandleImpl::GetRedirectChain() {
+  return redirect_chain_;
 }
 
 int NavigationHandleImpl::GetFrameTreeNodeId() {
@@ -256,6 +277,11 @@ bool NavigationHandleImpl::IsErrorPage() {
   return state_ == DID_COMMIT_ERROR_PAGE;
 }
 
+net::HostPortPair NavigationHandleImpl::GetSocketAddress() {
+  DCHECK(state_ == DID_COMMIT || state_ == DID_COMMIT_ERROR_PAGE);
+  return socket_address_;
+}
+
 void NavigationHandleImpl::Resume() {
   if (state_ != DEFERRING_START && state_ != DEFERRING_REDIRECT &&
       state_ != DEFERRING_RESPONSE) {
@@ -286,7 +312,9 @@ void NavigationHandleImpl::Resume() {
 
 void NavigationHandleImpl::CancelDeferredNavigation(
     NavigationThrottle::ThrottleCheckResult result) {
-  DCHECK(state_ == DEFERRING_START || state_ == DEFERRING_REDIRECT);
+  DCHECK(state_ == DEFERRING_START ||
+         state_ == DEFERRING_REDIRECT ||
+         state_ == DEFERRING_RESPONSE);
   DCHECK(result == NavigationThrottle::CANCEL_AND_IGNORE ||
          result == NavigationThrottle::CANCEL);
   state_ = CANCELING;
@@ -320,6 +348,7 @@ NavigationHandleImpl::CallWillStartRequestForTesting(
   WillStartRequest(method, resource_request_body, sanitized_referrer,
                    has_user_gesture, transition, is_external_protocol,
                    REQUEST_CONTEXT_TYPE_LOCATION,
+                   blink::WebMixedContentContextType::Blockable,
                    base::Bind(&UpdateThrottleCheckResult, &result));
 
   // Reset the callback to ensure it will not be called later.
@@ -396,6 +425,10 @@ const std::string& NavigationHandleImpl::GetSearchableFormEncoding() {
   return searchable_form_encoding_;
 }
 
+ReloadType NavigationHandleImpl::GetReloadType() {
+  return reload_type_;
+}
+
 NavigationData* NavigationHandleImpl::GetNavigationData() {
   return navigation_data_.get();
 }
@@ -413,6 +446,12 @@ void NavigationHandleImpl::InitServiceWorkerHandle(
       new ServiceWorkerNavigationHandle(service_worker_context));
 }
 
+void NavigationHandleImpl::InitAppCacheHandle(
+    ChromeAppCacheService* appcache_service) {
+  DCHECK(IsBrowserSideNavigationEnabled());
+  appcache_handle_.reset(new AppCacheNavigationHandle(appcache_service));
+}
+
 void NavigationHandleImpl::WillStartRequest(
     const std::string& method,
     scoped_refptr<content::ResourceRequestBodyImpl> resource_request_body,
@@ -421,6 +460,7 @@ void NavigationHandleImpl::WillStartRequest(
     ui::PageTransition transition,
     bool is_external_protocol,
     RequestContextType request_context_type,
+    blink::WebMixedContentContextType mixed_content_context_type,
     const ThrottleChecksFinishedCallback& callback) {
   if (method != "POST")
     DCHECK(!resource_request_body);
@@ -434,6 +474,7 @@ void NavigationHandleImpl::WillStartRequest(
   transition_ = transition;
   is_external_protocol_ = is_external_protocol;
   request_context_type_ = request_context_type;
+  mixed_content_context_type_ = mixed_content_context_type;
   state_ = WILL_SEND_REQUEST;
   complete_callback_ = callback;
 
@@ -544,6 +585,8 @@ void NavigationHandleImpl::DidCommitNavigation(
   has_user_gesture_ = (params.gesture == NavigationGestureUser);
   transition_ = params.transition;
   render_frame_host_ = render_frame_host;
+  base_url_ = params.base_url;
+  socket_address_ = params.socket_address;
 
   // If an error page reloads, net_error_code might be 200 but we still want to
   // count it as an error page.
@@ -588,6 +631,9 @@ NavigationHandleImpl::CheckWillStartRequest() {
         state_ = DEFERRING_START;
         next_index_ = i + 1;
         return result;
+
+      case NavigationThrottle::BLOCK_RESPONSE:
+        NOTREACHED();
     }
   }
   next_index_ = 0;
@@ -618,6 +664,7 @@ NavigationHandleImpl::CheckWillRedirectRequest() {
         return result;
 
       case NavigationThrottle::BLOCK_REQUEST:
+      case NavigationThrottle::BLOCK_RESPONSE:
         NOTREACHED();
     }
   }
@@ -645,6 +692,7 @@ NavigationHandleImpl::CheckWillProcessResponse() {
 
       case NavigationThrottle::CANCEL:
       case NavigationThrottle::CANCEL_AND_IGNORE:
+      case NavigationThrottle::BLOCK_RESPONSE:
         state_ = CANCELING;
         return result;
 
@@ -672,12 +720,18 @@ bool NavigationHandleImpl::MaybeTransferAndProceed() {
 
   // Inform observers that the navigation is now ready to commit, unless a
   // transfer of the navigation failed.
-  ReadyToCommitNavigation(render_frame_host_);
+  // PlzNavigate: when a navigation is not set to commit (204/205s/downloads) do
+  // not call ReadyToCommitNavigation.
+  DCHECK(!IsBrowserSideNavigationEnabled() || render_frame_host_ ||
+         net_error_code_ == net::ERR_ABORTED);
+  if (!IsBrowserSideNavigationEnabled() || render_frame_host_)
+    ReadyToCommitNavigation(render_frame_host_);
   return true;
 }
 
 bool NavigationHandleImpl::MaybeTransferAndProceedInternal() {
-  DCHECK(render_frame_host_);
+  DCHECK(render_frame_host_ || (IsBrowserSideNavigationEnabled() &&
+                                net_error_code_ == net::ERR_ABORTED));
 
   // PlzNavigate: the final RenderFrameHost handling this navigation has been
   // decided before calling WillProcessResponse in
@@ -767,11 +821,11 @@ void NavigationHandleImpl::RunCompleteCallback(
 }
 
 void NavigationHandleImpl::RegisterNavigationThrottles() {
-  // Register the navigation throttles. The ScopedVector returned by
+  // Register the navigation throttles. The vector returned by
   // GetNavigationThrottles is not assigned to throttles_ directly because it
-  // would overwrite any throttle previously added with
+  // would overwrite any throttles previously added with
   // RegisterThrottleForTesting.
-  ScopedVector<NavigationThrottle> throttles_to_register =
+  std::vector<std::unique_ptr<NavigationThrottle>> throttles_to_register =
       GetDelegate()->CreateThrottlesForNavigation(this);
   std::unique_ptr<NavigationThrottle> devtools_throttle =
       RenderFrameDevToolsAgentHost::CreateThrottleForNavigation(this);
@@ -783,11 +837,14 @@ void NavigationHandleImpl::RegisterNavigationThrottles() {
   if (clear_site_data_throttle)
     throttles_to_register.push_back(std::move(clear_site_data_throttle));
 
-  if (throttles_to_register.size() > 0) {
-    throttles_.insert(throttles_.begin(), throttles_to_register.begin(),
-                      throttles_to_register.end());
-    throttles_to_register.weak_clear();
-  }
+  std::unique_ptr<content::NavigationThrottle> ancestor_throttle =
+      content::AncestorThrottle::MaybeCreateThrottleFor(this);
+  if (ancestor_throttle)
+    throttles_.push_back(std::move(ancestor_throttle));
+
+  throttles_.insert(throttles_.begin(),
+                    std::make_move_iterator(throttles_to_register.begin()),
+                    std::make_move_iterator(throttles_to_register.end()));
 }
 
 }  // namespace content

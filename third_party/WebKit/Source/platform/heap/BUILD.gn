@@ -26,11 +26,10 @@ source_set("heap") {
     "Heap.h",
     "HeapAllocator.cpp",
     "HeapAllocator.h",
+    "HeapCompact.cpp",
+    "HeapCompact.h",
     "HeapPage.cpp",
     "HeapPage.h",
-    "InlinedGlobalMarkingVisitor.h",
-    "MarkingVisitor.h",
-    "MarkingVisitorImpl.h",
     "Member.h",
     "PageMemory.cpp",
     "PageMemory.h",
@@ -42,6 +41,8 @@ source_set("heap") {
     "SafePoint.cpp",
     "SafePoint.h",
     "SelfKeepAlive.h",
+    "SparseHeapBitmap.cpp",
+    "SparseHeapBitmap.h",
     "StackFrameDepth.cpp",
     "StackFrameDepth.h",
     "ThreadState.cpp",
@@ -50,6 +51,7 @@ source_set("heap") {
     "TraceTraits.h",
     "Visitor.cpp",
     "Visitor.h",
+    "VisitorImpl.h",
     "WrapperVisitor.h",
   ]
 
@@ -76,6 +78,7 @@ source_set("heap") {
 test("blink_heap_unittests") {
   sources = [
     "BlinkGCMemoryDumpProviderTest.cpp",
+    "HeapCompactTest.cpp",
     "HeapTest.cpp",
     "PersistentTest.cpp",
     "RunAllTests.cpp",

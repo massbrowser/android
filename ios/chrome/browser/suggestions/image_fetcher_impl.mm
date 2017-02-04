@@ -4,23 +4,29 @@
 
 #include "ios/chrome/browser/suggestions/image_fetcher_impl.h"
 
-#include <UIKit/UIKit.h>
+#import <UIKit/UIKit.h>
 
+#include "base/memory/ptr_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "components/image_fetcher/image_fetcher_delegate.h"
-#include "ios/chrome/browser/net/image_fetcher.h"
+#include "components/image_fetcher/ios/ios_image_data_fetcher_wrapper.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "skia/ext/skia_utils_ios.h"
 #include "ui/gfx/image/image.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace suggestions {
 
 ImageFetcherImpl::ImageFetcherImpl(
     net::URLRequestContextGetter* url_request_context,
-    base::SequencedWorkerPool* blocking_pool) {
-  imageFetcher_.reset(new ::ImageFetcher(blocking_pool));
-  imageFetcher_->SetRequestContextGetter(url_request_context);
-}
+    base::SequencedWorkerPool* blocking_pool)
+    : image_fetcher_(
+          base::MakeUnique<image_fetcher::IOSImageDataFetcherWrapper>(
+              url_request_context,
+              blocking_pool)) {}
 
 ImageFetcherImpl::~ImageFetcherImpl() {
 }
@@ -33,9 +39,7 @@ void ImageFetcherImpl::SetImageFetcherDelegate(
 
 void ImageFetcherImpl::SetDataUseServiceName(
     DataUseServiceName data_use_service_name) {
-  // Not implemented - will be obsolete once iOS also uses
-  // image_fetcher::ImageDataFetcher.
-  NOTREACHED();
+  image_fetcher_->SetDataUseServiceName(data_use_service_name);
 }
 
 void ImageFetcherImpl::StartOrQueueNetworkRequest(
@@ -52,27 +56,29 @@ void ImageFetcherImpl::StartOrQueueNetworkRequest(
   }
   // Copy string reference so it's retained.
   const std::string fetch_id(id);
-  ImageFetchedCallback fetcher_callback =
-      ^(const GURL& original_url, int response_code, NSData* data) {
-      if (data) {
-        // Most likely always returns 1x images.
-        UIImage* ui_image = [UIImage imageWithData:data scale:1];
-        if (ui_image) {
-          gfx::Image gfx_image(ui_image);
-          callback.Run(fetch_id, gfx_image);
-          if (delegate_) {
-            delegate_->OnImageFetched(fetch_id, gfx_image);
+  // If image_fetcher_ is destroyed the request will be cancelled and this block
+  // will never be called. A reference to delegate_ can be kept.
+  image_fetcher::IOSImageDataFetcherCallback fetcher_callback =
+      ^(NSData* data) {
+        if (data) {
+          // Most likely always returns 1x images.
+          UIImage* ui_image = [UIImage imageWithData:data scale:1];
+          if (ui_image) {
+            gfx::Image gfx_image(ui_image, base::scoped_policy::ASSUME);
+            callback.Run(fetch_id, gfx_image);
+            if (delegate_) {
+              delegate_->OnImageFetched(fetch_id, gfx_image);
+            }
+            return;
           }
-          return;
         }
-      }
-      gfx::Image empty_image;
-      callback.Run(fetch_id, empty_image);
-      if (delegate_) {
-        delegate_->OnImageFetched(fetch_id, empty_image);
-      }
-  };
-  imageFetcher_->StartDownload(image_url, fetcher_callback);
+        gfx::Image empty_image;
+        callback.Run(fetch_id, empty_image);
+        if (delegate_) {
+          delegate_->OnImageFetched(fetch_id, empty_image);
+        }
+      };
+  image_fetcher_->FetchImageDataWebpDecoded(image_url, fetcher_callback);
 }
 
 }  // namespace suggestions

@@ -62,7 +62,7 @@ TouchExplorationController::~TouchExplorationController() {
 void TouchExplorationController::SetTouchAccessibilityAnchorPoint(
     const gfx::Point& anchor_point) {
   gfx::Point native_point = anchor_point;
-  root_window_->GetHost()->ConvertPointToNativeScreen(&native_point);
+  root_window_->GetHost()->ConvertDIPToScreenInPixels(&native_point);
 
   anchor_point_ = gfx::PointF(native_point.x(), native_point.y());
   anchor_point_state_ = ANCHOR_POINT_EXPLICITLY_SET;
@@ -93,7 +93,7 @@ ui::EventRewriteStatus TouchExplorationController::RewriteEvent(
 
   if (!exclude_bounds_.IsEmpty()) {
     gfx::Point location = touch_event.location();
-    root_window_->GetHost()->ConvertPointFromNativeScreen(&location);
+    root_window_->GetHost()->ConvertScreenInPixelsToDIP(&location);
     bool in_exclude_area = exclude_bounds_.Contains(location);
     if (in_exclude_area) {
       if (state_ == NO_FINGERS_DOWN)
@@ -846,24 +846,20 @@ void TouchExplorationController::OnGestureEvent(ui::GestureConsumer* consumer,
                                                 ui::GestureEvent* gesture) {}
 
 void TouchExplorationController::ProcessGestureEvents() {
-  std::unique_ptr<ScopedVector<ui::GestureEvent>> gestures(
-      gesture_provider_->GetAndResetPendingGestures());
-  if (gestures) {
-    for (ScopedVector<GestureEvent>::iterator i = gestures->begin();
-         i != gestures->end();
-         ++i) {
-      if ((*i)->type() == ui::ET_GESTURE_SWIPE &&
-          state_ == GESTURE_IN_PROGRESS) {
-        OnSwipeEvent(*i);
-        // The tap timer to leave gesture state is ended, and we now wait for
-        // all fingers to be released.
-        tap_timer_.Stop();
-        SET_STATE(WAIT_FOR_NO_FINGERS);
-        return;
-      }
-      if (state_ == SLIDE_GESTURE && (*i)->IsScrollGestureEvent()) {
-        SideSlideControl(*i);
-      }
+  std::vector<std::unique_ptr<GestureEvent>> gestures =
+      gesture_provider_->GetAndResetPendingGestures();
+  for (const auto& gesture : gestures) {
+    if (gesture->type() == ui::ET_GESTURE_SWIPE &&
+        state_ == GESTURE_IN_PROGRESS) {
+      OnSwipeEvent(gesture.get());
+      // The tap timer to leave gesture state is ended, and we now wait for
+      // all fingers to be released.
+      tap_timer_.Stop();
+      SET_STATE(WAIT_FOR_NO_FINGERS);
+      return;
+    }
+    if (state_ == SLIDE_GESTURE && gesture->IsScrollGestureEvent()) {
+      SideSlideControl(gesture.get());
     }
   }
 }
@@ -901,7 +897,7 @@ void TouchExplorationController::SideSlideControl(ui::GestureEvent* gesture) {
   }
 
   location = gesture->location();
-  root_window_->GetHost()->ConvertPointFromNativeScreen(&location);
+  root_window_->GetHost()->ConvertScreenInPixelsToDIP(&location);
   float volume_adjust_height =
       root_window_->bounds().height() - 2 * kMaxDistanceFromEdge;
   float ratio = (location.y() - kMaxDistanceFromEdge) / volume_adjust_height;
@@ -1003,7 +999,7 @@ int TouchExplorationController::FindEdgesWithinBounds(gfx::Point point,
                                                       float bounds) {
   // Since GetBoundsInScreen is in DIPs but point is not, then point needs to be
   // converted.
-  root_window_->GetHost()->ConvertPointFromNativeScreen(&point);
+  root_window_->GetHost()->ConvertScreenInPixelsToDIP(&point);
   gfx::Rect window = root_window_->GetBoundsInScreen();
 
   float left_edge_limit = window.x() + bounds;

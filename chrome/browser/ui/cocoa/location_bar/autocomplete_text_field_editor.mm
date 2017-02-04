@@ -16,6 +16,7 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/grit/generated_resources.h"
 #import "ui/base/cocoa/find_pasteboard.h"
+#import "ui/base/cocoa/touch_bar_forward_declarations.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/material_design/material_design_controller.h"
 
@@ -94,6 +95,11 @@ NSMenuItem* PasteAndGoMenuItemForObserver(
     [self setEnabledTextCheckingTypes:checkingTypes];
   }
   return self;
+}
+
+// Overridden to prevent unwanted items from appearing in the Touch Bar.
+- (NSTouchBar*)makeTouchBar {
+  return nil;
 }
 
 - (void)updateColorsToMatchTheme {
@@ -590,6 +596,20 @@ NSMenuItem* PasteAndGoMenuItemForObserver(
     return;
 
   [[FindPasteboard sharedInstance] setFindText:[selection string]];
+}
+
+- (BOOL)isOpaque {
+  // Even if you call -setDrawsBackground:NO, the background still gets drawn
+  // when editing. This is a problem because the left edge of the background
+  // overlaps the security decoration's hover rect. Return that the textview
+  // is transparent, and follow up below by disabling any background drawing.
+  // This will cause background drawing to fall through to the cell. See
+  // https://crbug.com/669870 .
+  return NO;
+}
+
+- (void)drawViewBackgroundInRect:(NSRect)aRect {
+  // See the comment in -isOpaque.
 }
 
 - (void)drawRect:(NSRect)rect {

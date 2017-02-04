@@ -13,22 +13,20 @@
 #include "components/ui_devtools/Forward.h"
 #include "components/ui_devtools/Protocol.h"
 #include "components/ui_devtools/devtools_client.h"
-#include "components/ui_devtools/devtools_export.h"
 #include "components/ui_devtools/string_util.h"
 #include "net/server/http_server.h"
 
 namespace ui {
 namespace devtools {
 
-class UI_DEVTOOLS_EXPORT UiDevToolsServer
-    : public NON_EXPORTED_BASE(net::HttpServer::Delegate) {
+class UiDevToolsServer : public net::HttpServer::Delegate {
  public:
   ~UiDevToolsServer() override;
 
   // Returns an empty unique_ptr if ui devtools flag isn't enabled or if a
   // server instance has already been created.
   static std::unique_ptr<UiDevToolsServer> Create(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+      scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner);
 
   // Returns a list of attached UiDevToolsClient name + URL
   using NameUrlPair = std::pair<std::string, std::string>;
@@ -39,7 +37,7 @@ class UI_DEVTOOLS_EXPORT UiDevToolsServer
 
  private:
   explicit UiDevToolsServer(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+      scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner);
 
   void Start(const std::string& address_string, uint16_t port);
   void StartServer(const std::string& address_string, uint16_t port);
@@ -60,7 +58,8 @@ class UI_DEVTOOLS_EXPORT UiDevToolsServer
 
   std::unique_ptr<base::Thread> thread_;
   std::unique_ptr<net::HttpServer> server_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
 
   // The server (owned by ash for now)
   static UiDevToolsServer* devtools_server_;

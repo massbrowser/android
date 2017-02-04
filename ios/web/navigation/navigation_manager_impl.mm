@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/web/navigation/navigation_manager_impl.h"
+#import "ios/web/navigation/navigation_manager_impl.h"
 
 #include <stddef.h>
 
@@ -12,12 +12,12 @@
 #import "ios/web/navigation/crw_session_controller+private_constructors.h"
 #import "ios/web/navigation/crw_session_controller.h"
 #import "ios/web/navigation/crw_session_entry.h"
-#include "ios/web/navigation/navigation_item_impl.h"
-#include "ios/web/navigation/navigation_manager_delegate.h"
-#import "ios/web/navigation/navigation_manager_facade_delegate.h"
+#import "ios/web/navigation/navigation_item_impl.h"
+#import "ios/web/navigation/navigation_manager_delegate.h"
+#include "ios/web/navigation/navigation_manager_facade_delegate.h"
 #include "ios/web/public/load_committed_details.h"
-#include "ios/web/public/navigation_item.h"
-#include "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/navigation_item.h"
+#import "ios/web/public/web_state/web_state.h"
 #include "ui/base/page_transition_types.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -70,20 +70,22 @@ NavigationManager::WebLoadParams& NavigationManager::WebLoadParams::operator=(
   return *this;
 }
 
-NavigationManagerImpl::NavigationManagerImpl(
-    NavigationManagerDelegate* delegate,
-    BrowserState* browser_state)
-    : delegate_(delegate),
-      browser_state_(browser_state),
-      facade_delegate_(nullptr) {
-  DCHECK(browser_state_);
-}
+NavigationManagerImpl::NavigationManagerImpl()
+    : delegate_(nullptr), browser_state_(nullptr), facade_delegate_(nullptr) {}
 
 NavigationManagerImpl::~NavigationManagerImpl() {
   // The facade layer should be deleted before this object.
   DCHECK(!facade_delegate_);
 
   [session_controller_ setNavigationManager:nullptr];
+}
+
+void NavigationManagerImpl::SetDelegate(NavigationManagerDelegate* delegate) {
+  delegate_ = delegate;
+}
+
+void NavigationManagerImpl::SetBrowserState(BrowserState* browser_state) {
+  browser_state_ = browser_state;
 }
 
 void NavigationManagerImpl::SetSessionController(
@@ -105,7 +107,7 @@ void NavigationManagerImpl::InitializeSession(NSString* window_name,
 }
 
 void NavigationManagerImpl::ReplaceSessionHistory(
-    ScopedVector<web::NavigationItem> items,
+    std::vector<std::unique_ptr<web::NavigationItem>> items,
     int current_index) {
   SetSessionController([[CRWSessionController alloc]
       initWithNavigationItems:std::move(items)
@@ -312,7 +314,7 @@ void NavigationManagerImpl::GoToIndex(int index) {
 }
 
 void NavigationManagerImpl::Reload(bool check_for_reposts) {
-  // Navigation manager may be empty if the only pending entry failed to load
+  // Navigation manager may be empty if the only pending item failed to load
   // with SSL error and the user has decided not to proceed.
   NavigationItem* item = GetVisibleItem();
   GURL url = item ? item->GetURL() : GURL(url::kAboutBlankURL);
@@ -344,16 +346,17 @@ int NavigationManagerImpl::GetIndexForOffset(int offset) const {
                    : static_cast<int>([session_controller_ pendingEntryIndex]);
 
   if (offset < 0) {
-    if (GetTransientItem()) {
-      // Going back from transient entry is a matter of discarding it and there
-      // is no need to move navigation index back.
+    if (GetTransientItem() && [session_controller_ pendingEntryIndex] == -1) {
+      // Going back from transient item that added to the end navigation stack
+      // is a matter of discarding it as there is no need to move navigation
+      // index back.
       offset++;
     }
 
-    while (offset < 0) {
+    while (offset < 0 && result > 0) {
       // To stop the user getting 'stuck' on redirecting pages they weren't
       // even aware existed, it is necessary to pass over pages that would
-      // immediately result in a redirect (the entry *before* the redirected
+      // immediately result in a redirect (the item *before* the redirected
       // page).
       while (result > 0 && IsRedirectItemAtIndex(result)) {
         --result;
@@ -361,19 +364,23 @@ int NavigationManagerImpl::GetIndexForOffset(int offset) const {
       --result;
       ++offset;
     }
+    // Result may be out of bounds, so stop trying to skip redirect items and
+    // simply add the remainder.
+    result += offset;
+    if (result > GetItemCount() /* overflow */)
+      result = INT_MIN;
   } else if (offset > 0) {
     if (GetPendingItem() && [session_controller_ pendingEntryIndex] == -1) {
       // Chrome for iOS does not allow forward navigation if there is another
       // pending navigation in progress. Returning invalid index indicates that
       // forward navigation will not be allowed (and |INT_MAX| works for that).
       // This is different from other platforms which allow forward navigation
-      // if pending entry exist.
+      // if pending item exist.
       // TODO(crbug.com/661858): Remove this once back-forward navigation uses
       // pending index.
       return INT_MAX;
     }
-
-    while (offset > 0) {
+    while (offset > 0 && result < GetItemCount()) {
       ++result;
       --offset;
       // As with going back, skip over redirects.
@@ -381,6 +388,11 @@ int NavigationManagerImpl::GetIndexForOffset(int offset) const {
         ++result;
       }
     }
+    // Result may be out of bounds, so stop trying to skip redirect items and
+    // simply add the remainder.
+    result += offset;
+    if (result < 0 /* overflow */)
+      result = INT_MAX;
   }
 
   return result;

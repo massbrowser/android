@@ -24,6 +24,11 @@ declare_args() {
   # a class has an empty destructor which would be unnecessarily invoked
   # when finalized.
   blink_gc_plugin_option_warn_unneeded_finalizer = false
+
+  # Set to true to have the clang Blink GC plugin use Chromium-style naming
+  # rather than legacy Blink name.
+  # TODO(https://crbug.com/675879): Remove this option after the Blink rename.
+  blink_gc_plugin_option_use_chromium_style_naming = false
 }
 
 # features ---------------------------------------------------------------------
@@ -64,17 +69,6 @@ config("blink_pch") {
 
       # Force include the header.
       cflags = [ "/FI$precompiled_header" ]
-
-      # Disable warning for "this file was empty after preprocessing". This
-      # error is generated only in C mode for ANSI compatibility. It conflicts
-      # with precompiled headers since the source file that's "compiled" for
-      # making the precompiled header is empty.
-      #
-      # This error doesn't happen every time. In VS2013, it seems if the .pch
-      # file doesn't exist, no error will be generated (probably MS tested this
-      # case but forgot the other one?). To reproduce this error, do a build,
-      # then delete the precompile.c.obj file, then build again.
-      cflags_c = [ "/wd4206" ]
     }
   }
 }
@@ -147,6 +141,14 @@ config("config") {
         "-plugin-arg-blink-gc-plugin",
         "-Xclang",
         "warn-unneeded-finalizer",
+      ]
+    }
+    if (blink_gc_plugin_option_use_chromium_style_naming) {
+      cflags += [
+        "-Xclang",
+        "-plugin-arg-blink-gc-plugin",
+        "-Xclang",
+        "use-chromium-style-naming",
       ]
     }
   }

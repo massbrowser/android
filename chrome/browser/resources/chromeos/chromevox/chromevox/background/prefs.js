@@ -60,6 +60,8 @@ cvox.ChromeVoxPrefs = function() {
  */
 cvox.ChromeVoxPrefs.DEFAULT_PREFS = {
   'active': true,
+  'audioStrategy': 'audioNormal',
+  'autoRead': false,
   'brailleCaptions': false,
   'brailleSideBySide': true,
   // TODO(dtseng): Leaking state about multiple key maps here until we have a
@@ -81,8 +83,6 @@ cvox.ChromeVoxPrefs.DEFAULT_PREFS = {
   'useIBeamCursor': cvox.ChromeVox.isMac,
   'useNext': true,
   'useVerboseMode': true,
-  'virtualBrailleRows': 1,
-  'virtualBrailleColumns': 40
 };
 
 

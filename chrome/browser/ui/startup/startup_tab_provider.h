@@ -58,12 +58,26 @@ class StartupTabProviderImpl : public StartupTabProvider {
   // the respective Get*Tabs methods, but do not gather or interact with any
   // system state relating to making those policy decisions.
 
-  // Determines which tabs which should be shown according to onboarding/first
+  // Determines which tabs should be shown according to onboarding/first
   // run policy.
   static StartupTabs CheckStandardOnboardingTabPolicy(
       bool is_first_run,
       bool has_seen_welcome_page,
-      bool is_signed_in);
+      bool is_signed_in,
+      bool is_supervised_user);
+
+#if defined(OS_WIN)
+  // Determines which tabs should be shown according to onboarding/first run
+  // policy, including promo content specific to Windows 10.
+  static StartupTabs CheckWin10OnboardingTabPolicy(
+      bool is_first_run,
+      bool has_seen_welcome_page,
+      bool has_seen_win10_promo,
+      bool is_signed_in,
+      bool set_default_browser_allowed,
+      bool is_default_browser,
+      bool is_supervised_user);
+#endif
 
   // Processes first run URLs specified in Master Preferences file, replacing
   // any "magic word" URL hosts with appropriate URLs.
@@ -81,10 +95,12 @@ class StartupTabProviderImpl : public StartupTabProvider {
   static StartupTabs CheckPinnedTabPolicy(const SessionStartupPref& pref,
                                           const StartupTabs& pinned_tabs);
 
-  // Determines whether preferences indicate that user-specified tabs should be
-  // shown as the default new window content, and returns the specified tabs if
-  // so.
-  static StartupTabs CheckPreferencesTabPolicy(const SessionStartupPref& pref);
+  // Determines whether preferences and window state indicate that
+  // user-specified tabs should be shown as the default new window content, and
+  // returns the specified tabs if so.
+  static StartupTabs CheckPreferencesTabPolicy(
+      const SessionStartupPref& pref,
+      bool profile_has_other_tabbed_browser);
 
   // Determines whether startup preferences require the New Tab Page to be
   // explicitly specified. Session Restore does not expect the NTP to be passed.
@@ -95,6 +111,13 @@ class StartupTabProviderImpl : public StartupTabProvider {
   // onboarding occurs after the first Chrome execution (e.g., when creating an
   // additional profile).
   static GURL GetWelcomePageUrl(bool use_later_run_variant);
+
+#if defined(OS_WIN)
+  // Gets the URL for the Windows 10 Welcome page. If |use_later_run_variant| is
+  // true, a URL parameter will be appended so as to access the variant page
+  // used when onboarding occurs after the first Chrome execution.
+  static GURL GetWin10WelcomePageUrl(bool use_later_run_variant);
+#endif
 
   // Gets the URL for the page which offers to reset the user's profile
   // settings.

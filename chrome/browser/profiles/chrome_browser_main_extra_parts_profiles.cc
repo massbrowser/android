@@ -48,6 +48,7 @@
 #include "chrome/browser/prerender/prerender_message_filter.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/profiles/gaia_info_update_service_factory.h"
+#include "chrome/browser/safe_browsing/certificate_reporting_service_factory.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/suggestions/suggestions_service_factory.h"
 #include "chrome/browser/search_engines/template_url_fetcher_factory.h"
@@ -63,6 +64,7 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
+#include "chrome/browser/ui/desktop_ios_promotion/sms_service_factory.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/tabs/pinned_tab_service_factory.h"
@@ -97,9 +99,9 @@
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
 #include "chrome/browser/chromeos/policy/recommendation_restorer_factory.h"
-#include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_token_forwarder_factory.h"
 #include "chrome/browser/chromeos/policy/user_network_configuration_updater_factory.h"
+#include "chrome/browser/chromeos/policy/user_policy_manager_factory_chromeos.h"
 #else
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
@@ -120,12 +122,14 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/printer_detector/printer_detector_factory.h"
+#include "chrome/browser/chromeos/printing/cups_print_job_manager_factory.h"
 #include "chrome/browser/chromeos/printing/printer_pref_manager_factory.h"
 #include "chrome/browser/extensions/api/platform_keys/verify_trust_api.h"
 #endif
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/data_usage/data_use_ui_tab_model_factory.h"
+#include "chrome/browser/android/search_geolocation/search_geolocation_service.h"
 #else
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
@@ -203,6 +207,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
   CaptivePortalServiceFactory::GetInstance();
 #endif
+  CertificateReportingServiceFactory::GetInstance();
 #if defined(OS_ANDROID)
   chrome::android::DataUseUITabModelFactory::GetInstance();
 #endif
@@ -214,13 +219,14 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   CrossDevicePromoFactory::GetInstance();
 #endif
-#if defined(ENABLE_NOTIFICATIONS)
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   ExtensionWelcomeNotificationFactory::GetInstance();
 #endif
   NotifierStateTrackerFactory::GetInstance();
-#endif  // defined(ENABLE_NOTIFICATIONS)
   data_use_measurement::ChromeDataUseAscriberServiceFactory::GetInstance();
+#if !defined(OS_ANDROID)
+  SMSServiceFactory::GetInstance();
+#endif
   dom_distiller::DomDistillerServiceFactory::GetInstance();
   domain_reliability::DomainReliabilityServiceFactory::GetInstance();
   DownloadServiceFactory::GetInstance();
@@ -230,6 +236,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #endif
 #if defined(OS_CHROMEOS)
   chromeos::PrinterDetectorFactory::GetInstance();
+  chromeos::CupsPrintJobManagerFactory::GetInstance();
   chromeos::PrinterPrefManagerFactory::GetInstance();
   extensions::VerifyTrustAPI::GetFactoryInstance();
 #endif
@@ -291,6 +298,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   PasswordManagerSettingMigratorServiceFactory::GetInstance();
 #if !defined(OS_ANDROID)
   PinnedTabServiceFactory::GetInstance();
+  ThemeServiceFactory::GetInstance();
 #endif
 #if BUILDFLAG(ENABLE_PLUGINS)
   PluginPrefsFactory::GetInstance();
@@ -301,7 +309,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   chromeos::OwnerSettingsServiceChromeOSFactory::GetInstance();
   policy::PolicyCertServiceFactory::GetInstance();
   policy::RecommendationRestorerFactory::GetInstance();
-  policy::UserCloudPolicyManagerFactoryChromeOS::GetInstance();
+  policy::UserPolicyManagerFactoryChromeOS::GetInstance();
   policy::UserCloudPolicyTokenForwarderFactory::GetInstance();
   policy::UserNetworkConfigurationUpdaterFactory::GetInstance();
 #else  // !defined(OS_CHROMEOS)
@@ -319,6 +327,9 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   prerender::PrerenderMessageFilter::EnsureShutdownNotifierFactoryBuilt();
   ProfileSyncServiceFactory::GetInstance();
   ProtocolHandlerRegistryFactory::GetInstance();
+#if defined(OS_ANDROID)
+  SearchGeolocationService::Factory::GetInstance();
+#endif
 #if BUILDFLAG(ENABLE_SESSION_SERVICE)
   SessionServiceFactory::GetInstance();
 #endif
@@ -336,9 +347,6 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   TabRestoreServiceFactory::GetInstance();
   TemplateURLFetcherFactory::GetInstance();
   TemplateURLServiceFactory::GetInstance();
-#if defined(ENABLE_THEMES)
-  ThemeServiceFactory::GetInstance();
-#endif
 #if defined(OS_WIN)
   TriggeredProfileResetterFactory::GetInstance();
 #endif

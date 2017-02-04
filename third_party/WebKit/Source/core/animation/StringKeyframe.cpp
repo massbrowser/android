@@ -24,10 +24,11 @@ StringKeyframe::StringKeyframe(const StringKeyframe& copyFrom)
 
 MutableStylePropertySet::SetResult StringKeyframe::setCSSPropertyValue(
     const AtomicString& propertyName,
+    const PropertyRegistry* registry,
     const String& value,
     StyleSheetContents* styleSheetContents) {
   bool isAnimationTainted = true;
-  return m_cssPropertyMap->setProperty(propertyName, value, false,
+  return m_cssPropertyMap->setProperty(propertyName, registry, value, false,
                                        styleSheetContents, isAnimationTainted);
 }
 
@@ -78,18 +79,18 @@ PropertyHandleSet StringKeyframe::properties() const {
         << "Web Animations: Encountered unexpanded shorthand CSS property ("
         << propertyReference.id() << ").";
     if (propertyReference.id() == CSSPropertyVariable)
-      properties.add(PropertyHandle(
+      properties.insert(PropertyHandle(
           toCSSCustomPropertyDeclaration(propertyReference.value()).name()));
     else
-      properties.add(PropertyHandle(propertyReference.id(), false));
+      properties.insert(PropertyHandle(propertyReference.id(), false));
   }
 
   for (unsigned i = 0; i < m_presentationAttributeMap->propertyCount(); ++i)
-    properties.add(
+    properties.insert(
         PropertyHandle(m_presentationAttributeMap->propertyAt(i).id(), true));
 
   for (const auto& key : m_svgAttributeMap.keys())
-    properties.add(PropertyHandle(*key));
+    properties.insert(PropertyHandle(*key));
 
   return properties;
 }
@@ -99,7 +100,8 @@ PassRefPtr<Keyframe> StringKeyframe::clone() const {
 }
 
 PassRefPtr<Keyframe::PropertySpecificKeyframe>
-StringKeyframe::createPropertySpecificKeyframe(PropertyHandle property) const {
+StringKeyframe::createPropertySpecificKeyframe(
+    const PropertyHandle& property) const {
   if (property.isCSSProperty())
     return CSSPropertySpecificKeyframe::create(
         offset(), &easing(), &cssPropertyValue(property), composite());

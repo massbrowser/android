@@ -8,11 +8,11 @@
 
 #include <memory>
 
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
-#include "ios/web/navigation/navigation_item_impl.h"
-#include "ios/web/navigation/nscoder_util.h"
-#include "ios/web/public/navigation_item.h"
+#import "ios/web/navigation/navigation_item_impl.h"
+#import "ios/web/navigation/nscoder_util.h"
+#import "ios/web/public/navigation_item.h"
 #include "ios/web/public/web_state/page_display_state.h"
 #import "net/base/mac/url_conversions.h"
 
@@ -39,23 +39,16 @@ NSString* const kSessionEntryTimestampKey = @"timestamp";
 NSString* const kSessionEntryTitleKey = @"title";
 NSString* const kSessionEntryPOSTDataKey = @"POSTData";
 NSString* const kSessionEntryHTTPRequestHeadersKey = @"httpHeaders";
-NSString* const kSessionEntrySkipResubmitConfirmationKey =
+NSString* const kSessionEntrySkipRepostFormConfirmationKey =
     @"skipResubmitDataConfirmation";
 NSString* const kSessionEntryUseDesktopUserAgentKey = @"useDesktopUserAgent";
 }
 
 @interface CRWSessionEntry () {
-  // The original URL of the page.  In cases where a redirect occurred, |url_|
-  // will contain the final post-redirect URL, and |originalUrl_| will contain
-  // the pre-redirect URL.  This field is not persisted to disk.
-  GURL _originalUrl;
-
   // The NavigationItemImpl corresponding to this CRWSessionEntry.
   // TODO(stuartmorgan): Move ownership to NavigationManagerImpl.
   std::unique_ptr<web::NavigationItemImpl> _navigationItem;
 }
-// Redefine originalUrl to be read-write.
-@property(nonatomic, readwrite) const GURL& originalUrl;
 
 // Converts a serialized NSDictionary to a web::PageDisplayState.
 + (web::PageDisplayState)pageDisplayStateFromDictionary:
@@ -70,15 +63,12 @@ NSString* const kSessionEntryUseDesktopUserAgentKey = @"useDesktopUserAgent";
 
 @implementation CRWSessionEntry
 
-@synthesize originalUrl = _originalUrl;
-
 - (instancetype)initWithNavigationItem:
     (std::unique_ptr<web::NavigationItem>)item {
   self = [super init];
   if (self) {
     _navigationItem.reset(
         static_cast<web::NavigationItemImpl*>(item.release()));
-    self.originalUrl = _navigationItem->GetURL();
   }
   return self;
 }
@@ -99,8 +89,8 @@ NSString* const kSessionEntryUseDesktopUserAgentKey = @"useDesktopUserAgent";
       url = net::GURLWithNSURL(
           [aDecoder decodeObjectForKey:web::kSessionEntryURLDeperecatedKey]);
     }
+    _navigationItem->SetOriginalRequestURL(url);
     _navigationItem->SetURL(url);
-    self.originalUrl = url;
 
     if ([aDecoder containsValueForKey:web::kSessionEntryReferrerURLKey]) {
       const std::string referrerString(web::nscoder_util::DecodeString(
@@ -131,8 +121,8 @@ NSString* const kSessionEntryUseDesktopUserAgentKey = @"useDesktopUserAgent";
         pageDisplayStateFromDictionary:
             [aDecoder
                 decodeObjectForKey:web::kSessionEntryPageScrollStateKey]]);
-    _navigationItem->SetShouldSkipResubmitDataConfirmation([aDecoder
-        decodeBoolForKey:web::kSessionEntrySkipResubmitConfirmationKey]);
+    _navigationItem->SetShouldSkipRepostFormConfirmation([aDecoder
+        decodeBoolForKey:web::kSessionEntrySkipRepostFormConfirmationKey]);
     _navigationItem->SetIsOverridingUserAgent(
         [aDecoder decodeBoolForKey:web::kSessionEntryUseDesktopUserAgentKey]);
     _navigationItem->SetPostData(
@@ -160,8 +150,8 @@ NSString* const kSessionEntryUseDesktopUserAgentKey = @"useDesktopUserAgent";
   [aCoder encodeObject:[[self class] dictionaryFromPageDisplayState:
                                          _navigationItem->GetPageDisplayState()]
                 forKey:web::kSessionEntryPageScrollStateKey];
-  [aCoder encodeBool:_navigationItem->ShouldSkipResubmitDataConfirmation()
-              forKey:web::kSessionEntrySkipResubmitConfirmationKey];
+  [aCoder encodeBool:_navigationItem->ShouldSkipRepostFormConfirmation()
+              forKey:web::kSessionEntrySkipRepostFormConfirmationKey];
   [aCoder encodeBool:_navigationItem->IsOverridingUserAgent()
               forKey:web::kSessionEntryUseDesktopUserAgentKey];
   [aCoder encodeObject:_navigationItem->GetPostData()
@@ -176,7 +166,6 @@ NSString* const kSessionEntryUseDesktopUserAgentKey = @"useDesktopUserAgent";
   CRWSessionEntry* copy = [[[self class] alloc] init];
   copy->_navigationItem.reset(
       new web::NavigationItemImpl(*_navigationItem.get()));
-  copy->_originalUrl = _originalUrl;
   return copy;
 }
 
@@ -186,11 +175,13 @@ NSString* const kSessionEntryUseDesktopUserAgentKey = @"useDesktopUserAgent";
           @"url:%@ originalurl:%@ title:%@ transition:%d displayState:%@ "
           @"desktopUA:%d",
           base::SysUTF8ToNSString(_navigationItem->GetURL().spec()),
-          base::SysUTF8ToNSString(self.originalUrl.spec()),
+          base::SysUTF8ToNSString(
+              _navigationItem->GetOriginalRequestURL().spec()),
           base::SysUTF16ToNSString(_navigationItem->GetTitle()),
           _navigationItem->GetTransitionType(),
-          [[self class] descriptionForPageDisplayState:
-                            _navigationItem->GetPageDisplayState()],
+          [[self class]
+              descriptionForPageDisplayState:_navigationItem
+                                                 ->GetPageDisplayState()],
           _navigationItem->IsOverridingUserAgent()];
 }
 

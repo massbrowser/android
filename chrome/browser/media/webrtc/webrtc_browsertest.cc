@@ -48,12 +48,6 @@ class WebRtcBrowserTest : public WebRtcTestBase {
 
     // Flag used by TestWebAudioMediaStream to force garbage collection.
     command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
-
-    // Flag used by |RunsAudioVideoWebRTCCallInTwoTabsGetStatsPromise|.
-    // TODO(hbos): Remove this when bug crbug.com/627816 is resolved (when this
-    // flag is removed).
-    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
-                                    "RTCPeerConnectionNewGetStats");
   }
 
   void RunsAudioVideoWebRTCCallInTwoTabs(
@@ -219,6 +213,8 @@ IN_PROC_BROWSER_TEST_F(WebRtcBrowserTest,
   StartServerAndOpenTabs();
   SetupPeerconnectionWithLocalStream(left_tab_);
   SetupPeerconnectionWithLocalStream(right_tab_);
+  CreateDataChannel(left_tab_, "data");
+  CreateDataChannel(right_tab_, "data");
   NegotiateCall(left_tab_, right_tab_);
 
   std::set<std::string> missing_expected_stats;
@@ -228,9 +224,9 @@ IN_PROC_BROWSER_TEST_F(WebRtcBrowserTest,
   for (const std::string& type : VerifyStatsGeneratedPromise(left_tab_)) {
     missing_expected_stats.erase(type);
   }
-  // TODO(hbos): When all stats are ready and returned by "getStats":
-  // EXPECT_TRUE(missing_expected_stats.empty());
-  // crbug.com/627816
+  for (const std::string& type : missing_expected_stats) {
+    EXPECT_TRUE(false) << "Expected stats dictionary is missing: " << type;
+  }
 
   DetectVideoAndHangUp();
 }

@@ -13,7 +13,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-#include "services/ui/display/platform_screen.h"
+#include "services/ui/display/screen_manager.h"
 #include "services/ui/display/viewport_metrics.h"
 #include "services/ui/public/interfaces/display_manager.mojom.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
@@ -41,14 +41,14 @@ namespace test {
 
 // Collection of utilities useful in creating mus tests.
 
-// Test PlatformDisplay instance that allows adding/modifying/removing displays.
+// Test ScreenManager instance that allows adding/modifying/removing displays.
 // Tracks display ids to perform some basic verification that no duplicates are
 // added and display was added before being modified or removed. Display ids
 // reset when Init() is called.
-class TestPlatformScreen : public display::PlatformScreen {
+class TestScreenManager : public display::ScreenManager {
  public:
-  TestPlatformScreen();
-  ~TestPlatformScreen() override;
+  TestScreenManager();
+  ~TestScreenManager() override;
 
   // Adds a new display with default metrics, generates a unique display id and
   // returns it. Calls OnDisplayAdded() on delegate.
@@ -64,18 +64,18 @@ class TestPlatformScreen : public display::PlatformScreen {
   // Calls OnDisplayRemoved() on delegate.
   void RemoveDisplay(int64_t id);
 
-  // display::PlatformScreen:
+  // display::ScreenManager:
   void AddInterfaces(service_manager::InterfaceRegistry* registry) override {}
-  void Init(display::PlatformScreenDelegate* delegate) override;
+  void Init(display::ScreenManagerDelegate* delegate) override;
   void RequestCloseDisplay(int64_t display_id) override {}
   int64_t GetPrimaryDisplayId() const override;
 
  private:
-  display::PlatformScreenDelegate* delegate_;
+  display::ScreenManagerDelegate* delegate_;
   int64_t primary_display_id_ = display::kInvalidDisplayId;
   std::set<int64_t> display_ids_;
 
-  DISALLOW_COPY_AND_ASSIGN(TestPlatformScreen);
+  DISALLOW_COPY_AND_ASSIGN(TestScreenManager);
 };
 
 // -----------------------------------------------------------------------------
@@ -106,12 +106,13 @@ class WindowTreeTestApi {
   void set_window_manager_internal(mojom::WindowManager* wm_internal) {
     tree_->window_manager_internal_ = wm_internal;
   }
-  void SetCanAcceptEvents(Id transport_window_id, bool can_accept_events) {
-    tree_->SetCanAcceptEvents(transport_window_id, can_accept_events);
+  void SetEventTargetingPolicy(Id transport_window_id,
+                               mojom::EventTargetingPolicy policy) {
+    tree_->SetEventTargetingPolicy(transport_window_id, policy);
   }
-  void AckOldestEvent() {
-    tree_->OnWindowInputEventAck(tree_->event_ack_id_,
-                                 mojom::EventResult::UNHANDLED);
+  void AckOldestEvent(
+      mojom::EventResult result = mojom::EventResult::UNHANDLED) {
+    tree_->OnWindowInputEventAck(tree_->event_ack_id_, result);
   }
   void EnableCapture() { tree_->event_ack_id_ = 1u; }
   void AckLastEvent(mojom::EventResult result) {
@@ -138,6 +139,8 @@ class DisplayTestApi {
   ~DisplayTestApi();
 
   void OnEvent(const ui::Event& event) { display_->OnEvent(event); }
+
+  mojom::Cursor last_cursor() const { return display_->last_cursor_; }
 
  private:
   Display* display_;
@@ -215,7 +218,7 @@ class WindowManagerStateTestApi {
     return wms_->GetEventTargetClientId(window, in_nonclient_area);
   }
 
-  mojom::WindowTree* tree_awaiting_input_ack() {
+  WindowTree* tree_awaiting_input_ack() {
     return wms_->tree_awaiting_input_ack_;
   }
 
@@ -291,7 +294,6 @@ class TestFrameGeneratorDelegate : public FrameGeneratorDelegate {
   // FrameGeneratorDelegate:
   bool IsInHighContrastMode() override;
 
- private:
   DISALLOW_COPY_AND_ASSIGN(TestFrameGeneratorDelegate);
 };
 
@@ -342,6 +344,7 @@ class TestWindowManager : public mojom::WindowManager {
       uint32_t window_id,
       const std::string& name,
       const base::Optional<std::vector<uint8_t>>& value) override {}
+  void WmSetCanFocus(uint32_t window_id, bool can_focus) override {}
   void WmCreateTopLevelWindow(
       uint32_t change_id,
       ClientSpecificId requesting_client_id,
@@ -354,6 +357,10 @@ class TestWindowManager : public mojom::WindowManager {
                          mojom::MoveLoopSource source,
                          const gfx::Point& cursor_location) override;
   void WmCancelMoveLoop(uint32_t window_id) override;
+  void WmDeactivateWindow(uint32_t window_id) override;
+  void WmStackAbove(uint32_t change_id, uint32_t above_id,
+                    uint32_t below_id) override;
+  void WmStackAtTop(uint32_t change_id, uint32_t window_id) override;
   void OnAccelerator(uint32_t ack_id,
                      uint32_t accelerator_id,
                      std::unique_ptr<ui::Event> event) override;
@@ -443,9 +450,7 @@ class TestWindowTreeClient : public ui::mojom::WindowTreeClient {
   void OnWindowPredefinedCursorChanged(uint32_t window_id,
                                        mojom::Cursor cursor_id) override;
   void OnWindowSurfaceChanged(Id window_id,
-                              const cc::SurfaceId& surface_id,
-                              const gfx::Size& frame_size,
-                              float device_scale_factor) override;
+                              const cc::SurfaceInfo& surface_info) override;
   void OnDragDropStart(
       const std::unordered_map<std::string, std::vector<uint8_t>>& mime_data)
       override;
@@ -553,7 +558,6 @@ class TestWindowServerDelegate : public WindowServerDelegate {
       mojom::WindowTreeRequest* tree_request,
       mojom::WindowTreeClientPtr* client) override;
   bool IsTestConfig() const override;
-  void UpdateTouchTransforms() override {}
 
  private:
   WindowServer* window_server_ = nullptr;

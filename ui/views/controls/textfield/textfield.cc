@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -410,11 +411,6 @@ void Textfield::UseDefaultSelectionTextColor() {
   SchedulePaint();
 }
 
-void Textfield::SetShadows(const gfx::ShadowValues& shadows) {
-  GetRenderText()->set_shadows(shadows);
-  SchedulePaint();
-}
-
 SkColor Textfield::GetSelectionBackgroundColor() const {
   return use_default_selection_background_color_ ?
       GetNativeTheme()->GetSystemColor(
@@ -579,19 +575,23 @@ gfx::NativeCursor Textfield::GetCursor(const ui::MouseEvent& event) {
 }
 
 bool Textfield::OnMousePressed(const ui::MouseEvent& event) {
+  const bool had_focus = HasFocus();
   bool handled = controller_ && controller_->HandleMouseEvent(this, event);
   if (!handled &&
       (event.IsOnlyLeftMouseButton() || event.IsOnlyRightMouseButton())) {
-    RequestFocus();
+    if (!had_focus)
+      RequestFocus();
     ShowImeIfNeeded();
   }
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-  if (!handled && !HasFocus() && event.IsOnlyMiddleMouseButton())
+  if (!handled && !had_focus && event.IsOnlyMiddleMouseButton())
     RequestFocus();
 #endif
 
-  return selection_controller_.OnMousePressed(event, handled);
+  return selection_controller_.OnMousePressed(
+      event, handled, had_focus ? SelectionController::FOCUSED
+                                : SelectionController::UNFOCUSED);
 }
 
 bool Textfield::OnMouseDragged(const ui::MouseEvent& event) {
@@ -878,6 +878,10 @@ void Textfield::OnDragDone() {
 void Textfield::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ui::AX_ROLE_TEXT_FIELD;
   node_data->SetName(accessible_name_);
+  if (enabled()) {
+    node_data->AddIntAttribute(ui::AX_ATTR_ACTION,
+                               ui::AX_SUPPORTED_ACTION_ACTIVATE);
+  }
   if (read_only())
     node_data->AddStateFlag(ui::AX_STATE_READ_ONLY);
   else
@@ -1440,7 +1444,7 @@ void Textfield::ExtendSelectionAndDelete(size_t before, size_t after) {
     DeleteRange(range);
 }
 
-void Textfield::EnsureCaretInRect(const gfx::Rect& rect) {}
+void Textfield::EnsureCaretNotInRect(const gfx::Rect& rect) {}
 
 bool Textfield::IsTextEditCommandEnabled(ui::TextEditCommand command) const {
   base::string16 result;
@@ -1847,8 +1851,8 @@ void Textfield::UpdateBackgroundColor() {
   const SkColor color = GetBackgroundColor();
   if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
     set_background(Background::CreateBackgroundPainter(
-        true, Painter::CreateSolidRoundRectPainter(
-                  color, FocusableBorder::kCornerRadiusDp)));
+        Painter::CreateSolidRoundRectPainter(
+            color, FocusableBorder::kCornerRadiusDp)));
   } else {
     set_background(Background::CreateSolidBackground(color));
   }

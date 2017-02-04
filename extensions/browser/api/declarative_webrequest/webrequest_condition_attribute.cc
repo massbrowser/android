@@ -507,7 +507,7 @@ HeaderMatcher::HeaderMatchTest::Create(const base::DictionaryValue* tests) {
     std::vector<std::unique_ptr<const StringMatchTest>>* tests =
         is_name ? &name_match : &value_match;
     switch (content->GetType()) {
-      case base::Value::TYPE_LIST: {
+      case base::Value::Type::LIST: {
         const base::ListValue* list = NULL;
         CHECK(content->GetAsList(&list));
         for (const auto& it : *list) {
@@ -515,7 +515,7 @@ HeaderMatcher::HeaderMatchTest::Create(const base::DictionaryValue* tests) {
         }
         break;
       }
-      case base::Value::TYPE_STRING: {
+      case base::Value::Type::STRING: {
         tests->push_back(
             StringMatchTest::Create(*content, match_type, !is_name));
         break;
@@ -761,9 +761,9 @@ bool WebRequestConditionAttributeThirdParty::IsFulfilled(
   // Request is "1st party" if it gets cookies under 3rd party-blocking policy.
   const net::StaticCookiePolicy block_third_party_policy(
       net::StaticCookiePolicy::BLOCK_ALL_THIRD_PARTY_COOKIES);
-  const int can_get_cookies = block_third_party_policy.CanGetCookies(
-          request_data.request->url(),
-          request_data.request->first_party_for_cookies());
+  const int can_get_cookies = block_third_party_policy.CanAccessCookies(
+      request_data.request->url(),
+      request_data.request->first_party_for_cookies());
   const bool is_first_party = (can_get_cookies == net::OK);
 
   return match_third_party_ ? !is_first_party : is_first_party;

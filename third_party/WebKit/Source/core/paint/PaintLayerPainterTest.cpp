@@ -223,11 +223,6 @@ TEST_P(PaintLayerPainterTest, CachedSubsequenceForSVGRoot) {
   LayoutObject& rect = *document().getElementById("rect")->layoutObject();
   LayoutObject& div = *document().getElementById("div")->layoutObject();
 
-  DisplayItem::Type clipBoxBegin =
-      DisplayItem::paintPhaseToClipBoxType(PaintPhaseForeground);
-  DisplayItem::Type clipBoxEnd =
-      DisplayItem::clipTypeToEndClipType(clipBoxBegin);
-
   if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
     if (RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
       // SPv2 slips the clip box (see BoxClipper).
@@ -269,11 +264,12 @@ TEST_P(PaintLayerPainterTest, CachedSubsequenceForSVGRoot) {
         TestDisplayItem(layoutView(), documentBackgroundType),
         TestDisplayItem(htmlLayer, DisplayItem::kSubsequence),
         TestDisplayItem(svgLayer, DisplayItem::kSubsequence),
-        TestDisplayItem(svg, clipBoxBegin),
+        TestDisplayItem(svg, DisplayItem::kClipLayerForeground),
         TestDisplayItem(svg, DisplayItem::kBeginTransform),
         TestDisplayItem(rect, foregroundType),
         TestDisplayItem(svg, DisplayItem::kEndTransform),
-        TestDisplayItem(svg, clipBoxEnd),
+        TestDisplayItem(svg, DisplayItem::clipTypeToEndClipType(
+                                 DisplayItem::kClipLayerForeground)),
         TestDisplayItem(svgLayer, DisplayItem::kEndSubsequence),
         TestDisplayItem(htmlLayer, DisplayItem::kEndSubsequence));
   }
@@ -337,11 +333,12 @@ TEST_P(PaintLayerPainterTest, CachedSubsequenceForSVGRoot) {
         TestDisplayItem(layoutView(), documentBackgroundType),
         TestDisplayItem(htmlLayer, DisplayItem::kSubsequence),
         TestDisplayItem(svgLayer, DisplayItem::kSubsequence),
-        TestDisplayItem(svg, clipBoxBegin),
+        TestDisplayItem(svg, DisplayItem::kClipLayerForeground),
         TestDisplayItem(svg, DisplayItem::kBeginTransform),
         TestDisplayItem(rect, foregroundType),
         TestDisplayItem(svg, DisplayItem::kEndTransform),
-        TestDisplayItem(svg, clipBoxEnd),
+        TestDisplayItem(svg, DisplayItem::clipTypeToEndClipType(
+                                 DisplayItem::kClipLayerForeground)),
         TestDisplayItem(svgLayer, DisplayItem::kEndSubsequence),
         TestDisplayItem(div, backgroundType),
         TestDisplayItem(htmlLayer, DisplayItem::kEndSubsequence),
@@ -1055,6 +1052,51 @@ TEST_P(PaintLayerPainterTest, DoPaintWithCompositedTinyOpacity) {
 TEST_P(PaintLayerPainterTest, DoPaintWithNonTinyOpacity) {
   setBodyInnerHTML(
       "<div id='target' style='background: blue; opacity: 0.1'></div>");
+  PaintLayer* targetLayer =
+      toLayoutBox(getLayoutObjectByElementId("target"))->layer();
+  PaintLayerPaintingInfo paintingInfo(nullptr, LayoutRect(),
+                                      GlobalPaintNormalPhase, LayoutSize());
+  EXPECT_FALSE(
+      PaintLayerPainter(*targetLayer).paintedOutputInvisible(paintingInfo));
+}
+
+TEST_P(PaintLayerPainterTest, DoPaintWithEffectAnimationZeroOpacity) {
+  setBodyInnerHTML(
+      "<style> "
+      "div { "
+      "  width: 100px; "
+      "  height: 100px; "
+      "  animation-name: example; "
+      "  animation-duration: 4s; "
+      "} "
+      "@keyframes example { "
+      "  from { opacity: 0.0;} "
+      "  to { opacity: 1.0;} "
+      "} "
+      "</style> "
+      "<div id='target'></div>");
+  PaintLayer* targetLayer =
+      toLayoutBox(getLayoutObjectByElementId("target"))->layer();
+  PaintLayerPaintingInfo paintingInfo(nullptr, LayoutRect(),
+                                      GlobalPaintNormalPhase, LayoutSize());
+  EXPECT_FALSE(
+      PaintLayerPainter(*targetLayer).paintedOutputInvisible(paintingInfo));
+}
+
+TEST_P(PaintLayerPainterTest, DoPaintWithTransformAnimationZeroOpacity) {
+  setBodyInnerHTML(
+      "<style> "
+      "div#target { "
+      "  animation-name: example; "
+      "  animation-duration: 4s; "
+      "  opacity: 0.0; "
+      "} "
+      "@keyframes example { "
+      " from { transform: translate(0px, 0px); } "
+      " to { transform: translate(3em, 0px); } "
+      "} "
+      "</style> "
+      "<div id='target'>x</div></div>");
   PaintLayer* targetLayer =
       toLayoutBox(getLayoutObjectByElementId("target"))->layer();
   PaintLayerPaintingInfo paintingInfo(nullptr, LayoutRect(),

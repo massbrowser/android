@@ -1,8 +1,4 @@
 {
-  "owners": [
-    "sdefresne",
-    "smut"
-  ],
   "comments": [
     "Builder for 32-bit devices.",
     "Build is performed with gn+ninja."
@@ -13,13 +9,15 @@
     "goma_dir=\"$(goma_dir)\"",
     "ios_enable_code_signing=false",
     "is_component_build=false",
-    "is_debug=true",
+    "is_debug=false",
     "target_cpu=\"arm\"",
     "target_os=\"ios\"",
     "use_goma=true",
     "use_xcode_clang=true"
   ],
-  "compiler": "ninja",
+  "additional_compile_targets": [
+    "all"
+  ],
   "configuration": "Release",
   "sdk": "iphoneos10.0",
   "tests": [

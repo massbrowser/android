@@ -11,9 +11,9 @@
 #include "wtf/PtrUtil.h"
 #include <memory>
 
-namespace {
+namespace blink {
 
-using namespace blink;
+namespace {
 
 void PingPongTask(WaitableEvent* doneEvent) {
   doneEvent->signal();
@@ -21,8 +21,10 @@ void PingPongTask(WaitableEvent* doneEvent) {
 
 class BackgroundTaskRunnerTest : public testing::Test {};
 
+}  // namespace
+
 TEST_F(BackgroundTaskRunnerTest, RunShortTaskOnBackgroundThread) {
-  std::unique_ptr<WaitableEvent> doneEvent = makeUnique<WaitableEvent>();
+  std::unique_ptr<WaitableEvent> doneEvent = WTF::makeUnique<WaitableEvent>();
   BackgroundTaskRunner::postOnBackgroundThread(
       BLINK_FROM_HERE,
       crossThreadBind(&PingPongTask, crossThreadUnretained(doneEvent.get())),
@@ -32,7 +34,7 @@ TEST_F(BackgroundTaskRunnerTest, RunShortTaskOnBackgroundThread) {
 }
 
 TEST_F(BackgroundTaskRunnerTest, RunLongTaskOnBackgroundThread) {
-  std::unique_ptr<WaitableEvent> doneEvent = makeUnique<WaitableEvent>();
+  std::unique_ptr<WaitableEvent> doneEvent = WTF::makeUnique<WaitableEvent>();
   BackgroundTaskRunner::postOnBackgroundThread(
       BLINK_FROM_HERE,
       crossThreadBind(&PingPongTask, crossThreadUnretained(doneEvent.get())),
@@ -41,4 +43,4 @@ TEST_F(BackgroundTaskRunnerTest, RunLongTaskOnBackgroundThread) {
   doneEvent->wait();
 }
 
-}  // unnamed namespace
+}  // namespace blink

@@ -68,7 +68,7 @@ void SnapCoordinator::snapContainerDidChange(LayoutBox& snapContainer,
     m_snapContainers.remove(&snapContainer);
     snapContainer.clearSnapAreas();
   } else {
-    m_snapContainers.add(&snapContainer);
+    m_snapContainers.insert(&snapContainer);
   }
 
   // TODO(majidvp): Add logic to correctly handle orphaned snap areas here.
@@ -95,7 +95,7 @@ static Vector<FloatPoint> localToContainerSnapCoordinates(
     FloatPoint containerPoint =
         snapArea.localToAncestorPoint(localPoint, &containerBox);
     containerPoint.moveBy(scrollOffset);
-    result.append(containerPoint);
+    result.push_back(containerPoint);
   }
   return result;
 }
@@ -131,7 +131,7 @@ Vector<double> SnapCoordinator::snapOffsets(const ContainerNode& element,
     repeat = std::max<LayoutUnit>(repeat, LayoutUnit(1));
     for (LayoutUnit offset = repeat; offset <= (scrollSize - clientSize);
          offset += repeat) {
-      result.append(offset.toFloat());
+      result.push_back(offset.toFloat());
     }
   }
 
@@ -148,7 +148,7 @@ Vector<double> SnapCoordinator::snapOffsets(const ContainerNode& element,
                                : snapCoordinate.y();
         if (snapOffset > scrollSize - clientSize)
           continue;
-        result.append(snapOffset);
+        result.push_back(snapOffset);
         didAddSnapAreaOffset = true;
       }
     }

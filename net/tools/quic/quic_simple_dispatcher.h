@@ -7,6 +7,7 @@
 
 #include "net/quic/core/quic_server_session_base.h"
 #include "net/tools/quic/quic_dispatcher.h"
+#include "net/tools/quic/quic_http_response_cache.h"
 
 namespace net {
 
@@ -18,7 +19,8 @@ class QuicSimpleDispatcher : public QuicDispatcher {
       QuicVersionManager* version_manager,
       std::unique_ptr<QuicConnectionHelperInterface> helper,
       std::unique_ptr<QuicCryptoServerStream::Helper> session_helper,
-      std::unique_ptr<QuicAlarmFactory> alarm_factory);
+      std::unique_ptr<QuicAlarmFactory> alarm_factory,
+      QuicHttpResponseCache* response_cache);
 
   ~QuicSimpleDispatcher() override;
 
@@ -26,6 +28,11 @@ class QuicSimpleDispatcher : public QuicDispatcher {
   QuicServerSessionBase* CreateQuicSession(
       QuicConnectionId connection_id,
       const QuicSocketAddress& client_address) override;
+
+  QuicHttpResponseCache* response_cache() { return response_cache_; }
+
+ private:
+  QuicHttpResponseCache* response_cache_;  // Unowned.
 };
 
 }  // namespace net

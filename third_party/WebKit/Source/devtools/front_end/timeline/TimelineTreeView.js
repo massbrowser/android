@@ -23,38 +23,48 @@ Timeline.TimelineTreeView = class extends UI.VBox {
   }
 
   /**
+   * @protected
    * @param {!TimelineModel.TimelineModel} model
-   * @param {!Array<!TimelineModel.TimelineModel.Filter>} filters
+   * @param {!Array<!TimelineModel.TimelineModelFilter>} filters
    */
-  _init(model, filters) {
+  init(model, filters) {
     this._model = model;
     this._linkifier = new Components.Linkifier();
 
     this._filters = filters.slice();
 
-    var columns = /** @type {!Array<!UI.DataGrid.ColumnDescriptor>} */ ([]);
-    this._populateColumns(columns);
-
-    var mainView = new UI.VBox();
-    this._populateToolbar(mainView.element);
-    this._dataGrid = new UI.SortableDataGrid(columns);
-    this._dataGrid.addEventListener(UI.DataGrid.Events.SortingChanged, this._sortingChanged, this);
-    this._dataGrid.element.addEventListener('mousemove', this._onMouseMove.bind(this), true);
-    this._dataGrid.setResizeMethod(UI.DataGrid.ResizeMethod.Last);
-    this._dataGrid.setRowContextMenuCallback(this._onContextMenu.bind(this));
-    this._dataGrid.asWidget().show(mainView.element);
+    const columns = /** @type {!Array<!DataGrid.DataGrid.ColumnDescriptor>} */ ([]);
+    this.populateColumns(columns);
 
     this._splitWidget = new UI.SplitWidget(true, true, 'timelineTreeViewDetailsSplitWidget');
-    this._splitWidget.show(this.element);
-    this._splitWidget.setMainWidget(mainView);
+    const mainView = new UI.VBox();
+    this._populateToolbar(mainView.element);
+
+    this._dataGrid = new DataGrid.SortableDataGrid(columns);
+    this._dataGrid.addEventListener(DataGrid.DataGrid.Events.SortingChanged, this._sortingChanged, this);
+    this._dataGrid.element.addEventListener('mousemove', this._onMouseMove.bind(this), true);
+    this._dataGrid.setResizeMethod(DataGrid.DataGrid.ResizeMethod.Last);
+    this._dataGrid.setRowContextMenuCallback(this._onContextMenu.bind(this));
+    this._dataGrid.asWidget().show(mainView.element);
+    this._dataGrid.addEventListener(DataGrid.DataGrid.Events.SelectedNode, this._updateDetailsForSelection, this);
 
     this._detailsView = new UI.VBox();
     this._detailsView.element.classList.add('timeline-details-view', 'timeline-details-view-body');
+    this._splitWidget.setMainWidget(mainView);
     this._splitWidget.setSidebarWidget(this._detailsView);
-    this._dataGrid.addEventListener(UI.DataGrid.Events.SelectedNode, this._updateDetailsForSelection, this);
+    this._splitWidget.hideSidebar();
+    this._splitWidget.show(this.element);
 
     /** @type {?TimelineModel.TimelineProfileTree.Node|undefined} */
     this._lastSelectedNode;
+  }
+
+  /**
+   * @protected
+   * @return {?TimelineModel.TimelineProfileTree.Node|undefined}
+   */
+  lastSelectedNode() {
+    return this._lastSelectedNode;
   }
 
   /**
@@ -71,7 +81,7 @@ Timeline.TimelineTreeView = class extends UI.VBox {
   setRange(startTime, endTime) {
     this._startTime = startTime;
     this._endTime = endTime;
-    this._refreshTree();
+    this.refreshTree();
   }
 
   /**
@@ -123,18 +133,21 @@ Timeline.TimelineTreeView = class extends UI.VBox {
     for (var node = treeNode; node; node = node.parent)
       pathToRoot.push(node);
     for (var i = pathToRoot.length - 1; i > 0; --i) {
-      var gridNode = this._dataGridNodeForTreeNode(pathToRoot[i]);
+      var gridNode = this.dataGridNodeForTreeNode(pathToRoot[i]);
       if (gridNode && gridNode.dataGrid)
         gridNode.expand();
     }
-    var gridNode = this._dataGridNodeForTreeNode(treeNode);
+    var gridNode = this.dataGridNodeForTreeNode(treeNode);
     if (gridNode.dataGrid) {
       gridNode.reveal();
       gridNode.select(suppressSelectedEvent);
     }
   }
 
-  _refreshTree() {
+  /**
+   * @protected
+   */
+  refreshTree() {
     this._linkifier.reset();
     this._dataGrid.rootNode().removeChildren();
     var tree = this._buildTree();
@@ -163,18 +176,20 @@ Timeline.TimelineTreeView = class extends UI.VBox {
   }
 
   /**
+   * @protected
    * @param {function(!SDK.TracingModel.Event):(string|symbol)=} eventIdCallback
    * @return {!TimelineModel.TimelineProfileTree.Node}
    */
-  _buildTopDownTree(eventIdCallback) {
+  buildTopDownTree(eventIdCallback) {
     return TimelineModel.TimelineProfileTree.buildTopDown(
         this._model.mainThreadEvents(), this._filters, this._startTime, this._endTime, eventIdCallback);
   }
 
   /**
-   * @param {!Array<!UI.DataGrid.ColumnDescriptor>} columns
+   * @protected
+   * @param {!Array<!DataGrid.DataGrid.ColumnDescriptor>} columns
    */
-  _populateColumns(columns) {
+  populateColumns(columns) {
     columns.push({id: 'self', title: Common.UIString('Self Time'), width: '110px', fixedWidth: true, sortable: true});
     columns.push({id: 'total', title: Common.UIString('Total Time'), width: '110px', fixedWidth: true, sortable: true});
     columns.push({id: 'activity', title: Common.UIString('Activity'), disclosure: true, sortable: true});
@@ -206,8 +221,8 @@ Timeline.TimelineTreeView = class extends UI.VBox {
 
     /**
      * @param {string} field
-     * @param {!UI.DataGridNode} a
-     * @param {!UI.DataGridNode} b
+     * @param {!DataGrid.DataGridNode} a
+     * @param {!DataGrid.DataGridNode} b
      * @return {number}
      */
     function compareNumericField(field, a, b) {
@@ -217,8 +232,8 @@ Timeline.TimelineTreeView = class extends UI.VBox {
     }
 
     /**
-     * @param {!UI.DataGridNode} a
-     * @param {!UI.DataGridNode} b
+     * @param {!DataGrid.DataGridNode} a
+     * @param {!DataGrid.DataGridNode} b
      * @return {number}
      */
     function compareStartTime(a, b) {
@@ -228,8 +243,8 @@ Timeline.TimelineTreeView = class extends UI.VBox {
     }
 
     /**
-     * @param {!UI.DataGridNode} a
-     * @param {!UI.DataGridNode} b
+     * @param {!DataGrid.DataGridNode} a
+     * @param {!DataGrid.DataGridNode} b
      * @return {number}
      */
     function compareName(a, b) {
@@ -281,7 +296,7 @@ Timeline.TimelineTreeView = class extends UI.VBox {
 
   /**
    * @param {!UI.ContextMenu} contextMenu
-   * @param {!UI.DataGridNode} gridNode
+   * @param {!DataGrid.DataGridNode} gridNode
    */
   _onContextMenu(contextMenu, gridNode) {
     var profileNode = gridNode._profileNode;
@@ -292,9 +307,10 @@ Timeline.TimelineTreeView = class extends UI.VBox {
 
   /**
    * @param {!TimelineModel.TimelineProfileTree.Node} treeNode
+   * @protected
    * @return {?Timeline.TimelineTreeView.GridNode}
    */
-  _dataGridNodeForTreeNode(treeNode) {
+  dataGridNodeForTreeNode(treeNode) {
     return treeNode[Timeline.TimelineTreeView.TreeGridNode._gridNodeSymbol] || null;
   }
 };
@@ -303,7 +319,7 @@ Timeline.TimelineTreeView = class extends UI.VBox {
 /**
  * @unrestricted
  */
-Timeline.TimelineTreeView.GridNode = class extends UI.SortableDataGridNode {
+Timeline.TimelineTreeView.GridNode = class extends DataGrid.SortableDataGridNode {
   /**
    * @param {!TimelineModel.TimelineProfileTree.Node} profileNode
    * @param {number} grandTotalTime
@@ -422,7 +438,7 @@ Timeline.TimelineTreeView.TreeGridNode = class extends Timeline.TimelineTreeView
    */
   constructor(profileNode, grandTotalTime, maxSelfTime, maxTotalTime, treeView) {
     super(profileNode, grandTotalTime, maxSelfTime, maxTotalTime, treeView);
-    this.hasChildren = this._profileNode.children ? this._profileNode.children.size > 0 : false;
+    this.setHasChildren(this._profileNode.children ? this._profileNode.children.size > 0 : false);
     profileNode[Timeline.TimelineTreeView.TreeGridNode._gridNodeSymbol] = this;
   }
 
@@ -451,13 +467,13 @@ Timeline.TimelineTreeView.TreeGridNode._gridNodeSymbol = Symbol('treeGridNode');
 Timeline.AggregatedTimelineTreeView = class extends Timeline.TimelineTreeView {
   /**
    * @param {!TimelineModel.TimelineModel} model
-   * @param {!Array<!TimelineModel.TimelineModel.Filter>} filters
+   * @param {!Array<!TimelineModel.TimelineModelFilter>} filters
    */
   constructor(model, filters) {
     super();
     this._groupBySetting =
-        Common.settings.createSetting('timelineTreeGroupBy', Timeline.AggregatedTimelineTreeView.GroupBy.Category);
-    this._init(model, filters);
+        Common.settings.createSetting('timelineTreeGroupBy', Timeline.AggregatedTimelineTreeView.GroupBy.None);
+    this.init(model, filters);
     var nonessentialEvents = [
       TimelineModel.TimelineModel.RecordType.EventDispatch, TimelineModel.TimelineModel.RecordType.FunctionCall,
       TimelineModel.TimelineModel.RecordType.TimerFire
@@ -506,6 +522,8 @@ Timeline.AggregatedTimelineTreeView = class extends Timeline.TimelineTreeView {
         var name = node.id;
         if (Timeline.AggregatedTimelineTreeView._isExtensionInternalURL(name))
           name = Common.UIString('[Chrome extensions overhead]');
+        else if (Timeline.AggregatedTimelineTreeView._isV8NativeURL(name))
+          name = Common.UIString('[V8 Runtime]');
         else if (name.startsWith('chrome-extension'))
           name = this._executionContextNamesByOrigin.get(name) || name;
         return {name: name || Common.UIString('unattributed'), color: color};
@@ -527,7 +545,6 @@ Timeline.AggregatedTimelineTreeView = class extends Timeline.TimelineTreeView {
         var frame = this._model.pageFrameById(node.id);
         var frameName = frame ? Timeline.TimelineUIUtils.displayNameForFrame(frame, 80) : Common.UIString('Page');
         return {name: frameName, color: color};
-        break;
 
       default:
         console.assert(false, 'Unexpected aggregation type');
@@ -562,6 +579,8 @@ Timeline.AggregatedTimelineTreeView = class extends Timeline.TimelineTreeView {
     addGroupingOption.call(this, Common.UIString('Group by URL'), groupBy.URL);
     addGroupingOption.call(this, Common.UIString('Group by Frame'), groupBy.Frame);
     panelToolbar.appendToolbarItem(this._groupByCombobox);
+    panelToolbar.appendSpacer();
+    panelToolbar.appendToolbarItem(this._splitWidget.createShowHideSidebarButton(Common.UIString('heaviest stack')));
   }
 
   /**
@@ -593,7 +612,7 @@ Timeline.AggregatedTimelineTreeView = class extends Timeline.TimelineTreeView {
 
   _onGroupByChanged() {
     this._groupBySetting.set(this._groupByCombobox.selectedOption().value);
-    this._refreshTree();
+    this.refreshTree();
   }
 
   _onStackViewSelectionChanged() {
@@ -636,6 +655,8 @@ Timeline.AggregatedTimelineTreeView = class extends Timeline.TimelineTreeView {
       var url = TimelineModel.TimelineProfileTree.eventURL(event) || '';
       if (Timeline.AggregatedTimelineTreeView._isExtensionInternalURL(url))
         return Timeline.AggregatedTimelineTreeView._extensionInternalPrefix;
+      if (Timeline.AggregatedTimelineTreeView._isV8NativeURL(url))
+        return Timeline.AggregatedTimelineTreeView._v8NativePrefix;
       var parsedURL = url.asParsedURL();
       if (!parsedURL)
         return '';
@@ -692,9 +713,18 @@ Timeline.AggregatedTimelineTreeView = class extends Timeline.TimelineTreeView {
   static _isExtensionInternalURL(url) {
     return url.startsWith(Timeline.AggregatedTimelineTreeView._extensionInternalPrefix);
   }
+
+  /**
+   * @param {string} url
+   * @return {boolean}
+   */
+  static _isV8NativeURL(url) {
+    return url.startsWith(Timeline.AggregatedTimelineTreeView._v8NativePrefix);
+  }
 };
 
 Timeline.AggregatedTimelineTreeView._extensionInternalPrefix = 'extensions::';
+Timeline.AggregatedTimelineTreeView._v8NativePrefix = 'native ';
 
 /**
  * @enum {string}
@@ -715,11 +745,11 @@ Timeline.AggregatedTimelineTreeView.GroupBy = {
 Timeline.CallTreeTimelineTreeView = class extends Timeline.AggregatedTimelineTreeView {
   /**
    * @param {!TimelineModel.TimelineModel} model
-   * @param {!Array<!TimelineModel.TimelineModel.Filter>} filters
+   * @param {!Array<!TimelineModel.TimelineModelFilter>} filters
    */
   constructor(model, filters) {
     super(model, filters);
-    this._dataGrid.markColumnAsSortedBy('total', UI.DataGrid.Order.Descending);
+    this._dataGrid.markColumnAsSortedBy('total', DataGrid.DataGrid.Order.Descending);
   }
 
   /**
@@ -728,7 +758,7 @@ Timeline.CallTreeTimelineTreeView = class extends Timeline.AggregatedTimelineTre
    */
   _buildTree() {
     var grouping = this._groupBySetting.get();
-    var topDown = this._buildTopDownTree(this._groupingFunction(grouping));
+    var topDown = this.buildTopDownTree(this._groupingFunction(grouping));
     if (grouping === Timeline.AggregatedTimelineTreeView.GroupBy.None)
       return topDown;
     return new TimelineModel.TimelineAggregator().performGrouping(topDown);
@@ -741,11 +771,11 @@ Timeline.CallTreeTimelineTreeView = class extends Timeline.AggregatedTimelineTre
 Timeline.BottomUpTimelineTreeView = class extends Timeline.AggregatedTimelineTreeView {
   /**
    * @param {!TimelineModel.TimelineModel} model
-   * @param {!Array<!TimelineModel.TimelineModel.Filter>} filters
+   * @param {!Array<!TimelineModel.TimelineModelFilter>} filters
    */
   constructor(model, filters) {
     super(model, filters);
-    this._dataGrid.markColumnAsSortedBy('self', UI.DataGrid.Order.Descending);
+    this._dataGrid.markColumnAsSortedBy('self', DataGrid.DataGrid.Order.Descending);
   }
 
   /**
@@ -753,141 +783,8 @@ Timeline.BottomUpTimelineTreeView = class extends Timeline.AggregatedTimelineTre
    * @return {!TimelineModel.TimelineProfileTree.Node}
    */
   _buildTree() {
-    var topDown = this._buildTopDownTree(this._groupingFunction(this._groupBySetting.get()));
+    var topDown = this.buildTopDownTree(this._groupingFunction(this._groupBySetting.get()));
     return TimelineModel.TimelineProfileTree.buildBottomUp(topDown);
-  }
-};
-
-/**
- * @unrestricted
- */
-Timeline.EventsTimelineTreeView = class extends Timeline.TimelineTreeView {
-  /**
-   * @param {!TimelineModel.TimelineModel} model
-   * @param {!Array<!TimelineModel.TimelineModel.Filter>} filters
-   * @param {!Timeline.TimelineModeViewDelegate} delegate
-   */
-  constructor(model, filters, delegate) {
-    super();
-    this._filtersControl = new Timeline.TimelineFilters();
-    this._filtersControl.addEventListener(Timeline.TimelineFilters.Events.FilterChanged, this._onFilterChanged, this);
-    this._init(model, filters);
-    this._delegate = delegate;
-    this._filters.push.apply(this._filters, this._filtersControl.filters());
-    this._dataGrid.markColumnAsSortedBy('startTime', UI.DataGrid.Order.Ascending);
-  }
-
-  /**
-   * @override
-   * @param {!Timeline.TimelineSelection} selection
-   */
-  updateContents(selection) {
-    super.updateContents(selection);
-    if (selection.type() === Timeline.TimelineSelection.Type.TraceEvent) {
-      var event = /** @type {!SDK.TracingModel.Event} */ (selection.object());
-      this._selectEvent(event, true);
-    }
-  }
-
-  /**
-   * @override
-   * @return {!TimelineModel.TimelineProfileTree.Node}
-   */
-  _buildTree() {
-    this._currentTree = this._buildTopDownTree();
-    return this._currentTree;
-  }
-
-  _onFilterChanged() {
-    var selectedEvent = this._lastSelectedNode && this._lastSelectedNode.event;
-    this._refreshTree();
-    if (selectedEvent)
-      this._selectEvent(selectedEvent, false);
-  }
-
-  /**
-   * @param {!SDK.TracingModel.Event} event
-   * @return {?TimelineModel.TimelineProfileTree.Node}
-   */
-  _findNodeWithEvent(event) {
-    var iterators = [this._currentTree.children.values()];
-
-    while (iterators.length) {
-      var iterator = iterators.peekLast().next();
-      if (iterator.done) {
-        iterators.pop();
-        continue;
-      }
-      var child = /** @type {!TimelineModel.TimelineProfileTree.Node} */ (iterator.value);
-      if (child.event === event)
-        return child;
-      if (child.children)
-        iterators.push(child.children.values());
-    }
-    return null;
-  }
-
-  /**
-   * @param {!SDK.TracingModel.Event} event
-   * @param {boolean=} expand
-   */
-  _selectEvent(event, expand) {
-    var node = this._findNodeWithEvent(event);
-    if (!node)
-      return;
-    this.selectProfileNode(node, false);
-    if (expand)
-      this._dataGridNodeForTreeNode(node).expand();
-  }
-
-  /**
-   * @override
-   * @param {!Array<!UI.DataGrid.ColumnDescriptor>} columns
-   */
-  _populateColumns(columns) {
-    columns.push(
-        {id: 'startTime', title: Common.UIString('Start Time'), width: '110px', fixedWidth: true, sortable: true});
-    super._populateColumns(columns);
-  }
-
-  /**
-   * @override
-   * @param {!Element} parent
-   */
-  _populateToolbar(parent) {
-    var filtersWidget = this._filtersControl.filtersWidget();
-    filtersWidget.forceShowFilterBar();
-    filtersWidget.show(parent);
-  }
-
-  /**
-   * @override
-   * @param {!TimelineModel.TimelineProfileTree.Node} node
-   * @return {boolean}
-   */
-  _showDetailsForNode(node) {
-    var traceEvent = node.event;
-    if (!traceEvent)
-      return false;
-    Timeline.TimelineUIUtils.buildTraceEventDetails(
-        traceEvent, this._model, this._linkifier, false, showDetails.bind(this));
-    return true;
-
-    /**
-     * @param {!DocumentFragment} fragment
-     * @this {Timeline.EventsTimelineTreeView}
-     */
-    function showDetails(fragment) {
-      this._detailsView.element.appendChild(fragment);
-    }
-  }
-
-  /**
-   * @override
-   * @param {?TimelineModel.TimelineProfileTree.Node} node
-   */
-  _onHover(node) {
-    this._delegate.highlightEvent(node && node.event);
   }
 };
 
@@ -900,13 +797,13 @@ Timeline.TimelineStackView = class extends UI.VBox {
     var header = this.element.createChild('div', 'timeline-stack-view-header');
     header.textContent = Common.UIString('Heaviest stack');
     this._treeView = treeView;
-    var columns = /** @type {!Array<!UI.DataGrid.ColumnDescriptor>} */ ([
+    var columns = /** @type {!Array<!DataGrid.DataGrid.ColumnDescriptor>} */ ([
       {id: 'total', title: Common.UIString('Total Time'), fixedWidth: true, width: '110px'},
       {id: 'activity', title: Common.UIString('Activity')}
     ]);
-    this._dataGrid = new UI.ViewportDataGrid(columns);
-    this._dataGrid.setResizeMethod(UI.DataGrid.ResizeMethod.Last);
-    this._dataGrid.addEventListener(UI.DataGrid.Events.SelectedNode, this._onSelectionChanged, this);
+    this._dataGrid = new DataGrid.ViewportDataGrid(columns);
+    this._dataGrid.setResizeMethod(DataGrid.DataGrid.ResizeMethod.Last);
+    this._dataGrid.addEventListener(DataGrid.DataGrid.Events.SelectedNode, this._onSelectionChanged, this);
     this._dataGrid.asWidget().show(this.element);
   }
 

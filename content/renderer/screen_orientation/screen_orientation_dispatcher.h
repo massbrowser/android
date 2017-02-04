@@ -5,11 +5,14 @@
 #ifndef CONTENT_RENDERER_SCREEN_ORIENTATION_SCREEN_ORIENTATION_DISPATCHER_H_
 #define CONTENT_RENDERER_SCREEN_ORIENTATION_SCREEN_ORIENTATION_DISPATCHER_H_
 
+#include <memory>
+#include <utility>
+
 #include "base/compiler_specific.h"
 #include "base/id_map.h"
 #include "base/macros.h"
-#include "content/common/screen_orientation.mojom.h"
 #include "content/public/renderer/render_frame_observer.h"
+#include "device/screen_orientation/public/interfaces/screen_orientation.mojom.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebLockOrientationCallback.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationClient.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationLockType.h"
@@ -17,8 +20,8 @@
 
 namespace content {
 
-using mojom::ScreenOrientationAssociatedPtr;
-using ::blink::mojom::ScreenOrientationLockResult;
+using device::mojom::ScreenOrientationAssociatedPtr;
+using device::mojom::ScreenOrientationLockResult;
 
 class RenderFrame;
 
@@ -40,8 +43,9 @@ class CONTENT_EXPORT ScreenOrientationDispatcher :
   void OnDestruct() override;
 
   // blink::WebScreenOrientationClient implementation.
-  void lockOrientation(blink::WebScreenOrientationLockType orientation,
-                       blink::WebLockOrientationCallback* callback) override;
+  void lockOrientation(
+      blink::WebScreenOrientationLockType orientation,
+      std::unique_ptr<blink::WebLockOrientationCallback> callback) override;
   void unlockOrientation() override;
 
   void OnLockOrientationResult(int request_id,
@@ -64,7 +68,7 @@ class CONTENT_EXPORT ScreenOrientationDispatcher :
   // pointer in the sense that it will destroy it when Remove() will be called.
   // Furthermore, we only expect to have one callback at a time in this map,
   // which is what IDMap was designed for.
-  typedef IDMap<blink::WebLockOrientationCallback, IDMapOwnPointer> CallbackMap;
+  using CallbackMap = IDMap<std::unique_ptr<blink::WebLockOrientationCallback>>;
   CallbackMap pending_callbacks_;
 
   ScreenOrientationAssociatedPtr screen_orientation_;

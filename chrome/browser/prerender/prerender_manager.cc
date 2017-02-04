@@ -65,6 +65,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
+#include "net/http/http_cache.h"
 #include "net/http/http_request_headers.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -98,6 +99,13 @@ bool AreExtraHeadersCompatibleWithPrerenderContents(
   parsed_headers.AddHeadersFromString(extra_headers);
   parsed_headers.RemoveHeader("upgrade-insecure-requests");
   return parsed_headers.IsEmpty();
+}
+
+// Returns true if prerendering is forced, because it is needed as a feature, as
+// opposed to a performance optimization.
+bool IsPrerenderingForced(Origin origin) {
+  return origin == ORIGIN_OFFLINE ||
+         origin == ORIGIN_EXTERNAL_REQUEST_FORCED_CELLULAR;
 }
 
 }  // namespace
@@ -150,6 +158,8 @@ class PrerenderManager::OnCloseWebContentsDeleter
   DISALLOW_COPY_AND_ASSIGN(OnCloseWebContentsDeleter);
 };
 
+PrerenderManagerObserver::~PrerenderManagerObserver() {}
+
 // static
 int PrerenderManager::prerenders_per_session_count_ = 0;
 
@@ -175,6 +185,7 @@ PrerenderManager::PrerenderManager(Profile* profile)
       last_recorded_profile_network_bytes_(0),
       clock_(new base::DefaultClock()),
       tick_clock_(new base::DefaultTickClock()),
+      page_load_metric_observer_disabled_(false),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -405,15 +416,7 @@ std::unique_ptr<WebContents> PrerenderManager::SwapInternal(
     return nullptr;
   }
 
-  // If we are just in the control group (which can be detected by noticing
-  // that prerendering hasn't even started yet), record that |web_contents| now
-  // would be showing a prerendered contents, but otherwise, don't do anything.
-  if (!prerender_data->contents()->prerendering_has_started()) {
-    target_tab_helper->WouldHavePrerenderedNextLoad(
-        prerender_data->contents()->origin());
-    prerender_data->contents()->Destroy(FINAL_STATUS_WOULD_HAVE_BEEN_USED);
-    return nullptr;
-  }
+  DCHECK(prerender_data->contents()->prerendering_has_started());
 
   // Don't use prerendered pages if debugger is attached to the tab.
   // See http://crbug.com/98541
@@ -566,31 +569,55 @@ void PrerenderManager::RecordPrefetchRedirectCount(Origin origin,
                                            redirect_count);
 }
 
-void PrerenderManager::RecordFirstContentfulPaint(const GURL& url,
-                                                  bool is_no_store,
-                                                  base::TimeDelta time) {
-  CleanUpOldNavigations(&prefetches_, base::TimeDelta::FromMinutes(30));
-
-  // Compute the prefetch age.
+void PrerenderManager::RecordNoStateFirstContentfulPaint(const GURL& url,
+                                                         bool is_no_store,
+                                                         bool was_hidden,
+                                                         base::TimeDelta time) {
   base::TimeDelta prefetch_age;
-  Origin origin = ORIGIN_NONE;
-  for (auto it = prefetches_.crbegin(); it != prefetches_.crend(); ++it) {
-    if (it->url == url) {
-      prefetch_age = GetCurrentTimeTicks() - it->time;
-      origin = it->origin;
-      break;
-    }
+  Origin origin;
+  GetPrefetchInformation(url, &prefetch_age, &origin);
+  OnPrefetchUsed(url);
+
+  histograms_->RecordPrefetchFirstContentfulPaintTime(
+      origin, is_no_store, was_hidden, time, prefetch_age);
+
+  for (auto& observer : observers_) {
+    observer->OnFirstContentfulPaint();
   }
+}
 
-  histograms_->RecordFirstContentfulPaint(origin, is_no_store, time,
-                                          prefetch_age);
+void PrerenderManager::RecordPrerenderFirstContentfulPaint(
+    const GURL& url,
+    content::WebContents* web_contents,
+    bool is_no_store,
+    bool was_hidden,
+    base::TimeTicks first_contentful_paint) {
+  DCHECK(!first_contentful_paint.is_null());
 
-  // Loading a prefetched URL resets the revalidation bypass. Remove the url
-  // from the prefetch list for more accurate metrics.
-  prefetches_.erase(
-      std::remove_if(prefetches_.begin(), prefetches_.end(),
-                     [url](const NavigationRecord& r) { return r.url == url; }),
-      prefetches_.end());
+  PrerenderTabHelper* tab_helper =
+      PrerenderTabHelper::FromWebContents(web_contents);
+  DCHECK(tab_helper);
+
+  base::TimeDelta prefetch_age;
+  // The origin at prefetch is superceeded by the tab_helper origin for the
+  // histogram recording, below.
+  GetPrefetchInformation(url, &prefetch_age, nullptr);
+  OnPrefetchUsed(url);
+
+  base::TimeTicks swap_ticks = tab_helper->swap_ticks();
+  bool fcp_recorded = false;
+  if (!swap_ticks.is_null() && !first_contentful_paint.is_null()) {
+    histograms_->RecordPrefetchFirstContentfulPaintTime(
+        tab_helper->origin(), is_no_store, was_hidden,
+        first_contentful_paint - swap_ticks, prefetch_age);
+    fcp_recorded = true;
+  }
+  histograms_->RecordPerceivedFirstContentfulPaintStatus(
+      tab_helper->origin(), fcp_recorded, was_hidden);
+
+  for (auto& observer : observers_) {
+    observer->OnFirstContentfulPaint();
+  }
 }
 
 // static
@@ -609,13 +636,15 @@ bool PrerenderManager::IsPrerenderingPossible() {
 }
 
 // static
-bool PrerenderManager::IsNoStatePrefetch() {
-  return GetMode() == PRERENDER_MODE_NOSTATE_PREFETCH;
+bool PrerenderManager::IsNoStatePrefetch(Origin origin) {
+  return !IsPrerenderingForced(origin) &&
+         GetMode() == PRERENDER_MODE_NOSTATE_PREFETCH;
 }
 
 // static
-bool PrerenderManager::IsSimpleLoadExperiment() {
-  return GetMode() == PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT;
+bool PrerenderManager::IsSimpleLoadExperiment(Origin origin) {
+  return !IsPrerenderingForced(origin) &&
+         GetMode() == PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT;
 }
 
 bool PrerenderManager::IsWebContentsPrerendering(
@@ -874,12 +903,15 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
 
   // Allow only Requests for offlining on low end devices, the lifetime of
   // those prerenders is managed by the offliner.
-  if (IsLowEndDevice() && origin != ORIGIN_OFFLINE)
+  if (IsLowEndDevice() && origin != ORIGIN_OFFLINE) {
+    RecordFinalStatusWithoutCreatingPrerenderContents(
+        url_arg, origin, FINAL_STATUS_LOW_END_DEVICE);
     return nullptr;
+  }
 
   if ((origin == ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN ||
        origin == ORIGIN_LINK_REL_PRERENDER_SAMEDOMAIN) &&
-      IsGoogleSearchResultURL(referrer.url)) {
+      IsGoogleOriginURL(referrer.url)) {
     origin = ORIGIN_GWS_PRERENDER;
   }
 
@@ -914,9 +946,21 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
 
   if (PrerenderData* preexisting_prerender_data =
           FindPrerenderData(url, session_storage_namespace)) {
-    RecordFinalStatusWithoutCreatingPrerenderContents(
-        url, origin, FINAL_STATUS_DUPLICATE);
+    RecordFinalStatusWithoutCreatingPrerenderContents(url, origin,
+                                                      FINAL_STATUS_DUPLICATE);
     return base::WrapUnique(new PrerenderHandle(preexisting_prerender_data));
+  }
+
+  if (IsNoStatePrefetch(origin)) {
+    base::TimeDelta prefetch_age;
+    GetPrefetchInformation(url, &prefetch_age, nullptr);
+    if (!prefetch_age.is_zero() &&
+        prefetch_age <
+            base::TimeDelta::FromMinutes(net::HttpCache::kPrefetchReuseMins)) {
+      RecordFinalStatusWithoutCreatingPrerenderContents(url, origin,
+                                                        FINAL_STATUS_DUPLICATE);
+      return nullptr;
+    }
   }
 
   // Do not prerender if there are too many render processes, and we would
@@ -952,7 +996,7 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
   // enable metrics comparisons.
   prefetches_.emplace_back(url, GetCurrentTimeTicks(), origin);
 
-  if (IsSimpleLoadExperiment()) {
+  if (IsSimpleLoadExperiment(origin)) {
     // Exit after adding the url to prefetches_, so that no prefetching occurs
     // but the page is still tracked as "would have been prefetched".
     return nullptr;
@@ -962,7 +1006,7 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
       CreatePrerenderContents(url, referrer, origin);
   DCHECK(prerender_contents);
   PrerenderContents* prerender_contents_ptr = prerender_contents.get();
-  if (IsNoStatePrefetch())
+  if (IsNoStatePrefetch(origin))
     prerender_contents_ptr->SetPrerenderMode(PREFETCH_ONLY);
   active_prerenders_.push_back(
       base::MakeUnique<PrerenderData>(this, std::move(prerender_contents),
@@ -1039,6 +1083,8 @@ void PrerenderManager::PeriodicCleanup() {
 
   to_delete_prerenders_.clear();
 
+  CleanUpOldNavigations(&prefetches_, base::TimeDelta::FromMinutes(30));
+
   // Measure how long a the various cleanup tasks took. http://crbug.com/305419.
   UMA_HISTOGRAM_TIMES("Prerender.PeriodicCleanupDeleteContentsTime",
                       cleanup_timer.Elapsed());
@@ -1090,6 +1136,11 @@ void PrerenderManager::SetClockForTesting(
 void PrerenderManager::SetTickClockForTesting(
     std::unique_ptr<base::SimpleTestTickClock> tick_clock) {
   tick_clock_ = std::move(tick_clock);
+}
+
+void PrerenderManager::AddObserver(
+    std::unique_ptr<PrerenderManagerObserver> observer) {
+  observers_.push_back(std::move(observer));
 }
 
 std::unique_ptr<PrerenderContents> PrerenderManager::CreatePrerenderContents(
@@ -1152,6 +1203,34 @@ void PrerenderManager::DeleteOldWebContents() {
     delete web_contents;
   }
   old_web_contents_list_.clear();
+}
+
+void PrerenderManager::GetPrefetchInformation(const GURL& url,
+                                              base::TimeDelta* prefetch_age,
+                                              Origin* origin) {
+  DCHECK(prefetch_age);
+  CleanUpOldNavigations(&prefetches_, base::TimeDelta::FromMinutes(30));
+
+  *prefetch_age = base::TimeDelta();
+  if (origin)
+    *origin = ORIGIN_NONE;
+  for (auto it = prefetches_.crbegin(); it != prefetches_.crend(); ++it) {
+    if (it->url == url) {
+      *prefetch_age = GetCurrentTimeTicks() - it->time;
+      if (origin)
+        *origin = it->origin;
+      break;
+    }
+  }
+}
+
+void PrerenderManager::OnPrefetchUsed(const GURL& url) {
+  // Loading a prefetched URL resets the revalidation bypass. Remove all
+  // matching urls from the prefetch list for more accurate metrics.
+  prefetches_.erase(
+      std::remove_if(prefetches_.begin(), prefetches_.end(),
+                     [url](const NavigationRecord& r) { return r.url == url; }),
+      prefetches_.end());
 }
 
 void PrerenderManager::CleanUpOldNavigations(
@@ -1261,8 +1340,10 @@ void PrerenderManager::RecordNetworkBytes(Origin origin,
 }
 
 bool PrerenderManager::IsPrerenderSilenceExperiment(Origin origin) const {
-  if (origin == ORIGIN_OFFLINE)
+  if (origin == ORIGIN_OFFLINE ||
+      origin == ORIGIN_EXTERNAL_REQUEST_FORCED_CELLULAR) {
     return false;
+  }
 
   // The group name should contain expiration time formatted as:
   //   "ExperimentYes_expires_YYYY-MM-DDTHH:MM:SSZ".

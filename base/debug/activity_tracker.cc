@@ -5,6 +5,8 @@
 #include "base/debug/activity_tracker.h"
 
 #include <algorithm>
+#include <limits>
+#include <utility>
 
 #include "base/debug/stack_trace.h"
 #include "base/files/file.h"
@@ -15,6 +17,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/pending_task.h"
+#include "base/pickle.h"
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/stl_util.h"
@@ -38,9 +41,12 @@ const int kMinStackDepth = 2;
 // The amount of memory set aside for holding arbitrary user data (key/value
 // pairs) globally or associated with ActivityData entries.
 const size_t kUserDataSize = 1024;    // bytes
-const size_t kGlobalDataSize = 1024;  // bytes
+const size_t kGlobalDataSize = 4096;  // bytes
 const size_t kMaxUserDataNameLength =
     static_cast<size_t>(std::numeric_limits<uint8_t>::max());
+
+// A constant used to indicate that module information is changing.
+const uint32_t kModuleInformationChanging = 0x80000000;
 
 union ThreadRef {
   int64_t as_id;
@@ -56,6 +62,11 @@ union ThreadRef {
   PlatformThreadHandle::Handle as_handle;
 #endif
 };
+
+// Determines the previous aligned index.
+size_t RoundDownToAlignment(size_t index, size_t alignment) {
+  return index & (0 - alignment);
+}
 
 // Determines the next aligned index.
 size_t RoundUpToAlignment(size_t index, size_t alignment) {
@@ -194,15 +205,81 @@ void Activity::FillFrom(Activity* activity,
 #endif
 }
 
-ActivitySnapshot::ActivitySnapshot() {}
-ActivitySnapshot::~ActivitySnapshot() {}
+ActivityUserData::TypedValue::TypedValue() {}
+ActivityUserData::TypedValue::TypedValue(const TypedValue& other) = default;
+ActivityUserData::TypedValue::~TypedValue() {}
+
+StringPiece ActivityUserData::TypedValue::Get() const {
+  DCHECK_EQ(RAW_VALUE, type_);
+  return long_value_;
+}
+
+StringPiece ActivityUserData::TypedValue::GetString() const {
+  DCHECK_EQ(STRING_VALUE, type_);
+  return long_value_;
+}
+
+bool ActivityUserData::TypedValue::GetBool() const {
+  DCHECK_EQ(BOOL_VALUE, type_);
+  return short_value_ != 0;
+}
+
+char ActivityUserData::TypedValue::GetChar() const {
+  DCHECK_EQ(CHAR_VALUE, type_);
+  return static_cast<char>(short_value_);
+}
+
+int64_t ActivityUserData::TypedValue::GetInt() const {
+  DCHECK_EQ(SIGNED_VALUE, type_);
+  return static_cast<int64_t>(short_value_);
+}
+
+uint64_t ActivityUserData::TypedValue::GetUint() const {
+  DCHECK_EQ(UNSIGNED_VALUE, type_);
+  return static_cast<uint64_t>(short_value_);
+}
+
+StringPiece ActivityUserData::TypedValue::GetReference() const {
+  DCHECK_EQ(RAW_VALUE_REFERENCE, type_);
+  return ref_value_;
+}
+
+StringPiece ActivityUserData::TypedValue::GetStringReference() const {
+  DCHECK_EQ(STRING_VALUE_REFERENCE, type_);
+  return ref_value_;
+}
 
 ActivityUserData::ValueInfo::ValueInfo() {}
 ActivityUserData::ValueInfo::ValueInfo(ValueInfo&&) = default;
 ActivityUserData::ValueInfo::~ValueInfo() {}
 
+std::atomic<uint32_t> ActivityUserData::next_id_;
+
 ActivityUserData::ActivityUserData(void* memory, size_t size)
-    : memory_(static_cast<char*>(memory)), available_(size) {}
+    : memory_(reinterpret_cast<char*>(memory)),
+      available_(RoundDownToAlignment(size, kMemoryAlignment)),
+      id_(reinterpret_cast<std::atomic<uint32_t>*>(memory)) {
+  // It's possible that no user data is being stored.
+  if (!memory_)
+    return;
+
+  DCHECK_LT(kMemoryAlignment, available_);
+  if (id_->load(std::memory_order_relaxed) == 0) {
+    // Generate a new ID and store it in the first 32-bit word of memory_.
+    // |id_| must be non-zero for non-sink instances.
+    uint32_t id;
+    while ((id = next_id_.fetch_add(1, std::memory_order_relaxed)) == 0)
+      ;
+    id_->store(id, std::memory_order_relaxed);
+    DCHECK_NE(0U, id_->load(std::memory_order_relaxed));
+  }
+  memory_ += kMemoryAlignment;
+  available_ -= kMemoryAlignment;
+
+  // If there is already data present, load that. This allows the same class
+  // to be used for analysis through snapshots.
+  ImportExistingData();
+}
 
 ActivityUserData::~ActivityUserData() {}
 
@@ -239,18 +316,28 @@ void ActivityUserData::Set(StringPiece name,
         sizeof(Header);
     size_t value_extent = RoundUpToAlignment(size, kMemoryAlignment);
 
-    // The "basic size" is the minimum size of the record. It's possible that
-    // lengthy values will get truncated but there must be at least some bytes
-    // available.
-    size_t basic_size = sizeof(Header) + name_extent + kMemoryAlignment;
-    if (basic_size > available_)
-      return;  // No space to store even the smallest value.
+    // The "base size" is the size of the header and (padded) string key. Stop
+    // now if there's not room enough for even this.
+    size_t base_size = sizeof(Header) + name_extent;
+    if (base_size > available_)
+      return;
 
-    // The "full size" is the size for storing the entire value, truncated
-    // to the amount of available memory.
-    size_t full_size =
-        std::min(sizeof(Header) + name_extent + value_extent, available_);
-    size = std::min(full_size - sizeof(Header) - name_extent, size);
+    // The "full size" is the size for storing the entire value.
+    size_t full_size = std::min(base_size + value_extent, available_);
+
+    // If the value is actually a single byte, see if it can be stuffed at the
+    // end of the name extent rather than wasting kMemoryAlignment bytes.
+    if (size == 1 && name_extent > name_size) {
+      full_size = base_size;
+      --name_extent;
+      --base_size;
+    }
+
+    // Truncate the stored size to the amount of available memory. Stop now if
+    // there's not any room for even part of the value.
+    size = std::min(full_size - base_size, size);
+    if (size == 0)
+      return;
 
     // Allocate a chunk of memory.
     Header* header = reinterpret_cast<Header*>(memory_);
@@ -303,10 +390,102 @@ void ActivityUserData::SetReference(StringPiece name,
   Set(name, type, &rec, sizeof(rec));
 }
 
+void ActivityUserData::ImportExistingData() const {
+  while (available_ > sizeof(Header)) {
+    Header* header = reinterpret_cast<Header*>(memory_);
+    ValueType type =
+        static_cast<ValueType>(header->type.load(std::memory_order_acquire));
+    if (type == END_OF_VALUES)
+      return;
+    if (header->record_size > available_)
+      return;
+
+    size_t value_offset = RoundUpToAlignment(sizeof(Header) + header->name_size,
+                                             kMemoryAlignment);
+    if (header->record_size == value_offset &&
+        header->value_size.load(std::memory_order_relaxed) == 1) {
+      value_offset -= 1;
+    }
+    if (value_offset + header->value_size > header->record_size)
+      return;
+
+    ValueInfo info;
+    info.name = StringPiece(memory_ + sizeof(Header), header->name_size);
+    info.type = type;
+    info.memory = memory_ + value_offset;
+    info.size_ptr = &header->value_size;
+    info.extent = header->record_size - value_offset;
+
+    StringPiece key(info.name);
+    values_.insert(std::make_pair(key, std::move(info)));
+
+    memory_ += header->record_size;
+    available_ -= header->record_size;
+  }
+}
+
+bool ActivityUserData::CreateSnapshot(Snapshot* output_snapshot) const {
+  DCHECK(output_snapshot);
+  DCHECK(output_snapshot->empty());
+
+  // Find any new data that may have been added by an active instance of this
+  // class that is adding records.
+  ImportExistingData();
+
+  for (const auto& entry : values_) {
+    TypedValue value;
+    value.type_ = entry.second.type;
+    DCHECK_GE(entry.second.extent,
+              entry.second.size_ptr->load(std::memory_order_relaxed));
+
+    switch (entry.second.type) {
+      case RAW_VALUE:
+      case STRING_VALUE:
+        value.long_value_ =
+            std::string(reinterpret_cast<char*>(entry.second.memory),
+                        entry.second.size_ptr->load(std::memory_order_relaxed));
+        break;
+      case RAW_VALUE_REFERENCE:
+      case STRING_VALUE_REFERENCE: {
+        ReferenceRecord* ref =
+            reinterpret_cast<ReferenceRecord*>(entry.second.memory);
+        value.ref_value_ = StringPiece(
+            reinterpret_cast<char*>(static_cast<uintptr_t>(ref->address)),
+            static_cast<size_t>(ref->size));
+      } break;
+      case BOOL_VALUE:
+      case CHAR_VALUE:
+        value.short_value_ = *reinterpret_cast<char*>(entry.second.memory);
+        break;
+      case SIGNED_VALUE:
+      case UNSIGNED_VALUE:
+        value.short_value_ = *reinterpret_cast<uint64_t*>(entry.second.memory);
+        break;
+      case END_OF_VALUES:  // Included for completeness purposes.
+        NOTREACHED();
+    }
+    auto inserted = output_snapshot->insert(
+        std::make_pair(entry.second.name.as_string(), std::move(value)));
+    DCHECK(inserted.second);  // True if inserted, false if existed.
+  }
+
+  return true;
+}
+
+const void* ActivityUserData::GetBaseAddress() {
+  // The |memory_| pointer advances as elements are written but the |id_|
+  // value is always at the start of the block so just return that.
+  return id_;
+}
+
 // This information is kept for every thread that is tracked. It is filled
 // the very first time the thread is seen. All fields must be of exact sizes
 // so there is no issue moving between 32 and 64-bit builds.
 struct ThreadActivityTracker::Header {
+  // Defined in .h for analyzer access. Increment this if structure changes!
+  static constexpr uint32_t kPersistentTypeId =
+      GlobalActivityTracker::kTypeIdActivityTracker;
+
   // Expected size for 32/64-bit check.
   static constexpr size_t kExpectedInstanceSize = 80;
 
@@ -359,6 +538,9 @@ struct ThreadActivityTracker::Header {
   char thread_name[32];
 };
 
+ThreadActivityTracker::Snapshot::Snapshot() {}
+ThreadActivityTracker::Snapshot::~Snapshot() {}
+
 ThreadActivityTracker::ScopedActivity::ScopedActivity(
     ThreadActivityTracker* tracker,
     const void* program_counter,
@@ -380,16 +562,6 @@ void ThreadActivityTracker::ScopedActivity::ChangeTypeAndData(
     const ActivityData& data) {
   if (tracker_)
     tracker_->ChangeActivity(activity_id_, type, data);
-}
-
-ActivityUserData& ThreadActivityTracker::ScopedActivity::user_data() {
-  if (!user_data_) {
-    if (tracker_)
-      user_data_ = tracker_->GetUserData(activity_id_);
-    else
-      user_data_ = MakeUnique<ActivityUserData>(nullptr, 0);
-  }
-  return *user_data_;
 }
 
 ThreadActivityTracker::ThreadActivityTracker(void* base, size_t size)
@@ -547,11 +719,6 @@ void ThreadActivityTracker::PopActivity(ActivityId id) {
   DCHECK(stack_[depth].activity_type == Activity::ACT_LOCK_ACQUIRE ||
          thread_checker_.CalledOnValidThread());
 
-  // Check if there was any user-data memory. It isn't free'd until later
-  // because the call to release it can push something on the stack.
-  PersistentMemoryAllocator::Reference user_data = stack_[depth].user_data;
-  stack_[depth].user_data = 0;
-
   // The stack has shrunk meaning that some other thread trying to copy the
   // contents for reporting purposes could get bad data. That thread would
   // have written a non-zero value into |stack_unchanged|; clearing it here
@@ -559,25 +726,50 @@ void ThreadActivityTracker::PopActivity(ActivityId id) {
   // happen after the atomic |depth| operation above so a "release" store
   // is required.
   header_->stack_unchanged.store(0, std::memory_order_release);
-
-  // Release resources located above. All stack processing is done so it's
-  // safe if some outside code does another push.
-  if (user_data)
-    GlobalActivityTracker::Get()->ReleaseUserDataMemory(&user_data);
 }
 
 std::unique_ptr<ActivityUserData> ThreadActivityTracker::GetUserData(
-    ActivityId id) {
+    ActivityId id,
+    ActivityTrackerMemoryAllocator* allocator) {
   // User-data is only stored for activities actually held in the stack.
   if (id < stack_slots_) {
+    // Don't allow user data for lock acquisition as recursion may occur.
+    if (stack_[id].activity_type == Activity::ACT_LOCK_ACQUIRE) {
+      NOTREACHED();
+      return MakeUnique<ActivityUserData>(nullptr, 0);
+    }
+
+    // Get (or reuse) a block of memory and create a real UserData object
+    // on it.
+    PersistentMemoryAllocator::Reference ref = allocator->GetObjectReference();
     void* memory =
-        GlobalActivityTracker::Get()->GetUserDataMemory(&stack_[id].user_data);
-    if (memory)
-      return MakeUnique<ActivityUserData>(memory, kUserDataSize);
+        allocator->GetAsArray<char>(ref, PersistentMemoryAllocator::kSizeAny);
+    if (memory) {
+      std::unique_ptr<ActivityUserData> user_data =
+          MakeUnique<ActivityUserData>(memory, kUserDataSize);
+      stack_[id].user_data_ref = ref;
+      stack_[id].user_data_id = user_data->id();
+      return user_data;
+    }
   }
 
   // Return a dummy object that will still accept (but ignore) Set() calls.
   return MakeUnique<ActivityUserData>(nullptr, 0);
+}
+
+bool ThreadActivityTracker::HasUserData(ActivityId id) {
+  // User-data is only stored for activities actually held in the stack.
+  return (id < stack_slots_ && stack_[id].user_data_ref);
+}
+
+void ThreadActivityTracker::ReleaseUserData(
+    ActivityId id,
+    ActivityTrackerMemoryAllocator* allocator) {
+  // User-data is only stored for activities actually held in the stack.
+  if (id < stack_slots_ && stack_[id].user_data_ref) {
+    allocator->ReleaseObjectReference(stack_[id].user_data_ref);
+    stack_[id].user_data_ref = 0;
+  }
 }
 
 bool ThreadActivityTracker::IsValid() const {
@@ -594,7 +786,7 @@ bool ThreadActivityTracker::IsValid() const {
   return valid_;
 }
 
-bool ThreadActivityTracker::Snapshot(ActivitySnapshot* output_snapshot) const {
+bool ThreadActivityTracker::CreateSnapshot(Snapshot* output_snapshot) const {
   DCHECK(output_snapshot);
 
   // There is no "called on valid thread" check for this method as it can be
@@ -710,6 +902,153 @@ size_t ThreadActivityTracker::SizeForStackDepth(int stack_depth) {
 
 GlobalActivityTracker* GlobalActivityTracker::g_tracker_ = nullptr;
 
+GlobalActivityTracker::ModuleInfo::ModuleInfo() {}
+GlobalActivityTracker::ModuleInfo::ModuleInfo(ModuleInfo&& rhs) = default;
+GlobalActivityTracker::ModuleInfo::ModuleInfo(const ModuleInfo& rhs) = default;
+GlobalActivityTracker::ModuleInfo::~ModuleInfo() {}
+
+GlobalActivityTracker::ModuleInfo& GlobalActivityTracker::ModuleInfo::operator=(
+    ModuleInfo&& rhs) = default;
+GlobalActivityTracker::ModuleInfo& GlobalActivityTracker::ModuleInfo::operator=(
+    const ModuleInfo& rhs) = default;
+
+GlobalActivityTracker::ModuleInfoRecord::ModuleInfoRecord() {}
+GlobalActivityTracker::ModuleInfoRecord::~ModuleInfoRecord() {}
+
+bool GlobalActivityTracker::ModuleInfoRecord::DecodeTo(
+    GlobalActivityTracker::ModuleInfo* info,
+    size_t record_size) const {
+  // Get the current "changes" indicator, acquiring all the other values.
+  uint32_t current_changes = changes.load(std::memory_order_acquire);
+
+  // Copy out the dynamic information.
+  info->is_loaded = loaded != 0;
+  info->address = static_cast<uintptr_t>(address);
+  info->load_time = load_time;
+
+  // Check to make sure no information changed while being read. A "seq-cst"
+  // operation is expensive but is only done during analysis and it's the only
+  // way to ensure this occurs after all the accesses above. If changes did
+  // occur then return a "not loaded" result so that |size| and |address|
+  // aren't expected to be accurate.
+  if ((current_changes & kModuleInformationChanging) != 0 ||
+      changes.load(std::memory_order_seq_cst) != current_changes) {
+    info->is_loaded = false;
+  }
+
+  // Copy out the static information. These never change so don't have to be
+  // protected by the atomic |current_changes| operations.
+  info->size = static_cast<size_t>(size);
+  info->timestamp = timestamp;
+  info->age = age;
+  memcpy(info->identifier, identifier, sizeof(info->identifier));
+
+  if (offsetof(ModuleInfoRecord, pickle) + pickle_size > record_size)
+    return false;
+  Pickle pickler(pickle, pickle_size);
+  PickleIterator iter(pickler);
+  return iter.ReadString(&info->file) && iter.ReadString(&info->debug_file);
+}
+
+bool GlobalActivityTracker::ModuleInfoRecord::EncodeFrom(
+    const GlobalActivityTracker::ModuleInfo& info,
+    size_t record_size) {
+  Pickle pickler;
+  bool okay =
+      pickler.WriteString(info.file) && pickler.WriteString(info.debug_file);
+  if (!okay) {
+    NOTREACHED();
+    return false;
+  }
+  if (offsetof(ModuleInfoRecord, pickle) + pickler.size() > record_size) {
+    NOTREACHED();
+    return false;
+  }
+
+  // These fields never changes and are done before the record is made
+  // iterable so no thread protection is necessary.
+  size = info.size;
+  timestamp = info.timestamp;
+  age = info.age;
+  memcpy(identifier, info.identifier, sizeof(identifier));
+  memcpy(pickle, pickler.data(), pickler.size());
+  pickle_size = pickler.size();
+  changes.store(0, std::memory_order_relaxed);
+
+  // Now set those fields that can change.
+  return UpdateFrom(info);
+}
+
+bool GlobalActivityTracker::ModuleInfoRecord::UpdateFrom(
+    const GlobalActivityTracker::ModuleInfo& info) {
+  // Updates can occur after the record is made visible so make changes atomic.
+  // A "strong" exchange ensures no false failures.
+  uint32_t old_changes = changes.load(std::memory_order_relaxed);
+  uint32_t new_changes = old_changes | kModuleInformationChanging;
+  if ((old_changes & kModuleInformationChanging) != 0 ||
+      !changes.compare_exchange_strong(old_changes, new_changes,
+                                       std::memory_order_acquire,
+                                       std::memory_order_acquire)) {
+    NOTREACHED() << "Multiple sources are updating module information.";
+    return false;
+  }
+
+  loaded = info.is_loaded ? 1 : 0;
+  address = info.address;
+  load_time = Time::Now().ToInternalValue();
+
+  bool success = changes.compare_exchange_strong(new_changes, old_changes + 1,
+                                                 std::memory_order_release,
+                                                 std::memory_order_relaxed);
+  DCHECK(success);
+  return true;
+}
+
+// static
+size_t GlobalActivityTracker::ModuleInfoRecord::EncodedSize(
+    const GlobalActivityTracker::ModuleInfo& info) {
+  PickleSizer sizer;
+  sizer.AddString(info.file);
+  sizer.AddString(info.debug_file);
+
+  return offsetof(ModuleInfoRecord, pickle) + sizeof(Pickle::Header) +
+         sizer.payload_size();
+}
+
+GlobalActivityTracker::ScopedThreadActivity::ScopedThreadActivity(
+    const void* program_counter,
+    const void* origin,
+    Activity::Type type,
+    const ActivityData& data,
+    bool lock_allowed)
+    : ThreadActivityTracker::ScopedActivity(GetOrCreateTracker(lock_allowed),
+                                            program_counter,
+                                            origin,
+                                            type,
+                                            data) {}
+
+GlobalActivityTracker::ScopedThreadActivity::~ScopedThreadActivity() {
+  if (tracker_ && tracker_->HasUserData(activity_id_)) {
+    GlobalActivityTracker* global = GlobalActivityTracker::Get();
+    AutoLock lock(global->user_data_allocator_lock_);
+    tracker_->ReleaseUserData(activity_id_, &global->user_data_allocator_);
+  }
+}
+
+ActivityUserData& GlobalActivityTracker::ScopedThreadActivity::user_data() {
+  if (!user_data_) {
+    if (tracker_) {
+      GlobalActivityTracker* global = GlobalActivityTracker::Get();
+      AutoLock lock(global->user_data_allocator_lock_);
+      user_data_ =
+          tracker_->GetUserData(activity_id_, &global->user_data_allocator_);
+    } else {
+      user_data_ = MakeUnique<ActivityUserData>(nullptr, 0);
+    }
+  }
+  return *user_data_;
+}
+
 GlobalActivityTracker::ManagedActivityTracker::ManagedActivityTracker(
     PersistentMemoryAllocator::Reference mem_reference,
     void* base,
@@ -804,13 +1143,8 @@ ThreadActivityTracker* GlobalActivityTracker::CreateTrackerForCurrentThread() {
   // TODO(bcwhite): Review this after major compiler releases.
   DCHECK(mem_reference);
   void* mem_base;
-#if !defined(OS_WIN) && !defined(OS_ANDROID)
-  mem_base = allocator_->GetAsObject<ThreadActivityTracker::Header>(
-      mem_reference, kTypeIdActivityTracker);
-#else
-  mem_base = allocator_->GetAsArray<char>(mem_reference, kTypeIdActivityTracker,
-                                          PersistentMemoryAllocator::kSizeAny);
-#endif
+  mem_base =
+      allocator_->GetAsObject<ThreadActivityTracker::Header>(mem_reference);
 
   DCHECK(mem_base);
   DCHECK_LE(stack_memory_size_, allocator_->GetAllocSize(mem_reference));
@@ -835,27 +1169,44 @@ void GlobalActivityTracker::ReleaseTrackerForCurrentThreadForTesting() {
     delete tracker;
 }
 
-void* GlobalActivityTracker::GetUserDataMemory(
-    PersistentMemoryAllocator::Reference* reference) {
-  if (!*reference) {
-    base::AutoLock autolock(user_data_allocator_lock_);
-    *reference = user_data_allocator_.GetObjectReference();
-    if (!*reference)
-      return nullptr;
+void GlobalActivityTracker::RecordLogMessage(StringPiece message) {
+  // Allocate at least one extra byte so the string is NUL terminated. All
+  // memory returned by the allocator is guaranteed to be zeroed.
+  PersistentMemoryAllocator::Reference ref =
+      allocator_->Allocate(message.size() + 1, kTypeIdGlobalLogMessage);
+  char* memory = allocator_->GetAsArray<char>(ref, kTypeIdGlobalLogMessage,
+                                              message.size() + 1);
+  if (memory) {
+    memcpy(memory, message.data(), message.size());
+    allocator_->MakeIterable(ref);
   }
-
-  void* memory = allocator_->GetAsArray<char>(
-      *reference, kTypeIdUserDataRecord, PersistentMemoryAllocator::kSizeAny);
-  DCHECK(memory);
-  return memory;
 }
 
-void GlobalActivityTracker::ReleaseUserDataMemory(
-    PersistentMemoryAllocator::Reference* reference) {
-  DCHECK(*reference);
-  base::AutoLock autolock(user_data_allocator_lock_);
-  user_data_allocator_.ReleaseObjectReference(*reference);
-  *reference = PersistentMemoryAllocator::kReferenceNull;
+void GlobalActivityTracker::RecordModuleInfo(const ModuleInfo& info) {
+  AutoLock lock(modules_lock_);
+  auto found = modules_.find(info.file);
+  if (found != modules_.end()) {
+    ModuleInfoRecord* record = found->second;
+    DCHECK(record);
+
+    // Update the basic state of module information that has been already
+    // recorded. It is assumed that the string information (identifier,
+    // version, etc.) remain unchanged which means that there's no need
+    // to create a new record to accommodate a possibly longer length.
+    record->UpdateFrom(info);
+    return;
+  }
+
+  size_t required_size = ModuleInfoRecord::EncodedSize(info);
+  ModuleInfoRecord* record =
+      allocator_->AllocateObject<ModuleInfoRecord>(required_size);
+  if (!record)
+    return;
+
+  bool success = record->EncodeFrom(info, required_size);
+  DCHECK(success);
+  allocator_->MakeIterable(record);
+  modules_.insert(std::make_pair(info.file, record));
 }
 
 GlobalActivityTracker::GlobalActivityTracker(
@@ -890,6 +1241,10 @@ GlobalActivityTracker::GlobalActivityTracker(
   // Ensure that there is no other global object and then make this one such.
   DCHECK(!g_tracker_);
   g_tracker_ = this;
+
+  // The global records must be iterable in order to be found by an analyzer.
+  allocator_->MakeIterable(allocator_->GetAsReference(
+      user_data_.GetBaseAddress(), kTypeIdGlobalDataRecord));
 }
 
 GlobalActivityTracker::~GlobalActivityTracker() {

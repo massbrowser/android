@@ -93,6 +93,11 @@ public abstract class ChromeSwitches {
      */
     public static final String MARKET_URL_FOR_TESTING = "market-url-for-testing";
 
+    /**
+     * Disable multiwindow tab merging for testing.
+     */
+    public static final String DISABLE_TAB_MERGING_FOR_TESTING = "disable-tab-merging";
+
     ///////////////////////////////////////////////////////////////////////////////////////////////
     // Native Switches
     ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -194,11 +199,6 @@ public abstract class ChromeSwitches {
      * Set the partner-defined homepage URL, for testing.
      */
     public static final String PARTNER_HOMEPAGE_FOR_TESTING = "partner-homepage-for-testing";
-
-    /**
-     * Enables "Add to Home screen" to mint a WebApk.
-     */
-    public static final String ENABLE_WEBAPK = "enable-improved-a2hs";
 
     /**
      * Forces the WebAPK runtime dex to be extracted each time that Chrome is started.

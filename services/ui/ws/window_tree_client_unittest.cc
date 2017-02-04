@@ -7,6 +7,7 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -15,12 +16,12 @@
 #include "services/service_manager/public/cpp/interface_factory.h"
 #include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service_test.h"
-#include "services/ui/public/cpp/tests/window_server_shelltest_base.h"
 #include "services/ui/public/interfaces/constants.mojom.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
 #include "services/ui/public/interfaces/window_tree_host.mojom.h"
 #include "services/ui/ws/ids.h"
 #include "services/ui/ws/test_change_tracker.h"
+#include "services/ui/ws/window_server_service_test_base.h"
 
 using service_manager::Connection;
 using mojo::InterfaceRequest;
@@ -68,7 +69,7 @@ bool EmbedUrl(service_manager::Connector* connector,
   base::RunLoop run_loop;
   {
     mojom::WindowTreeClientPtr client;
-    connector->ConnectToInterface(url, &client);
+    connector->BindInterface(url, &client);
     const uint32_t embed_flags = 0;
     tree->Embed(root_id, std::move(client), embed_flags,
                 base::Bind(&EmbedCallbackImpl, &run_loop, &result));
@@ -382,11 +383,8 @@ class TestWindowTreeClient : public mojom::WindowTreeClient,
   }
 
   void OnWindowSurfaceChanged(Id window_id,
-                              const cc::SurfaceId& surface_id,
-                              const gfx::Size& frame_size,
-                              float device_scale_factor) override {
-    tracker_.OnWindowSurfaceChanged(window_id, surface_id, frame_size,
-                                    device_scale_factor);
+                              const cc::SurfaceInfo& surface_info) override {
+    tracker_.OnWindowSurfaceChanged(window_id, surface_info);
   }
 
   void OnDragEnter(uint32_t window,
@@ -433,7 +431,7 @@ class TestWindowTreeClient : public mojom::WindowTreeClient,
         base::MakeUnique<mojo::AssociatedBinding<mojom::WindowManager>>(
             this, std::move(internal));
     tree_->GetWindowManagerClient(
-        GetProxy(&window_manager_client_, tree_.associated_group()));
+        MakeRequest(&window_manager_client_, tree_.associated_group()));
   }
 
   // mojom::WindowManager:
@@ -459,6 +457,7 @@ class TestWindowTreeClient : public mojom::WindowTreeClient,
       const base::Optional<std::vector<uint8_t>>& value) override {
     window_manager_client_->WmResponse(change_id, false);
   }
+  void WmSetCanFocus(uint32_t window_id, bool can_focus) override {}
   void WmCreateTopLevelWindow(
       uint32_t change_id,
       ClientSpecificId requesting_client_id,
@@ -477,6 +476,14 @@ class TestWindowTreeClient : public mojom::WindowTreeClient,
     NOTIMPLEMENTED();
   }
   void WmCancelMoveLoop(uint32_t window_id) override { NOTIMPLEMENTED(); }
+  void WmDeactivateWindow(uint32_t window_id) override { NOTIMPLEMENTED(); }
+  void WmStackAbove(uint32_t change_id, uint32_t above_id,
+                    uint32_t below_id) override {
+    NOTIMPLEMENTED();
+  }
+  void WmStackAtTop(uint32_t change_id, uint32_t window_id) override {
+    NOTIMPLEMENTED();
+  }
   void OnAccelerator(uint32_t ack_id,
                      uint32_t accelerator_id,
                      std::unique_ptr<ui::Event> event) override {
@@ -653,13 +660,13 @@ class WindowTreeClientTest : public WindowServerServiceTestBase {
     WindowServerServiceTestBase::SetUp();
 
     mojom::WindowTreeHostFactoryPtr factory;
-    connector()->ConnectToInterface(ui::mojom::kServiceName, &factory);
+    connector()->BindInterface(ui::mojom::kServiceName, &factory);
 
     mojom::WindowTreeClientPtr tree_client_ptr;
     wt_client1_ = base::MakeUnique<TestWindowTreeClient>();
-    wt_client1_->Bind(GetProxy(&tree_client_ptr));
+    wt_client1_->Bind(MakeRequest(&tree_client_ptr));
 
-    factory->CreateWindowTreeHost(GetProxy(&host_),
+    factory->CreateWindowTreeHost(MakeRequest(&host_),
                                   std::move(tree_client_ptr));
 
     // Next we should get an embed call on the "window manager" client.
@@ -2157,18 +2164,18 @@ TEST_F(WindowTreeClientTest, SurfaceIdPropagation) {
   cc::mojom::MojoCompositorFrameSinkPtr surface_ptr;
   cc::mojom::MojoCompositorFrameSinkClientRequest client_request;
   cc::mojom::MojoCompositorFrameSinkClientPtr surface_client_ptr;
-  client_request = mojo::GetProxy(&surface_client_ptr);
-  wt2()->AttachCompositorFrameSink(
-      window_2_101, mojom::CompositorFrameSinkType::DEFAULT,
-      mojo::GetProxy(&surface_ptr), std::move(surface_client_ptr));
+  client_request = mojo::MakeRequest(&surface_client_ptr);
+  wt2()->AttachCompositorFrameSink(window_2_101,
+                                   mojo::MakeRequest(&surface_ptr),
+                                   std::move(surface_client_ptr));
   cc::CompositorFrame compositor_frame;
   std::unique_ptr<cc::RenderPass> render_pass = cc::RenderPass::Create();
   gfx::Rect frame_rect(0, 0, 100, 100);
-  render_pass->SetNew(cc::RenderPassId(1, 1), frame_rect, frame_rect,
-                      gfx::Transform());
+  render_pass->SetNew(1, frame_rect, frame_rect, gfx::Transform());
   compositor_frame.render_pass_list.push_back(std::move(render_pass));
-  cc::LocalFrameId local_frame_id(1, base::UnguessableToken::Create());
-  surface_ptr->SubmitCompositorFrame(local_frame_id,
+  compositor_frame.metadata.device_scale_factor = 1.f;
+  cc::LocalSurfaceId local_surface_id(1, base::UnguessableToken::Create());
+  surface_ptr->SubmitCompositorFrame(local_surface_id,
                                      std::move(compositor_frame));
   // Make sure the parent connection gets the surface ID.
   wt_client1()->WaitForChangeCount(1);

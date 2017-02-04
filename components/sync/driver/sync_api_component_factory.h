@@ -32,7 +32,7 @@ class DataTypeEncryptionHandler;
 class DataTypeManager;
 class DataTypeManagerObserver;
 class LocalDeviceInfoProvider;
-class SyncBackendHost;
+class SyncEngine;
 class SyncClient;
 class SyncPrefs;
 class SyncService;
@@ -78,18 +78,17 @@ class SyncApiComponentFactory {
       SyncService* sync_service,
       const RegisterDataTypesMethod& register_platform_types_method) = 0;
 
-  // Instantiates a new DataTypeManager with a SyncBackendHost, a list of data
-  // type controllers and a DataTypeManagerObserver.  The return pointer is
-  // owned by the caller.
+  // Creates a DataTypeManager; the return pointer is owned by the caller.
   virtual DataTypeManager* CreateDataTypeManager(
+      ModelTypeSet initial_types,
       const WeakHandle<DataTypeDebugInfoListener>& debug_info_listener,
       const DataTypeController::TypeMap* controllers,
       const DataTypeEncryptionHandler* encryption_handler,
-      SyncBackendHost* backend,
+      ModelTypeConfigurer* configurer,
       DataTypeManagerObserver* observer) = 0;
 
   // Creating this in the factory helps us mock it out in testing.
-  virtual SyncBackendHost* CreateSyncBackendHost(
+  virtual SyncEngine* CreateSyncEngine(
       const std::string& name,
       invalidation::InvalidationService* invalidator,
       const base::WeakPtr<SyncPrefs>& sync_prefs,

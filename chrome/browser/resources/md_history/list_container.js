@@ -7,35 +7,39 @@ Polymer({
 
   properties: {
     // The path of the currently selected page.
-    selectedPage_: String,
+    selectedPage_: {
+      type: String,
+      computed: 'computeSelectedPage_(queryState.range)',
+    },
 
     // Whether domain-grouped history is enabled.
     grouped: Boolean,
-
-    /** @type {HistoryRange} */
-    groupedRange: {type: Number, observer: 'groupedRangeChanged_'},
 
     /** @type {!QueryState} */
     queryState: Object,
 
     /** @type {!QueryResult} */
     queryResult: Object,
+
+    /**
+     * @private {?{
+     *   index: number,
+     *   item: !HistoryEntry,
+     *   path: string,
+     *   target: !HTMLElement
+     * }}
+     */
+    actionMenuModel_: Object,
   },
 
-  observers: [
-    'searchTermChanged_(queryState.searchTerm)',
-  ],
-
   listeners: {
-    'history-list-scrolled': 'closeMenu_',
-    'load-more-history': 'loadMoreHistory_',
-    'toggle-menu': 'toggleMenu_',
+    'open-menu': 'openMenu_',
   },
 
   /**
    * @param {HistoryQuery} info An object containing information about the
    *    query.
-   * @param {!Array<HistoryEntry>} results A list of results.
+   * @param {!Array<!HistoryEntry>} results A list of results.
    */
   historyResult: function(info, results) {
     this.initializeResults_(info, results);
@@ -49,53 +53,15 @@ Polymer({
       });
     }
 
-    if (this.selectedPage_ == 'grouped-list') {
-      this.$$('#grouped-list').historyData = results;
-      return;
-    }
-
-    var list = /** @type {HistoryListElement} */(this.$['infinite-list']);
-    list.addNewResults(results, this.queryState.incremental);
-    if (info.finished)
-      list.disableResultLoading();
-  },
-
-  /**
-   * Queries the history backend for results based on queryState.
-   * @param {boolean} incremental Whether the new query should continue where
-   *    the previous query stopped.
-   */
-  queryHistory: function(incremental) {
-    var queryState = this.queryState;
-    // Disable querying until the first set of results have been returned. If
-    // there is a search, query immediately to support search query params from
-    // the URL.
-    var noResults = !this.queryResult || this.queryResult.results == null;
-    if (queryState.queryingDisabled ||
-        (!this.queryState.searchTerm && noResults)) {
-      return;
-    }
-
-    // Close any open dialog if a new query is initiated.
-    var dialog = this.$.dialog.getIfExists();
-    if (!incremental && dialog && dialog.open)
-      dialog.close();
-
-    this.set('queryState.querying', true);
-    this.set('queryState.incremental', incremental);
-
-    var lastVisitTime = 0;
-    if (incremental) {
-      var lastVisit = this.queryResult.results.slice(-1)[0];
-      lastVisitTime = lastVisit ? Math.floor(lastVisit.time) : 0;
-    }
-
-    var maxResults =
-      this.groupedRange == HistoryRange.ALL_TIME ? RESULTS_PER_PAGE : 0;
-    chrome.send('queryHistory', [
-      queryState.searchTerm, queryState.groupedOffset, queryState.range,
-      lastVisitTime, maxResults
-    ]);
+    var list = /** @type {HistoryListBehavior} */ this.getSelectedList_();
+    // It is possible for results to arrive for the grouped list before the lazy
+    // load has finished and the <history-grouped-list> element exists. In this
+    // case, add the items to a property on the unresolved element which can be
+    // read when it upgrades and is attached.
+    if (Polymer.isInstance(list))
+      list.addNewResults(results, this.queryState.incremental, info.finished);
+    else
+      list.initialData = results;
   },
 
   historyDeleted: function() {
@@ -104,10 +70,10 @@ Polymer({
       return;
 
     // Reload the list with current search state.
-    this.queryHistory(false);
+    this.fire('query-history', false);
   },
 
-  /** @return {HTMLElement} */
+  /** @return {Element} */
   getContentScrollTarget: function() {
     return this.getSelectedList_();
   },
@@ -143,29 +109,12 @@ Polymer({
 
   /**
    * @param {HistoryRange} range
+   * @return {string}
    * @private
    */
-  groupedRangeChanged_: function(range, oldRange) {
-    this.selectedPage_ = range == HistoryRange.ALL_TIME ?
-      'infinite-list' : 'grouped-list';
-
-    if (oldRange == undefined)
-      return;
-
-    this.queryHistory(false);
-    this.fire('history-view-changed');
+  computeSelectedPage_: function(range) {
+    return range == HistoryRange.ALL_TIME ? 'infinite-list' : 'grouped-list';
   },
-
-  /** @private */
-  searchTermChanged_: function() {
-    this.queryHistory(false);
-    // TODO(tsergeant): Ignore incremental searches in this metric.
-    if (this.queryState.searchTerm)
-      md_history.BrowserService.getInstance().recordAction('Search');
-  },
-
-  /** @private */
-  loadMoreHistory_: function() { this.queryHistory(true); },
 
   /**
    * @param {HistoryQuery} info
@@ -215,20 +164,25 @@ Polymer({
    */
   closeMenu_: function() {
     var menu = this.$.sharedMenu.getIfExists();
-    if (menu)
-      menu.closeMenu();
+    if (menu && menu.open) {
+      this.actionMenuModel_ = null;
+      menu.close();
+    }
   },
 
   /**
-   * Opens the overflow menu unless the menu is already open and the same button
-   * is pressed.
-   * @param {{detail: {item: !HistoryEntry, target: !HTMLElement}}} e
+   * Opens the overflow menu.
+   * @param {{detail: {
+   *    index: number, item: !HistoryEntry,
+   *    path: string, target: !HTMLElement
+   * }}} e
    * @private
    */
-  toggleMenu_: function(e) {
+  openMenu_: function(e) {
     var target = e.detail.target;
-    var menu = /** @type {CrSharedMenuElement} */this.$.sharedMenu.get();
-    menu.toggleMenu(target, e.detail);
+    this.actionMenuModel_ = e.detail;
+    var menu = /** @type {CrSharedMenuElement} */ this.$.sharedMenu.get();
+    menu.showAt(target);
   },
 
   /** @private */
@@ -237,8 +191,9 @@ Polymer({
         'EntryMenuShowMoreFromSite');
 
     var menu = assert(this.$.sharedMenu.getIfExists());
-    this.set('queryState.searchTerm', menu.itemData.item.domain);
-    menu.closeMenu();
+    this.fire('change-query', {search: this.actionMenuModel_.item.domain});
+    this.actionMenuModel_ = null;
+    this.closeMenu_();
   },
 
   /** @private */
@@ -246,39 +201,40 @@ Polymer({
     var browserService = md_history.BrowserService.getInstance();
     browserService.recordAction('EntryMenuRemoveFromHistory');
     var menu = assert(this.$.sharedMenu.getIfExists());
-    var itemData = menu.itemData;
-    browserService.deleteItems([itemData.item])
-        .then(function(items) {
-          // This unselect-all resets the toolbar when deleting a selected item
-          // and clears selection state which can be invalid if items move
-          // around during deletion.
-          // TODO(tsergeant): Make this automatic based on observing list
-          // modifications.
-          this.fire('unselect-all');
-          this.getSelectedList_().removeItemsByPath([itemData.path]);
+    var itemData = this.actionMenuModel_;
+    browserService.deleteItems([itemData.item]).then(function(items) {
+      // This unselect-all resets the toolbar when deleting a selected item
+      // and clears selection state which can be invalid if items move
+      // around during deletion.
+      // TODO(tsergeant): Make this automatic based on observing list
+      // modifications.
+      this.fire('unselect-all');
+      this.getSelectedList_().removeItemsByPath([itemData.path]);
 
-          var index = itemData.index;
-          if (index == undefined)
-            return;
+      var index = itemData.index;
+      if (index == undefined)
+        return;
 
-          var browserService = md_history.BrowserService.getInstance();
-          browserService.recordHistogram(
-              'HistoryPage.RemoveEntryPosition',
-              Math.min(index, UMA_MAX_BUCKET_VALUE), UMA_MAX_BUCKET_VALUE);
-          if (index <= UMA_MAX_SUBSET_BUCKET_VALUE) {
-            browserService.recordHistogram(
-                'HistoryPage.RemoveEntryPositionSubset', index,
-                UMA_MAX_SUBSET_BUCKET_VALUE);
-          }
-        }.bind(this));
-    menu.closeMenu();
+      var browserService = md_history.BrowserService.getInstance();
+      browserService.recordHistogram(
+          'HistoryPage.RemoveEntryPosition',
+          Math.min(index, UMA_MAX_BUCKET_VALUE), UMA_MAX_BUCKET_VALUE);
+      if (index <= UMA_MAX_SUBSET_BUCKET_VALUE) {
+        browserService.recordHistogram(
+            'HistoryPage.RemoveEntryPositionSubset', index,
+            UMA_MAX_SUBSET_BUCKET_VALUE);
+      }
+    }.bind(this));
+    this.closeMenu_();
   },
 
   /**
-   * @return {HTMLElement}
+   * @return {Element}
    * @private
    */
-  getSelectedList_: function() { return this.$.content.selectedItem; },
+  getSelectedList_: function() {
+    return this.$$('#' + this.selectedPage_);
+  },
 
   /** @private */
   canDeleteHistory_: function() {

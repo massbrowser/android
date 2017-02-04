@@ -8,8 +8,10 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "components/autofill/core/browser/webdata/autocomplete_sync_bridge.h"
 #include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_wallet_metadata_syncable_service.h"
@@ -29,11 +31,9 @@
 #include "components/reading_list/ios/reading_list_model.h"
 #include "components/search_engines/search_engine_data_type_controller.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/sync/base/extensions_activity.h"
 #include "components/sync/base/report_unrecoverable_error.h"
 #include "components/sync/driver/sync_api_component_factory.h"
 #include "components/sync/driver/sync_util.h"
-#include "components/sync/driver/ui_data_type_controller.h"
 #include "components/sync/engine/browser_thread_model_worker.h"
 #include "components/sync/engine/passive_model_worker.h"
 #include "components/sync/engine/ui_model_worker.h"
@@ -59,10 +59,10 @@
 #include "ios/chrome/browser/sync/glue/sync_start_util.h"
 #include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
 #include "ios/chrome/browser/sync/sessions/ios_chrome_local_session_event_router.h"
+#include "ios/chrome/browser/tabs/tab_model_synced_window_delegate_getter.h"
 #include "ios/chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "ios/chrome/browser/web_data_service_factory.h"
 #include "ios/chrome/common/channel_info.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/web/public/web_thread.h"
 #include "ui/base/device_form_factor.h"
 
@@ -80,8 +80,7 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
   explicit SyncSessionsClientImpl(ios::ChromeBrowserState* browser_state)
       : browser_state_(browser_state),
         window_delegates_getter_(
-            ios::GetChromeBrowserProvider()->CreateSyncedWindowDelegatesGetter(
-                browser_state)) {}
+            base::MakeUnique<TabModelSyncedWindowDelegatesGetter>()) {}
 
   ~SyncSessionsClientImpl() override {}
 
@@ -139,8 +138,8 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
 
 IOSChromeSyncClient::IOSChromeSyncClient(ios::ChromeBrowserState* browser_state)
     : browser_state_(browser_state),
-      sync_sessions_client_(new SyncSessionsClientImpl(browser_state)),
-      dummy_extensions_activity_(new syncer::ExtensionsActivity()),
+      sync_sessions_client_(
+          base::MakeUnique<SyncSessionsClientImpl>(browser_state)),
       weak_ptr_factory_(this) {}
 
 IOSChromeSyncClient::~IOSChromeSyncClient() {}
@@ -204,6 +203,11 @@ history::HistoryService* IOSChromeSyncClient::GetHistoryService() {
       browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
 }
 
+bool IOSChromeSyncClient::HasPasswordStore() {
+  DCHECK_CURRENTLY_ON(web::WebThread::UI);
+  return password_store_ != nullptr;
+}
+
 autofill::PersonalDataManager* IOSChromeSyncClient::GetPersonalDataManager() {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
   return autofill::PersonalDataManagerFactory::GetForBrowserState(
@@ -239,9 +243,7 @@ IOSChromeSyncClient::GetInvalidationService() {
 
 scoped_refptr<syncer::ExtensionsActivity>
 IOSChromeSyncClient::GetExtensionsActivity() {
-  // TODO(crbug.com/562048) Get rid of dummy_extensions_activity_ and return
-  // nullptr.
-  return dummy_extensions_activity_;
+  return nullptr;
 }
 
 sync_sessions::SyncSessionsClient*
@@ -311,11 +313,10 @@ IOSChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
                       : base::WeakPtr<syncer::SyncableService>();
     }
     case syncer::ARTICLES: {
-      dom_distiller::DomDistillerService* service =
-          dom_distiller::DomDistillerServiceFactory::GetForBrowserState(
-              browser_state_);
-      if (service)
-        return service->GetSyncableService()->AsWeakPtr();
+      // DomDistillerService is used in iOS ReadingList. The distilled articles
+      // are saved separately and must not be synced.
+      // Add a not reached to avoid having ARTICLES sync be enabled silently.
+      NOTREACHED();
       return base::WeakPtr<syncer::SyncableService>();
     }
     case syncer::SESSIONS: {
@@ -348,6 +349,10 @@ IOSChromeSyncClient::GetSyncBridgeForModelType(syncer::ModelType type) {
           ReadingListModelFactory::GetForBrowserState(browser_state_);
       return reading_list_model->GetModelTypeSyncBridge()->AsWeakPtr();
     }
+    case syncer::AUTOFILL:
+      return autofill::AutocompleteSyncBridge::FromWebDataService(
+                 web_data_service_.get())
+          ->AsWeakPtr();
     default:
       NOTREACHED();
       return base::WeakPtr<syncer::ModelTypeSyncBridge>();

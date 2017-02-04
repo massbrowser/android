@@ -263,10 +263,6 @@ class WebContents : public PageNavigator,
   // Gets the current RenderViewHost for this tab.
   virtual RenderViewHost* GetRenderViewHost() const = 0;
 
-  // Gets the current RenderViewHost's routing id. Returns
-  // MSG_ROUTING_NONE when there is no RenderViewHost.
-  virtual int GetRoutingID() const = 0;
-
   // Returns the currently active RenderWidgetHostView. This may change over
   // time and can be nullptr (during setup and teardown).
   virtual RenderWidgetHostView* GetRenderWidgetHostView() const = 0;
@@ -306,13 +302,13 @@ class WebContents : public PageNavigator,
   virtual void SetUserAgentOverride(const std::string& override) = 0;
   virtual const std::string& GetUserAgentOverride() const = 0;
 
-  // Enable the accessibility tree for this WebContents in the renderer,
-  // but don't enable creating a native accessibility tree on the browser
-  // side.
-  virtual void EnableTreeOnlyAccessibilityMode() = 0;
+  // Set the accessibility mode so that accessibility events are forwarded
+  // to each WebContentsObserver.
+  virtual void EnableWebContentsOnlyAccessibilityMode() = 0;
 
-  // Returns true only if "tree only" accessibility mode is on.
-  virtual bool IsTreeOnlyAccessibilityModeForTesting() const = 0;
+  // Returns true only if the WebContentsObserver accessibility mode is
+  // enabled.
+  virtual bool IsWebContentsOnlyAccessibilityModeForTesting() const = 0;
 
   // Returns true only if complete accessibility mode is on, meaning there's
   // both renderer accessibility, and a native browser accessibility tree.
@@ -734,6 +730,12 @@ class WebContents : public PageNavigator,
 
   virtual int GetCurrentlyPlayingVideoCount() = 0;
   virtual bool IsFullscreen() = 0;
+
+  // Tells the renderer to clear the focused element (if any).
+  virtual void ClearFocusedElement() = 0;
+
+  // Returns true if the current focused element is editable.
+  virtual bool IsFocusedElementEditable() = 0;
 
 #if defined(OS_ANDROID)
   CONTENT_EXPORT static WebContents* FromJavaWebContents(

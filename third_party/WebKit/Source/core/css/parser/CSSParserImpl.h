@@ -9,7 +9,6 @@
 #include "core/css/CSSProperty.h"
 #include "core/css/CSSPropertySourceData.h"
 #include "core/css/StylePropertySet.h"
-#include "core/css/parser/CSSParserMode.h"
 #include "core/css/parser/CSSParserTokenRange.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Vector.h"
@@ -19,6 +18,7 @@
 namespace blink {
 
 class CSSLazyParsingState;
+class CSSParserContext;
 class CSSParserObserver;
 class CSSParserObserverWrapper;
 class StyleRule;
@@ -41,7 +41,7 @@ class CSSParserImpl {
   WTF_MAKE_NONCOPYABLE(CSSParserImpl);
 
  public:
-  CSSParserImpl(const CSSParserContext&, StyleSheetContents* = nullptr);
+  CSSParserImpl(const CSSParserContext*, StyleSheetContents* = nullptr);
 
   enum AllowedRulesType {
     // As per css-syntax, css-cascade and css-namespaces, @charset rules
@@ -62,25 +62,26 @@ class CSSParserImpl {
                                                        CSSPropertyID,
                                                        const String&,
                                                        bool important,
-                                                       const CSSParserContext&);
+                                                       const CSSParserContext*);
   static MutableStylePropertySet::SetResult parseVariableValue(
       MutableStylePropertySet*,
       const AtomicString& propertyName,
+      const PropertyRegistry*,
       const String&,
       bool important,
-      const CSSParserContext&,
+      const CSSParserContext*,
       bool isAnimationTainted);
   static ImmutableStylePropertySet* parseInlineStyleDeclaration(const String&,
                                                                 Element*);
   static bool parseDeclarationList(MutableStylePropertySet*,
                                    const String&,
-                                   const CSSParserContext&);
+                                   const CSSParserContext*);
   static StyleRuleBase* parseRule(const String&,
-                                  const CSSParserContext&,
+                                  const CSSParserContext*,
                                   StyleSheetContents*,
                                   AllowedRulesType);
   static void parseStyleSheet(const String&,
-                              const CSSParserContext&,
+                              const CSSParserContext*,
                               StyleSheetContents*,
                               bool deferPropertyParsing = false);
   static CSSSelectorList parsePageSelector(CSSParserTokenRange,
@@ -93,16 +94,16 @@ class CSSParserImpl {
   bool supportsDeclaration(CSSParserTokenRange&);
 
   static void parseDeclarationListForInspector(const String&,
-                                               const CSSParserContext&,
+                                               const CSSParserContext*,
                                                CSSParserObserver&);
   static void parseStyleSheetForInspector(const String&,
-                                          const CSSParserContext&,
+                                          const CSSParserContext*,
                                           StyleSheetContents*,
                                           CSSParserObserver&);
 
   static StylePropertySet* parseDeclarationListForLazyStyle(
       CSSParserTokenRange block,
-      const CSSParserContext&);
+      const CSSParserContext*);
 
  private:
   enum RuleListType { TopLevelRuleList, RegularRuleList, KeyframesRuleList };
@@ -156,8 +157,8 @@ class CSSParserImpl {
   // FIXME: Can we build StylePropertySets directly?
   // FIXME: Investigate using a smaller inline buffer
   HeapVector<CSSProperty, 256> m_parsedProperties;
-  const CSSParserContext& m_context;
 
+  Member<const CSSParserContext> m_context;
   Member<StyleSheetContents> m_styleSheet;
 
   // For the inspector

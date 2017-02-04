@@ -19,7 +19,7 @@ Resources.AppManifestView = class extends UI.VBox {
     toolbar.renderAsLinks();
     var addToHomeScreen =
         new UI.ToolbarButton(Common.UIString('Add to homescreen'), undefined, Common.UIString('Add to homescreen'));
-    addToHomeScreen.addEventListener('click', this._addToHomescreen.bind(this));
+    addToHomeScreen.addEventListener(UI.ToolbarButton.Events.Click, this._addToHomescreen, this);
     toolbar.appendToolbarItem(addToHomeScreen);
 
     this._presentationSection = this._reportView.appendSection(Common.UIString('Presentation'));
@@ -31,11 +31,11 @@ Resources.AppManifestView = class extends UI.VBox {
     this._startURLField = this._presentationSection.appendField(Common.UIString('Start URL'));
 
     var themeColorField = this._presentationSection.appendField(Common.UIString('Theme color'));
-    this._themeColorSwatch = UI.ColorSwatch.create();
+    this._themeColorSwatch = InlineEditor.ColorSwatch.create();
     themeColorField.appendChild(this._themeColorSwatch);
 
     var backgroundColorField = this._presentationSection.appendField(Common.UIString('Background color'));
-    this._backgroundColorSwatch = UI.ColorSwatch.create();
+    this._backgroundColorSwatch = InlineEditor.ColorSwatch.create();
     backgroundColorField.appendChild(this._backgroundColorSwatch);
 
     this._orientationField = this._presentationSection.appendField(Common.UIString('Orientation'));
@@ -86,7 +86,7 @@ Resources.AppManifestView = class extends UI.VBox {
     this._errorsSection.element.classList.toggle('hidden', !errors.length);
     for (var error of errors) {
       this._errorsSection.appendRow().appendChild(
-          createLabel(error.message, error.critical ? 'smallicon-error' : 'smallicon-warning'));
+          UI.createLabel(error.message, error.critical ? 'smallicon-error' : 'smallicon-warning'));
     }
 
     if (!data)
@@ -136,7 +136,10 @@ Resources.AppManifestView = class extends UI.VBox {
     }
   }
 
-  _addToHomescreen() {
+  /**
+   * @param {!Common.Event} event
+   */
+  _addToHomescreen(event) {
     var target = SDK.targetManager.mainTarget();
     if (target && target.hasBrowserCapability()) {
       target.pageAgent().requestAppBanner();

@@ -2,18 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_RECEIVED_PACKET_MANAGER_H_
-#define NET_QUIC_QUIC_RECEIVED_PACKET_MANAGER_H_
-
-#include <stddef.h>
-
-#include <deque>
+#ifndef NET_QUIC_CORE_QUIC_RECEIVED_PACKET_MANAGER_H_
+#define NET_QUIC_CORE_QUIC_RECEIVED_PACKET_MANAGER_H_
 
 #include "base/macros.h"
-#include "net/base/net_export.h"
 #include "net/quic/core/quic_config.h"
 #include "net/quic/core/quic_framer.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
+#include "net/quic/platform/api/quic_export.h"
 
 namespace net {
 
@@ -25,7 +21,7 @@ class QuicReceivedPacketManagerPeer;
 struct QuicConnectionStats;
 
 // Records all received packets by a connection.
-class NET_EXPORT_PRIVATE QuicReceivedPacketManager {
+class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
  public:
   explicit QuicReceivedPacketManager(QuicConnectionStats* stats);
   virtual ~QuicReceivedPacketManager();
@@ -102,4 +98,4 @@ class NET_EXPORT_PRIVATE QuicReceivedPacketManager {
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_RECEIVED_PACKET_MANAGER_H_
+#endif  // NET_QUIC_CORE_QUIC_RECEIVED_PACKET_MANAGER_H_

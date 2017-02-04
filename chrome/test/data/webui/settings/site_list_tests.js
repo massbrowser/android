@@ -58,7 +58,6 @@ cr.define('site_list', function() {
           ],
           images: [],
           javascript: [],
-          keygen: [],
           mic: [],
           notifications: [],
           plugins: [],
@@ -148,7 +147,6 @@ cr.define('site_list', function() {
               source: 'preference',
             },
           ],
-          keygen: [],
           mic: [],
           notifications: [],
           plugins: [],
@@ -184,7 +182,6 @@ cr.define('site_list', function() {
           ],
           images: [],
           javascript: [],
-          keygen: [],
           mic: [],
           notifications: [
             {
@@ -328,11 +325,8 @@ cr.define('site_list', function() {
         }
       };
 
-      // Import necessary html before running suite.
       suiteSetup(function() {
         CrSettingsPrefs.setInitialized();
-        return PolymerTest.importHtml(
-            'chrome://md-settings/site_settings/site_list.html');
       });
 
       suiteTeardown(function() {
@@ -462,6 +456,28 @@ cr.define('site_list', function() {
               assertMenu(['Block', 'Remove'], testElement);
 
               assertFalse(testElement.$.category.hidden);
+            });
+      });
+
+      test('action menu closes when list changes', function() {
+        setUpCategory(settings.ContentSettingsTypes.GEOLOCATION,
+            settings.PermissionValues.ALLOW, prefs);
+        var actionMenu = testElement.$$('dialog[is=cr-action-menu]');
+        return browserProxy.whenCalled('getExceptionList').then(
+            function(contentType) {
+              Polymer.dom.flush();  // Populates action menu.
+              openActionMenu(0);
+              assertTrue(actionMenu.open);
+
+              browserProxy.resetResolver('getExceptionList');
+              // Simulate a change in the underlying model.
+              cr.webUIListenerCallback(
+                  'contentSettingSitePermissionChanged',
+                  settings.ContentSettingsTypes.GEOLOCATION);
+              return browserProxy.whenCalled('getExceptionList');
+            }).then(function() {
+              // Check that the action menu was closed.
+              assertFalse(actionMenu.open);
             });
       });
 
@@ -625,7 +641,7 @@ cr.define('site_list', function() {
               assertNotEquals(undefined, clickable);
               MockInteractions.tap(clickable);
               assertEquals(prefs.exceptions.geolocation[0].origin,
-                  testElement.selectedSite.origin);
+                  settings.getQueryParameters().get('site'));
             });
       });
 
@@ -709,6 +725,22 @@ cr.define('site_list', function() {
             });
       });
 
+      test('All sites category no action menu', function() {
+        setUpCategory(settings.ALL_SITES, '', prefsVarious);
+        return browserProxy.whenCalled('getExceptionList').then(
+            function(contentType) {
+              // Use resolver to ensure that the list container is populated.
+              var resolver = new PromiseResolver();
+              testElement.async(resolver.resolve);
+              return resolver.promise.then(function() {
+                var item = testElement.$.listContainer.children[0];
+                var dots = item.querySelector('paper-icon-button');
+                assertTrue(!!dots);
+                assertTrue(dots.hidden);
+              });
+            });
+      });
+
       test('All sites category', function() {
         // Prefs: Multiple and overlapping sites.
         setUpCategory(settings.ALL_SITES, '', prefsVarious);
@@ -748,7 +780,7 @@ cr.define('site_list', function() {
                 assertNotEquals(undefined, clickable);
                 MockInteractions.tap(clickable);
                 assertEquals(prefsVarious.exceptions.geolocation[0].origin,
-                    testElement.selectedSite.origin);
+                    settings.getQueryParameters().get('site'));
               });
             });
       });
@@ -786,7 +818,7 @@ cr.define('site_list', function() {
                       prefsMixedOriginAndPattern.exceptions.
                                                  geolocation[0].
                                                  origin,
-                      testElement.sites[0].originForDisplay);
+                      testElement.sites[0].displayName);
                 }
 
                 assertEquals(undefined, testElement.selectedOrigin);
@@ -800,7 +832,7 @@ cr.define('site_list', function() {
                       prefsMixedOriginAndPattern.exceptions.
                                                  geolocation[0].
                                                  origin,
-                      testElement.selectedSite.originForDisplay);
+                      testElement.sites[0].displayName);
                 }
               });
             });

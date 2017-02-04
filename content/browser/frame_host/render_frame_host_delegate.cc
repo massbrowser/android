@@ -15,7 +15,7 @@
 namespace content {
 
 bool RenderFrameHostDelegate::OnMessageReceived(
-    RenderFrameHost* render_view_host,
+    RenderFrameHostImpl* render_frame_host,
     const IPC::Message& message) {
   return false;
 }
@@ -55,6 +55,11 @@ bool RenderFrameHostDelegate::CheckMediaAccessPermission(
   LOG(ERROR) << "RenderFrameHostDelegate::CheckMediaAccessPermission: "
              << "Not supported.";
   return false;
+}
+
+std::string RenderFrameHostDelegate::GetDefaultMediaDeviceID(
+    MediaStreamType type) {
+  return std::string();
 }
 
 AccessibilityMode RenderFrameHostDelegate::GetAccessibilityMode() const {

@@ -7,6 +7,7 @@
 #include <queue>
 #include <utility>
 
+#include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
@@ -102,7 +103,8 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
           unique_name,
           blink::WebSandboxFlags::None,
           false /* should enforce strict mixed content checking */,
-          false /* is a potentially trustworthy unique origin */),
+          false /* is a potentially trustworthy unique origin */,
+          false /* has received a user gesture */),
       pending_sandbox_flags_(blink::WebSandboxFlags::None),
       frame_owner_properties_(frame_owner_properties),
       loading_progress_(kLoadingProgressNotStarted),
@@ -255,8 +257,9 @@ void FrameTreeNode::SetFrameName(const std::string& name,
   replication_state_.unique_name = unique_name;
 }
 
-void FrameTreeNode::SetFeaturePolicyHeader(const std::string& header) {
-  replication_state_.feature_policy_header = header;
+void FrameTreeNode::SetFeaturePolicyHeader(
+    const ParsedFeaturePolicyHeader& parsed_header) {
+  replication_state_.feature_policy_header = parsed_header;
 }
 
 void FrameTreeNode::ResetFeaturePolicy() {
@@ -506,6 +509,11 @@ void FrameTreeNode::BeforeUnloadCanceled() {
     if (pending_frame_host)
       pending_frame_host->ResetLoadingState();
   }
+}
+
+void FrameTreeNode::OnSetHasReceivedUserGesture() {
+  render_manager_.OnSetHasReceivedUserGesture();
+  replication_state_.has_received_user_gesture = true;
 }
 
 FrameTreeNode* FrameTreeNode::GetSibling(int relative_offset) const {

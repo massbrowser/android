@@ -97,6 +97,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   bool IsRichlyEditable();
   bool IsFocused();
   bool IsFocusable();
+  bool IsModal();
   bool IsSelected();
   bool IsSelectable();
   bool IsMultiSelectable();
@@ -191,6 +192,8 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   int MisspellingsCount();
   int DescriptionElementCount();
   v8::Local<v8::Object> DescriptionElementAtIndex(unsigned index);
+
+  std::string Placeholder();
 
   blink::WebAXObject accessibility_object_;
   Factory* factory_;

@@ -10,9 +10,11 @@
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContextTask.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/Event.h"
 #include "core/html/HTMLMediaElement.h"
 #include "modules/EventTargetModules.h"
+#include "platform/MemoryCoordinator.h"
 #include "platform/UserGestureIndicator.h"
 
 namespace blink {
@@ -45,9 +47,7 @@ RemotePlayback* RemotePlayback::create(HTMLMediaElement& element) {
 }
 
 RemotePlayback::RemotePlayback(HTMLMediaElement& element)
-    : ActiveScriptWrappable(this),
-      ContextLifecycleObserver(&element.document()),
-      m_state(element.isPlayingRemotely()
+    : m_state(element.isPlayingRemotely()
                   ? WebRemotePlaybackState::Connected
                   : WebRemotePlaybackState::Disconnected),
       m_availability(WebRemotePlaybackAvailability::Unknown),
@@ -73,8 +73,13 @@ ScriptPromise RemotePlayback::watchAvailability(
     return promise;
   }
 
-  // TODO(avayvod): implement steps 4 and 5 of the algorithm.
-  // https://crbug.com/655233
+  if (MemoryCoordinator::isLowEndDevice()) {
+    resolver->reject(DOMException::create(
+        NotSupportedError,
+        "Availability monitoring is not supported on this device."));
+    return promise;
+  }
+
   int id;
   do {
     id = getExecutionContext()->circularSequentialID();
@@ -85,7 +90,7 @@ ScriptPromise RemotePlayback::watchAvailability(
 
   // Report the current availability via the callback.
   getExecutionContext()->postTask(
-      BLINK_FROM_HERE,
+      TaskType::MediaElementEvent, BLINK_FROM_HERE,
       createSameThreadTask(&RemotePlayback::notifyInitialAvailability,
                            wrapPersistent(this), id),
       "watchAvailabilityCallback");
@@ -200,11 +205,6 @@ bool RemotePlayback::hasPendingActivity() const {
          m_promptPromiseResolver;
 }
 
-void RemotePlayback::contextDestroyed() {
-  m_availabilityCallbacks.clear();
-  m_promptPromiseResolver = nullptr;
-}
-
 void RemotePlayback::notifyInitialAvailability(int callbackId) {
   // May not find the callback if the website cancels it fast enough.
   auto iter = m_availabilityCallbacks.find(callbackId);
@@ -304,7 +304,6 @@ DEFINE_TRACE(RemotePlayback) {
   visitor->trace(m_promptPromiseResolver);
   visitor->trace(m_mediaElement);
   EventTargetWithInlineData::trace(visitor);
-  ContextLifecycleObserver::trace(visitor);
 }
 
 DEFINE_TRACE_WRAPPERS(RemotePlayback) {

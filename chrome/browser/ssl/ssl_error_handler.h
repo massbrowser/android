@@ -29,6 +29,7 @@ class Profile;
 
 namespace base {
 class Clock;
+class TimeDelta;
 }
 
 namespace content {
@@ -41,11 +42,11 @@ class NetworkTimeTracker;
 
 // This class is responsible for deciding what type of interstitial to show for
 // an SSL validation error. The display of the interstitial might be delayed by
-// a few seconds (2 by default) while trying to determine the cause of the
-// error. During this window, the class will: check for a clock error, wait for
-// a name-mismatch suggested URL, or wait for a captive portal result to arrive.
-// If there is a name mismatch error and a corresponding suggested URL
-// result arrives in this window, the user is redirected to the suggested URL.
+// a few seconds while trying to determine the cause of the error. During this
+// window, the class will: check for a clock error, wait for a name-mismatch
+// suggested URL, or wait for a captive portal result to arrive. If there is a
+// name mismatch error and a corresponding suggested URL result arrives in this
+// window, the user is redirected to the suggested URL.
 // Failing that, if a captive portal detected result arrives in the time window,
 // a captive portal error page is shown. If none of these potential error
 // causes match, an SSL interstitial is shown.
@@ -58,6 +59,41 @@ class SSLErrorHandler : public content::WebContentsUserData<SSLErrorHandler>,
                         public content::NotificationObserver {
  public:
   typedef base::Callback<void(content::WebContents*)> TimerStartedCallback;
+
+  // Events for UMA. Do not rename or remove values, add new values to the end.
+  // Public for testing.
+  enum UMAEvent {
+    HANDLE_ALL = 0,
+    SHOW_CAPTIVE_PORTAL_INTERSTITIAL_NONOVERRIDABLE,
+    SHOW_CAPTIVE_PORTAL_INTERSTITIAL_OVERRIDABLE,
+    SHOW_SSL_INTERSTITIAL_NONOVERRIDABLE,
+    SHOW_SSL_INTERSTITIAL_OVERRIDABLE,
+    WWW_MISMATCH_FOUND,
+    WWW_MISMATCH_URL_AVAILABLE,
+    WWW_MISMATCH_URL_NOT_AVAILABLE,
+    SHOW_BAD_CLOCK,
+    SSL_ERROR_HANDLER_EVENT_COUNT
+  };
+
+  // This delegate allows unit tests to provide their own Chrome specific
+  // actions.
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+    virtual void CheckForCaptivePortal() = 0;
+    virtual bool GetSuggestedUrl(const std::vector<std::string>& dns_names,
+                                 GURL* suggested_url) const = 0;
+    virtual void CheckSuggestedUrl(
+        const GURL& suggested_url,
+        const CommonNameMismatchHandler::CheckUrlCallback& callback) = 0;
+    virtual void NavigateToSuggestedURL(const GURL& suggested_url) = 0;
+    virtual bool IsErrorOverridable() const = 0;
+    virtual void ShowCaptivePortalInterstitial(const GURL& landing_url) = 0;
+    virtual void ShowSSLInterstitial() = 0;
+    virtual void ShowBadClockInterstitial(
+        const base::Time& now,
+        ssl_errors::ClockState clock_state) = 0;
+  };
 
   // Entry point for the class. The parameters are the same as SSLBlockingPage
   // constructor.
@@ -72,52 +108,46 @@ class SSLErrorHandler : public content::WebContentsUserData<SSLErrorHandler>,
           callback);
 
   // Testing methods.
-  static void SetInterstitialDelayForTest(base::TimeDelta delay);
+  static void SetInterstitialDelayForTesting(const base::TimeDelta& delay);
   // The callback pointer must remain valid for the duration of error handling.
-  static void SetInterstitialTimerStartedCallbackForTest(
+  static void SetInterstitialTimerStartedCallbackForTesting(
       TimerStartedCallback* callback);
-  static void SetClockForTest(base::Clock* testing_clock);
-  static void SetNetworkTimeTrackerForTest(
+  static void SetClockForTesting(base::Clock* testing_clock);
+  static void SetNetworkTimeTrackerForTesting(
       network_time::NetworkTimeTracker* tracker);
+  static std::string GetHistogramNameForTesting();
+  bool IsTimerRunningForTesting() const;
 
  protected:
-  // The parameters are the same as SSLBlockingPage's constructor.
-  SSLErrorHandler(content::WebContents* web_contents,
-                  int cert_error,
-                  const net::SSLInfo& ssl_info,
-                  const GURL& request_url,
-                  int options_mask,
-                  std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
-                  const base::Callback<
-                      void(content::CertificateRequestResultType)>& callback);
+  SSLErrorHandler(
+      std::unique_ptr<Delegate> delegate,
+      content::WebContents* web_contents,
+      Profile* profile,
+      int cert_error,
+      const net::SSLInfo& ssl_info,
+      const GURL& request_url,
+      const base::Callback<void(content::CertificateRequestResultType)>&
+          callback);
 
   ~SSLErrorHandler() override;
 
   // Called when an SSL cert error is encountered. Triggers a captive portal
   // check and fires a one shot timer to wait for a "captive portal detected"
-  // result to arrive.
+  // result to arrive. Protected for testing.
   void StartHandlingError();
-  const base::OneShotTimer& get_timer() const { return timer_; }
 
-  // These are virtual for tests:
-  virtual void CheckForCaptivePortal();
-  virtual bool GetSuggestedUrl(const std::vector<std::string>& dns_names,
-                               GURL* suggested_url) const;
-  virtual void CheckSuggestedUrl(const GURL& suggested_url);
-  virtual void NavigateToSuggestedURL(const GURL& suggested_url);
-  virtual bool IsErrorOverridable() const;
-  virtual void ShowCaptivePortalInterstitial(const GURL& landing_url);
-  virtual void ShowSSLInterstitial();
-  virtual void ShowBadClockInterstitial(const base::Time& now,
-                                        ssl_errors::ClockState clock_state);
+ private:
+  void ShowCaptivePortalInterstitial(const GURL& landing_url);
+  void ShowSSLInterstitial();
+  void ShowBadClockInterstitial(const base::Time& now,
+                                ssl_errors::ClockState clock_state);
 
   // Gets the result of whether the suggested URL is valid. Displays
   // common name mismatch interstitial or ssl interstitial accordingly.
   void CommonNameMismatchHandlerCallback(
-      const CommonNameMismatchHandler::SuggestedUrlCheckResult& result,
+      CommonNameMismatchHandler::SuggestedUrlCheckResult result,
       const GURL& suggested_url);
 
- private:
   // content::NotificationObserver:
   void Observe(
       int type,
@@ -125,9 +155,8 @@ class SSLErrorHandler : public content::WebContentsUserData<SSLErrorHandler>,
       const content::NotificationDetails& details) override;
 
   // content::WebContentsObserver:
-  void DidStartNavigationToPendingEntry(
-      const GURL& url,
-      content::ReloadType reload_type) override;
+  void DidStartNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
   // content::WebContentsObserver:
   void NavigationStopped() override;
@@ -137,22 +166,20 @@ class SSLErrorHandler : public content::WebContentsUserData<SSLErrorHandler>,
   void DeleteSSLErrorHandler();
 
   void HandleCertDateInvalidError();
-  void HandleCertDateInvalidErrorImpl();
+  void HandleCertDateInvalidErrorImpl(base::TimeTicks started_handling_error);
 
-  content::WebContents* web_contents_;
+  std::unique_ptr<Delegate> delegate_;
+  content::WebContents* const web_contents_;
+  Profile* const profile_;
   const int cert_error_;
   const net::SSLInfo ssl_info_;
   const GURL request_url_;
-  const int options_mask_;
   base::Callback<void(content::CertificateRequestResultType)> callback_;
-  Profile* const profile_;
 
   content::NotificationRegistrar registrar_;
   base::OneShotTimer timer_;
 
   std::unique_ptr<CommonNameMismatchHandler> common_name_mismatch_handler_;
-
-  std::unique_ptr<SSLCertReporter> ssl_cert_reporter_;
 
   base::WeakPtrFactory<SSLErrorHandler> weak_ptr_factory_;
 

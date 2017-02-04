@@ -18,8 +18,10 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "cc/blink/web_layer_impl.h"
 #include "cc/layers/video_layer.h"
+#include "cc/paint/paint_flags.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/renderer_preferences.h"
@@ -37,7 +39,6 @@
 #include "media/base/android/media_player_android.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/media_content_type.h"
-#include "media/base/media_keys.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
 #include "media/base/timestamp_constants.h"
@@ -64,7 +65,6 @@
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImage.h"
-#include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
@@ -133,7 +133,7 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
     blink::WebFrame* frame,
     blink::WebMediaPlayerClient* client,
     blink::WebMediaPlayerEncryptedMediaClient* encrypted_client,
-    base::WeakPtr<media::WebMediaPlayerDelegate> delegate,
+    media::WebMediaPlayerDelegate* delegate,
     RendererMediaPlayerManager* player_manager,
     scoped_refptr<StreamTextureFactory> factory,
     int frame_id,
@@ -179,11 +179,12 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       volume_multiplier_(1.0),
       weak_factory_(this) {
   DCHECK(player_manager_);
+  DCHECK(delegate_);
 
   DCHECK(main_thread_checker_.CalledOnValidThread());
 
-  if (delegate_)
-    delegate_id_ = delegate_->AddObserver(this);
+  delegate_id_ = delegate_->AddObserver(this);
+  delegate_->SetIdle(delegate_id_, true);
 
   player_id_ = player_manager_->RegisterMediaPlayer(this);
 
@@ -215,10 +216,8 @@ WebMediaPlayerAndroid::~WebMediaPlayerAndroid() {
     current_frame_ = NULL;
   }
 
-  if (delegate_) {
-    delegate_->PlayerGone(delegate_id_);
-    delegate_->RemoveObserver(delegate_id_);
-  }
+  delegate_->PlayerGone(delegate_id_);
+  delegate_->RemoveObserver(delegate_id_);
 }
 
 void WebMediaPlayerAndroid::load(LoadType load_type,
@@ -296,7 +295,7 @@ void WebMediaPlayerAndroid::play() {
         base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kDisableMediaSuspend) ||
         (IsBackgroundVideoCandidate() &&
-            delegate_ && delegate_->IsPlayingBackgroundVideo());
+         delegate_->IsBackgroundVideoPlaybackUnlocked());
     if (!can_video_play_in_background) {
       is_play_pending_ = true;
       return;
@@ -341,7 +340,7 @@ void WebMediaPlayerAndroid::requestRemotePlaybackStop() {
 
 void WebMediaPlayerAndroid::seek(double seconds) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
-  DVLOG(1) << __FUNCTION__ << "(" << seconds << ")";
+  DVLOG(1) << __func__ << "(" << seconds << ")";
 
   playback_completed_ = false;
   base::TimeDelta new_seek_time = base::TimeDelta::FromSecondsD(seconds);
@@ -508,7 +507,7 @@ bool WebMediaPlayerAndroid::didLoadingProgress() {
 
 void WebMediaPlayerAndroid::paint(blink::WebCanvas* canvas,
                                   const blink::WebRect& rect,
-                                  SkPaint& paint) {
+                                  cc::PaintFlags& paint) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   std::unique_ptr<blink::WebGraphicsContext3DProvider> provider(
       blink::Platform::current()
@@ -556,7 +555,7 @@ void WebMediaPlayerAndroid::paint(blink::WebCanvas* canvas,
   // readbacked to system memory then draw onto the canvas.
   SkRect dest;
   dest.set(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
-  SkPaint video_paint;
+  cc::PaintFlags video_paint;
   video_paint.setAlpha(paint.getAlpha());
   video_paint.setBlendMode(paint.getBlendMode());
   // It is not necessary to pass the dest into the drawBitmap call since all
@@ -576,8 +575,6 @@ void WebMediaPlayerAndroid::paint(blink::WebCanvas* canvas,
 bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
     gpu::gles2::GLES2Interface* gl,
     unsigned int texture,
-    unsigned int internal_format,
-    unsigned int type,
     bool premultiply_alpha,
     bool flip_y) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
@@ -606,9 +603,15 @@ bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
   // value down to get the expected result.
   // flip_y==true means to reverse the video orientation while
   // flip_y==false means to keep the intrinsic orientation.
-  gl->CopyTextureCHROMIUM(src_texture, texture, internal_format, type, flip_y,
-                          premultiply_alpha, false);
 
+  // The video's texture might be larger than the natural size because
+  // the encoder might have had to round up to the size of a macroblock.
+  // Make sure to only copy the natural size to avoid putting garbage
+  // into the bottom of the destination texture.
+  const gfx::Size& natural_size = video_frame->natural_size();
+  gl->CopySubTextureCHROMIUM(src_texture, 0, GL_TEXTURE_2D, texture, 0, 0, 0, 0,
+                             0, natural_size.width(), natural_size.height(),
+                             flip_y, premultiply_alpha, false);
   gl->DeleteTextures(1, &src_texture);
   gl->Flush();
 
@@ -823,8 +826,10 @@ void WebMediaPlayerAndroid::OnVideoSizeChanged(int width, int height) {
     // If we're paused after we receive metadata for the first time, tell the
     // delegate we can now be safely suspended due to inactivity if a subsequent
     // play event does not occur.
-    if (paused() && delegate_)
-      delegate_->DidPause(delegate_id_, false);
+    if (paused()) {
+      delegate_->DidPause(delegate_id_);
+      delegate_->SetIdle(delegate_id_, true);
+    }
   }
 }
 
@@ -949,8 +954,7 @@ void WebMediaPlayerAndroid::OnPlayerReleased() {
   if (is_playing_)
     OnMediaPlayerPause();
 
-  if (delegate_)
-    delegate_->PlayerGone(delegate_id_);
+  delegate_->PlayerGone(delegate_id_);
 }
 
 void WebMediaPlayerAndroid::SuspendAndReleaseResources() {
@@ -962,8 +966,7 @@ void WebMediaPlayerAndroid::SuspendAndReleaseResources() {
     case WebMediaPlayer::NetworkStateLoaded:
       Pause(false);
       client_->playbackStateChanged();
-      if (delegate_)
-        delegate_->PlayerGone(delegate_id_);
+      delegate_->PlayerGone(delegate_id_);
       break;
     // If a WebMediaPlayer instance has entered into one of these states,
     // the internal network state in HTMLMediaElement could be set to empty.
@@ -1148,8 +1151,8 @@ void WebMediaPlayerAndroid::TryCreateStreamTextureProxyIfNeeded() {
     return;
 
   DCHECK(!texture_id_);
-  stream_texture_proxy_.reset(stream_texture_factory_->CreateProxy(
-      kGLTextureExternalOES, &texture_id_, &texture_mailbox_));
+  stream_texture_proxy_ = stream_texture_factory_->CreateProxy(
+      kGLTextureExternalOES, &texture_id_, &texture_mailbox_);
   if (!stream_texture_proxy_)
     return;
   ReallocateVideoFrame();
@@ -1193,25 +1196,32 @@ void WebMediaPlayerAndroid::UpdatePlayingState(bool is_playing) {
   else
     interpolator_.StopInterpolating();
 
-  if (delegate_) {
-    if (is_playing) {
-      // We must specify either video or audio to the delegate, but neither may
-      // be known at this point -- there are no video only containers, so only
-      // send audio if we know for sure its audio.  The browser side player will
-      // fill in the correct value later for media sessions.
-      delegate_->DidPlay(delegate_id_, hasVideo(), !hasVideo(), isRemote(),
-                         media::DurationToMediaContentType(duration_));
+  if (is_playing) {
+    // We must specify either video or audio to the delegate, but neither may
+    // be known at this point -- there are no video only containers, so only
+    // send audio if we know for sure its audio.  The browser side player will
+    // fill in the correct value later for media sessions.
+    if (isRemote()) {
+      delegate_->PlayerGone(delegate_id_);
     } else {
-      // Even if OnPlaybackComplete() has not been called yet, Blink may have
-      // already fired the ended event based on current time relative to
-      // duration -- so we need to check both possibilities here.
-      delegate_->DidPause(delegate_id_,
-                          playback_completed_ || currentTime() >= duration());
+      delegate_->DidPlay(delegate_id_, hasVideo(), !hasVideo(),
+                         media::DurationToMediaContentType(duration_));
     }
+    delegate_->SetIdle(delegate_id_, false);
+  } else {
+    // Even if OnPlaybackComplete() has not been called yet, Blink may have
+    // already fired the ended event based on current time relative to
+    // duration -- so we need to check both possibilities here.
+    if (playback_completed_ || currentTime() >= duration()) {
+      delegate_->PlayerGone(delegate_id_);
+    } else {
+      delegate_->DidPause(delegate_id_);
+    }
+    delegate_->SetIdle(delegate_id_, true);
   }
 }
 
-void WebMediaPlayerAndroid::OnHidden() {
+void WebMediaPlayerAndroid::OnFrameHidden() {
   // Pause audible video preserving its session.
   if (hasVideo() && IsBackgroundVideoCandidate() && !paused()) {
     Pause(false);
@@ -1219,29 +1229,30 @@ void WebMediaPlayerAndroid::OnHidden() {
     return;
   }
 
-  OnSuspendRequested(false);
+  OnIdleTimeout();
 }
 
-void WebMediaPlayerAndroid::OnShown() {
+void WebMediaPlayerAndroid::OnFrameClosed() {
+  SuspendAndReleaseResources();
+}
+
+void WebMediaPlayerAndroid::OnFrameShown() {
   if (is_play_pending_)
     play();
 }
 
-bool WebMediaPlayerAndroid::OnSuspendRequested(bool must_suspend) {
-  if (!must_suspend &&
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
+void WebMediaPlayerAndroid::OnIdleTimeout() {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableMediaSuspend)) {
-    return true;
+    return;
   }
 
-  // If we're idle or playing video, pause and release resources; audio only
-  // players are allowed to continue unless indicated otherwise by the call.
-  if (must_suspend || (paused() && playback_completed_) ||
-      (hasVideo() && !IsBackgroundVideoCandidate())) {
+  // If we're playing video or ended, pause and release resources; audio only
+  // players are allowed to continue.
+  if ((hasVideo() && !IsBackgroundVideoCandidate()) ||
+      (paused() && playback_completed_)) {
     SuspendAndReleaseResources();
   }
-
-  return true;
 }
 
 void WebMediaPlayerAndroid::OnPlay() {
@@ -1322,7 +1333,8 @@ bool WebMediaPlayerAndroid::IsBackgroundVideoCandidate() const {
   }
 
   return base::FeatureList::IsEnabled(media::kResumeBackgroundVideo) &&
-      hasAudio() && !isRemote() && delegate_ && delegate_->IsHidden();
+         hasAudio() && !isRemote() && delegate_ && delegate_->IsFrameHidden() &&
+         !delegate_->IsFrameClosed();
 }
 
 }  // namespace content

@@ -11,6 +11,7 @@
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "ios/chrome/browser/bookmarks/startup_task_runner_service_factory.h"
 #include "ios/chrome/browser/content_settings/cookie_settings_factory.h"
+#include "ios/chrome/browser/desktop_promotion/desktop_promotion_sync_service_factory.h"
 #include "ios/chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "ios/chrome/browser/favicon/favicon_service_factory.h"
 #include "ios/chrome/browser/favicon/ios_chrome_favicon_loader_factory.h"
@@ -28,6 +29,7 @@
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #include "ios/chrome/browser/services/gcm/ios_chrome_gcm_profile_service_factory.h"
+#include "ios/chrome/browser/sessions/tab_restore_service_delegate_impl_ios_factory.h"
 #include "ios/chrome/browser/signin/about_signin_internals_factory.h"
 #include "ios/chrome/browser/signin/account_consistency_service_factory.h"
 #include "ios/chrome/browser/signin/account_fetcher_service_factory.h"
@@ -84,6 +86,7 @@ void EnsureBrowserStateKeyedServiceFactoriesBuilt() {
   ios::WebDataServiceFactory::GetInstance();
   ios::WebHistoryServiceFactory::GetInstance();
   AuthenticationServiceFactory::GetInstance();
+  DesktopPromotionSyncServiceFactory::GetInstance();
   IOSChromeGCMProfileServiceFactory::GetInstance();
   IOSChromeLargeIconCacheFactory::GetInstance();
   IOSChromeLargeIconServiceFactory::GetInstance();
@@ -98,5 +101,6 @@ void EnsureBrowserStateKeyedServiceFactoriesBuilt() {
   SigninClientFactory::GetInstance();
   suggestions::SuggestionsServiceFactory::GetInstance();
   SyncSetupServiceFactory::GetInstance();
+  TabRestoreServiceDelegateImplIOSFactory::GetInstance();
   TranslateAcceptLanguagesFactory::GetInstance();
 }

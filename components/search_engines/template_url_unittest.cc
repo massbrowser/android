@@ -1691,34 +1691,29 @@ TEST_F(TemplateURLTest, ContextualSearchParameters) {
                                                         search_terms_data_);
   EXPECT_EQ("http://bar/_/contextualsearch?", result);
 
-  TemplateURLRef::SearchTermsArgs::ContextualSearchParams params(
-      1, 6, 11, "allen", "woody+allen+movies", "www.wikipedia.org", "utf-8", 1);
+  // Test the current common case, which uses no home country.
+  TemplateURLRef::SearchTermsArgs::ContextualSearchParams params(2, 1,
+                                                                 std::string());
   search_terms_args.contextual_search_params = params;
   result = url.url_ref().ReplaceSearchTerms(search_terms_args,
                                             search_terms_data_);
   EXPECT_EQ(
       "http://bar/_/contextualsearch?"
-      "ctxs=1&"
-      "ctxs_start=6&"
-      "ctxs_end=11&"
-      "q=allen&"
-      "ctxs_content=woody+allen+movies&"
-      "ctxsl_url=www.wikipedia.org&"
-      "ctxs_encoding=utf-8&"
+      "ctxs=2&"
       "ctxsl_coca=1",
       result);
 
-  // Test the current common case, which uses the shorter constructor.
+  // Test the home country case.
   search_terms_args.contextual_search_params =
-      TemplateURLRef::SearchTermsArgs::ContextualSearchParams(2, "allen",
-                                                              std::string(), 0);
+      TemplateURLRef::SearchTermsArgs::ContextualSearchParams(2, 2, "CH");
   result =
       url.url_ref().ReplaceSearchTerms(search_terms_args, search_terms_data_);
 
   EXPECT_EQ(
       "http://bar/_/contextualsearch?"
       "ctxs=2&"
-      "q=allen",
+      "ctxsl_coca=2&"
+      "ctxs_hc=CH",
       result);
 }
 
@@ -1872,48 +1867,4 @@ TEST_F(TemplateURLTest, InvalidateCachedValues) {
   EXPECT_EQ(base::ASCIIToUTF16("123"), search_terms);
 
   search_terms_data_.set_google_base_url("http://www.google.com/");
-}
-
-// Test that TemplateURL object created with settings for google engine
-// matches its TemplateURLData.
-TEST_F(TemplateURLTest, MatchesData) {
-  TemplateURLData data;
-  data.SetURL("{google:baseURL}search?q={searchTerms}");
-  data.SetShortName(ASCIIToUTF16("Google"));
-  data.SetKeyword(ASCIIToUTF16("google.com"));
-  data.suggestions_url = "{google:baseSuggestURL}search?q={searchTerms}";
-  data.instant_url = "{google:baseURL}webhp";
-  data.image_url = "{google:baseURL}searchbyimage/upload";
-  data.new_tab_url = "{google:baseURL}_/chrome/newtab";
-  data.contextual_search_url = "{google:baseURL}_/contextualsearch";
-  data.image_url_post_params = "encoded_image={google:imageThumbnail}";
-  data.alternate_urls.push_back("{google:baseURL}s#q={searchTerms}");
-  // search_terms_replacement_key with value of
-  // "{google:instantExtendedEnabledKey}" is replaced inside TemplateUrl
-  // constructor so must be handled specially inside MatchesData.
-  data.search_terms_replacement_key = "{google:instantExtendedEnabledKey}";
-  TemplateURL url(data);
-  EXPECT_TRUE(TemplateURL::MatchesData(&url, &data, search_terms_data_));
-}
-
-// Test for correct replacement of GoogleInstantExtendedEnabledKey param.
-TEST_F(TemplateURLTest, GoogleInstantExtendedEnabledReplacement) {
-  TemplateURLData data;
-  data.SetURL(
-      "{google:baseURL}search/"
-      "?{google:instantExtendedEnabledKey}&q={searchTerms}");
-  data.SetShortName(ASCIIToUTF16("Google"));
-  data.SetKeyword(ASCIIToUTF16("google.com"));
-  data.search_terms_replacement_key = "{google:instantExtendedEnabledKey}";
-  TemplateURL turl(data);
-  EXPECT_TRUE(TemplateURL::MatchesData(&turl, &data, search_terms_data_));
-  // Expect that replacement of search_terms_replacement_key in TemplateURL
-  // constructor is correct.
-  EXPECT_EQ("espv", turl.search_terms_replacement_key());
-  // Expect that replacement of {google:instantExtendedEnabledKey} in search url
-  // is correct.
-  GURL search_generated = turl.GenerateSearchURL(search_terms_data_);
-  EXPECT_EQ("http://www.google.com/search/?espv&q=blah.blah.blah.blah.blah",
-            search_generated.spec());
-  EXPECT_TRUE(turl.HasSearchTermsReplacementKey(search_generated));
 }

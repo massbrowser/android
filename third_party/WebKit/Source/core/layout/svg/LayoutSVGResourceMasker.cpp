@@ -23,9 +23,9 @@
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/paint/SVGPaintContext.h"
 #include "core/svg/SVGElement.h"
+#include "platform/graphics/paint/PaintRecord.h"
 #include "platform/graphics/paint/SkPictureBuilder.h"
 #include "platform/transforms/AffineTransform.h"
-#include "third_party/skia/include/core/SkPicture.h"
 
 namespace blink {
 
@@ -51,7 +51,7 @@ void LayoutSVGResourceMasker::removeClientFromCache(LayoutObject* client,
                                         : ParentOnlyInvalidation);
 }
 
-sk_sp<const SkPicture> LayoutSVGResourceMasker::createContentPicture(
+sk_sp<const PaintRecord> LayoutSVGResourceMasker::createContentPicture(
     AffineTransform& contentTransformation,
     const FloatRect& targetBoundingBox,
     GraphicsContext& context) {
@@ -85,17 +85,11 @@ sk_sp<const SkPicture> LayoutSVGResourceMasker::createContentPicture(
           : ColorFilterNone;
   pictureBuilder.context().setColorFilter(maskContentFilter);
 
-  for (SVGElement* childElement = Traversal<SVGElement>::firstChild(*element());
-       childElement;
-       childElement = Traversal<SVGElement>::nextSibling(*childElement)) {
-    LayoutObject* layoutObject = childElement->layoutObject();
-    if (!layoutObject)
+  for (const SVGElement& childElement :
+       Traversal<SVGElement>::childrenOf(*element())) {
+    const LayoutObject* layoutObject = childElement.layoutObject();
+    if (!layoutObject || layoutObject->styleRef().display() == EDisplay::None)
       continue;
-    const ComputedStyle* style = layoutObject->style();
-    if (!style || style->display() == EDisplay::None ||
-        style->visibility() != EVisibility::Visible)
-      continue;
-
     SVGPaintContext::paintSubtree(pictureBuilder.context(), layoutObject);
   }
 
@@ -104,15 +98,10 @@ sk_sp<const SkPicture> LayoutSVGResourceMasker::createContentPicture(
 }
 
 void LayoutSVGResourceMasker::calculateMaskContentVisualRect() {
-  for (SVGElement* childElement = Traversal<SVGElement>::firstChild(*element());
-       childElement;
-       childElement = Traversal<SVGElement>::nextSibling(*childElement)) {
-    LayoutObject* layoutObject = childElement->layoutObject();
-    if (!layoutObject)
-      continue;
-    const ComputedStyle* style = layoutObject->style();
-    if (!style || style->display() == EDisplay::None ||
-        style->visibility() != EVisibility::Visible)
+  for (const SVGElement& childElement :
+       Traversal<SVGElement>::childrenOf(*element())) {
+    const LayoutObject* layoutObject = childElement.layoutObject();
+    if (!layoutObject || layoutObject->styleRef().display() == EDisplay::None)
       continue;
     m_maskContentBoundaries.unite(
         layoutObject->localToSVGParentTransform().mapRect(

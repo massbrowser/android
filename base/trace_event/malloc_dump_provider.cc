@@ -82,14 +82,49 @@ size_t HookGetSizeEstimate(const AllocatorDispatch* self, void* address) {
   return next->get_size_estimate_function(next, address);
 }
 
+unsigned HookBatchMalloc(const AllocatorDispatch* self,
+                         size_t size,
+                         void** results,
+                         unsigned num_requested) {
+  const AllocatorDispatch* const next = self->next;
+  unsigned count =
+      next->batch_malloc_function(next, size, results, num_requested);
+  for (unsigned i = 0; i < count; ++i) {
+    MallocDumpProvider::GetInstance()->InsertAllocation(results[i], size);
+  }
+  return count;
+}
+
+void HookBatchFree(const AllocatorDispatch* self,
+                   void** to_be_freed,
+                   unsigned num_to_be_freed) {
+  const AllocatorDispatch* const next = self->next;
+  for (unsigned i = 0; i < num_to_be_freed; ++i) {
+    MallocDumpProvider::GetInstance()->RemoveAllocation(to_be_freed[i]);
+  }
+  next->batch_free_function(next, to_be_freed, num_to_be_freed);
+}
+
+void HookFreeDefiniteSize(const AllocatorDispatch* self,
+                          void* ptr,
+                          size_t size) {
+  if (ptr)
+    MallocDumpProvider::GetInstance()->RemoveAllocation(ptr);
+  const AllocatorDispatch* const next = self->next;
+  next->free_definite_size_function(next, ptr, size);
+}
+
 AllocatorDispatch g_allocator_hooks = {
-    &HookAlloc,           /* alloc_function */
-    &HookZeroInitAlloc,   /* alloc_zero_initialized_function */
-    &HookllocAligned,     /* alloc_aligned_function */
-    &HookRealloc,         /* realloc_function */
-    &HookFree,            /* free_function */
-    &HookGetSizeEstimate, /* get_size_estimate_function */
-    nullptr,              /* next */
+    &HookAlloc,            /* alloc_function */
+    &HookZeroInitAlloc,    /* alloc_zero_initialized_function */
+    &HookllocAligned,      /* alloc_aligned_function */
+    &HookRealloc,          /* realloc_function */
+    &HookFree,             /* free_function */
+    &HookGetSizeEstimate,  /* get_size_estimate_function */
+    &HookBatchMalloc,      /* batch_malloc_function */
+    &HookBatchFree,        /* batch_free_function */
+    &HookFreeDefiniteSize, /* free_definite_size_function */
+    nullptr,               /* next */
 };
 #endif  // BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
 
@@ -105,26 +140,28 @@ struct WinHeapInfo {
 // NOTE: crbug.com/665516
 // Unfortunately, there is no safe way to collect information from secondary
 // heaps due to limitations and racy nature of this piece of WinAPI.
-void WinHeapMemoryDumpImpl(WinHeapInfo* main_heap_info) {
+void WinHeapMemoryDumpImpl(WinHeapInfo* crt_heap_info) {
 #if defined(SYZYASAN)
   if (base::debug::IsBinaryInstrumented())
     return;
 #endif
-  HANDLE main_heap = ::GetProcessHeap();
-  ::HeapLock(main_heap);
+
+  // Iterate through whichever heap our CRT is using.
+  HANDLE crt_heap = reinterpret_cast<HANDLE>(_get_heap_handle());
+  ::HeapLock(crt_heap);
   PROCESS_HEAP_ENTRY heap_entry;
   heap_entry.lpData = nullptr;
   // Walk over all the entries in the main heap.
-  while (::HeapWalk(main_heap, &heap_entry) != FALSE) {
+  while (::HeapWalk(crt_heap, &heap_entry) != FALSE) {
     if ((heap_entry.wFlags & PROCESS_HEAP_ENTRY_BUSY) != 0) {
-      main_heap_info->allocated_size += heap_entry.cbData;
-      main_heap_info->block_count++;
+      crt_heap_info->allocated_size += heap_entry.cbData;
+      crt_heap_info->block_count++;
     } else if ((heap_entry.wFlags & PROCESS_HEAP_REGION) != 0) {
-      main_heap_info->committed_size += heap_entry.Region.dwCommittedSize;
-      main_heap_info->uncommitted_size += heap_entry.Region.dwUnCommittedSize;
+      crt_heap_info->committed_size += heap_entry.Region.dwCommittedSize;
+      crt_heap_info->uncommitted_size += heap_entry.Region.dwUnCommittedSize;
     }
   }
-  CHECK(::HeapUnlock(main_heap) == TRUE);
+  CHECK(::HeapUnlock(crt_heap) == TRUE);
 }
 #endif  // defined(OS_WIN)
 }  // namespace
@@ -295,7 +332,10 @@ void MallocDumpProvider::InsertAllocation(void* address, size_t size) {
   auto* tracker = AllocationContextTracker::GetInstanceForCurrentThread();
   if (!tracker)
     return;
-  AllocationContext context = tracker->GetContextSnapshot();
+
+  AllocationContext context;
+  if (!tracker->GetContextSnapshot(&context))
+    return;
 
   AutoLock lock(allocation_register_lock_);
   if (!allocation_register_)

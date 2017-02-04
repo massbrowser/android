@@ -116,8 +116,8 @@ TEST_F(AnimationEffectStackTest, NewAnimations) {
       makeEffectModel(CSSPropertyFontSize, AnimatableDouble::create(3)));
   InertEffect* inert2 = makeInertEffect(
       makeEffectModel(CSSPropertyZIndex, AnimatableDouble::create(4)));
-  newAnimations.append(inert1);
-  newAnimations.append(inert2);
+  newAnimations.push_back(inert1);
+  newAnimations.push_back(inert2);
   ActiveInterpolationsMap result = EffectStack::activeInterpolations(
       &element->elementAnimations()->effectStack(), &newAnimations, 0,
       KeyframeEffectReadOnly::DefaultPriority);
@@ -134,7 +134,7 @@ TEST_F(AnimationEffectStackTest, CancelledAnimations) {
       play(makeKeyframeEffect(makeEffectModel(CSSPropertyFontSize,
                                               AnimatableDouble::create(1))),
            0);
-  cancelledAnimations.add(animation);
+  cancelledAnimations.insert(animation);
   play(makeKeyframeEffect(
            makeEffectModel(CSSPropertyZIndex, AnimatableDouble::create(2))),
        0);

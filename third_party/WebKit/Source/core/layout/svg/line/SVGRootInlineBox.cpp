@@ -69,17 +69,19 @@ void SVGRootInlineBox::computePerCharacterLayoutInformation() {
   // Perform SVG text layout phase four
   // Position & resize all SVGInlineText/FlowBoxes in the inline box tree,
   // resize the root box as well as the LayoutSVGText parent block.
-  LayoutRect childRect = layoutInlineBoxes(*this);
+  layoutInlineBoxes(*this);
 
-  // Finally, assign the root block position, now that all content is laid out.
+  // Let the HTML block space originate from the local SVG coordinate space.
   LineLayoutBlockFlow parentBlock = block();
-  parentBlock.setLocation(childRect.location());
-  parentBlock.setSize(childRect.size());
+  parentBlock.setLocation(LayoutPoint());
+  // The width could be any value, but set it so that a line box will mirror
+  // within the childRect when its coordinates are converted between physical
+  // block direction and flipped block direction, for ease of understanding of
+  // flipped coordinates. The height doesn't matter.
+  parentBlock.setSize(LayoutSize(x() * 2 + width(), LayoutUnit()));
 
-  adjustInlineBoxesToBlockSpace(*this);
-
-  setLineTopBottomPositions(LayoutUnit(), logicalHeight(), LayoutUnit(),
-                            logicalHeight());
+  setLineTopBottomPositions(logicalTop(), logicalBottom(), logicalTop(),
+                            logicalBottom());
 }
 
 LayoutRect SVGRootInlineBox::layoutInlineBoxes(InlineBox& box) {
@@ -106,25 +108,6 @@ LayoutRect SVGRootInlineBox::layoutInlineBoxes(InlineBox& box) {
   return rect;
 }
 
-void SVGRootInlineBox::adjustInlineBoxesToBlockSpace(InlineBox& box) {
-  LineLayoutBlockFlow parentBlock = block();
-  LayoutRect rect(box.topLeft(), box.size());
-  // In layoutChildBoxes(), the box was laid out in physical SVG coordinates.
-  rect.moveBy(-parentBlock.location());
-  // Convert physical coordinates into "physical coordinates in flipped block
-  // direction".
-  parentBlock.flipForWritingMode(rect);
-  box.setX(rect.x());
-  box.setY(rect.y());
-
-  if (!box.isInlineFlowBox())
-    return;
-
-  for (InlineBox* child = toInlineFlowBox(box).firstChild(); child;
-       child = child->nextOnLine())
-    adjustInlineBoxesToBlockSpace(*child);
-}
-
 InlineBox* SVGRootInlineBox::closestLeafChildForPosition(
     const LayoutPoint& point) {
   InlineBox* firstLeaf = firstLeafChild();
@@ -143,7 +126,7 @@ InlineBox* SVGRootInlineBox::closestLeafChildForPosition(
       continue;
 
     closestLeaf = leaf;
-    if (point.x() < leaf->left() + leaf->logicalWidth())
+    if (point.x() < leaf->x() + leaf->logicalWidth())
       return leaf;
   }
 

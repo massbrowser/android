@@ -198,6 +198,25 @@ void SendRequestIPC(ScriptContext* context,
   frame->Send(new ExtensionHostMsg_Request(frame->GetRoutingID(), params));
 }
 
+// Sends a notification to the browser that an event either has or no longer has
+// listeners associated with it. Note that we only do this for the first added/
+// last removed listener, rather than for each subsequent listener; the browser
+// only cares if an event has >0 associated listeners.
+// TODO(devlin): Use this in EventBindings, too, and add logic for lazy
+// background pages.
+void SendEventListenersIPC(binding::EventListenersChanged changed,
+                           ScriptContext* context,
+                           const std::string& event_name) {
+  if (changed == binding::EventListenersChanged::HAS_LISTENERS) {
+    content::RenderThread::Get()->Send(new ExtensionHostMsg_AddListener(
+        context->GetExtensionID(), context->url(), event_name));
+  } else {
+    DCHECK_EQ(binding::EventListenersChanged::NO_LISTENERS, changed);
+    content::RenderThread::Get()->Send(new ExtensionHostMsg_RemoveListener(
+        context->GetExtensionID(), context->url(), event_name));
+  }
+}
+
 base::LazyInstance<WorkerScriptContextSet> g_worker_script_context_set =
     LAZY_INSTANCE_INITIALIZER;
 
@@ -217,7 +236,7 @@ Dispatcher::Dispatcher(DispatcherDelegate* delegate)
 
   if (FeatureSwitch::native_crx_bindings()->IsEnabled()) {
     bindings_system_ = base::MakeUnique<NativeExtensionBindingsSystem>(
-        base::Bind(&SendRequestIPC));
+        base::Bind(&SendRequestIPC), base::Bind(&SendEventListenersIPC));
   } else {
     bindings_system_ = base::MakeUnique<JsExtensionBindingsSystem>(
         &source_map_, base::MakeUnique<RequestSender>());
@@ -247,37 +266,22 @@ Dispatcher::Dispatcher(DispatcherDelegate* delegate)
 
   RenderThread::Get()->RegisterExtension(SafeBuiltins::CreateV8Extension());
 
-  // WebSecurityPolicy whitelists. They should be registered for both
-  // chrome-extension: and chrome-extension-resource.
-  using RegisterFunction = void (*)(const WebString&);
-  RegisterFunction register_functions[] = {
-      // Treat as secure because communication with them is entirely in the
-      // browser, so there is no danger of manipulation or eavesdropping on
-      // communication with them by third parties.
-      WebSecurityPolicy::registerURLSchemeAsSecure,
-      // As far as Blink is concerned, they should be allowed to receive CORS
-      // requests. At the Extensions layer, requests will actually be blocked
-      // unless overridden by the web_accessible_resources manifest key.
-      // TODO(kalman): See what happens with a service worker.
-      WebSecurityPolicy::registerURLSchemeAsCORSEnabled,
-      // Resources should bypass Content Security Policy checks when included in
-      // protected resources. TODO(kalman): What are "protected resources"?
-      WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy,
-      // Extension resources are HTTP-like and safe to expose to the fetch API.
-      // The rules for the fetch API are consistent with XHR.
-      WebSecurityPolicy::registerURLSchemeAsSupportingFetchAPI,
-      // Extension resources, when loaded as the top-level document, should
-      // bypass Blink's strict first-party origin checks.
-      WebSecurityPolicy::registerURLSchemeAsFirstPartyWhenTopLevel,
-  };
+  // Register WebSecurityPolicy whitelists for the chrome-extension:// scheme.
+  WebString extension_scheme(WebString::fromASCII(kExtensionScheme));
 
-  WebString extension_scheme(base::ASCIIToUTF16(kExtensionScheme));
-  WebString extension_resource_scheme(base::ASCIIToUTF16(
-      kExtensionResourceScheme));
-  for (RegisterFunction func : register_functions) {
-    func(extension_scheme);
-    func(extension_resource_scheme);
-  }
+  // Resources should bypass Content Security Policy checks when included in
+  // protected resources. TODO(kalman): What are "protected resources"?
+  WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy(
+      extension_scheme);
+
+  // Extension resources are HTTP-like and safe to expose to the fetch API. The
+  // rules for the fetch API are consistent with XHR.
+  WebSecurityPolicy::registerURLSchemeAsSupportingFetchAPI(extension_scheme);
+
+  // Extension resources, when loaded as the top-level document, should bypass
+  // Blink's strict first-party origin checks.
+  WebSecurityPolicy::registerURLSchemeAsFirstPartyWhenTopLevel(
+      extension_scheme);
 
   // For extensions, we want to ensure we call the IdleHandler every so often,
   // even if the extension keeps up activity.
@@ -320,12 +324,11 @@ bool Dispatcher::IsExtensionActive(const std::string& extension_id) const {
 void Dispatcher::DidCreateScriptContext(
     blink::WebLocalFrame* frame,
     const v8::Local<v8::Context>& v8_context,
-    int extension_group,
     int world_id) {
   const base::TimeTicks start_time = base::TimeTicks::Now();
 
-  ScriptContext* context = script_context_set_->Register(
-      frame, v8_context, extension_group, world_id);
+  ScriptContext* context =
+      script_context_set_->Register(frame, v8_context, world_id);
 
   // Initialize origin permissions for content scripts, which can't be
   // initialized in |OnActivateExtension|.
@@ -349,14 +352,13 @@ void Dispatcher::DidCreateScriptContext(
   bindings_system_->DidCreateScriptContext(context);
   UpdateBindingsForContext(context);
 
-  bool is_within_platform_app = IsWithinPlatformApp();
   // Inject custom JS into the platform app context.
-  if (is_within_platform_app) {
+  if (IsWithinPlatformApp()) {
     module_system->Require("platformApp");
   }
 
   RequireGuestViewModules(context);
-  delegate_->RequireAdditionalModules(context, is_within_platform_app);
+  delegate_->RequireAdditionalModules(context);
 
   const base::TimeDelta elapsed = base::TimeTicks::Now() - start_time;
   switch (context->context_type()) {
@@ -400,12 +402,11 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
     const GURL& url) {
   const base::TimeTicks start_time = base::TimeTicks::Now();
 
-  if (!url.SchemeIs(kExtensionScheme) &&
-      !url.SchemeIs(kExtensionResourceScheme)) {
-    // Early-out if this isn't a chrome-extension:// or resource scheme,
-    // because looking up the extension registry is unnecessary if it's not.
-    // Checking this will also skip over hosted apps, which is the desired
-    // behavior - hosted app service workers are not our concern.
+  if (!url.SchemeIs(kExtensionScheme)) {
+    // Early-out if this isn't a chrome-extension:// scheme, because looking up
+    // the extension registry is unnecessary if it's not. Checking this will
+    // also skip over hosted apps, which is the desired behavior - hosted app
+    // service workers are not our concern.
     return;
   }
 
@@ -465,8 +466,7 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
     // TODO(lazyboy): Get rid of RequireGuestViewModules() as this doesn't seem
     // necessary for Extension SW.
     RequireGuestViewModules(context);
-    delegate_->RequireAdditionalModules(context,
-                                        false /* is_within_platform_app */);
+    delegate_->RequireAdditionalModules(context);
   }
 
   g_worker_script_context_set.Get().Insert(base::WrapUnique(context));
@@ -532,8 +532,7 @@ void Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(
     v8::Local<v8::Context> v8_context,
     int64_t service_worker_version_id,
     const GURL& url) {
-  if (url.SchemeIs(kExtensionScheme) ||
-      url.SchemeIs(kExtensionResourceScheme)) {
+  if (url.SchemeIs(kExtensionScheme)) {
     // See comment in DidInitializeServiceWorkerContextOnWorkerThread.
     g_worker_script_context_set.Get().Remove(v8_context, url);
     // TODO(devlin): We're not calling
@@ -744,9 +743,9 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
   resources.push_back(
       std::make_pair(mojo::kCodecModuleName, IDR_MOJO_CODEC_JS));
   resources.push_back(
-      std::make_pair(mojo::kConnectionModuleName, IDR_MOJO_CONNECTION_JS));
-  resources.push_back(
       std::make_pair(mojo::kConnectorModuleName, IDR_MOJO_CONNECTOR_JS));
+  resources.push_back(std::make_pair(mojo::kInterfaceTypesModuleName,
+                                     IDR_MOJO_INTERFACE_TYPES_JS));
   resources.push_back(
       std::make_pair(mojo::kRouterModuleName, IDR_MOJO_ROUTER_JS));
   resources.push_back(
@@ -788,7 +787,6 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
                                      IDR_PRINTER_PROVIDER_CUSTOM_BINDINGS_JS));
   resources.push_back(
       std::make_pair("runtime", IDR_RUNTIME_CUSTOM_BINDINGS_JS));
-  resources.push_back(std::make_pair("windowControls", IDR_WINDOW_CONTROLS_JS));
   resources.push_back(
       std::make_pair("webViewRequest",
                      IDR_WEB_VIEW_REQUEST_CUSTOM_BINDINGS_JS));
@@ -804,8 +802,8 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
   resources.push_back(
       std::make_pair("chrome/browser/media/router/mojo/media_router.mojom",
                      IDR_MEDIA_ROUTER_MOJOM_JS));
-  resources.push_back(std::make_pair("mojo/common/common_custom_types.mojom",
-                                     IDR_MOJO_COMMON_CUSTOM_TYPES_MOJOM_JS));
+  resources.push_back(
+      std::make_pair("mojo/common/time.mojom", IDR_MOJO_TIME_MOJOM_JS));
   resources.push_back(
       std::make_pair("media_router_bindings", IDR_MEDIA_ROUTER_BINDINGS_JS));
 #endif  // defined(ENABLE_MEDIA_ROUTER)
@@ -999,8 +997,7 @@ void Dispatcher::OnCancelSuspend(const std::string& extension_id) {
                 base::DictionaryValue());
 }
 
-void Dispatcher::OnDeliverMessage(int target_port_id,
-                                  int source_tab_id,
+void Dispatcher::OnDeliverMessage(const PortId& target_port_id,
                                   const Message& message) {
   MessagingBindings::DeliverMessage(*script_context_set_, target_port_id,
                                     message,
@@ -1008,12 +1005,12 @@ void Dispatcher::OnDeliverMessage(int target_port_id,
 }
 
 void Dispatcher::OnDispatchOnConnect(
-    int target_port_id,
+    const PortId& target_port_id,
     const std::string& channel_name,
     const ExtensionMsg_TabConnectionInfo& source,
     const ExtensionMsg_ExternalConnectionInfo& info,
     const std::string& tls_channel_id) {
-  DCHECK_EQ(1, target_port_id % 2);  // target renderer ports have odd IDs.
+  DCHECK(!target_port_id.is_opener);
 
   MessagingBindings::DispatchOnConnect(*script_context_set_, target_port_id,
                                        channel_name, source, info,
@@ -1021,7 +1018,7 @@ void Dispatcher::OnDispatchOnConnect(
                                        NULL);  // All render frames.
 }
 
-void Dispatcher::OnDispatchOnDisconnect(int port_id,
+void Dispatcher::OnDispatchOnDisconnect(const PortId& port_id,
                                         const std::string& error_message) {
   MessagingBindings::DispatchOnDisconnect(*script_context_set_, port_id,
                                           error_message,

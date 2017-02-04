@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,14 +20,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "ui/display/display.h"
-#include "ui/display/display_export.h"
+#include "ui/display/display_layout.h"
 #include "ui/display/display_observer.h"
-#include "ui/display/manager/display_layout.h"
+#include "ui/display/manager/display_manager_export.h"
 #include "ui/display/manager/managed_display_info.h"
 #include "ui/display/types/display_constants.h"
 
 #if defined(OS_CHROMEOS)
-#include "ui/display/chromeos/display_configurator.h"
+#include "ui/display/manager/chromeos/display_configurator.h"
 #endif
 
 namespace gfx {
@@ -47,13 +48,13 @@ class DisplayManagerTestApi;
 
 // DisplayManager maintains the current display configurations,
 // and notifies observers when configuration changes.
-class DISPLAY_EXPORT DisplayManager
+class DISPLAY_MANAGER_EXPORT DisplayManager
 #if defined(OS_CHROMEOS)
-    : public ui::DisplayConfigurator::SoftwareMirroringController
+    : public DisplayConfigurator::SoftwareMirroringController
 #endif
 {
  public:
-  class DISPLAY_EXPORT Delegate {
+  class DISPLAY_MANAGER_EXPORT Delegate {
    public:
     virtual ~Delegate() {}
 
@@ -71,12 +72,9 @@ class DISPLAY_EXPORT DisplayManager
     virtual void PostDisplayConfigurationChange(bool must_clear_window) = 0;
 
 #if defined(OS_CHROMEOS)
-    // Get the ui::DisplayConfigurator.
-    virtual ui::DisplayConfigurator* display_configurator() = 0;
+    // Get the DisplayConfigurator.
+    virtual DisplayConfigurator* display_configurator() = 0;
 #endif
-
-    virtual std::string GetInternalDisplayNameString() = 0;
-    virtual std::string GetUnknownDisplayNameString() = 0;
   };
 
   // How the second display will be used.
@@ -110,6 +108,10 @@ class DISPLAY_EXPORT DisplayManager
     force_bounds_changed_ = force_bounds_changed;
   }
 
+  void set_configure_displays(bool configure_displays) {
+    configure_displays_ = configure_displays;
+  }
+
   // Returns the display id of the first display in the outupt list.
   int64_t first_display_id() const { return first_display_id_; }
 
@@ -125,6 +127,9 @@ class DISPLAY_EXPORT DisplayManager
 
   // Returns the display layout used for current displays.
   const DisplayLayout& GetCurrentDisplayLayout() const;
+
+  // Returns the actual display layout after it has been resolved and applied.
+  const DisplayLayout& GetCurrentResolvedDisplayLayout() const;
 
   // Returns the current display list.
   DisplayIdList GetCurrentDisplayIdList() const;
@@ -166,15 +171,19 @@ class DISPLAY_EXPORT DisplayManager
   bool SetDisplayMode(int64_t display_id,
                       const scoped_refptr<ManagedDisplayMode>& display_mode);
 
-  // Register per display properties. |overscan_insets| is null if the display
-  // has no custom overscan insets.
-  void RegisterDisplayProperty(int64_t display_id,
-                               Display::Rotation rotation,
-                               float ui_scale,
-                               const gfx::Insets* overscan_insets,
-                               const gfx::Size& resolution_in_pixels,
-                               float device_scale_factor,
-                               ui::ColorCalibrationProfile color_profile);
+  // Register per display properties.
+  // |overscan_insets| is null if the display has no custom overscan insets.
+  // |touch_calibration_data| is null if the display has no touch calibration
+  // associated data.
+  void RegisterDisplayProperty(
+      int64_t display_id,
+      Display::Rotation rotation,
+      float ui_scale,
+      const gfx::Insets* overscan_insets,
+      const gfx::Size& resolution_in_pixels,
+      float device_scale_factor,
+      ColorCalibrationProfile color_profile,
+      const TouchCalibrationData* touch_calibration_data);
 
   // Register stored rotation properties for the internal display.
   void RegisterDisplayRotationProperties(bool rotation_lock,
@@ -211,7 +220,7 @@ class DISPLAY_EXPORT DisplayManager
 
   // Sets the color calibration of the display to |profile|.
   void SetColorCalibrationProfile(int64_t display_id,
-                                  ui::ColorCalibrationProfile profile);
+                                  ColorCalibrationProfile profile);
 
   // Called when display configuration has changed. The new display
   // configurations is passed as a vector of Display object, which contains each
@@ -297,6 +306,11 @@ class DISPLAY_EXPORT DisplayManager
 #if defined(OS_CHROMEOS)
   void SetSoftwareMirroring(bool enabled) override;
   bool SoftwareMirroringEnabled() const override;
+  void SetTouchCalibrationData(
+      int64_t display_id,
+      const TouchCalibrationData::CalibrationPointPairQuad& point_pair_quad,
+      const gfx::Size& display_bounds);
+  void ClearTouchCalibrationData(int64_t display_id);
 #endif
 
   // Sets/gets default multi display mode.
@@ -401,15 +415,22 @@ class DISPLAY_EXPORT DisplayManager
 
   // Applies the |layout| and updates the bounds of displays in |display_list|.
   // |updated_ids| contains the ids for displays whose bounds have changed.
-  void ApplyDisplayLayout(const DisplayLayout& layout,
+  void ApplyDisplayLayout(DisplayLayout* layout,
                           Displays* display_list,
                           std::vector<int64_t>* updated_ids);
 
   Delegate* delegate_ = nullptr;  // not owned.
 
+  // When set to true, DisplayManager will use DisplayConfigurator to configure
+  // displays. By default, this is set to true when running on device and false
+  // when running off device.
+  bool configure_displays_ = false;
+
   std::unique_ptr<Screen> screen_;
 
   std::unique_ptr<DisplayLayoutStore> layout_store_;
+
+  std::unique_ptr<DisplayLayout> current_resolved_layout_;
 
   int64_t first_display_id_ = kInvalidDisplayId;
 

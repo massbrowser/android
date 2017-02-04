@@ -273,6 +273,12 @@ void ContentPasswordManagerDriver::ShowPasswordSuggestions(
       key, text_direction, typed_username, options, bounds);
 }
 
+void ContentPasswordManagerDriver::ShowNotSecureWarning(
+    base::i18n::TextDirection text_direction,
+    const gfx::RectF& bounds) {
+  password_autofill_manager_.OnShowNotSecureWarning(text_direction, bounds);
+}
+
 void ContentPasswordManagerDriver::PasswordAutofillAgentConstructed() {
   SendLoggingAvailability();
 }
@@ -308,8 +314,8 @@ ContentPasswordManagerDriver::GetAutofillAgent() {
 const autofill::mojom::PasswordAutofillAgentPtr&
 ContentPasswordManagerDriver::GetPasswordAutofillAgent() {
   if (!password_autofill_agent_) {
-    autofill::mojom::PasswordAutofillAgentRequest request =
-        mojo::GetProxy(&password_autofill_agent_);
+    autofill::mojom::PasswordAutofillAgentRequest request(
+        &password_autofill_agent_);
     // Some test codes may have no initialized remote interfaces.
     if (render_frame_host_->GetRemoteInterfaces()) {
       render_frame_host_->GetRemoteInterfaces()->GetInterface(
@@ -324,7 +330,7 @@ const autofill::mojom::PasswordGenerationAgentPtr&
 ContentPasswordManagerDriver::GetPasswordGenerationAgent() {
   if (!password_gen_agent_) {
     render_frame_host_->GetRemoteInterfaces()->GetInterface(
-        mojo::GetProxy(&password_gen_agent_));
+        mojo::MakeRequest(&password_gen_agent_));
   }
 
   return password_gen_agent_;

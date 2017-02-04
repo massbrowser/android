@@ -43,13 +43,11 @@ class AccessPolicy;
 class DisplayManager;
 class Display;
 class DragTargetConnection;
-class EventMatcher;
 class ServerWindow;
 class TargetedEvent;
 class WindowManagerDisplayRoot;
 class WindowManagerState;
 class WindowServer;
-class WindowTreeTest;
 
 namespace test {
 class WindowTreeTestApi;
@@ -260,9 +258,7 @@ class WindowTree : public mojom::WindowTree,
                                      const ServerWindow* transient_window,
                                      bool originated_change);
   void ProcessWindowSurfaceChanged(ServerWindow* window,
-                                   const cc::SurfaceId& surface_id,
-                                   const gfx::Size& frame_size,
-                                   float device_scale_factor);
+                                   const cc::SurfaceInfo& surface_info);
 
   // Sends this event to the client if it matches an active pointer watcher.
   // |target_window| is the target of the event, and may be null or not known
@@ -421,7 +417,6 @@ class WindowTree : public mojom::WindowTree,
                         float opacity) override;
   void AttachCompositorFrameSink(
       Id transport_window_id,
-      mojom::CompositorFrameSinkType type,
       cc::mojom::MojoCompositorFrameSinkRequest compositor_frame_sink,
       cc::mojom::MojoCompositorFrameSinkClientPtr client) override;
   void Embed(Id transport_window_id,
@@ -430,8 +425,8 @@ class WindowTree : public mojom::WindowTree,
              const EmbedCallback& callback) override;
   void SetFocus(uint32_t change_id, Id transport_window_id) override;
   void SetCanFocus(Id transport_window_id, bool can_focus) override;
-  void SetCanAcceptEvents(Id transport_window_id,
-                          bool can_accept_events) override;
+  void SetEventTargetingPolicy(Id transport_window_id,
+                               mojom::EventTargetingPolicy policy) override;
   void SetPredefinedCursor(uint32_t change_id,
                            Id transport_window_id,
                            ui::mojom::Cursor cursor_id) override;
@@ -442,6 +437,7 @@ class WindowTree : public mojom::WindowTree,
                         mojo::TextInputStatePtr state) override;
   void OnWindowInputEventAck(uint32_t event_id,
                              mojom::EventResult result) override;
+  void DeactivateWindow(Id window_id) override;
   void SetClientArea(Id transport_window_id,
                      const gfx::Insets& insets,
                      const base::Optional<std::vector<gfx::Rect>>&
@@ -449,6 +445,8 @@ class WindowTree : public mojom::WindowTree,
   void SetCanAcceptDrops(Id window_id, bool accepts_drops) override;
   void SetHitTestMask(Id transport_window_id,
                       const base::Optional<gfx::Rect>& mask) override;
+  void StackAbove(uint32_t change_id, Id above_id, Id below_id) override;
+  void StackAtTop(uint32_t change_id, Id window_id) override;
   void GetWindowManagerClient(
       mojo::AssociatedInterfaceRequest<mojom::WindowManagerClient> internal)
       override;
@@ -467,9 +465,8 @@ class WindowTree : public mojom::WindowTree,
   void CancelWindowMove(Id window_id) override;
 
   // mojom::WindowManagerClient:
-  void AddAccelerator(uint32_t id,
-                      mojom::EventMatcherPtr event_matcher,
-                      const AddAcceleratorCallback& callback) override;
+  void AddAccelerators(std::vector<mojom::AcceleratorPtr> accelerators,
+                       const AddAcceleratorsCallback& callback) override;
   void RemoveAccelerator(uint32_t id) override;
   void AddActivationParent(Id transport_window_id) override;
   void RemoveActivationParent(Id transport_window_id) override;
@@ -494,6 +491,8 @@ class WindowTree : public mojom::WindowTree,
   bool IsWindowKnownForAccessPolicy(const ServerWindow* window) const override;
   bool IsWindowRootOfAnotherTreeForAccessPolicy(
       const ServerWindow* window) const override;
+  bool IsWindowCreatedByWindowManager(
+      const ServerWindow* window) const override;
 
   // DragSource:
   void OnDragCompleted(bool success, uint32_t action_taken) override;
@@ -503,7 +502,8 @@ class WindowTree : public mojom::WindowTree,
 
   // DragTargetConnection:
   void PerformOnDragDropStart(
-      mojo::Map<mojo::String, mojo::Array<uint8_t>> mime_data) override;
+      const std::unordered_map<std::string, std::vector<uint8_t>>& mime_data)
+      override;
   void PerformOnDragEnter(
       const ServerWindow* window,
       uint32_t event_flags,

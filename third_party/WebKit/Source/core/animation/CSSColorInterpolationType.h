@@ -19,11 +19,11 @@ class CSSColorInterpolationType : public CSSInterpolationType {
   CSSColorInterpolationType(PropertyHandle property)
       : CSSInterpolationType(property) {}
 
-  InterpolationValue maybeConvertUnderlyingValue(
-      const InterpolationEnvironment&) const final;
-  void apply(const InterpolableValue&,
-             const NonInterpolableValue*,
-             InterpolationEnvironment&) const final;
+  InterpolationValue maybeConvertStandardPropertyUnderlyingValue(
+      const StyleResolverState&) const final;
+  void applyStandardPropertyValue(const InterpolableValue&,
+                                  const NonInterpolableValue*,
+                                  StyleResolverState&) const final;
 
   static std::unique_ptr<InterpolableValue> createInterpolableColor(
       const Color&);
@@ -50,6 +50,10 @@ class CSSColorInterpolationType : public CSSInterpolationType {
                                        ConversionCheckers&) const final;
   InterpolationValue convertStyleColorPair(const StyleColor&,
                                            const StyleColor&) const;
+
+  const CSSValue* createCSSValue(const InterpolableValue&,
+                                 const NonInterpolableValue*,
+                                 const StyleResolverState&) const final;
 };
 
 }  // namespace blink

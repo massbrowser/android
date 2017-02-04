@@ -33,6 +33,7 @@
 #include "net/base/auth.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
+#include "net/base/trace_constants.h"
 #include "net/base/upload_data_stream.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/x509_certificate.h"
@@ -1265,7 +1266,8 @@ int HttpCache::Transaction::DoCacheToggleUnusedSincePrefetch() {
 int HttpCache::Transaction::DoCacheToggleUnusedSincePrefetchComplete(
     int result) {
   TRACE_EVENT0(
-      "net", "HttpCacheTransaction::DoCacheToggleUnusedSincePrefetchComplete");
+      kNetTracingCategory,
+      "HttpCacheTransaction::DoCacheToggleUnusedSincePrefetchComplete");
   // Restore the original value for this transaction.
   response_.unused_since_prefetch = !response_.unused_since_prefetch;
   next_state_ = STATE_CACHE_DISPATCH_VALIDATION;
@@ -2246,7 +2248,8 @@ ValidationType HttpCache::Transaction::RequiresValidation() {
   //  - make sure we have a matching request method
   //  - watch out for cached responses that depend on authentication
 
-  if (response_.vary_data.is_valid() &&
+  if (!(effective_load_flags_ & LOAD_SKIP_VARY_CHECK) &&
+      response_.vary_data.is_valid() &&
       !response_.vary_data.MatchesRequest(*request_,
                                           *response_.headers.get())) {
     vary_mismatch_ = true;

@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
+import android.support.v4.util.ArrayMap;
 import android.util.Log;
 
 import org.chromium.base.ActivityState;
@@ -45,13 +46,11 @@ import org.chromium.chrome.browser.net.qualityprovider.ExternalEstimateProviderA
 import org.chromium.chrome.browser.omaha.RequestGenerator;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
 import org.chromium.chrome.browser.physicalweb.PhysicalWebBleClient;
-import org.chromium.chrome.browser.physicalweb.PhysicalWebEnvironment;
 import org.chromium.chrome.browser.policy.PolicyAuditor;
 import org.chromium.chrome.browser.preferences.LocationSettings;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
-import org.chromium.chrome.browser.preferences.autofill.AutofillPreferences;
+import org.chromium.chrome.browser.preferences.autofill.AutofillAndPaymentsPreferences;
 import org.chromium.chrome.browser.preferences.password.SavePasswordsPreferences;
-import org.chromium.chrome.browser.preferences.privacy.ClearBrowsingDataPreferences;
 import org.chromium.chrome.browser.rlz.RevenueStats;
 import org.chromium.chrome.browser.services.AndroidEduOwnerCheckCallback;
 import org.chromium.chrome.browser.signin.GoogleActivityController;
@@ -62,12 +61,15 @@ import org.chromium.chrome.browser.tabmodel.document.ActivityDelegateImpl;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModelSelector;
 import org.chromium.chrome.browser.tabmodel.document.StorageDelegate;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
+import org.chromium.chrome.browser.webapps.GooglePlayWebApkInstallDelegate;
 import org.chromium.components.signin.AccountManagerDelegate;
 import org.chromium.components.signin.SystemAccountManagerDelegate;
 import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.ChildProcessCreationParams;
 import org.chromium.policy.AppRestrictionsProvider;
 import org.chromium.policy.CombinedPolicyProvider;
+
+import java.util.Map;
 
 /**
  * Basic application functionality that should be shared among all browser applications that use
@@ -85,10 +87,17 @@ public class ChromeApplication extends ContentApplication {
 
     private static DocumentTabModelSelector sDocumentTabModelSelector;
 
+    protected Map<Class, Class> mImplementationMap;
+
     @Override
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
         ContextUtils.initApplicationContext(this);
+
+        // This field may be used before onCreate is called, so we need to create it here.
+        // It may be wise to update this anticipated capacity from time time as expectations for
+        // the quantity of downsteam-specific implementations increases (or decreases).
+        mImplementationMap = new ArrayMap<Class, Class>(8);
     }
 
     /**
@@ -148,8 +157,8 @@ public class ChromeApplication extends ContentApplication {
 
     @CalledByNative
     protected void showAutofillSettings() {
-        PreferencesLauncher.launchSettingsPage(this,
-                AutofillPreferences.class.getName());
+        PreferencesLauncher.launchSettingsPage(
+                this, AutofillAndPaymentsPreferences.class.getName());
     }
 
     @CalledByNative
@@ -197,8 +206,8 @@ public class ChromeApplication extends ContentApplication {
                     "Attempting to open clear browsing data for a tab without a valid activity");
             return;
         }
-        Intent intent = PreferencesLauncher.createIntentForSettingsPage(activity,
-                ClearBrowsingDataPreferences.class.getName());
+
+        Intent intent = PreferencesLauncher.createIntentForClearBrowsingDataPage(activity);
         activity.startActivity(intent);
     }
 
@@ -312,13 +321,6 @@ public class ChromeApplication extends ContentApplication {
         return new PhysicalWebBleClient();
     }
 
-    /**
-     * @return A new {@link PhysicalWebEnvironment} instance.
-     */
-    public PhysicalWebEnvironment createPhysicalWebEnvironment() {
-        return new PhysicalWebEnvironment();
-    }
-
     public InstantAppsHandler createInstantAppsHandler() {
         return new InstantAppsHandler();
     }
@@ -395,8 +397,13 @@ public class ChromeApplication extends ContentApplication {
         return null;
     }
 
+    /** Returns the singleton instance of GooglePlayWebApkInstallDelegate. */
+    public GooglePlayWebApkInstallDelegate getGooglePlayWebApkInstallDelegate() {
+        return null;
+    }
+
     /**
-     * Returns the Singleton instance of the DocumentTabModelSelector.
+     * Returns the singleton instance of the DocumentTabModelSelector.
      * TODO(dfalcantara): Find a better place for this once we differentiate between activity and
      *                    application-level TabModelSelectors.
      * @return The DocumentTabModelSelector for the application.
@@ -426,5 +433,40 @@ public class ChromeApplication extends ContentApplication {
      */
     public AccountManagerDelegate createAccountManagerDelegate() {
         return new SystemAccountManagerDelegate(this);
+    }
+
+    /**
+     * Instantiates an object of a given type.
+     * This method exists as a utility to generate objects of types that have different
+     * implementations upstream and downstream.  To use this,
+     * - give the upstream class a public parameterless constructor (required!)
+     *   e.g., public MyType() {},
+     * - register the downstream object in mImplementationMap,
+     *   e.g., mImplementationMap.put(MyType.class, MySubType.class);
+     * - invoke this method on the appropriate class,
+     *   e.g., ChromeApplication.createObject(MyType.class).
+     * @param klass The class that the Chrome Application should create an instance of.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> T createObject(Class<T> klass) {
+        Class newKlass = ((ChromeApplication) ContextUtils.getApplicationContext())
+                .mImplementationMap.get(klass);
+        if (newKlass == null) {
+            newKlass = klass;
+        }
+
+        Object obj;
+        try {
+            obj = newKlass.newInstance();
+        } catch (InstantiationException e) {
+            throw new RuntimeException("Asked to create unexpected class: " + klass.getName(), e);
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException("Asked to create unexpected class: " + klass.getName(), e);
+        }
+        if (!klass.isInstance(obj)) {
+            throw new RuntimeException("Created an instance of type " + obj.getClass().getName()
+                    + " when expected an instance of type " + klass.getName());
+        }
+        return (T) obj;
     }
 }

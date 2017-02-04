@@ -112,6 +112,7 @@ SkColor NativeThemeDarkAura::GetSystemColor(ColorId color_id) const {
     case kColorId_DisabledMenuItemForegroundColor:
     case kColorId_SelectedMenuItemForegroundColor:
     case kColorId_FocusedMenuItemBackgroundColor:
+    case kColorId_MenuItemSubtitleColor:
     case kColorId_MenuSeparatorColor:
     case kColorId_MenuBackgroundColor:
     case kColorId_MenuBorderColor:
@@ -137,12 +138,16 @@ SkColor NativeThemeDarkAura::GetSystemColor(ColorId color_id) const {
     case kColorId_TableSelectionBackgroundFocused:
     case kColorId_TableSelectionBackgroundUnfocused:
     case kColorId_TableGroupingIndicatorColor:
+    case kColorId_TableHeaderText:
+    case kColorId_TableHeaderBackground:
+    case kColorId_TableHeaderSeparator:
     case kColorId_ResultsTablePositiveText:
     case kColorId_ResultsTablePositiveHoveredText:
     case kColorId_ResultsTablePositiveSelectedText:
     case kColorId_ResultsTableNegativeText:
     case kColorId_ResultsTableNegativeHoveredText:
     case kColorId_ResultsTableNegativeSelectedText:
+    case kColorId_SeparatorColor:
     case kColorId_ThrobberSpinningColor:
     case kColorId_ThrobberWaitingColor:
     case kColorId_ThrobberLightColor:

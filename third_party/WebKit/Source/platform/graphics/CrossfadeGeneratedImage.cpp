@@ -41,9 +41,11 @@ CrossfadeGeneratedImage::CrossfadeGeneratedImage(PassRefPtr<Image> fromImage,
       m_percentage(percentage),
       m_crossfadeSize(crossfadeSize) {}
 
-void CrossfadeGeneratedImage::drawCrossfade(SkCanvas* canvas,
-                                            const SkPaint& paint,
-                                            ImageClampingMode clampMode) {
+void CrossfadeGeneratedImage::drawCrossfade(
+    PaintCanvas* canvas,
+    const SkPaint& paint,
+    ImageClampingMode clampMode,
+    const ColorBehavior& colorBehavior) {
   FloatRect fromImageRect(FloatPoint(), FloatSize(m_fromImage->size()));
   FloatRect toImageRect(FloatPoint(), FloatSize(m_toImage->size()));
   FloatRect destRect((FloatPoint()), FloatSize(m_crossfadeSize));
@@ -52,12 +54,12 @@ void CrossfadeGeneratedImage::drawCrossfade(SkCanvas* canvas,
   // applied here instead of inside the layer.  This probably faulty behavior
   // was maintained in order to preserve pre-existing behavior while refactoring
   // this code.  This should be investigated further. crbug.com/472634
-  SkPaint layerPaint;
+  PaintFlags layerPaint;
   layerPaint.setBlendMode(paint.getBlendMode());
-  SkAutoCanvasRestore ar(canvas, false);
+  PaintCanvasAutoRestore ar(canvas, false);
   canvas->saveLayer(nullptr, &layerPaint);
 
-  SkPaint imagePaint(paint);
+  PaintFlags imagePaint(paint);
   imagePaint.setBlendMode(SkBlendMode::kSrcOver);
   int imageAlpha = clampedAlphaForBlending(1 - m_percentage);
   imagePaint.setAlpha(imageAlpha > 255 ? 255 : imageAlpha);
@@ -67,25 +69,26 @@ void CrossfadeGeneratedImage::drawCrossfade(SkCanvas* canvas,
   // written this way during refactoring to avoid modifying existing behavior,
   // but this warrants further investigation. crbug.com/472634
   m_fromImage->draw(canvas, imagePaint, destRect, fromImageRect,
-                    DoNotRespectImageOrientation, clampMode);
+                    DoNotRespectImageOrientation, clampMode, colorBehavior);
   imagePaint.setBlendMode(SkBlendMode::kPlus);
   imageAlpha = clampedAlphaForBlending(m_percentage);
   imagePaint.setAlpha(imageAlpha > 255 ? 255 : imageAlpha);
   m_toImage->draw(canvas, imagePaint, destRect, toImageRect,
-                  DoNotRespectImageOrientation, clampMode);
+                  DoNotRespectImageOrientation, clampMode, colorBehavior);
 }
 
-void CrossfadeGeneratedImage::draw(SkCanvas* canvas,
-                                   const SkPaint& paint,
+void CrossfadeGeneratedImage::draw(PaintCanvas* canvas,
+                                   const PaintFlags& paint,
                                    const FloatRect& dstRect,
                                    const FloatRect& srcRect,
                                    RespectImageOrientationEnum,
-                                   ImageClampingMode clampMode) {
+                                   ImageClampingMode clampMode,
+                                   const ColorBehavior& colorBehavior) {
   // Draw nothing if either of the images hasn't loaded yet.
   if (m_fromImage == Image::nullImage() || m_toImage == Image::nullImage())
     return;
 
-  SkAutoCanvasRestore ar(canvas, true);
+  PaintCanvasAutoRestore ar(canvas, true);
   canvas->clipRect(dstRect);
   canvas->translate(dstRect.x(), dstRect.y());
   if (dstRect.size() != srcRect.size())
@@ -93,7 +96,7 @@ void CrossfadeGeneratedImage::draw(SkCanvas* canvas,
                   dstRect.height() / srcRect.height());
   canvas->translate(-srcRect.x(), -srcRect.y());
 
-  drawCrossfade(canvas, paint, clampMode);
+  drawCrossfade(canvas, paint, clampMode, colorBehavior);
 }
 
 void CrossfadeGeneratedImage::drawTile(GraphicsContext& context,
@@ -102,12 +105,13 @@ void CrossfadeGeneratedImage::drawTile(GraphicsContext& context,
   if (m_fromImage == Image::nullImage() || m_toImage == Image::nullImage())
     return;
 
-  SkPaint paint = context.fillPaint();
+  PaintFlags paint = context.fillPaint();
   paint.setBlendMode(SkBlendMode::kSrcOver);
   paint.setAntiAlias(context.shouldAntialias());
   FloatRect destRect((FloatPoint()), FloatSize(m_crossfadeSize));
   paint.setFilterQuality(context.computeFilterQuality(this, destRect, srcRect));
-  drawCrossfade(context.canvas(), paint, ClampImageToSourceRect);
+  drawCrossfade(context.canvas(), paint, ClampImageToSourceRect,
+                context.getColorBehavior());
 }
 
 }  // namespace blink

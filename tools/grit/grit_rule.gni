@@ -240,30 +240,6 @@ if (enable_media_router) {
     "enable_media_router",
   ]
 }
-if (enable_themes) {
-  grit_defines += [
-    "-D",
-    "enable_themes",
-  ]
-}
-if (enable_task_manager) {
-  grit_defines += [
-    "-D",
-    "enable_task_manager",
-  ]
-}
-if (enable_notifications) {
-  grit_defines += [
-    "-D",
-    "enable_notifications",
-  ]
-}
-if (mac_views_browser) {
-  grit_defines += [
-    "-D",
-    "mac_views_browser",
-  ]
-}
 
 # TODO(aberent): Enable for other platforms once the build machines have
 #                Java on them (and hence can run the closure compiler).

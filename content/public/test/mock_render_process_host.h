@@ -101,6 +101,7 @@ class MockRenderProcessHost : public RenderProcessHost {
       override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
   bool IsProcessBackgrounded() const override;
+  size_t GetWorkerRefCount() const override;
   void IncrementServiceWorkerRefCount() override;
   void DecrementServiceWorkerRefCount() override;
   void IncrementSharedWorkerRefCount() override;
@@ -110,6 +111,8 @@ class MockRenderProcessHost : public RenderProcessHost {
   void PurgeAndSuspend() override;
   void Resume() override;
   mojom::Renderer* GetRendererInterface() override;
+  void SetIsNeverSuitableForReuse() override;
+  bool MayReuseHost() override;
 
   // IPC::Sender via RenderProcessHost.
   bool Send(IPC::Message* msg) override;
@@ -139,8 +142,6 @@ class MockRenderProcessHost : public RenderProcessHost {
   void GetAudioOutputControllers(
       const GetAudioOutputControllersCallback& callback) const override {}
 
-  int worker_ref_count() const { return worker_ref_count_; }
-
   void SetRemoteInterfaces(
       std::unique_ptr<service_manager::InterfaceProvider> remote_interfaces) {
     remote_interfaces_ = std::move(remote_interfaces);
@@ -156,9 +157,9 @@ class MockRenderProcessHost : public RenderProcessHost {
   BrowserContext* browser_context_;
   base::ObserverList<RenderProcessHostObserver> observers_;
 
-  IDMap<RenderWidgetHost> render_widget_hosts_;
+  IDMap<RenderWidgetHost*> render_widget_hosts_;
   int prev_routing_id_;
-  IDMap<IPC::Listener> listeners_;
+  IDMap<IPC::Listener*> listeners_;
   bool fast_shutdown_started_;
   bool deletion_callback_called_;
   bool is_for_guests_only_;

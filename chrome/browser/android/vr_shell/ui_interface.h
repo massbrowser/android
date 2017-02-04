@@ -5,12 +5,16 @@
 #ifndef CHROME_BROWSER_ANDROID_VR_SHELL_UI_INTERFACE_H_
 #define CHROME_BROWSER_ANDROID_VR_SHELL_UI_INTERFACE_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/values.h"
 
 class GURL;
 
 namespace vr_shell {
+
+class VrOmnibox;
 
 class UiCommandHandler {
  public:
@@ -22,20 +26,33 @@ class UiCommandHandler {
 class UiInterface {
  public:
   enum Mode {
-    STANDARD,
-    WEB_VR,
-    MENU,
-    CINEMA,
+    STANDARD = 0,
+    WEB_VR
   };
 
-  UiInterface();
+  explicit UiInterface(Mode initial_mode, bool fullscreen);
   virtual ~UiInterface();
 
   void SetMode(Mode mode);
   Mode GetMode() { return mode_; }
-  void SetSecureOrigin(bool secure);
+  void SetMenuMode(bool enabled);
+  bool GetMenuMode() { return menu_mode_; }
+  void SetFullscreen(bool enabled);
+  bool GetFullscreen() { return fullscreen_; }
+  void SetSecurityLevel(int level);
+  void SetWebVRSecureOrigin(bool secure);
   void SetLoading(bool loading);
+  void SetLoadProgress(double progress);
+  void InitTabList();
+  void AppendToTabList(bool incognito, int id, const base::string16& title);
+  void FlushTabList();
+  void UpdateTab(bool incognito, int id, const std::string& title);
+  void RemoveTab(bool incognito, int id);
   void SetURL(const GURL& url);
+
+  // Omnibox input and output handling.
+  void HandleOmniboxInput(const base::DictionaryValue& input);
+  void SetOmniboxSuggestions(std::unique_ptr<base::Value> suggestions);
 
   // Called by WebUI when starting VR.
   void OnDomContentsLoaded();
@@ -43,11 +60,17 @@ class UiInterface {
 
  private:
   void FlushUpdates();
+  void FlushModeState();
 
   Mode mode_;
+  bool menu_mode_ = false;
+  bool fullscreen_ = false;
   UiCommandHandler* handler_;
   bool loaded_ = false;
   base::DictionaryValue updates_;
+  std::unique_ptr<base::ListValue> tab_list_;
+
+  std::unique_ptr<VrOmnibox> omnibox_;
 
   DISALLOW_COPY_AND_ASSIGN(UiInterface);
 };

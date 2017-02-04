@@ -5,7 +5,9 @@ import glob
 import logging
 import os
 import re
+import sys
 
+from gpu_tests import gpu_integration_test
 from gpu_tests import cloud_storage_integration_test_base
 from gpu_tests import pixel_expectations
 from gpu_tests import pixel_test_pages
@@ -93,7 +95,6 @@ class PixelIntegrationTest(
       cls.ResetGpuInfo()
       cls.CustomizeBrowserArgs(browser_args)
       cls.StartBrowser()
-      cls.tab = cls.browser.tabs[0]
 
   @classmethod
   def AddCommandlineArgs(cls, parser):
@@ -113,7 +114,10 @@ class PixelIntegrationTest(
     cls.SetParsedCommandLineOptions(options)
     name = 'Pixel'
     pages = pixel_test_pages.DefaultPages(name)
+    pages += pixel_test_pages.GpuRasterizationPages(name)
     pages += pixel_test_pages.ExperimentalCanvasFeaturesPages(name)
+    if sys.platform.startswith('darwin'):
+      pages += pixel_test_pages.MacSpecificPages(name)
     for p in pages:
       yield(p.name, p.url, (p))
 
@@ -223,3 +227,7 @@ class PixelIntegrationTest(
 
     self._WriteImage(image_path, screenshot)
     return screenshot
+
+def load_tests(loader, tests, pattern):
+  del loader, tests, pattern  # Unused.
+  return gpu_integration_test.LoadAllTestsInModule(sys.modules[__name__])

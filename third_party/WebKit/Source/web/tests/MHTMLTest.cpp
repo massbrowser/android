@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "bindings/core/v8/ScriptController.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Location.h"
@@ -115,7 +114,7 @@ class MHTMLTest : public ::testing::Test {
                    const char* mime,
                    PassRefPtr<SharedBuffer> data) {
     SerializedResource resource(toKURL(url), mime, data);
-    m_resources.append(resource);
+    m_resources.push_back(resource);
   }
 
   void addResource(const char* url, const char* mime, const char* fileName) {
@@ -284,7 +283,7 @@ TEST_F(MHTMLTest, EnforceSandboxFlags) {
   // MHTML document should be loaded into unique origin.
   EXPECT_TRUE(document->getSecurityOrigin()->isUnique());
   // Script execution should be disabled.
-  EXPECT_FALSE(frame->script().canExecuteScripts(NotAboutToExecuteScript));
+  EXPECT_FALSE(document->canExecuteScripts(NotAboutToExecuteScript));
 }
 
 }  // namespace blink

@@ -86,7 +86,7 @@ using InputTypeFactoryMap =
 
 static std::unique_ptr<InputTypeFactoryMap> createInputTypeFactoryMap() {
   std::unique_ptr<InputTypeFactoryMap> map =
-      wrapUnique(new InputTypeFactoryMap);
+      WTF::wrapUnique(new InputTypeFactoryMap);
   map->add(InputTypeNames::button, ButtonInputType::create);
   map->add(InputTypeNames::checkbox, CheckboxInputType::create);
   map->add(InputTypeNames::color, ColorInputType::create);
@@ -337,13 +337,13 @@ std::pair<String, String> InputType::validationMessage(
   // The order of the following checks is meaningful. e.g. We'd like to show the
   // badInput message even if the control has other validation errors.
   if (inputTypeView.hasBadInput())
-    return std::make_pair(badInputText(), emptyString());
+    return std::make_pair(badInputText(), emptyString);
 
   if (valueMissing(value))
-    return std::make_pair(valueMissingText(), emptyString());
+    return std::make_pair(valueMissingText(), emptyString);
 
   if (typeMismatch())
-    return std::make_pair(typeMismatchText(), emptyString());
+    return std::make_pair(typeMismatchText(), emptyString);
 
   if (patternMismatch(value)) {
     // https://html.spec.whatwg.org/multipage/forms.html#attr-input-pattern
@@ -356,32 +356,32 @@ std::pair<String, String> InputType::validationMessage(
         element().fastGetAttribute(titleAttr).getString());
   }
 
-  if (element().tooLong())
+  if (element().tooLong()) {
     return std::make_pair(locale().validationMessageTooLongText(
                               value.length(), element().maxLength()),
-                          emptyString());
+                          emptyString);
+  }
 
-  if (element().tooShort())
+  if (element().tooShort()) {
     return std::make_pair(locale().validationMessageTooShortText(
                               value.length(), element().minLength()),
-                          emptyString());
+                          emptyString);
+  }
 
   if (!isSteppable())
-    return std::make_pair(emptyString(), emptyString());
+    return std::make_pair(emptyString, emptyString);
 
   const Decimal numericValue = parseToNumberOrNaN(value);
   if (!numericValue.isFinite())
-    return std::make_pair(emptyString(), emptyString());
+    return std::make_pair(emptyString, emptyString);
 
   StepRange stepRange(createStepRange(RejectAny));
 
   if (numericValue < stepRange.minimum())
-    return std::make_pair(rangeUnderflowText(stepRange.minimum()),
-                          emptyString());
+    return std::make_pair(rangeUnderflowText(stepRange.minimum()), emptyString);
 
   if (numericValue > stepRange.maximum())
-    return std::make_pair(rangeOverflowText(stepRange.maximum()),
-                          emptyString());
+    return std::make_pair(rangeOverflowText(stepRange.maximum()), emptyString);
 
   if (stepRange.stepMismatch(numericValue)) {
     DCHECK(stepRange.hasStep());
@@ -391,25 +391,27 @@ std::pair<String, String> InputType::validationMessage(
                              ? candidate1 + stepRange.step()
                              : candidate1 - stepRange.step();
     if (!candidate2.isFinite() || candidate2 < stepRange.minimum() ||
-        candidate2 > stepRange.maximum())
+        candidate2 > stepRange.maximum()) {
       return std::make_pair(
           locale().queryString(
               WebLocalizedString::ValidationStepMismatchCloseToLimit,
               localizedCandidate1),
-          emptyString());
+          emptyString);
+    }
     String localizedCandidate2 = localizeValue(serialize(candidate2));
-    if (candidate1 < candidate2)
+    if (candidate1 < candidate2) {
       return std::make_pair(
           locale().queryString(WebLocalizedString::ValidationStepMismatch,
                                localizedCandidate1, localizedCandidate2),
-          emptyString());
+          emptyString);
+    }
     return std::make_pair(
         locale().queryString(WebLocalizedString::ValidationStepMismatch,
                              localizedCandidate2, localizedCandidate1),
-        emptyString());
+        emptyString);
   }
 
-  return std::make_pair(emptyString(), emptyString());
+  return std::make_pair(emptyString, emptyString);
 }
 
 Decimal InputType::parseToNumber(const String&,
@@ -553,7 +555,7 @@ void InputType::warnIfValueIsInvalidAndElementIsVisible(
     const String& value) const {
   // Don't warn if the value is set in Modernizr.
   const ComputedStyle* style = element().computedStyle();
-  if (style && style->visibility() != EVisibility::Hidden)
+  if (style && style->visibility() != EVisibility::kHidden)
     warnIfValueIsInvalid(value);
 }
 
@@ -845,24 +847,24 @@ void InputType::stepUpFromLayoutObject(int n) {
       current = stepRange.minimum() - nextDiff;
     if (current > stepRange.maximum() - nextDiff)
       current = stepRange.maximum() - nextDiff;
-    setValueAsDecimal(current, DispatchNoEvent, IGNORE_EXCEPTION);
+    setValueAsDecimal(current, DispatchNoEvent, IGNORE_EXCEPTION_FOR_TESTING);
   }
   if ((sign > 0 && current < stepRange.minimum()) ||
       (sign < 0 && current > stepRange.maximum())) {
     setValueAsDecimal(sign > 0 ? stepRange.minimum() : stepRange.maximum(),
-                      DispatchChangeEvent, IGNORE_EXCEPTION);
+                      DispatchChangeEvent, IGNORE_EXCEPTION_FOR_TESTING);
     return;
   }
   if ((sign > 0 && current >= stepRange.maximum()) ||
       (sign < 0 && current <= stepRange.minimum()))
     return;
   applyStep(current, n, AnyIsDefaultStep, DispatchChangeEvent,
-            IGNORE_EXCEPTION);
+            IGNORE_EXCEPTION_FOR_TESTING);
 }
 
 void InputType::countUsageIfVisible(UseCounter::Feature feature) const {
   if (const ComputedStyle* style = element().computedStyle()) {
-    if (style->visibility() != EVisibility::Hidden)
+    if (style->visibility() != EVisibility::kHidden)
       UseCounter::count(element().document(), feature);
   }
 }

@@ -38,10 +38,9 @@ class CORE_EXPORT DragEvent final : public MouseEvent {
                            short button,
                            unsigned short buttons,
                            EventTarget* relatedTarget,
-                           double platformTimeStamp,
+                           TimeTicks platformTimeStamp,
                            DataTransfer*,
-                           PlatformMouseEvent::SyntheticEventType =
-                               PlatformMouseEvent::RealOrIndistinguishable);
+                           SyntheticEventType = RealOrIndistinguishable);
 
   static DragEvent* create(const AtomicString& type,
                            const DragEventInit& initializer) {
@@ -77,9 +76,9 @@ class CORE_EXPORT DragEvent final : public MouseEvent {
             short button,
             unsigned short buttons,
             EventTarget* relatedTarget,
-            double platformTimeStamp,
+            TimeTicks platformTimeStamp,
             DataTransfer*,
-            PlatformMouseEvent::SyntheticEventType);
+            SyntheticEventType);
 
   DragEvent(const AtomicString& type, const DragEventInit&);
 

@@ -121,7 +121,7 @@ void findGoodTouchTargets(const IntRect& touchBoxInRootFrame,
       Node* containerNode = container->node();
       if (!containerNode)
         continue;
-      if (!blackList.add(containerNode).isNewEntry)
+      if (!blackList.insert(containerNode).isNewEntry)
         break;
     }
   }
@@ -156,8 +156,8 @@ void findGoodTouchTargets(const IntRect& touchBoxInRootFrame,
     // avoid excessive popups.
     if (touchTarget.value.score < bestScore * 0.5)
       continue;
-    goodTargets.append(touchTarget.value.windowBoundingBox);
-    highlightNodes.append(touchTarget.key);
+    goodTargets.push_back(touchTarget.value.windowBoundingBox);
+    highlightNodes.push_back(touchTarget.key);
   }
 }
 

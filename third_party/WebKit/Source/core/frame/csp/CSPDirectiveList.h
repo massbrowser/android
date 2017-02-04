@@ -5,11 +5,11 @@
 #ifndef CSPDirectiveList_h
 #define CSPDirectiveList_h
 
-#include "core/fetch/Resource.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/frame/csp/MediaListDirective.h"
 #include "core/frame/csp/SourceListDirective.h"
 #include "platform/heap/Handle.h"
+#include "platform/loader/fetch/Resource.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/ResourceRequest.h"
@@ -21,6 +21,8 @@
 namespace blink {
 
 class ContentSecurityPolicy;
+
+typedef HeapVector<Member<SourceListDirective>> SourceListDirectiveVector;
 
 class CORE_EXPORT CSPDirectiveList
     : public GarbageCollectedFinalized<CSPDirectiveList> {
@@ -156,10 +158,16 @@ class CORE_EXPORT CSPDirectiveList
 
   bool shouldSendCSPHeader(Resource::Type) const;
 
+  // The algorithm is described here:
+  // https://w3c.github.io/webappsec-csp/embedded/#subsume-policy
+  bool subsumes(const CSPDirectiveListVector&);
+
   DECLARE_TRACE();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(CSPDirectiveListTest, IsMatchingNoncePresent);
+  FRIEND_TEST_ALL_PREFIXES(CSPDirectiveListTest, GetSourceVector);
+  FRIEND_TEST_ALL_PREFIXES(CSPDirectiveListTest, OperativeDirectiveGivenType);
 
   enum RequireSRIForToken { None = 0, Script = 1 << 0, Style = 1 << 1 };
 
@@ -215,7 +223,6 @@ class CORE_EXPORT CSPDirectiveList
       const ContentSecurityPolicy::ExceptionStatus) const;
 
   bool checkEval(SourceListDirective*) const;
-  bool checkInline(SourceListDirective*) const;
   bool checkDynamic(SourceListDirective*) const;
   bool isMatchingNoncePresent(SourceListDirective*, const String&) const;
   bool checkHash(SourceListDirective*, const CSPHashValue&) const;
@@ -265,6 +272,17 @@ class CORE_EXPORT CSPDirectiveList
       ResourceRequest::RedirectStatus) const;
 
   bool denyIfEnforcingPolicy() const { return isReportOnly(); }
+
+  // This function returns a SourceListDirective of a given type
+  // or if it is not defined, the default SourceListDirective for that type.
+  SourceListDirective* operativeDirective(
+      const ContentSecurityPolicy::DirectiveType&) const;
+
+  // This function aggregates from a vector of policies all operative
+  // SourceListDirectives of a given type into a vector.
+  static SourceListDirectiveVector getSourceVector(
+      const ContentSecurityPolicy::DirectiveType&,
+      const CSPDirectiveListVector& policies);
 
   Member<ContentSecurityPolicy> m_policy;
 

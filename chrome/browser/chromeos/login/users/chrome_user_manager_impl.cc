@@ -30,6 +30,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/signin/auth_sync_observer.h"
@@ -76,7 +77,6 @@
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "extensions/common/features/feature_session_type.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
@@ -145,20 +145,6 @@ bool GetUserLockAttributes(const user_manager::User* user,
         prefs->GetString(prefs::kMultiProfileUserBehavior);
   }
   return true;
-}
-
-extensions::FeatureSessionType GetFeatureSessionTypeForUser(
-    const user_manager::User* user) {
-  switch (user->GetType()) {
-    case user_manager::USER_TYPE_REGULAR:
-    case user_manager::USER_TYPE_CHILD:
-      return extensions::FeatureSessionType::REGULAR;
-    case user_manager::USER_TYPE_KIOSK_APP:
-      return extensions::FeatureSessionType::KIOSK;
-    default:
-      // The rest of user types is not used by extensions features.
-      return extensions::FeatureSessionType::UNKNOWN;
-  }
 }
 
 }  // namespace
@@ -297,6 +283,12 @@ user_manager::UserList ChromeUserManagerImpl::GetUsersAllowedForMultiProfile()
       GetPrimaryUser()->GetType() != user_manager::USER_TYPE_REGULAR) {
     return user_manager::UserList();
   }
+
+  // Multiprofile mode is not allowed on the Active Directory managed devices.
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  if (connector->IsActiveDirectoryManaged())
+    return user_manager::UserList();
 
   user_manager::UserList result;
   const user_manager::UserList& users = GetUsers();
@@ -500,8 +492,8 @@ void ChromeUserManagerImpl::Observe(
 
 void ChromeUserManagerImpl::OnExternalDataSet(const std::string& policy,
                                               const std::string& user_id) {
-  const AccountId account_id =
-      user_manager::known_user::GetAccountId(user_id, std::string());
+  const AccountId account_id = user_manager::known_user::GetAccountId(
+      user_id, std::string() /* id */, AccountType::UNKNOWN);
   if (policy == policy::key::kUserAvatarImage)
     GetUserImageManager(account_id)->OnExternalDataSet(policy);
   else if (policy == policy::key::kWallpaperImage)
@@ -512,8 +504,8 @@ void ChromeUserManagerImpl::OnExternalDataSet(const std::string& policy,
 
 void ChromeUserManagerImpl::OnExternalDataCleared(const std::string& policy,
                                                   const std::string& user_id) {
-  const AccountId account_id =
-      user_manager::known_user::GetAccountId(user_id, std::string());
+  const AccountId account_id = user_manager::known_user::GetAccountId(
+      user_id, std::string() /* id */, AccountType::UNKNOWN);
   if (policy == policy::key::kUserAvatarImage)
     GetUserImageManager(account_id)->OnExternalDataCleared(policy);
   else if (policy == policy::key::kWallpaperImage)
@@ -526,8 +518,8 @@ void ChromeUserManagerImpl::OnExternalDataFetched(
     const std::string& policy,
     const std::string& user_id,
     std::unique_ptr<std::string> data) {
-  const AccountId account_id =
-      user_manager::known_user::GetAccountId(user_id, std::string());
+  const AccountId account_id = user_manager::known_user::GetAccountId(
+      user_id, std::string() /* id */, AccountType::UNKNOWN);
   if (policy == policy::key::kUserAvatarImage)
     GetUserImageManager(account_id)
         ->OnExternalDataFetched(policy, std::move(data));
@@ -539,8 +531,8 @@ void ChromeUserManagerImpl::OnExternalDataFetched(
 }
 
 void ChromeUserManagerImpl::OnPolicyUpdated(const std::string& user_id) {
-  const AccountId account_id =
-      user_manager::known_user::GetAccountId(user_id, std::string());
+  const AccountId account_id = user_manager::known_user::GetAccountId(
+      user_id, std::string() /* id */, AccountType::UNKNOWN);
   const user_manager::User* user = FindUser(account_id);
   if (!user || user->GetType() != user_manager::USER_TYPE_PUBLIC_ACCOUNT)
     return;
@@ -868,6 +860,13 @@ void ChromeUserManagerImpl::KioskAppLoggedIn(user_manager::User* user) {
   // Disable window animation since kiosk app runs in a single full screen
   // window and window animation causes start-up janks.
   command_line->AppendSwitch(wm::switches::kWindowAnimationsDisabled);
+
+  // If restoring auto-launched kiosk session, make sure the app is marked
+  // as auto-launched.
+  if (command_line->HasSwitch(switches::kLoginUser) &&
+      command_line->HasSwitch(switches::kAppAutoLaunched)) {
+    KioskAppManager::Get()->SetAppWasAutoLaunchedWithZeroDelay(kiosk_app_id);
+  }
 }
 
 void ChromeUserManagerImpl::ArcKioskAppLoggedIn(user_manager::User* user) {
@@ -883,6 +882,7 @@ void ChromeUserManagerImpl::ArcKioskAppLoggedIn(user_manager::User* user) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(chromeos::switches::kEnableArc);
   command_line->AppendSwitch(::switches::kForceAndroidAppMode);
+  command_line->AppendSwitch(::switches::kSilentLaunch);
 
   // Disable window animation since kiosk app runs in a single full screen
   // window and window animation causes start-up janks.
@@ -1216,8 +1216,8 @@ void ChromeUserManagerImpl::UpdateUserTimeZoneRefresher(Profile* profile) {
 void ChromeUserManagerImpl::SetUserAffiliation(
     const std::string& user_email,
     const AffiliationIDSet& user_affiliation_ids) {
-  const AccountId& account_id =
-      user_manager::known_user::GetAccountId(user_email, std::string());
+  const AccountId& account_id = user_manager::known_user::GetAccountId(
+      user_email, std::string() /* id */, AccountType::UNKNOWN);
   user_manager::User* user = FindUserAndModify(account_id);
 
   if (user) {
@@ -1263,11 +1263,6 @@ void ChromeUserManagerImpl::UpdateLoginState(
     bool is_current_user_owner) const {
   chrome_user_manager_util::UpdateLoginState(active_user, primary_user,
                                              is_current_user_owner);
-  // If a user is logged in, update session type as seen by extensions system.
-  if (active_user) {
-    extensions::SetCurrentFeatureSessionType(
-        GetFeatureSessionTypeForUser(active_user));
-  }
 }
 
 bool ChromeUserManagerImpl::GetPlatformKnownUserId(

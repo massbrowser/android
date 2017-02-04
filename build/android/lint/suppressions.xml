@@ -39,7 +39,6 @@ Still reading?
     <ignore regexp="third_party/cacheinvalidation/src/java/com/google/ipc/invalidation/ticl/android2/channel/AndroidChannelPreferences.java"/>
   </issue>
   <issue id="ContentDescription" severity="Error">
-    <ignore regexp="blimp/client/app/android/java/res/layout/blimp_main.xml"/>
     <ignore regexp="chromecast/internal"/>
   </issue>
   <issue id="DefaultLocale">
@@ -162,9 +161,7 @@ Still reading?
   <issue id="LongLogTag" severity="ignore"/>
   <issue id="MissingApplicationIcon" severity="ignore"/>
   <issue id="MissingPermission" severity="ignore"/>
-  <issue id="MissingPrefix" severity="Error">
-    <ignore regexp="chrome/android/java/res/layout/download_content.xml"/>
-  </issue>
+  <issue id="MissingPrefix" severity="ignore"/>
   <issue id="MissingQuantity">
     <ignore regexp="android_chrome_strings.xml"/>
   </issue>
@@ -242,6 +239,7 @@ Still reading?
     <ignore regexp="chromecast/internal"/>
   </issue>
   <issue id="StringFormatCount" severity="Error">
+    <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-cs/android_chrome_strings.xml"/>
     <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-pl/android_chrome_strings.xml"/>
     <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values/android_chrome_strings.xml"/>
   </issue>
@@ -249,6 +247,7 @@ Still reading?
     <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-cs/android_chrome_strings.xml"/>
     <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-da/android_chrome_strings.xml"/>
     <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-pl/android_chrome_strings.xml"/>
+    <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-pt-rBR/android_chrome_strings.xml"/>
     <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-sv/android_chrome_strings.xml"/>
     <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-tl/android_chrome_strings.xml"/>
   </issue>
@@ -260,13 +259,7 @@ Still reading?
     <ignore regexp="chrome/android/java/res_chromium/values/channel_constants.xml"/>
     <ignore regexp="chrome/app/policy/android/values-v21/restriction_values.xml"/>
   </issue>
-  <issue id="Typos" severity="Error">
-    <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-de/android_chrome_strings.xml"/>
-    <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-pt-rBR/android_chrome_strings.xml"/>
-    <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-pt-rPT/android_chrome_strings.xml"/>
-    <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values-tr/android_chrome_strings.xml"/>
-    <ignore regexp="gen/chrome/android/chrome_strings_grd.resources.zip/values/android_chrome_strings.xml"/>
-  </issue>
+  <issue id="Typos" severity="ignore"/>
   <issue id="UnusedAttribute" severity="ignore"/>
   <issue id="UnusedIds" severity="ignore"/>
   <issue id="UnusedQuantity" severity="Error">
@@ -327,8 +320,6 @@ Still reading?
     <ignore regexp="chrome/android/java/res/drawable-hdpi/bubble_white.9.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/cvc_icon.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/cvc_icon_amex.png"/>
-    <ignore regexp="chrome/android/java/res/drawable-hdpi/discover_card.png"/>
-    <ignore regexp="chrome/android/java/res/drawable-hdpi/generic_card.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/ic_folder_white_24dp.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/ic_settings.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/infobar_3d_blocked.png"/>
@@ -345,7 +336,7 @@ Still reading?
     <ignore regexp="chrome/android/java/res/drawable-hdpi/infobar_restore.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/infobar_screen_share.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/infobar_subresource_filtering.png"/>
-    <ignore regexp="chrome/android/java/res/drawable-hdpi/mc_card.png"/>
+    <ignore regexp="chrome/android/java/res/drawable-hdpi/mir_card.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/pageinfo_bad.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/pageinfo_good.png"/>
     <ignore regexp="chrome/android/java/res/drawable-hdpi/pageinfo_warning.png"/>
@@ -362,22 +353,32 @@ Still reading?
     <ignore regexp="chrome/android/java/res/drawable-mdpi/untitled_5.png"/>
     <ignore regexp="chrome/android/java/res/drawable-nodpi/missing.png"/>
     <ignore regexp="chrome/android/java/res/drawable/accessibility_tab_switcher_divider.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/amex_card.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/btn_back.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/btn_forward.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/btn_reload_stop.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/cycle_gray.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/discover_card.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/download_progressbar.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/downloads_big.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/flush_footer_button.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/ic_cast_dark_chrome.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/ic_credit_card_black.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/ic_info_outline_grey.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/ic_photo_camera_black.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/ic_settings_black.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/ic_snippet_thumbnail_placeholder.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/ic_warning_red.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/keyboard_accessory_background.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/material_progressbar.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/mc_card.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/most_visited_item_highlight.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/most_visited_item_highlight_mask.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/most_visited_item_highlight_plain.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/offline_badge_background.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/physical_web_scanning_animation.xml"/>
     <ignore regexp="chrome/android/java/res/drawable/snackbar_background_tablet.xml"/>
+    <ignore regexp="chrome/android/java/res/drawable/visa_card.xml"/>
     <ignore regexp="chrome/android/java/res/interpolator/fade_out_curve_interpolator.xml"/>
     <ignore regexp="chrome/android/java/res/interpolator/transform_curve_interpolator.xml"/>
     <ignore regexp="chrome/android/java/res/layout/accessibility_tab_switcher.xml"/>
@@ -423,6 +424,7 @@ Still reading?
     <ignore regexp="chrome/android/java/res/layout/password_entry_editor_interactive.xml"/>
     <ignore regexp="chrome/android/java/res/layout/payment_request_editor.xml"/>
     <ignore regexp="chrome/android/java/res/layout/payment_request_editor_footer.xml"/>
+    <ignore regexp="chrome/android/java/res/layout/physical_web_optin.xml"/>
     <ignore regexp="chrome/android/java/res/layout/powered_by_chrome_footer.xml"/>
     <ignore regexp="chrome/android/java/res/layout/preference_address_float_label_layout.xml"/>
     <ignore regexp="chrome/android/java/res/layout/recent_tabs_group_separator_invisible.xml"/>
@@ -531,8 +533,7 @@ Still reading?
     <ignore regexp="ui/android/java/res/values/dimens.xml"/>
   </issue>
   <issue id="UseCompoundDrawables">
-    <ignore regexp="chrome/android/java/res/layout/download_content.xml"/>
-    <ignore regexp="chromecast/internal"/>
+    <ignore regexp="chromecast/internal/android/prebuilt/settings/res/layout-v17/setup_activity_progress.xml"/>
   </issue>
   <issue id="UselessParent">
     <ignore regexp="android_webview/tools/system_webview_shell/apk/res/layout/activity_webview_browser.xml"/>
@@ -544,8 +545,6 @@ Still reading?
     <ignore regexp="AndroidManifest.xml"/>
   </issue>
   <issue id="ValidFragment" severity="Error">
-    <ignore regexp="blimp/client/app/android/javatests/src/org/chromium/blimp/core/settings/BlimpPreferencesTest.java"/>
-    <ignore regexp="blimp/client/app/android/javatests/src/org/chromium/blimp/core/settings/MockPreferences.java"/>
     <ignore regexp="chrome/android/java/src/org/chromium/chrome/browser/media/router/BaseMediaRouteDialogManager.java"/>
     <ignore regexp="chrome/android/java/src/org/chromium/chrome/browser/media/router/MediaRouteChooserDialogManager.java"/>
     <ignore regexp="chrome/android/java/src/org/chromium/chrome/browser/media/router/MediaRouteControllerDialogManager.java"/>

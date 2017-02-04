@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.customtabs;
 
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.UrlConstants;
@@ -24,11 +24,11 @@ public class CustomTabTabPersistenceIntegrationTest extends CustomTabActivityTes
     public void startMainActivity() throws InterruptedException {
         super.startMainActivity();
         startCustomTabActivityWithIntent(CustomTabsTestUtils.createMinimalCustomTabIntent(
-                getInstrumentation().getTargetContext(), UrlConstants.ABOUT_BLANK));
+                getInstrumentation().getTargetContext(), UrlConstants.ABOUT_BLANK_DISPLAY_URL));
     }
 
     @MediumTest
-    public void testTabFilesDeletedOnClose() throws InterruptedException {
+    public void testTabFilesDeletedOnClose() {
         Tab tab = getActivity().getActivityTab();
         String expectedTabFileName = TabState.getTabStateFilename(tab.getId(), false);
         String expectedMetadataFileName =
@@ -45,8 +45,7 @@ public class CustomTabTabPersistenceIntegrationTest extends CustomTabActivityTes
     }
 
     private void waitForFileExistState(
-            final boolean exists, final String fileName, final File filePath)
-                    throws InterruptedException {
+            final boolean exists, final String fileName, final File filePath) {
         CriteriaHelper.pollInstrumentationThread(new Criteria(
                 String.format(Locale.US, "File, %s, expected to exist: %b", fileName, exists)) {
             @Override

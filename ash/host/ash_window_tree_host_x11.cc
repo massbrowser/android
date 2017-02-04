@@ -121,8 +121,8 @@ void AshWindowTreeHostX11::PrepareForShutdown() {
   }
 }
 
-void AshWindowTreeHostX11::SetBounds(const gfx::Rect& bounds) {
-  WindowTreeHostX11::SetBounds(bounds);
+void AshWindowTreeHostX11::SetBoundsInPixels(const gfx::Rect& bounds) {
+  WindowTreeHostX11::SetBoundsInPixels(bounds);
   if (pointer_barriers_) {
     UnConfineCursor();
     ConfineCursorToRootWindow();
@@ -141,8 +141,9 @@ gfx::Transform AshWindowTreeHostX11::GetInverseRootTransform() const {
   return transformer_helper_.GetInverseTransform();
 }
 
-void AshWindowTreeHostX11::UpdateRootWindowSize(const gfx::Size& host_size) {
-  transformer_helper_.UpdateWindowSize(host_size);
+void AshWindowTreeHostX11::UpdateRootWindowSizeInPixels(
+    const gfx::Size& host_size_in_pixels) {
+  transformer_helper_.UpdateWindowSize(host_size_in_pixels);
 }
 
 void AshWindowTreeHostX11::OnCursorVisibilityChangedNative(bool show) {
@@ -196,7 +197,8 @@ bool AshWindowTreeHostX11::CanDispatchEvent(const ui::PlatformEvent& event) {
       // space so the bounds check will not work so well.
       if (touch_display_id == display::kInvalidDisplayId) {
         if (base::SysInfo::IsRunningOnChromeOS() &&
-            !bounds().Contains(ui::EventLocationFromNative(xev)))
+            !bounds().Contains(
+                gfx::ToFlooredPoint(ui::EventLocationFromNative(xev))))
           return false;
       } else {
         display::Screen* screen = display::Screen::GetScreen();

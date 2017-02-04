@@ -22,14 +22,17 @@
 #include "ash/common/system/tray/tray_popup_utils.h"
 #include "ash/common/system/tray/tray_utils.h"
 #include "ash/common/wm_lookup.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/root_window_controller.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/ime_bridge.h"
+#include "ui/base/ime/text_input_client.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -50,9 +53,16 @@ namespace {
 // Returns the height range of ImeListView.
 gfx::Range GetImeListViewRange() {
   const int max_items = 5;
-  const int min_items = 2;
+  const int min_items = 1;
   const int tray_item_height = GetTrayConstant(TRAY_POPUP_ITEM_MIN_HEIGHT);
   return gfx::Range(tray_item_height * min_items, tray_item_height * max_items);
+}
+
+// Returns the minimum with of IME menu.
+int GetMinimumMenuWidth() {
+  return MaterialDesignController::IsSystemTrayMenuMaterial()
+             ? kTrayMenuMinimumWidthMd
+             : kTrayMenuMinimumWidth;
 }
 
 // Shows language and input settings page.
@@ -61,11 +71,39 @@ void ShowIMESettings() {
   WmShell::Get()->system_tray_controller()->ShowIMESettings();
 }
 
+// Records the number of times users click buttons in opt-in IME menu.
+void RecordButtonsClicked(const std::string& button_name) {
+  enum {
+    UNKNOWN = 0,
+    EMOJI = 1,
+    HANDWRITING = 2,
+    VOICE = 3,
+    // SETTINGS is not used for now.
+    SETTINGS = 4,
+    BUTTON_MAX
+  } button = UNKNOWN;
+  if (button_name == "emoji") {
+    button = EMOJI;
+  } else if (button_name == "hwt") {
+    button = HANDWRITING;
+  } else if (button_name == "voice") {
+    button = VOICE;
+  }
+  UMA_HISTOGRAM_ENUMERATION("InputMethod.ImeMenu.EmojiHandwritingVoiceButton",
+                            button, BUTTON_MAX);
+}
+
 // Returns true if the current screen is login or lock screen.
 bool IsInLoginOrLockScreen() {
   LoginStatus login =
       WmShell::Get()->system_tray_delegate()->GetUserLoginStatus();
   return !TrayPopupUtils::CanOpenWebUISettings(login);
+}
+
+// Returns true if the current input context type is password.
+bool IsInPasswordInputContext() {
+  return ui::IMEBridge::Get()->GetCurrentInputContext().type ==
+         ui::TEXT_INPUT_TYPE_PASSWORD;
 }
 
 class ImeMenuLabel : public views::Label {
@@ -112,13 +150,16 @@ class ImeTitleView : public views::View, public views::ButtonListener {
     box_layout->set_minimum_cross_axis_size(
         GetTrayConstant(TRAY_POPUP_ITEM_MIN_HEIGHT));
     SetLayoutManager(box_layout);
-    title_label_ =
+    auto title_label =
         new views::Label(l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_IME));
-    title_label_->SetBorder(
-        views::CreateEmptyBorder(0, kMenuEdgeEffectivePadding, 0, 0));
-    title_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    AddChildView(title_label_);
-    box_layout->SetFlexForView(title_label_, 1);
+    title_label->SetBorder(views::CreateEmptyBorder(
+        0, kMenuEdgeEffectivePadding, kTrayMenuBottomRowPadding, 0));
+    title_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    TrayPopupItemStyle style(TrayPopupItemStyle::FontStyle::TITLE);
+    style.SetupLabel(title_label);
+
+    AddChildView(title_label);
+    box_layout->SetFlexForView(title_label, 1);
 
     if (show_settings_button) {
       settings_button_ = CreateImeMenuButton(
@@ -127,12 +168,6 @@ class ImeTitleView : public views::View, public views::ButtonListener {
         settings_button_->SetEnabled(false);
       AddChildView(settings_button_);
     }
-  }
-
-  // views::View:
-  void OnNativeThemeChanged(const ui::NativeTheme* theme) override {
-    TrayPopupItemStyle style(theme, TrayPopupItemStyle::FontStyle::TITLE);
-    style.SetupLabel(title_label_);
   }
 
   // views::ButtonListener:
@@ -144,8 +179,6 @@ class ImeTitleView : public views::View, public views::ButtonListener {
   ~ImeTitleView() override {}
 
  private:
-  views::Label* title_label_;
-
   // Settings button that is only used in material design, and only if the
   // emoji, handwriting and voice buttons are not available.
   SystemMenuButton* settings_button_;
@@ -195,14 +228,18 @@ class ImeButtonsView : public views::View,
     // extensions. InputMethodManager::ShowKeyboardWithKeyset() will deal with
     // the |keyset| string to generate the right input view url.
     std::string keyset;
-    if (sender == emoji_button_)
+    if (sender == emoji_button_) {
       keyset = "emoji";
-    else if (sender == voice_button_)
+      RecordButtonsClicked(keyset);
+    } else if (sender == voice_button_) {
       keyset = "voice";
-    else if (sender == handwriting_button_)
+      RecordButtonsClicked(keyset);
+    } else if (sender == handwriting_button_) {
       keyset = "hwt";
-    else
+      RecordButtonsClicked(keyset);
+    } else {
       NOTREACHED();
+    }
 
     ime_menu_tray_->ShowKeyboardWithKeyset(keyset);
   }
@@ -238,8 +275,11 @@ class ImeButtonsView : public views::View,
                    bool show_voice_button,
                    bool show_settings_button) {
     if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
-      SetLayoutManager(
-          new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
+      auto* box_layout =
+          new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0);
+      box_layout->set_minimum_cross_axis_size(
+          GetTrayConstant(TRAY_POPUP_ITEM_MIN_HEIGHT));
+      SetLayoutManager(box_layout);
       SetBorder(views::CreatePaddedBorder(
           views::CreateSolidSidedBorder(kSeparatorWidth, 0, 0, 0,
                                         kHorizontalSeparatorColor),
@@ -293,6 +333,40 @@ class ImeButtonsView : public views::View,
   DISALLOW_COPY_AND_ASSIGN(ImeButtonsView);
 };
 
+// The list view that contains the selected IME and property items.
+class ImeMenuListView : public ImeListView {
+ public:
+  ImeMenuListView(SystemTrayItem* owner,
+                  bool show_keyboard_toggle,
+                  SingleImeBehavior single_ime_behavior)
+      : ImeListView(owner, show_keyboard_toggle, single_ime_behavior) {
+    set_should_focus_ime_after_selection_with_keyboard(true);
+  }
+
+  ~ImeMenuListView() override {}
+
+ protected:
+  void Layout() override {
+    gfx::Range height_range = GetImeListViewRange();
+    if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
+      scroller()->ClipHeightTo(height_range.start(), height_range.end());
+    } else {
+      uint32_t current_height = scroll_content()->height();
+      int minimum_menu_width = GetMinimumMenuWidth();
+      if (current_height > height_range.end()) {
+        scroller()->SetFixedSize(
+            gfx::Size(minimum_menu_width, height_range.end()));
+      } else if (current_height < height_range.start()) {
+        scroller()->SetFixedSize(
+            gfx::Size(minimum_menu_width, height_range.start()));
+      }
+    }
+    ImeListView::Layout();
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(ImeMenuListView);
+};
+
 }  // namespace
 
 ImeMenuTray::ImeMenuTray(WmShelf* wm_shelf)
@@ -301,7 +375,8 @@ ImeMenuTray::ImeMenuTray(WmShelf* wm_shelf)
       show_keyboard_(false),
       force_show_keyboard_(false),
       should_block_shelf_auto_hide_(false),
-      keyboard_suppressed_(false) {
+      keyboard_suppressed_(false),
+      show_bubble_after_keyboard_hidden_(false) {
   if (MaterialDesignController::IsShelfMaterial()) {
     SetInkDropMode(InkDropMode::ON);
     SetContentsBackground(false);
@@ -321,12 +396,30 @@ ImeMenuTray::~ImeMenuTray() {
   SystemTrayNotifier* tray_notifier = WmShell::Get()->system_tray_notifier();
   tray_notifier->RemoveIMEObserver(this);
   tray_notifier->RemoveVirtualKeyboardObserver(this);
+  keyboard::KeyboardController* keyboard_controller =
+      keyboard::KeyboardController::GetInstance();
+  if (keyboard_controller)
+    keyboard_controller->RemoveObserver(this);
 }
 
 void ImeMenuTray::ShowImeMenuBubble() {
+  keyboard::KeyboardController* keyboard_controller =
+      keyboard::KeyboardController::GetInstance();
+  if (keyboard_controller && keyboard_controller->keyboard_visible()) {
+    show_bubble_after_keyboard_hidden_ = true;
+    keyboard_controller->AddObserver(this);
+    keyboard_controller->HideKeyboard(
+        keyboard::KeyboardController::HIDE_REASON_AUTOMATIC);
+  } else {
+    ShowImeMenuBubbleInternal();
+  }
+}
+
+void ImeMenuTray::ShowImeMenuBubbleInternal() {
+  int minimum_menu_width = GetMinimumMenuWidth();
   should_block_shelf_auto_hide_ = true;
   views::TrayBubbleView::InitParams init_params(
-      GetAnchorAlignment(), kTrayPopupMinWidth, kTrayPopupMaxWidth);
+      GetAnchorAlignment(), minimum_menu_width, minimum_menu_width);
   init_params.can_activate = true;
   init_params.close_on_deactivate = true;
 
@@ -337,8 +430,6 @@ void ImeMenuTray::ShowImeMenuBubble() {
   // In the material design, we will add a title item with a separator on the
   // top of the IME menu.
   if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
-    bubble_view->SetLayoutManager(
-        new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0));
     bubble_view->AddChildView(
         new ImeTitleView(!ShouldShowEmojiHandwritingVoiceButtons()));
   } else {
@@ -346,36 +437,17 @@ void ImeMenuTray::ShowImeMenuBubble() {
   }
 
   // Adds IME list to the bubble.
-  ime_list_view_ = new ImeListView(nullptr, ShouldShowKeyboardToggle(),
-                                   ImeListView::SHOW_SINGLE_IME);
-
-  uint32_t current_height = ime_list_view_->scroll_content()->height();
-  const gfx::Range height_range = GetImeListViewRange();
-
-  if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
-    ime_list_view_->scroller()->ClipHeightTo(height_range.start(),
-                                             height_range.end());
-  } else if (current_height > height_range.end()) {
-    ime_list_view_->scroller()->SetFixedSize(
-        gfx::Size(kTrayPopupMaxWidth, height_range.end()));
-  } else if (current_height < height_range.start()) {
-    ime_list_view_->scroller()->SetFixedSize(
-        gfx::Size(kTrayPopupMaxWidth, height_range.start()));
-  }
+  ime_list_view_ = new ImeMenuListView(nullptr, ShouldShowKeyboardToggle(),
+                                       ImeListView::SHOW_SINGLE_IME);
   bubble_view->AddChildView(ime_list_view_);
 
-  // The bottom view that contains buttons are not supported in login/lock
-  // screen.
-  if (!IsInLoginOrLockScreen()) {
-    if (ShouldShowEmojiHandwritingVoiceButtons()) {
-      bubble_view->AddChildView(
-          new ImeButtonsView(this, true, true, true, true));
-    } else if (!MaterialDesignController::IsSystemTrayMenuMaterial()) {
-      // For MD, we don't need |ImeButtonsView| as the settings button will be
-      // shown in the title row.
-      bubble_view->AddChildView(
-          new ImeButtonsView(this, false, false, false, true));
-    }
+  if (ShouldShowEmojiHandwritingVoiceButtons()) {
+    bubble_view->AddChildView(new ImeButtonsView(this, true, true, true, true));
+  } else if (!MaterialDesignController::IsSystemTrayMenuMaterial()) {
+    // For MD, we don't need |ImeButtonsView| as the settings button will be
+    // shown in the title row.
+    bubble_view->AddChildView(
+        new ImeButtonsView(this, false, false, false, true));
   }
 
   bubble_.reset(new TrayBubbleWrapper(this, bubble_view));
@@ -407,7 +479,14 @@ void ImeMenuTray::ShowKeyboardWithKeyset(const std::string& keyset) {
   show_keyboard_ = true;
   if (keyboard_controller) {
     keyboard_controller->AddObserver(this);
-    keyboard_controller->ShowKeyboard(false);
+    // If the keyboard window hasn't been created yet, it means the extension
+    // cannot receive anything to show the keyboard. Therefore, instead of
+    // relying the extension to show the keyboard, forcibly show the keyboard
+    // window here (which will cause the keyboard window to be created).
+    // Otherwise, the extension will show keyboard by calling private api. The
+    // native side could just skip showing the keyboard.
+    if (!keyboard_controller->IsKeyboardWindowCreated())
+      keyboard_controller->ShowKeyboard(false);
     return;
   }
 
@@ -433,9 +512,15 @@ bool ImeMenuTray::ShouldBlockShelfAutoHide() const {
 }
 
 bool ImeMenuTray::ShouldShowEmojiHandwritingVoiceButtons() const {
+  // Emoji, handwriting and voice input is not supported for these cases:
+  // 1) features::kEHVInputOnImeMenu is not enabled.
+  // 2) third party IME extensions.
+  // 3) login/lock screen.
+  // 4) password input client.
   return InputMethodManager::Get() &&
          InputMethodManager::Get()->IsEmojiHandwritingVoiceOnImeMenuEnabled() &&
-         !current_ime_.third_party;
+         !current_ime_.third_party && !IsInLoginOrLockScreen() &&
+         !IsInPasswordInputContext();
 }
 
 bool ImeMenuTray::ShouldShowKeyboardToggle() const {
@@ -523,11 +608,27 @@ void ImeMenuTray::OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) {}
 void ImeMenuTray::OnKeyboardClosed() {
   if (InputMethodManager::Get())
     InputMethodManager::Get()->OverrideKeyboardUrlRef(std::string());
+  keyboard::KeyboardController* keyboard_controller =
+      keyboard::KeyboardController::GetInstance();
+  if (keyboard_controller)
+    keyboard_controller->RemoveObserver(this);
+
   show_keyboard_ = false;
   force_show_keyboard_ = false;
 }
 
 void ImeMenuTray::OnKeyboardHidden() {
+  if (show_bubble_after_keyboard_hidden_) {
+    show_bubble_after_keyboard_hidden_ = false;
+    keyboard::KeyboardController* keyboard_controller =
+        keyboard::KeyboardController::GetInstance();
+    if (keyboard_controller)
+      keyboard_controller->RemoveObserver(this);
+
+    ShowImeMenuBubbleInternal();
+    return;
+  }
+
   if (!show_keyboard_)
     return;
 

@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include <algorithm>
+
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/time/time.h"
@@ -14,6 +16,7 @@
 #include "content/browser/media/media_internals.h"
 #include "content/browser/speech/audio_buffer.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
+#include "media/audio/audio_file_writer.h"
 #include "media/base/audio_converter.h"
 
 #if defined(OS_WIN)
@@ -276,8 +279,10 @@ void SpeechRecognizerImpl::OnError(AudioInputController* controller,
                                      this, event_args));
 }
 
-void SpeechRecognizerImpl::OnData(AudioInputController* controller,
-                                  const AudioBus* data) {
+void SpeechRecognizerImpl::Write(const AudioBus* data,
+                                 double volume,
+                                 bool key_pressed,
+                                 uint32_t hardware_delay_bytes) {
   // Convert audio from native format to fixed format used by WebSpeech.
   FSMEventArgs event_args(EVENT_AUDIO_DATA);
   event_args.audio_data = audio_converter_->Convert(data);
@@ -296,6 +301,8 @@ void SpeechRecognizerImpl::OnData(AudioInputController* controller,
   // audio segments.
   CHECK(audio_converter_->data_was_converted());
 }
+
+void SpeechRecognizerImpl::Close() {}
 
 void SpeechRecognizerImpl::OnAudioClosed(AudioInputController*) {}
 
@@ -585,7 +592,8 @@ SpeechRecognizerImpl::StartRecording(const FSMEventArgs&) {
       new OnDataConverter(input_parameters, output_parameters));
 
   audio_controller_ = AudioInputController::Create(
-      audio_manager, this, input_parameters, device_id_, NULL);
+      audio_manager, this, this, nullptr, nullptr, input_parameters, device_id_,
+      /*agc_is_enabled*/ false);
 
   if (!audio_controller_.get()) {
     return Abort(

@@ -59,20 +59,22 @@ class AddToHomescreenDataFetcher
 
     // Called when all the data needed to create a shortcut is available.
     virtual void OnDataAvailable(const ShortcutInfo& info,
-                                 const SkBitmap& icon) = 0;
+                                 const SkBitmap& primary_icon,
+                                 const SkBitmap& badge_icon) = 0;
 
-    protected:
-     virtual ~Observer() {}
+   protected:
+    virtual ~Observer() {}
   };
 
   // Initialize the fetcher by requesting the information about the page from
   // the renderer process. The initialization is asynchronous and
   // OnDidGetWebApplicationInfo is expected to be called when finished.
   AddToHomescreenDataFetcher(content::WebContents* web_contents,
-                             int ideal_icon_size_in_dp,
-                             int minimum_icon_size_in_dp,
-                             int ideal_splash_image_size_in_dp,
-                             int minimum_splash_image_size_in_dp,
+                             int ideal_icon_size_in_px,
+                             int minimum_icon_size_in_px,
+                             int ideal_splash_image_size_in_px,
+                             int minimum_splash_image_size_in_px,
+                             int badge_size_in_px,
                              bool check_webapk_compatible,
                              Observer* observer);
 
@@ -86,8 +88,9 @@ class AddToHomescreenDataFetcher
   // Accessors, etc.
   void set_weak_observer(Observer* observer) { weak_observer_ = observer; }
   bool is_ready() const { return is_ready_; }
+  const SkBitmap& badge_icon() const { return badge_icon_; }
+  const SkBitmap& primary_icon() const { return primary_icon_; }
   ShortcutInfo& shortcut_info() { return shortcut_info_; }
-  const SkBitmap& shortcut_icon() const { return shortcut_icon_; }
 
  private:
   friend class base::RefCounted<AddToHomescreenDataFetcher>;
@@ -123,18 +126,20 @@ class AddToHomescreenDataFetcher
 
   Observer* weak_observer_;
 
-  // The icon must only be set on the UI thread for thread safety.
-  SkBitmap shortcut_icon_;
+  // The icons must only be set on the UI thread for thread safety.
+  SkBitmap badge_icon_;
+  SkBitmap primary_icon_;
   ShortcutInfo shortcut_info_;
   GURL splash_screen_url_;
 
   base::CancelableTaskTracker favicon_task_tracker_;
   base::Timer data_timeout_timer_;
 
-  const int ideal_icon_size_in_dp_;
-  const int minimum_icon_size_in_dp_;
-  const int ideal_splash_image_size_in_dp_;
-  const int minimum_splash_image_size_in_dp_;
+  const int ideal_icon_size_in_px_;
+  const int minimum_icon_size_in_px_;
+  const int ideal_splash_image_size_in_px_;
+  const int minimum_splash_image_size_in_px_;
+  const int badge_size_in_px_;
 
   // Indicates whether to check WebAPK compatibility.
   bool check_webapk_compatibility_;

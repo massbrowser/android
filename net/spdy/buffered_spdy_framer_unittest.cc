@@ -4,6 +4,7 @@
 
 #include "net/spdy/buffered_spdy_framer.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "base/logging.h"
@@ -16,7 +17,7 @@ namespace {
 
 class TestBufferedSpdyVisitor : public BufferedSpdyFramerVisitorInterface {
  public:
-  explicit TestBufferedSpdyVisitor()
+  TestBufferedSpdyVisitor()
       : buffered_spdy_framer_(),
         error_count_(0),
         setting_count_(0),
@@ -27,8 +28,8 @@ class TestBufferedSpdyVisitor : public BufferedSpdyFramerVisitorInterface {
         header_stream_id_(static_cast<SpdyStreamId>(-1)),
         promised_stream_id_(static_cast<SpdyStreamId>(-1)) {}
 
-  void OnError(SpdyFramer::SpdyError error_code) override {
-    VLOG(1) << "SpdyFramer Error: " << error_code;
+  void OnError(SpdyFramer::SpdyFramerError spdy_framer_error) override {
+    VLOG(1) << "SpdyFramer Error: " << spdy_framer_error;
     error_count_++;
   }
 
@@ -74,7 +75,7 @@ class TestBufferedSpdyVisitor : public BufferedSpdyFramerVisitorInterface {
 
   void OnSettings() override {}
 
-  void OnSetting(SpdySettingsIds id, uint8_t flags, uint32_t value) override {
+  void OnSetting(SpdySettingsIds id, uint32_t value) override {
     setting_count_++;
   }
 
@@ -122,7 +123,7 @@ class TestBufferedSpdyVisitor : public BufferedSpdyFramerVisitorInterface {
     altsvc_vector_ = altsvc_vector;
   }
 
-  bool OnUnknownFrame(SpdyStreamId stream_id, int frame_type) override {
+  bool OnUnknownFrame(SpdyStreamId stream_id, uint8_t frame_type) override {
     return true;
   }
 
@@ -132,7 +133,8 @@ class TestBufferedSpdyVisitor : public BufferedSpdyFramerVisitorInterface {
     size_t input_remaining = size;
     const char* input_ptr = reinterpret_cast<const char*>(input);
     while (input_remaining > 0 &&
-           buffered_spdy_framer_.error_code() == SpdyFramer::SPDY_NO_ERROR) {
+           buffered_spdy_framer_.spdy_framer_error() ==
+               SpdyFramer::SPDY_NO_ERROR) {
       // To make the tests more interesting, we feed random (amd small) chunks
       // into the framer.  This simulates getting strange-sized reads from
       // the socket.
@@ -179,10 +181,10 @@ class TestBufferedSpdyVisitor : public BufferedSpdyFramerVisitorInterface {
 class BufferedSpdyFramerTest : public PlatformTest {};
 
 TEST_F(BufferedSpdyFramerTest, OnSetting) {
-  SpdyFramer framer(HTTP2);
+  SpdyFramer framer(SpdyFramer::ENABLE_COMPRESSION);
   SpdySettingsIR settings_ir;
-  settings_ir.AddSetting(SETTINGS_INITIAL_WINDOW_SIZE, false, false, 2);
-  settings_ir.AddSetting(SETTINGS_MAX_CONCURRENT_STREAMS, false, false, 3);
+  settings_ir.AddSetting(SETTINGS_INITIAL_WINDOW_SIZE, 2);
+  settings_ir.AddSetting(SETTINGS_MAX_CONCURRENT_STREAMS, 3);
   SpdySerializedFrame control_frame(framer.SerializeSettings(settings_ir));
   TestBufferedSpdyVisitor visitor;
 

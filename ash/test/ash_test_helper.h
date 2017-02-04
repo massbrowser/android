@@ -20,10 +20,6 @@ namespace ui {
 class ScopedAnimationDurationScaleMode;
 }  // namespace ui
 
-namespace views {
-class ViewsDelegate;
-}
-
 namespace wm {
 class WMState;
 }
@@ -32,6 +28,7 @@ namespace ash {
 namespace test {
 
 class AshTestEnvironment;
+class AshTestViewsDelegate;
 class TestScreenshotDelegate;
 class TestShellDelegate;
 class TestSessionStateDelegate;
@@ -69,12 +66,9 @@ class AshTestHelper {
   TestScreenshotDelegate* test_screenshot_delegate() {
     return test_screenshot_delegate_;
   }
+  AshTestViewsDelegate* views_delegate() { return views_delegate_.get(); }
 
   AshTestEnvironment* ash_test_environment() { return ash_test_environment_; }
-
-  // True if the running environment supports multiple displays,
-  // or false otherwise (e.g. win8 bot).
-  static bool SupportsMultipleDisplays();
 
  private:
   AshTestEnvironment* ash_test_environment_;  // Not owned.
@@ -85,14 +79,12 @@ class AshTestHelper {
   TestScreenshotDelegate* test_screenshot_delegate_;
 
   std::unique_ptr<::wm::WMState> wm_state_;
-  std::unique_ptr<views::ViewsDelegate> views_delegate_;
+  std::unique_ptr<AshTestViewsDelegate> views_delegate_;
 
-#if defined(OS_CHROMEOS)
   // Check if DBus Thread Manager was initialized here.
   bool dbus_thread_manager_initialized_;
   // Check if Bluez DBus Manager was initialized here.
   bool bluez_dbus_manager_initialized_;
-#endif
 
   std::unique_ptr<test::MaterialDesignControllerTestAPI> material_design_state_;
 

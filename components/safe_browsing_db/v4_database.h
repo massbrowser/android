@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "components/safe_browsing_db/v4_protocol_manager_util.h"
@@ -116,6 +117,13 @@ class V4Database {
   // Returns the current state of each of the stores being managed.
   std::unique_ptr<StoreStateMap> GetStoreStateMap();
 
+  // Check if all the selected stores are available and populated.
+  // Returns false if any of |stores_to_check| don't have valid data.
+  // A store may be unavailble if either it hasn't yet gotten a proper
+  // full-update (just after install, or corrupted/missing file), or if it's
+  // not supported in this build (i.e. Chromium).
+  virtual bool AreStoresAvailable(const StoresToCheck& stores_to_check) const;
+
   // Searches for a hash prefix matching the |full_hash| in stores in the
   // database, filtered by |stores_to_check|, and returns the identifier of the
   // store along with the matching hash prefix in |matched_hash_prefix_map|.
@@ -197,6 +205,10 @@ class V4Database {
   // that needed updating and is ready for the next update. It should only be
   // accessed on the IO thread.
   int pending_store_updates_;
+
+  // Only meant to be dereferenced and invalidated on the IO thread and hence
+  // named. For details, see the comment at the top of weak_ptr.h
+  base::WeakPtrFactory<V4Database> weak_factory_on_io_;
 
   DISALLOW_COPY_AND_ASSIGN(V4Database);
 };

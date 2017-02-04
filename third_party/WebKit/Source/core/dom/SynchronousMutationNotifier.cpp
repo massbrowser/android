@@ -11,10 +11,24 @@ namespace blink {
 
 SynchronousMutationNotifier::SynchronousMutationNotifier() = default;
 
-void SynchronousMutationNotifier::notifyMergeTextNodes(Text& node,
-                                                       unsigned offset) {
+void SynchronousMutationNotifier::notifyChangeChildren(
+    const ContainerNode& container) {
   for (SynchronousMutationObserver* observer : m_observers)
-    observer->didMergeTextNodes(node, offset);
+    observer->didChangeChildren(container);
+}
+
+void SynchronousMutationNotifier::notifyMergeTextNodes(
+    const Text& node,
+    const NodeWithIndex& nodeToBeRemovedWithIndex,
+    unsigned oldLength) {
+  for (SynchronousMutationObserver* observer : m_observers)
+    observer->didMergeTextNodes(node, nodeToBeRemovedWithIndex, oldLength);
+}
+
+void SynchronousMutationNotifier::notifyMoveTreeToNewDocument(
+    const Node& root) {
+  for (SynchronousMutationObserver* observer : m_observers)
+    observer->didMoveTreeToNewDocument(root);
 }
 
 void SynchronousMutationNotifier::notifySplitTextNode(const Text& node) {

@@ -19,10 +19,13 @@ buildflag_header("media_features") {
 
   flags = [
     "ENABLE_AC3_EAC3_AUDIO_DEMUXING=$enable_ac3_eac3_audio_demuxing",
+    "ENABLE_CBCS_ENCRYPTION_SCHEME=$enable_cbcs_encryption_scheme",
     "ENABLE_HEVC_DEMUXING=$enable_hevc_demuxing",
+    "ENABLE_HLS_SAMPLE_AES=$enable_hls_sample_aes",
     "ENABLE_MSE_MPEG2TS_STREAM_PARSER=$enable_mse_mpeg2ts_stream_parser",
     "ENABLE_MEDIA_REMOTING=$enable_media_remoting",
     "ENABLE_WEBRTC=$enable_webrtc",
+    "USE_PROPRIETARY_CODECS=$proprietary_codecs",
   ]
 }
 
@@ -75,7 +78,7 @@ config("media_dependent_config") {
       "/DELAYLOAD:mfreadwrite.dll",
     ]
   }
-  if (media_use_ffmpeg && is_android) {
+  if (disable_ffmpeg_video_decoders) {
     defines += [ "DISABLE_FFMPEG_VIDEO_DECODERS" ]
   }
 }
@@ -272,11 +275,31 @@ component("media") {
   defines = []
   deps = [
     ":cdm_api",
+    "//base",
+    "//base:i18n",
+    "//base/third_party/dynamic_annotations",
+    "//crypto",
+    "//crypto:platform",
+    "//gpu/command_buffer/client:gles2_interface",
+    "//gpu/command_buffer/common",
+    "//skia",
+    "//third_party/libwebm",
+    "//third_party/libyuv",
+    "//ui/events:events_base",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
+    "//ui/gl:gl",
+    "//url",
   ]
 
   public_configs = [ "//third_party/libwebm:libwebm_config" ]
   public_deps = [
     ":filters_common",
+    ":media_features",
+    ":shared_memory_support",
+    "//media/audio",
+    "//media/base",
+    "//ui/gfx:color_space",
   ]
 
   include_dirs = [ "." ]
@@ -341,7 +364,7 @@ component("media") {
   if (is_android) {
     # On Android, FFmpeg is built without video decoders. We only
     # support hardware video decoding.
-    if (media_use_ffmpeg) {
+    if (disable_ffmpeg_video_decoders) {
       sources -= [
         "filters/ffmpeg_video_decoder.cc",
         "filters/ffmpeg_video_decoder.h",
@@ -433,6 +456,8 @@ component("media") {
     ]
     if (enable_mse_mpeg2ts_stream_parser) {
       sources += [
+        "formats/mp2t/descriptors.cc",
+        "formats/mp2t/descriptors.h",
         "formats/mp2t/es_adapter_video.cc",
         "formats/mp2t/es_adapter_video.h",
         "formats/mp2t/es_parser.cc",
@@ -460,6 +485,16 @@ component("media") {
         "formats/mp2t/ts_section_psi.cc",
         "formats/mp2t/ts_section_psi.h",
       ]
+      if (enable_hls_sample_aes) {
+        sources += [
+          "formats/mp2t/ts_section_cat.cc",
+          "formats/mp2t/ts_section_cat.h",
+          "formats/mp2t/ts_section_cets_ecm.cc",
+          "formats/mp2t/ts_section_cets_ecm.h",
+          "formats/mp2t/ts_section_cets_pssh.cc",
+          "formats/mp2t/ts_section_cets_pssh.h",
+        ]
+      }
     }
   }
 
@@ -482,31 +517,6 @@ component("media") {
       "device_monitors/device_monitor_udev.h",
     ]
   }
-
-  public_deps += [
-    ":media_features",
-    ":shared_memory_support",
-    "//media/audio",
-    "//media/base",
-  ]
-
-  deps += [
-    "//base",
-    "//base:i18n",
-    "//base/third_party/dynamic_annotations",
-    "//crypto",
-    "//crypto:platform",
-    "//gpu/command_buffer/client:gles2_interface",
-    "//gpu/command_buffer/common",
-    "//skia",
-    "//third_party/libwebm",
-    "//third_party/libyuv",
-    "//ui/events:events_base",
-    "//ui/gfx",
-    "//ui/gfx/geometry",
-    "//ui/gl:gl",
-    "//url",
-  ]
 }
 
 static_library("cdm_paths") {
@@ -599,6 +609,7 @@ source_set("unit_tests") {
     ":media",
     ":test_support",
     "//base/test:test_support",
+    "//crypto",
     "//gpu:test_support",
     "//gpu/command_buffer/common",
     "//media/audio:test_support",
@@ -633,7 +644,6 @@ source_set("unit_tests") {
   }
 
   if (media_use_ffmpeg) {
-    deps += [ "//media/ffmpeg:ffmpeg_unittests" ]
     sources += [
       "filters/audio_decoder_unittest.cc",
       "filters/audio_file_reader_unittest.cc",
@@ -641,6 +651,13 @@ source_set("unit_tests") {
       "filters/ffmpeg_demuxer_unittest.cc",
       "filters/ffmpeg_glue_unittest.cc",
       "filters/in_memory_url_protocol_unittest.cc",
+    ]
+
+    deps += [
+      "//media/ffmpeg:ffmpeg_unittests",
+
+      # Direct dependency needed for the config
+      "//third_party/opus",
     ]
 
     if (!is_android) {
@@ -692,6 +709,9 @@ source_set("unit_tests") {
     if (enable_hevc_demuxing) {
       sources += [ "filters/h265_parser_unittest.cc" ]
     }
+    if (enable_hls_sample_aes) {
+      deps += [ "//third_party/boringssl" ]
+    }
   }
 
   if (is_mac || is_ios) {
@@ -712,6 +732,14 @@ source_set("unit_tests") {
 # Contains tests for all targets in the "media" folder.
 # TODO(xhwang): Move mojo/capture/remoting tests here where applicable.
 test("media_unittests") {
+  # crbug.com/676418: Suppress symbol import warnings.
+  if (is_win && is_component_build) {
+    ldflags = [
+      "/ignore:4217",
+      "/ignore:4049",
+    ]
+  }
+
   deps = [
     ":unit_tests",
     "//media/audio:unit_tests",
@@ -733,6 +761,10 @@ test("media_unittests") {
 
   if (enable_media_remoting) {
     deps += [ "//media/remoting:media_remoting_tests" ]
+  }
+
+  if (proprietary_codecs) {
+    configs += [ "//third_party/opus:opus_config" ]
   }
 }
 
@@ -763,6 +795,12 @@ test("media_perftests") {
 
   data = [
     "test/data/",
+
+    # Needed for isolate script to execute.
+    "//testing/scripts/common.py",
+    "//testing/xvfb.py",
+    "//testing/scripts/run_gtest_perf_test.py",
+    "//tools/perf/generate_legacy_perf_dashboard_json.py",
   ]
 }
 

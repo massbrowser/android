@@ -6,12 +6,12 @@
 
 #include <vector>
 
-#include "base/memory/ptr_util.h"
-#include "base/strings/stringprintf.h"
 #include "net/quic/core/crypto/aes_128_gcm_12_encrypter.h"
 #include "net/quic/core/quic_flags.h"
 #include "net/quic/core/spdy_utils.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/quic/platform/api/quic_str_cat.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/mock_quic_spdy_client_stream.h"
 #include "net/quic/test_tools/quic_config_peer.h"
@@ -22,24 +22,7 @@
 #include "net/tools/quic/quic_spdy_client_stream.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::StringPrintf;
 using google::protobuf::implicit_cast;
-using net::test::ConstructEncryptedPacket;
-using net::test::ConstructMisFramedEncryptedPacket;
-using net::test::CryptoTestUtils;
-using net::test::DefaultQuicConfig;
-using net::test::MockQuicConnection;
-using net::test::MockQuicConnectionHelper;
-using net::test::MockQuicSpdyClientStream;
-using net::test::PacketSavingConnection;
-using net::test::QuicConnectionPeer;
-using net::test::QuicPacketCreatorPeer;
-using net::test::QuicSpdySessionPeer;
-using net::test::SupportedVersions;
-using net::test::TestPeerIPAddress;
-using net::test::kClientDataStreamId1;
-using net::test::kServerDataStreamId1;
-using net::test::kTestPort;
 using std::string;
 using testing::AnyNumber;
 using testing::Invoke;
@@ -67,14 +50,14 @@ class TestQuicClientSession : public QuicClientSession {
                           push_promise_index) {}
 
   std::unique_ptr<QuicSpdyClientStream> CreateClientStream() override {
-    return base::MakeUnique<MockQuicSpdyClientStream>(GetNextOutgoingStreamId(),
-                                                      this);
+    return QuicMakeUnique<MockQuicSpdyClientStream>(GetNextOutgoingStreamId(),
+                                                    this);
   }
 
   MockQuicSpdyClientStream* CreateIncomingDynamicStream(
       QuicStreamId id) override {
     MockQuicSpdyClientStream* stream = new MockQuicSpdyClientStream(id, this);
-    ActivateStream(base::WrapUnique(stream));
+    ActivateStream(QuicWrapUnique(stream));
     return stream;
   }
 };
@@ -308,9 +291,10 @@ TEST_P(QuicClientSessionTest, InvalidFramedPacketReceived) {
 
   // Verify that a decryptable packet with bad frames does close the connection.
   QuicConnectionId connection_id = session_->connection()->connection_id();
+  QuicVersionVector versions = {GetParam()};
   std::unique_ptr<QuicEncryptedPacket> packet(ConstructMisFramedEncryptedPacket(
       connection_id, false, false, false, kDefaultPathId, 100, "data",
-      PACKET_8BYTE_CONNECTION_ID, PACKET_6BYTE_PACKET_NUMBER, nullptr,
+      PACKET_8BYTE_CONNECTION_ID, PACKET_6BYTE_PACKET_NUMBER, &versions,
       Perspective::IS_SERVER));
   std::unique_ptr<QuicReceivedPacket> received(
       ConstructReceivedPacket(*packet, QuicTime::Zero()));
@@ -422,7 +406,7 @@ TEST_P(QuicClientSessionTest, PushPromiseDuplicateUrl) {
 
 TEST_P(QuicClientSessionTest, ReceivingPromiseEnhanceYourCalm) {
   for (size_t i = 0u; i < session_->get_max_promises(); i++) {
-    push_promise_[":path"] = StringPrintf("/bar%zu", i);
+    push_promise_[":path"] = QuicStringPrintf("/bar%zu", i);
 
     QuicStreamId id = promised_stream_id_ + i * 2;
 
@@ -436,7 +420,7 @@ TEST_P(QuicClientSessionTest, ReceivingPromiseEnhanceYourCalm) {
 
   // One more promise, this should be refused.
   int i = session_->get_max_promises();
-  push_promise_[":path"] = StringPrintf("/bar%d", i);
+  push_promise_[":path"] = QuicStringPrintf("/bar%d", i);
 
   QuicStreamId id = promised_stream_id_ + i * 2;
   EXPECT_CALL(*connection_, SendRstStream(id, QUIC_REFUSED_STREAM, 0));

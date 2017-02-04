@@ -4,6 +4,8 @@
 
 #include "ash/common/accelerators/accelerator_controller.h"
 
+#include <utility>
+
 #include "ash/common/accelerators/accelerator_commands.h"
 #include "ash/common/accelerators/accelerator_controller_delegate.h"
 #include "ash/common/accelerators/debug_commands.h"
@@ -11,15 +13,21 @@
 #include "ash/common/accessibility_types.h"
 #include "ash/common/focus_cycler.h"
 #include "ash/common/ime_control_delegate.h"
-#include "ash/common/media_delegate.h"
+#include "ash/common/media_controller.h"
 #include "ash/common/multi_profile_uma.h"
+#include "ash/common/new_window_controller.h"
+#include "ash/common/palette_delegate.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/shelf_widget.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/shell_delegate.h"
 #include "ash/common/system/brightness_control_delegate.h"
+#include "ash/common/system/chromeos/ime_menu/ime_menu_tray.h"
+#include "ash/common/system/chromeos/palette/palette_tray.h"
+#include "ash/common/system/chromeos/palette/palette_utils.h"
 #include "ash/common/system/keyboard_brightness_control_delegate.h"
 #include "ash/common/system/status_area_widget.h"
+#include "ash/common/system/system_notifier.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/system_tray_notifier.h"
 #include "ash/common/system/web_notification/web_notification_tray.h"
@@ -29,38 +37,23 @@
 #include "ash/common/wm/window_positioning_utils.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/wm_event.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
-#include "ash/public/interfaces/new_window.mojom.h"
+#include "ash/resources/vector_icons/vector_icons.h"
+#include "ash/root_window_controller.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
-#include "content/public/common/service_names.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "ui/base/accelerators/accelerator.h"
-#include "ui/base/accelerators/accelerator_manager.h"
-#include "ui/keyboard/keyboard_controller.h"
-
-#if defined(OS_CHROMEOS)
-#include "ash/common/palette_delegate.h"
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/system/chromeos/ime_menu/ime_menu_tray.h"
-#include "ash/common/system/chromeos/palette/palette_tray.h"
-#include "ash/common/system/chromeos/palette/palette_utils.h"
-#include "ash/common/system/status_area_widget.h"
-#include "ash/common/system/system_notifier.h"
-#include "ash/common/wm_root_window_controller.h"
-#include "ash/common/wm_window.h"
-#include "ash/resources/vector_icons/vector_icons.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "grit/ash_strings.h"
+#include "ui/base/accelerators/accelerator.h"
+#include "ui/base/accelerators/accelerator_manager.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/keyboard/keyboard_controller.h"
 #include "ui/message_center/message_center.h"
-#endif  // defined(OS_CHROMEOS)
 
 namespace ash {
 namespace {
@@ -133,15 +126,15 @@ void HandleLaunchLastApp() {
 }
 
 void HandleMediaNextTrack() {
-  WmShell::Get()->media_delegate()->HandleMediaNextTrack();
+  WmShell::Get()->media_controller()->HandleMediaNextTrack();
 }
 
 void HandleMediaPlayPause() {
-  WmShell::Get()->media_delegate()->HandleMediaPlayPause();
+  WmShell::Get()->media_controller()->HandleMediaPlayPause();
 }
 
 void HandleMediaPrevTrack() {
-  WmShell::Get()->media_delegate()->HandleMediaPrevTrack();
+  WmShell::Get()->media_controller()->HandleMediaPrevTrack();
 }
 
 bool CanHandleNewIncognitoWindow() {
@@ -150,18 +143,18 @@ bool CanHandleNewIncognitoWindow() {
 
 void HandleNewIncognitoWindow() {
   base::RecordAction(UserMetricsAction("Accel_New_Incognito_Window"));
-  WmShell::Get()->new_window_client()->NewWindow(true /* is_incognito */);
+  WmShell::Get()->new_window_controller()->NewWindow(true /* is_incognito */);
 }
 
 void HandleNewTab(const ui::Accelerator& accelerator) {
   if (accelerator.key_code() == ui::VKEY_T)
     base::RecordAction(UserMetricsAction("Accel_NewTab_T"));
-  WmShell::Get()->new_window_client()->NewTab();
+  WmShell::Get()->new_window_controller()->NewTab();
 }
 
 void HandleNewWindow() {
   base::RecordAction(UserMetricsAction("Accel_New_Window"));
-  WmShell::Get()->new_window_client()->NewWindow(false /* is_incognito */);
+  WmShell::Get()->new_window_controller()->NewWindow(false /* is_incognito */);
 }
 
 bool CanHandleNextIme(ImeControlDelegate* ime_control_delegate) {
@@ -169,32 +162,15 @@ bool CanHandleNextIme(ImeControlDelegate* ime_control_delegate) {
 }
 
 bool CanHandleCycleMru(const ui::Accelerator& accelerator) {
-  // Don't do anything when Alt+Tab comes from a virtual keyboard. Touchscreen
-  // users have better window switching options. See http://crbug.com/638269
+  // Don't do anything when Alt+Tab is hit while a virtual keyboard is showing.
+  // Touchscreen users have better window switching options. It would be
+  // preferable if we could tell whether this event actually came from a virtual
+  // keyboard, but there's no easy way to do so, thus we block Alt+Tab when the
+  // virtual keyboard is showing, even if it came from a real keyboard. See
+  // http://crbug.com/638269
   keyboard::KeyboardController* keyboard_controller =
       keyboard::KeyboardController::GetInstance();
-  return !(keyboard_controller && keyboard_controller->keyboard_visible() &&
-           (accelerator.modifiers() & ui::EF_IS_SYNTHESIZED));
-}
-
-// We must avoid showing the Deprecated NEXT_IME notification erronously.
-bool ShouldShowDeprecatedNextImeNotification(
-    const ui::Accelerator& previous_accelerator) {
-  // We only show the deprecation notification if the previous accelerator key
-  // is ONLY either Shift, or Alt.
-  const ui::KeyboardCode previous_key_code = previous_accelerator.key_code();
-  switch (previous_key_code) {
-    case ui::VKEY_SHIFT:
-    case ui::VKEY_LSHIFT:
-    case ui::VKEY_RSHIFT:
-    case ui::VKEY_MENU:
-    case ui::VKEY_LMENU:
-    case ui::VKEY_RMENU:
-      return true;
-
-    default:
-      return false;
-  }
+  return !(keyboard_controller && keyboard_controller->keyboard_visible());
 }
 
 void HandleNextIme(ImeControlDelegate* ime_control_delegate) {
@@ -204,7 +180,7 @@ void HandleNextIme(ImeControlDelegate* ime_control_delegate) {
 
 void HandleOpenFeedbackPage() {
   base::RecordAction(UserMetricsAction("Accel_Open_Feedback_Page"));
-  WmShell::Get()->new_window_client()->OpenFeedbackPage();
+  WmShell::Get()->new_window_controller()->OpenFeedbackPage();
 }
 
 bool CanHandlePreviousIme(ImeControlDelegate* ime_control_delegate) {
@@ -221,12 +197,12 @@ void HandlePreviousIme(ImeControlDelegate* ime_control_delegate,
 
 void HandleRestoreTab() {
   base::RecordAction(UserMetricsAction("Accel_Restore_Tab"));
-  WmShell::Get()->new_window_client()->RestoreTab();
+  WmShell::Get()->new_window_controller()->RestoreTab();
 }
 
 void HandleShowKeyboardOverlay() {
   base::RecordAction(UserMetricsAction("Accel_Show_Keyboard_Overlay"));
-  WmShell::Get()->new_window_client()->ShowKeyboardOverlay();
+  WmShell::Get()->new_window_controller()->ShowKeyboardOverlay();
 }
 
 bool CanHandleShowMessageCenterBubble() {
@@ -252,7 +228,7 @@ void HandleShowMessageCenterBubble() {
 
 void HandleShowTaskManager() {
   base::RecordAction(UserMetricsAction("Accel_Show_Task_Manager"));
-  WmShell::Get()->new_window_client()->ShowTaskManager();
+  WmShell::Get()->new_window_controller()->ShowTaskManager();
 }
 
 bool CanHandleSwitchIme(ImeControlDelegate* ime_control_delegate,
@@ -371,7 +347,7 @@ void HandleShowImeMenuBubble() {
 void HandleCrosh() {
   base::RecordAction(UserMetricsAction("Accel_Open_Crosh"));
 
-  WmShell::Get()->new_window_client()->OpenCrosh();
+  WmShell::Get()->new_window_controller()->OpenCrosh();
 }
 
 bool CanHandleDisableCapsLock(const ui::Accelerator& previous_accelerator) {
@@ -401,11 +377,11 @@ void HandleDisableCapsLock() {
 void HandleFileManager() {
   base::RecordAction(UserMetricsAction("Accel_Open_File_Manager"));
 
-  WmShell::Get()->new_window_client()->OpenFileManager();
+  WmShell::Get()->new_window_controller()->OpenFileManager();
 }
 
 void HandleGetHelp() {
-  WmShell::Get()->new_window_client()->OpenGetHelp();
+  WmShell::Get()->new_window_controller()->OpenGetHelp();
 }
 
 bool CanHandleLock() {
@@ -420,7 +396,7 @@ void HandleLock() {
 void HandleShowStylusTools() {
   base::RecordAction(UserMetricsAction("Accel_Show_Stylus_Tools"));
 
-  WmRootWindowController* root_window_controller =
+  RootWindowController* root_window_controller =
       WmShell::Get()->GetRootWindowForNewWindows()->GetRootWindowController();
   PaletteTray* palette_tray =
       root_window_controller->GetShelf()->GetStatusAreaWidget()->palette_tray();
@@ -553,10 +529,11 @@ AcceleratorController::AcceleratorController(
 
 AcceleratorController::~AcceleratorController() {}
 
-void AcceleratorController::Register(const ui::Accelerator& accelerator,
-                                     ui::AcceleratorTarget* target) {
+void AcceleratorController::Register(
+    const std::vector<ui::Accelerator>& accelerators,
+    ui::AcceleratorTarget* target) {
   accelerator_manager_->Register(
-      accelerator, ui::AcceleratorManager::kNormalPriority, target);
+      accelerators, ui::AcceleratorManager::kNormalPriority, target);
 }
 
 void AcceleratorController::Unregister(const ui::Accelerator& accelerator,
@@ -639,49 +616,32 @@ bool AcceleratorController::AcceleratorPressed(
       accelerators_.find(accelerator);
   DCHECK(it != accelerators_.end());
   AcceleratorAction action = it->second;
-  if (CanPerformAction(action, accelerator)) {
-    // Handling the deprecated accelerators (if any) only if action can be
-    // performed.
-    auto itr = actions_with_deprecations_.find(action);
-    if (itr != actions_with_deprecations_.end()) {
-      const DeprecatedAcceleratorData* data = itr->second;
-      if (deprecated_accelerators_.count(accelerator)) {
-        // This accelerator has been deprecated and should be treated according
-        // to its |DeprecatedAcceleratorData|.
+  if (!CanPerformAction(action, accelerator))
+    return false;
 
-        // Record UMA stats.
-        RecordUmaHistogram(data->uma_histogram_name, DEPRECATED_USED);
-
-        // We always display the notification as long as this entry exists,
-        // except for NEXT_IME, we must check to avoid showing it for the wrong
-        // shortcut, as Alt+Shift is tricky and trigger the action on release.
-        if (delegate_ &&
-            (action != NEXT_IME ||
-             (action == NEXT_IME &&
-              ShouldShowDeprecatedNextImeNotification(
-                  accelerator_history_->previous_accelerator())))) {
-          delegate_->ShowDeprecatedAcceleratorNotification(
-              data->uma_histogram_name, data->notification_message_id,
-              data->old_shortcut_id, data->new_shortcut_id);
-        }
-
-        if (!data->deprecated_enabled)
-          return false;
-      } else {
-        // This is a new accelerator replacing the old deprecated one.
-        // Record UMA stats and proceed normally.
-        RecordUmaHistogram(data->uma_histogram_name, NEW_USED);
-      }
-    }
-
-    PerformAction(action, accelerator);
-    return ShouldActionConsumeKeyEvent(action);
+  // Handling the deprecated accelerators (if any) only if action can be
+  // performed.
+  if (MaybeDeprecatedAcceleratorPressed(action, accelerator) ==
+      AcceleratorProcessingStatus::STOP) {
+    return false;
   }
-  return false;
+
+  PerformAction(action, accelerator);
+  return ShouldActionConsumeKeyEvent(action);
 }
 
 bool AcceleratorController::CanHandleAccelerators() const {
   return true;
+}
+
+void AcceleratorController::BindRequest(
+    mojom::AcceleratorControllerRequest request) {
+  bindings_.AddBinding(this, std::move(request));
+}
+
+void AcceleratorController::SetVolumeController(
+    mojom::VolumeControllerPtr controller) {
+  volume_controller_ = std::move(controller);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -740,13 +700,15 @@ void AcceleratorController::Init() {
 void AcceleratorController::RegisterAccelerators(
     const AcceleratorData accelerators[],
     size_t accelerators_length) {
+  std::vector<ui::Accelerator> ui_accelerators;
   for (size_t i = 0; i < accelerators_length; ++i) {
     ui::Accelerator accelerator =
         CreateAccelerator(accelerators[i].keycode, accelerators[i].modifiers,
                           accelerators[i].trigger_on_press);
-    Register(accelerator, this);
+    ui_accelerators.push_back(accelerator);
     accelerators_.insert(std::make_pair(accelerator, accelerators[i].action));
   }
+  Register(ui_accelerators, this);
 }
 
 void AcceleratorController::RegisterDeprecatedAccelerators() {
@@ -756,16 +718,18 @@ void AcceleratorController::RegisterDeprecatedAccelerators() {
     actions_with_deprecations_[data->action] = data;
   }
 
+  std::vector<ui::Accelerator> ui_accelerators;
   for (size_t i = 0; i < kDeprecatedAcceleratorsLength; ++i) {
     const AcceleratorData& accelerator_data = kDeprecatedAccelerators[i];
     const ui::Accelerator deprecated_accelerator =
         CreateAccelerator(accelerator_data.keycode, accelerator_data.modifiers,
                           accelerator_data.trigger_on_press);
 
-    Register(deprecated_accelerator, this);
+    ui_accelerators.push_back(deprecated_accelerator);
     accelerators_[deprecated_accelerator] = accelerator_data.action;
     deprecated_accelerators_.insert(deprecated_accelerator);
   }
+  Register(ui_accelerators, this);
 #endif  // defined(OS_CHROMEOS)
 }
 
@@ -794,6 +758,7 @@ bool AcceleratorController::CanPerformAction(
     case DEBUG_PRINT_VIEW_HIERARCHY:
     case DEBUG_PRINT_WINDOW_HIERARCHY:
     case DEBUG_TOGGLE_WALLPAPER_MODE:
+    case DEBUG_TRIGGER_CRASH:
       return debug::DebugAcceleratorsEnabled();
     case NEW_INCOGNITO_WINDOW:
       return CanHandleNewIncognitoWindow();
@@ -908,6 +873,7 @@ void AcceleratorController::PerformAction(AcceleratorAction action,
     case DEBUG_PRINT_VIEW_HIERARCHY:
     case DEBUG_PRINT_WINDOW_HIERARCHY:
     case DEBUG_TOGGLE_WALLPAPER_MODE:
+    case DEBUG_TRIGGER_CRASH:
       debug::PerformDebugActionIfEnabled(action);
       break;
     case EXIT:
@@ -1095,13 +1061,13 @@ void AcceleratorController::PerformAction(AcceleratorAction action,
       WmShell::Get()->system_tray_notifier()->NotifyRequestToggleWifi();
       break;
     case VOLUME_DOWN:
-      HandleVolumeDown(GetVolumeController(), accelerator);
+      HandleVolumeDown(volume_controller_.get(), accelerator);
       break;
     case VOLUME_MUTE:
-      HandleVolumeMute(GetVolumeController(), accelerator);
+      HandleVolumeMute(volume_controller_.get(), accelerator);
       break;
     case VOLUME_UP:
-      HandleVolumeUp(GetVolumeController(), accelerator);
+      HandleVolumeUp(volume_controller_.get(), accelerator);
       break;
 #else
     case DUMMY_FOR_RESERVED:
@@ -1131,6 +1097,7 @@ AcceleratorController::GetAcceleratorProcessingRestriction(int action) {
           actions_allowed_in_pinned_mode_.end()) {
     return RESTRICTION_PREVENT_PROCESSING_AND_PROPAGATION;
   }
+  // TODO(xiyuan): Replace with SessionController. http://crbug.com/648964
   if (!wm_shell->GetSessionStateDelegate()->IsActiveUserSessionStarted() &&
       actions_allowed_at_login_screen_.find(action) ==
           actions_allowed_at_login_screen_.end()) {
@@ -1164,19 +1131,44 @@ AcceleratorController::GetAcceleratorProcessingRestriction(int action) {
   return RESTRICTION_NONE;
 }
 
-mojom::VolumeController* AcceleratorController::GetVolumeController() {
-  if (!volume_controller_ && WmShell::Get()->delegate()->GetShellConnector()) {
-    WmShell::Get()->delegate()->GetShellConnector()->ConnectToInterface(
-        content::mojom::kBrowserServiceName, &volume_controller_);
-    volume_controller_.set_connection_error_handler(
-        base::Bind(&AcceleratorController::OnVolumeControllerConnectionError,
-                   base::Unretained(this)));
+AcceleratorController::AcceleratorProcessingStatus
+AcceleratorController::MaybeDeprecatedAcceleratorPressed(
+    AcceleratorAction action,
+    const ui::Accelerator& accelerator) const {
+  auto itr = actions_with_deprecations_.find(action);
+  if (itr == actions_with_deprecations_.end()) {
+    // The action is not associated with any deprecated accelerators, and hence
+    // should be performed normally.
+    return AcceleratorProcessingStatus::PROCEED;
   }
-  return volume_controller_.get();
-}
 
-void AcceleratorController::OnVolumeControllerConnectionError() {
-  volume_controller_.reset();
+  // This action is associated with new and deprecated accelerators, find which
+  // one is |accelerator|.
+  const DeprecatedAcceleratorData* data = itr->second;
+  if (!deprecated_accelerators_.count(accelerator)) {
+    // This is a new accelerator replacing the old deprecated one.
+    // Record UMA stats and proceed normally to perform it.
+    RecordUmaHistogram(data->uma_histogram_name, NEW_USED);
+    return AcceleratorProcessingStatus::PROCEED;
+  }
+
+  // This accelerator has been deprecated and should be treated according
+  // to its |DeprecatedAcceleratorData|.
+
+  // Record UMA stats.
+  RecordUmaHistogram(data->uma_histogram_name, DEPRECATED_USED);
+
+  if (delegate_) {
+    // We always display the notification as long as this |data| entry exists.
+    delegate_->ShowDeprecatedAcceleratorNotification(
+        data->uma_histogram_name, data->notification_message_id,
+        data->old_shortcut_id, data->new_shortcut_id);
+  }
+
+  if (!data->deprecated_enabled)
+    return AcceleratorProcessingStatus::STOP;
+
+  return AcceleratorProcessingStatus::PROCEED;
 }
 
 }  // namespace ash

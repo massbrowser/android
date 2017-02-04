@@ -28,7 +28,7 @@ mojom::blink::BroadcastChannelProviderPtr& getThreadSpecificProvider() {
       new ThreadSpecific<mojom::blink::BroadcastChannelProviderPtr>);
   if (!provider.isSet()) {
     Platform::current()->interfaceProvider()->getInterface(
-        mojo::GetProxy(&*provider));
+        mojo::MakeRequest(&*provider));
   }
   return *provider;
 }
@@ -95,7 +95,7 @@ bool BroadcastChannel::hasPendingActivity() const {
   return m_binding.is_bound() && hasEventListeners(EventTypeNames::message);
 }
 
-void BroadcastChannel::contextDestroyed() {
+void BroadcastChannel::contextDestroyed(ExecutionContext*) {
   close();
 }
 
@@ -108,7 +108,7 @@ void BroadcastChannel::OnMessage(const WTF::Vector<uint8_t>& message) {
   // Queue a task to dispatch the event.
   RefPtr<SerializedScriptValue> value = SerializedScriptValue::create(
       message.isEmpty() ? nullptr
-                        : reinterpret_cast<const char*>(&message.first()),
+                        : reinterpret_cast<const char*>(&message.front()),
       message.size());
   MessageEvent* event = MessageEvent::create(
       nullptr, value.release(),
@@ -125,13 +125,10 @@ void BroadcastChannel::onError() {
 
 BroadcastChannel::BroadcastChannel(ExecutionContext* executionContext,
                                    const String& name)
-    : ActiveScriptWrappable(this),
-      ContextLifecycleObserver(executionContext),
+    : ContextLifecycleObserver(executionContext),
       m_origin(executionContext->getSecurityOrigin()),
       m_name(name),
       m_binding(this) {
-  ThreadState::current()->registerPreFinalizer(this);
-
   mojom::blink::BroadcastChannelProviderPtr& provider =
       getThreadSpecificProvider();
 

@@ -31,17 +31,33 @@ found in the LICENSE file.
         <div>$i18n{insecureWebVrContentTransient}</div>
       </div>
     </div>
-    <div id="omni-container" class="ui-element">
-      <div id="omni" class="idle">
-        <div id="omni-content">
-          <img id="omni-insecure-icon" class="connection-security"
-               src="../../../../ui/webui/resources/images/i_circle.svg">
-          <img id="omni-secure-icon" class="connection-security"
-               src="../../../../ui/webui/resources/images/lock.svg">
-          <div id="url">
+    <div id="url-indicator-container" class="ui-element">
+      <div id="url-indicator-border">
+        <div id="url-indicator">
+          <div id="url-indicator-content">
+            <div id="url-indicator-info-icon" class="url-indicator-icon"></div>
+            <div id="url-indicator-lock-icon" class="url-indicator-icon"></div>
+            <div id="url-indicator-warning-icon" class="url-indicator-icon">
+            </div>
+            <div id="url">
               <span id="domain"></span><span id="path"></span>
+            </div>
           </div>
         </div>
+      </div>
+    </div>
+    <div id="omnibox-ui-element" class="ui-element">
+      <div id="suggestions">
+        <div id="suggestion-4" class="omnibox-suggestion"></div>
+        <div id="suggestion-3" class="omnibox-suggestion"></div>
+        <div id="suggestion-2" class="omnibox-suggestion"></div>
+        <div id="suggestion-1" class="omnibox-suggestion"></div>
+        <div id="suggestion-0" class="omnibox-suggestion"></div>
+      </div>
+      <div id="omnibox-url-divider"></div>
+      <div id="omnibox-url-element">
+        <input id="omnibox-input-field" type="url"></input>
+        <div id="omnibox-clear-button"></div>
       </div>
     </div>
     <div id="back" class="round-button ui-element">

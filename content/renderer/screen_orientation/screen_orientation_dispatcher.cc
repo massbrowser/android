@@ -9,7 +9,7 @@
 
 namespace content {
 
-using ::blink::mojom::ScreenOrientationLockResult;
+using device::mojom::ScreenOrientationLockResult;
 
 ScreenOrientationDispatcher::ScreenOrientationDispatcher(
     RenderFrame* render_frame)
@@ -65,10 +65,10 @@ void ScreenOrientationDispatcher::CancelPendingLocks() {
 
 void ScreenOrientationDispatcher::lockOrientation(
     blink::WebScreenOrientationLockType orientation,
-    blink::WebLockOrientationCallback* callback) {
+    std::unique_ptr<blink::WebLockOrientationCallback> callback) {
   CancelPendingLocks();
 
-  int request_id = pending_callbacks_.Add(callback);
+  int request_id = pending_callbacks_.Add(std::move(callback));
   EnsureScreenOrientationService();
   screen_orientation_->LockOrientation(
       orientation,

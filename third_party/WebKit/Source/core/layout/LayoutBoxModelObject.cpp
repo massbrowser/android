@@ -41,6 +41,7 @@
 #include "core/style/ShadowList.h"
 #include "platform/LengthFunctions.h"
 #include "platform/geometry/TransformState.h"
+#include "platform/scroll/MainThreadScrollingReason.h"
 #include "wtf/PtrUtil.h"
 
 namespace blink {
@@ -111,7 +112,8 @@ bool LayoutBoxModelObject::usesCompositedScrolling() const {
          layer()->getScrollableArea()->usesCompositedScrolling();
 }
 
-bool LayoutBoxModelObject::hasLocalEquivalentBackground() const {
+BackgroundPaintLocation LayoutBoxModelObject::backgroundPaintLocation(
+    uint32_t* reasons) const {
   bool hasCustomScrollbars = false;
   // TODO(flackr): Detect opaque custom scrollbars which would cover up a
   // border-box background.
@@ -127,14 +129,20 @@ bool LayoutBoxModelObject::hasLocalEquivalentBackground() const {
   // TODO(flackr): When we correctly clip the scrolling contents layer we can
   // paint locally equivalent backgrounds into it. https://crbug.com/645957
   if (!style()->hasAutoClip())
-    return false;
+    return BackgroundPaintInGraphicsLayer;
 
   // TODO(flackr): Remove this when box shadows are still painted correctly when
   // painting into the composited scrolling contents layer.
   // https://crbug.com/646464
-  if (style()->boxShadow())
-    return false;
+  if (style()->boxShadow()) {
+    if (reasons)
+      *reasons |= MainThreadScrollingReason::kHasBoxShadowFromNonRootLayer;
+    return BackgroundPaintInGraphicsLayer;
+  }
 
+  // Assume optimistically that the background can be painted in the scrolling
+  // contents until we find otherwise.
+  BackgroundPaintLocation paintLocation = BackgroundPaintInScrollingContents;
   const FillLayer* layer = &(style()->backgroundLayers());
   for (; layer; layer = layer->next()) {
     if (layer->attachment() == LocalBackgroundAttachment)
@@ -149,15 +157,25 @@ bool LayoutBoxModelObject::hasLocalEquivalentBackground() const {
         continue;
       // A border box can be treated as a padding box if the border is opaque or
       // there is no border and we don't have custom scrollbars.
-      if (clip == BorderFillBox && !hasCustomScrollbars &&
-          (style()->borderTopWidth() == 0 ||
-           !resolveColor(CSSPropertyBorderTopColor).hasAlpha()) &&
-          (style()->borderLeftWidth() == 0 ||
-           !resolveColor(CSSPropertyBorderLeftColor).hasAlpha()) &&
-          (style()->borderRightWidth() == 0 ||
-           !resolveColor(CSSPropertyBorderRightColor).hasAlpha()) &&
-          (style()->borderBottomWidth() == 0 ||
-           !resolveColor(CSSPropertyBorderBottomColor).hasAlpha())) {
+      if (clip == BorderFillBox) {
+        if (!hasCustomScrollbars &&
+            (style()->borderTopWidth() == 0 ||
+             !resolveColor(CSSPropertyBorderTopColor).hasAlpha()) &&
+            (style()->borderLeftWidth() == 0 ||
+             !resolveColor(CSSPropertyBorderLeftColor).hasAlpha()) &&
+            (style()->borderRightWidth() == 0 ||
+             !resolveColor(CSSPropertyBorderRightColor).hasAlpha()) &&
+            (style()->borderBottomWidth() == 0 ||
+             !resolveColor(CSSPropertyBorderBottomColor).hasAlpha())) {
+          continue;
+        }
+        // If we have an opaque background color only, we can safely paint it
+        // into both the scrolling contents layer and the graphics layer to
+        // preserve LCD text.
+        if (layer == (&style()->backgroundLayers()) &&
+            resolveColor(CSSPropertyBackgroundColor).alpha() < 255)
+          return BackgroundPaintInGraphicsLayer;
+        paintLocation |= BackgroundPaintInGraphicsLayer;
         continue;
       }
       // A content fill box can be treated as a padding fill box if there is no
@@ -168,9 +186,9 @@ bool LayoutBoxModelObject::hasLocalEquivalentBackground() const {
         continue;
       }
     }
-    return false;
+    return BackgroundPaintInGraphicsLayer;
   }
-  return true;
+  return paintLocation;
 }
 
 LayoutBoxModelObject::~LayoutBoxModelObject() {
@@ -219,13 +237,8 @@ void LayoutBoxModelObject::styleWillChange(StyleDifference diff,
 
   FloatStateForStyleChange::setWasFloating(this, isFloating());
 
-  if (const ComputedStyle* oldStyle = style()) {
-    if (hasLayer() && diff.needsPaintInvalidationSubtree()) {
-      if (oldStyle->hasAutoClip() != newStyle.hasAutoClip() ||
-          oldStyle->clip() != newStyle.clip())
-        layer()->clipper().clearClipRectsIncludingDescendants();
-    }
-  }
+  if (hasLayer() && diff.cssClipChanged())
+    layer()->clipper().clearClipRectsIncludingDescendants();
 
   LayoutObject::styleWillChange(diff, newStyle);
 }
@@ -233,7 +246,7 @@ void LayoutBoxModelObject::styleWillChange(StyleDifference diff,
 DISABLE_CFI_PERF
 void LayoutBoxModelObject::styleDidChange(StyleDifference diff,
                                           const ComputedStyle* oldStyle) {
-  bool hadTransform = hasTransformRelatedProperty();
+  bool hadTransformRelatedProperty = hasTransformRelatedProperty();
   bool hadLayer = hasLayer();
   bool layerWasSelfPainting = hadLayer && layer()->isSelfPaintingLayer();
   bool wasFloatingBeforeStyleChanged =
@@ -287,12 +300,26 @@ void LayoutBoxModelObject::styleDidChange(StyleDifference diff,
     layer()->removeOnlyThisLayerAfterStyleChange();
     if (wasFloatingBeforeStyleChanged && isFloating())
       setChildNeedsLayout();
-    if (hadTransform)
+    if (hadTransformRelatedProperty) {
       setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
           LayoutInvalidationReason::StyleChange);
+    }
     if (!needsLayout()) {
       // FIXME: We should call a specialized version of this function.
       parentLayer->updateLayerPositionsAfterLayout();
+    }
+  }
+
+  if (RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled()) {
+    if ((oldStyle && oldStyle->position() != styleRef().position()) ||
+        hadLayer != hasLayer()) {
+      // This may affect paint properties of the current object, and descendants
+      // even if paint properties of the current object won't change. E.g. the
+      // stacking context and/or containing block of descendants may change.
+      setSubtreeNeedsPaintPropertyUpdate();
+    } else if (hadTransformRelatedProperty != hasTransformRelatedProperty()) {
+      // This affects whether to create transform node.
+      setNeedsPaintPropertyUpdate();
     }
   }
 
@@ -379,9 +406,11 @@ void LayoutBoxModelObject::styleDidChange(StyleDifference diff,
         if (layer()) {
           DisableCompositingQueryAsserts disabler;
           if (const PaintLayer* ancestorOverflowLayer =
-                  layer()->ancestorOverflowLayer())
-            ancestorOverflowLayer->getScrollableArea()
-                ->invalidateStickyConstraintsFor(layer());
+                  layer()->ancestorOverflowLayer()) {
+            if (PaintLayerScrollableArea* scrollableArea =
+                    ancestorOverflowLayer->getScrollableArea())
+              scrollableArea->invalidateStickyConstraintsFor(layer());
+          }
         }
 
         // TODO(pdr): When slimming paint v2 is enabled, we will need to
@@ -415,7 +444,7 @@ void LayoutBoxModelObject::invalidateStickyConstraints() {
 
 void LayoutBoxModelObject::createLayer() {
   ASSERT(!m_layer);
-  m_layer = makeUnique<PaintLayer>(this);
+  m_layer = WTF::makeUnique<PaintLayer>(this);
   setHasLayer(true);
   m_layer->insertOnlyThisLayerAfterStyleChange();
 }
@@ -589,12 +618,14 @@ bool LayoutBoxModelObject::hasNonEmptyLayoutSize() const {
 }
 
 void LayoutBoxModelObject::absoluteQuadsForSelf(
-    Vector<FloatQuad>& quads) const {
+    Vector<FloatQuad>& quads,
+    MapCoordinatesFlags mode) const {
   NOTREACHED();
 }
 
-void LayoutBoxModelObject::absoluteQuads(Vector<FloatQuad>& quads) const {
-  absoluteQuadsForSelf(quads);
+void LayoutBoxModelObject::absoluteQuads(Vector<FloatQuad>& quads,
+                                         MapCoordinatesFlags mode) const {
+  absoluteQuadsForSelf(quads, mode);
 
   // Iterate over continuations, avoiding recursion in case there are
   // many of them. See crbug.com/653767.
@@ -605,7 +636,7 @@ void LayoutBoxModelObject::absoluteQuads(Vector<FloatQuad>& quads) const {
            (continuationObject->isLayoutBlockFlow() &&
             toLayoutBlockFlow(continuationObject)
                 ->isAnonymousBlockContinuation()));
-    continuationObject->absoluteQuadsForSelf(quads);
+    continuationObject->absoluteQuadsForSelf(quads, mode);
   }
 }
 
@@ -748,12 +779,21 @@ void LayoutBoxModelObject::updateStickyPositionConstraints() const {
   StickyPositionScrollingConstraints constraints;
   FloatSize skippedContainersOffset;
   LayoutBlock* containingBlock = this->containingBlock();
+  // The location container for boxes is not always the containing block.
+  LayoutBox* locationContainer = isLayoutInline()
+                                     ? containingBlock
+                                     : toLayoutBox(this)->locationContainer();
   // Skip anonymous containing blocks.
   while (containingBlock->isAnonymous()) {
-    skippedContainersOffset +=
-        toFloatSize(FloatPoint(containingBlock->frameRect().location()));
     containingBlock = containingBlock->containingBlock();
   }
+  MapCoordinatesFlags flags = 0;
+  skippedContainersOffset =
+      toFloatSize(locationContainer
+                      ->localToAncestorQuadWithoutTransforms(
+                          FloatQuad(), containingBlock, flags)
+                      .boundingBox()
+                      .location());
   LayoutBox* scrollAncestor =
       layer()->ancestorOverflowLayer()->isRootLayer()
           ? nullptr
@@ -781,13 +821,11 @@ void LayoutBoxModelObject::updateStickyPositionConstraints() const {
   }
   if (containingBlock != scrollAncestor) {
     FloatQuad localQuad(FloatRect(containingBlock->paddingBoxRect()));
-    TransformState transformState(TransformState::ApplyTransformDirection,
-                                  localQuad.boundingBox().center(), localQuad);
-    containingBlock->mapLocalToAncestor(scrollAncestor, transformState,
-                                        ApplyContainerFlip);
-    transformState.flatten();
     scrollContainerRelativePaddingBoxRect =
-        transformState.lastPlanarQuad().boundingBox();
+        containingBlock
+            ->localToAncestorQuadWithoutTransforms(localQuad, scrollAncestor,
+                                                   flags)
+            .boundingBox();
 
     // The sticky position constraint rects should be independent of the current
     // scroll position, so after mapping we add in the scroll position to get
@@ -987,13 +1025,13 @@ LayoutPoint LayoutBoxModelObject::adjustedPositionRelativeTo(
         // FIXME: What are we supposed to do inside SVG content?
         referencePoint.move(current->columnOffset(referencePoint));
         if (current->isBox() && !current->isTableRow())
-          referencePoint.moveBy(toLayoutBox(current)->topLeftLocation());
+          referencePoint.moveBy(toLayoutBox(current)->physicalLocation());
       }
 
       if (offsetParentObject->isBox() && offsetParentObject->isBody() &&
           !offsetParentObject->isPositioned()) {
         referencePoint.moveBy(
-            toLayoutBox(offsetParentObject)->topLeftLocation());
+            toLayoutBox(offsetParentObject)->physicalLocation());
       }
     }
 
@@ -1075,7 +1113,7 @@ void LayoutBoxModelObject::setContinuation(LayoutBoxModelObject* continuation) {
     continuationMap->set(this, continuation);
   } else {
     if (continuationMap)
-      continuationMap->remove(this);
+      continuationMap->erase(this);
   }
 }
 
@@ -1107,23 +1145,23 @@ LayoutRect LayoutBoxModelObject::localCaretRectForEmptyElement(
   CaretAlignment alignment = AlignLeft;
 
   switch (currentStyle.textAlign()) {
-    case ETextAlign::Left:
-    case ETextAlign::WebkitLeft:
+    case ETextAlign::kLeft:
+    case ETextAlign::kWebkitLeft:
       break;
-    case ETextAlign::Center:
-    case ETextAlign::WebkitCenter:
+    case ETextAlign::kCenter:
+    case ETextAlign::kWebkitCenter:
       alignment = AlignCenter;
       break;
-    case ETextAlign::Right:
-    case ETextAlign::WebkitRight:
+    case ETextAlign::kRight:
+    case ETextAlign::kWebkitRight:
       alignment = AlignRight;
       break;
-    case ETextAlign::Justify:
-    case ETextAlign::Start:
+    case ETextAlign::kJustify:
+    case ETextAlign::kStart:
       if (!currentStyle.isLeftToRightDirection())
         alignment = AlignRight;
       break;
-    case ETextAlign::End:
+    case ETextAlign::kEnd:
       if (currentStyle.isLeftToRightDirection())
         alignment = AlignRight;
       break;
@@ -1175,8 +1213,8 @@ const LayoutObject* LayoutBoxModelObject::pushMappingToContainer(
     LayoutGeometryMap& geometryMap) const {
   ASSERT(ancestorToStopAt != this);
 
-  bool ancestorSkipped;
-  LayoutObject* container = this->container(ancestorToStopAt, &ancestorSkipped);
+  AncestorSkipInfo skipInfo(ancestorToStopAt);
+  LayoutObject* container = this->container(&skipInfo);
   if (!container)
     return nullptr;
 
@@ -1185,7 +1223,7 @@ const LayoutObject* LayoutBoxModelObject::pushMappingToContainer(
   bool containsFixedPosition = canContainFixedPositionObjects();
 
   LayoutSize adjustmentForSkippedAncestor;
-  if (ancestorSkipped) {
+  if (skipInfo.ancestorSkipped()) {
     // There can't be a transform between paintInvalidationContainer and
     // ancestorToStopAt, because transforms create containers, so it should be
     // safe to just subtract the delta between the ancestor and
@@ -1225,7 +1263,7 @@ const LayoutObject* LayoutBoxModelObject::pushMappingToContainer(
     geometryMap.push(this, containerOffset, flags, LayoutSize());
   }
 
-  return ancestorSkipped ? ancestorToStopAt : container;
+  return skipInfo.ancestorSkipped() ? ancestorToStopAt : container;
 }
 
 void LayoutBoxModelObject::moveChildTo(LayoutBoxModelObject* toBoxModelObject,

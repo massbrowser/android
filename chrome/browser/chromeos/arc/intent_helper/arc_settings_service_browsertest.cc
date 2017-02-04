@@ -23,8 +23,8 @@
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/proxy/proxy_config_handler.h"
+#include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
-#include "components/arc/test/fake_arc_bridge_service.h"
 #include "components/arc/test/fake_intent_helper_instance.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
@@ -209,21 +209,23 @@ class ArcSettingsServiceTest : public InProcessBrowserTest {
         .WillRepeatedly(Return(true));
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
     fake_intent_helper_instance_.reset(new FakeIntentHelperInstance());
-
-    ArcServiceManager::SetArcBridgeServiceForTesting(
-        base::MakeUnique<FakeArcBridgeService>());
   }
 
   void SetUpOnMainThread() override {
     SetupNetworkEnvironment();
     RunUntilIdle();
 
-    ArcBridgeService::Get()->intent_helper()->SetInstance(
-        fake_intent_helper_instance_.get());
+    ArcServiceManager::Get()
+        ->arc_bridge_service()
+        ->intent_helper()
+        ->SetInstance(fake_intent_helper_instance_.get());
   }
 
   void TearDownOnMainThread() override {
-    ArcBridgeService::Get()->intent_helper()->SetInstance(nullptr);
+    ArcServiceManager::Get()
+        ->arc_bridge_service()
+        ->intent_helper()
+        ->SetInstance(nullptr);
   }
 
   void UpdatePolicy(const policy::PolicyMap& policy) {

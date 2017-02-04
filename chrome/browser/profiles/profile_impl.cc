@@ -133,7 +133,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
-#include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
+#include "chrome/browser/chromeos/policy/user_policy_manager_factory_chromeos.h"
 #else
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
@@ -380,6 +380,8 @@ void ProfileImpl::RegisterProfilePrefs(
   registry->RegisterStringPref(prefs::kHomePage,
                                std::string(),
                                home_page_flags);
+  registry->RegisterStringPref(prefs::kNewTabPageLocationOverride,
+                               std::string());
 #if BUILDFLAG(ENABLE_PRINTING)
   registry->RegisterBooleanPref(prefs::kPrintingEnabled, true);
 #endif
@@ -389,7 +391,10 @@ void ProfileImpl::RegisterProfilePrefs(
   registry->RegisterBooleanPref(prefs::kForceEphemeralProfiles, false);
 #if defined(ENABLE_MEDIA_ROUTER)
   registry->RegisterBooleanPref(prefs::kEnableMediaRouter, true);
-#endif
+#if !defined(OS_ANDROID)
+  registry->RegisterBooleanPref(prefs::kShowCastIconInToolbar, false);
+#endif  // !defined(OS_ANDROID)
+#endif  // defined(ENABLE_MEDIA_ROUTER)
   // Initialize the cache prefs.
   registry->RegisterFilePathPref(prefs::kDiskCacheDir, base::FilePath());
   registry->RegisterIntegerPref(prefs::kDiskCacheSize, 0);
@@ -434,11 +439,11 @@ ProfileImpl::ProfileImpl(
       policy::SchemaRegistryServiceFactory::CreateForContext(
           this, connector->GetChromeSchema(), connector->GetSchemaRegistry());
 #if defined(OS_CHROMEOS)
-  cloud_policy_manager_ =
-      policy::UserCloudPolicyManagerFactoryChromeOS::CreateForProfile(
+  configuration_policy_provider_ =
+      policy::UserPolicyManagerFactoryChromeOS::CreateForProfile(
           this, force_immediate_policy_load, sequenced_task_runner);
 #else
-  cloud_policy_manager_ =
+  configuration_policy_provider_ =
       policy::UserCloudPolicyManagerFactory::CreateForOriginalBrowserContext(
           this, force_immediate_policy_load, sequenced_task_runner,
           BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
@@ -855,6 +860,15 @@ void ProfileImpl::OnLocaleReady() {
 void ProfileImpl::OnPrefsLoaded(CreateMode create_mode, bool success) {
   TRACE_EVENT0("browser", "ProfileImpl::OnPrefsLoaded");
   if (!success) {
+    if (delegate_)
+      delegate_->OnProfileCreated(this, false, false);
+    return;
+  }
+
+  // Fail fast if the browser is shutting down. We want to avoid launching new
+  // UI, finalising profile creation, etc. which would trigger a crash down the
+  // the line. See crbug.com/625646
+  if (g_browser_process->IsShuttingDown()) {
     if (delegate_)
       delegate_->OnProfileCreated(this, false, false);
     return;

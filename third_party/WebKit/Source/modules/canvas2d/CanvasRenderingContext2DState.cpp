@@ -20,6 +20,8 @@
 #include "platform/graphics/DrawLooperBuilder.h"
 #include "platform/graphics/filters/FilterEffect.h"
 #include "platform/graphics/filters/SkiaImageFilterBuilder.h"
+#include "platform/graphics/paint/PaintCanvas.h"
+#include "platform/graphics/paint/PaintFlags.h"
 #include "platform/graphics/skia/SkiaUtils.h"
 #include "third_party/skia/include/effects/SkDashPathEffect.h"
 #include "third_party/skia/include/effects/SkDropShadowImageFilter.h"
@@ -51,15 +53,15 @@ CanvasRenderingContext2DState::CanvasRenderingContext2DState()
       m_strokeStyleDirty(true),
       m_lineDashDirty(false),
       m_imageSmoothingQuality(kLow_SkFilterQuality) {
-  m_fillPaint.setStyle(SkPaint::kFill_Style);
+  m_fillPaint.setStyle(PaintFlags::kFill_Style);
   m_fillPaint.setAntiAlias(true);
-  m_imagePaint.setStyle(SkPaint::kFill_Style);
+  m_imagePaint.setStyle(PaintFlags::kFill_Style);
   m_imagePaint.setAntiAlias(true);
-  m_strokePaint.setStyle(SkPaint::kStroke_Style);
+  m_strokePaint.setStyle(PaintFlags::kStroke_Style);
   m_strokePaint.setStrokeWidth(1);
-  m_strokePaint.setStrokeCap(SkPaint::kButt_Cap);
+  m_strokePaint.setStrokeCap(PaintFlags::kButt_Cap);
   m_strokePaint.setStrokeMiter(10);
-  m_strokePaint.setStrokeJoin(SkPaint::kMiter_Join);
+  m_strokePaint.setStrokeJoin(PaintFlags::kMiter_Join);
   m_strokePaint.setAntiAlias(true);
   setImageSmoothingEnabled(true);
 }
@@ -272,6 +274,40 @@ void CanvasRenderingContext2DState::resetTransform() {
   m_isTransformInvertible = true;
 }
 
+sk_sp<SkImageFilter> CanvasRenderingContext2DState::getFilterForOffscreenCanvas(
+    IntSize canvasSize) const {
+  if (!m_filterValue)
+    return nullptr;
+
+  if (m_resolvedFilter)
+    return m_resolvedFilter;
+
+  FilterOperations operations =
+      FilterOperationResolver::createOffscreenFilterOperations(*m_filterValue);
+
+  // We can't reuse m_fillPaint and m_strokePaint for the filter, since these
+  // incorporate the global alpha, which isn't applicable here.
+  SkPaint fillPaintForFilter;
+  m_fillStyle->applyToPaint(fillPaintForFilter);
+  fillPaintForFilter.setColor(m_fillStyle->paintColor());
+  SkPaint strokePaintForFilter;
+  m_strokeStyle->applyToPaint(strokePaintForFilter);
+  strokePaintForFilter.setColor(m_strokeStyle->paintColor());
+
+  FilterEffectBuilder filterEffectBuilder(
+      FloatRect((FloatPoint()), FloatSize(canvasSize)),
+      1.0f,  // Deliberately ignore zoom on the canvas element.
+      &fillPaintForFilter, &strokePaintForFilter);
+
+  FilterEffect* lastEffect = filterEffectBuilder.buildFilterEffect(operations);
+  if (lastEffect) {
+    m_resolvedFilter =
+        SkiaImageFilterBuilder::build(lastEffect, ColorSpaceDeviceRGB);
+  }
+
+  return m_resolvedFilter;
+}
+
 sk_sp<SkImageFilter> CanvasRenderingContext2DState::getFilter(
     Element* styleResolutionHost,
     IntSize canvasSize,
@@ -284,6 +320,10 @@ sk_sp<SkImageFilter> CanvasRenderingContext2DState::getFilter(
     return nullptr;
 
   if (!m_resolvedFilter) {
+    // Update the filter value to the proper base URL if needed.
+    if (m_filterValue->mayContainUrl())
+      m_filterValue->reResolveUrl(styleResolutionHost->document());
+
     RefPtr<ComputedStyle> filterStyle = ComputedStyle::create();
     // Must set font in case the filter uses any font-relative units (em, ex)
     filterStyle->setFont(m_fontForFilter);
@@ -298,10 +338,10 @@ sk_sp<SkImageFilter> CanvasRenderingContext2DState::getFilter(
 
     // We can't reuse m_fillPaint and m_strokePaint for the filter, since these
     // incorporate the global alpha, which isn't applicable here.
-    SkPaint fillPaintForFilter;
+    PaintFlags fillPaintForFilter;
     m_fillStyle->applyToPaint(fillPaintForFilter);
     fillPaintForFilter.setColor(m_fillStyle->paintColor());
-    SkPaint strokePaintForFilter;
+    PaintFlags strokePaintForFilter;
     m_strokeStyle->applyToPaint(strokePaintForFilter);
     strokePaintForFilter.setColor(m_strokeStyle->paintColor());
 
@@ -323,6 +363,13 @@ sk_sp<SkImageFilter> CanvasRenderingContext2DState::getFilter(
   }
 
   return m_resolvedFilter;
+}
+
+bool CanvasRenderingContext2DState::hasFilterForOffscreenCanvas(
+    IntSize canvasSize) const {
+  // Checking for a non-null m_filterValue isn't sufficient, since this value
+  // might refer to a non-existent filter.
+  return !!getFilterForOffscreenCanvas(canvasSize);
 }
 
 bool CanvasRenderingContext2DState::hasFilter(
@@ -492,11 +539,11 @@ bool CanvasRenderingContext2DState::shouldDrawShadows() const {
          (m_shadowBlur || !m_shadowOffset.isZero());
 }
 
-const SkPaint* CanvasRenderingContext2DState::getPaint(
+const PaintFlags* CanvasRenderingContext2DState::getPaint(
     PaintType paintType,
     ShadowMode shadowMode,
     ImageType imageType) const {
-  SkPaint* paint;
+  PaintFlags* paint;
   switch (paintType) {
     case StrokePaintType:
       updateLineDash();

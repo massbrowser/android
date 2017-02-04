@@ -29,15 +29,17 @@
 
 #include "bindings/core/v8/SourceLocation.h"
 #include "core/dom/ExecutionContextTask.h"
+#include "core/dom/SuspendableObject.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/ErrorEvent.h"
 #include "core/events/EventTarget.h"
-#include "core/fetch/MemoryCache.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/PublicURLManager.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerThread.h"
+#include "platform/loader/fetch/MemoryCache.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "wtf/PtrUtil.h"
 #include <memory>
@@ -47,46 +49,47 @@ namespace blink {
 ExecutionContext::ExecutionContext()
     : m_circularSequentialID(0),
       m_inDispatchErrorEvent(false),
-      m_activeDOMObjectsAreSuspended(false),
-      m_activeDOMObjectsAreStopped(false),
+      m_isContextSuspended(false),
+      m_isContextDestroyed(false),
       m_windowInteractionTokens(0),
       m_referrerPolicy(ReferrerPolicyDefault) {}
 
 ExecutionContext::~ExecutionContext() {}
 
-void ExecutionContext::suspendActiveDOMObjects() {
-  DCHECK(!m_activeDOMObjectsAreSuspended);
-  notifySuspendingActiveDOMObjects();
-  m_activeDOMObjectsAreSuspended = true;
+void ExecutionContext::suspendSuspendableObjects() {
+  DCHECK(!m_isContextSuspended);
+  notifySuspendingSuspendableObjects();
+  m_isContextSuspended = true;
 }
 
-void ExecutionContext::resumeActiveDOMObjects() {
-  DCHECK(m_activeDOMObjectsAreSuspended);
-  m_activeDOMObjectsAreSuspended = false;
-  notifyResumingActiveDOMObjects();
+void ExecutionContext::resumeSuspendableObjects() {
+  DCHECK(m_isContextSuspended);
+  m_isContextSuspended = false;
+  notifyResumingSuspendableObjects();
 }
 
 void ExecutionContext::notifyContextDestroyed() {
-  m_activeDOMObjectsAreStopped = true;
+  m_isContextDestroyed = true;
   ContextLifecycleNotifier::notifyContextDestroyed();
 }
 
 void ExecutionContext::suspendScheduledTasks() {
-  suspendActiveDOMObjects();
+  suspendSuspendableObjects();
   tasksWereSuspended();
 }
 
 void ExecutionContext::resumeScheduledTasks() {
-  resumeActiveDOMObjects();
+  resumeSuspendableObjects();
   tasksWereResumed();
 }
 
-void ExecutionContext::suspendActiveDOMObjectIfNeeded(ActiveDOMObject* object) {
+void ExecutionContext::suspendSuspendableObjectIfNeeded(
+    SuspendableObject* object) {
 #if DCHECK_IS_ON()
   DCHECK(contains(object));
 #endif
-  // Ensure all ActiveDOMObjects are suspended also newly created ones.
-  if (m_activeDOMObjectsAreSuspended)
+  // Ensure all SuspendableObjects are suspended also newly created ones.
+  if (m_isContextSuspended)
     object->suspend();
 }
 
@@ -102,7 +105,7 @@ bool ExecutionContext::shouldSanitizeScriptError(
 void ExecutionContext::dispatchErrorEvent(ErrorEvent* errorEvent,
                                           AccessControlStatus corsStatus) {
   if (m_inDispatchErrorEvent) {
-    m_pendingExceptions.append(errorEvent);
+    m_pendingExceptions.push_back(errorEvent);
     return;
   }
 

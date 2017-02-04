@@ -34,7 +34,6 @@
 #include "core/CoreExport.h"
 #include "core/dom/Document.h"
 #include "core/dom/IconURL.h"
-#include "core/fetch/ResourceLoaderOptions.h"
 #include "core/frame/FrameClient.h"
 #include "core/frame/FrameTypes.h"
 #include "core/html/LinkResource.h"
@@ -42,10 +41,12 @@
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/loader/NavigationPolicy.h"
 #include "platform/heap/Handle.h"
+#include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/ResourceLoadPriority.h"
 #include "platform/weborigin/Referrer.h"
 #include "public/platform/WebEffectiveConnectionType.h"
+#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/platform/WebLoadingBehaviorFlag.h"
 #include "wtf/Forward.h"
@@ -69,7 +70,6 @@ class LocalFrame;
 class ResourceError;
 class ResourceRequest;
 class ResourceResponse;
-class ScriptState;
 class SecurityOrigin;
 class SharedWorkerRepositoryClient;
 class SubstituteData;
@@ -218,13 +218,10 @@ class CORE_EXPORT FrameLoaderClient : public FrameClient {
   virtual void runScriptsAtDocumentReady(bool documentIsEmpty) = 0;
 
   virtual void didCreateScriptContext(v8::Local<v8::Context>,
-                                      int extensionGroup,
                                       int worldId) = 0;
   virtual void willReleaseScriptContext(v8::Local<v8::Context>,
                                         int worldId) = 0;
-  virtual bool allowScriptExtension(const String& extensionName,
-                                    int extensionGroup,
-                                    int worldId) = 0;
+  virtual bool allowScriptExtensions() = 0;
 
   virtual void didChangeScrollOffset() {}
   virtual void didUpdateCurrentHistoryItem() {}
@@ -263,9 +260,6 @@ class CORE_EXPORT FrameLoaderClient : public FrameClient {
   // This callback is similar, but for plugins.
   virtual void didNotAllowPlugins() {}
 
-  // This callback notifies the client that the frame created a Keygen element.
-  virtual void didUseKeygen() {}
-
   virtual WebCookieJar* cookieJar() const = 0;
 
   virtual void didChangeName(const String& name, const String& uniqueName) {}
@@ -276,7 +270,8 @@ class CORE_EXPORT FrameLoaderClient : public FrameClient {
 
   virtual void didChangeSandboxFlags(Frame* childFrame, SandboxFlags) {}
 
-  virtual void didSetFeaturePolicyHeader(const String& headerValue) {}
+  virtual void didSetFeaturePolicyHeader(
+      const WebParsedFeaturePolicyHeader& parsedHeader) {}
 
   // Called when a new Content Security Policy is added to the frame's document.
   // This can be triggered by handling of HTTP headers, handling of <meta>
@@ -341,6 +336,10 @@ class CORE_EXPORT FrameLoaderClient : public FrameClient {
   // Overwrites the given URL to use an HTML5 embed if possible. An empty URL is
   // returned if the URL is not overriden.
   virtual KURL overrideFlashEmbedWithHTML(const KURL&) { return KURL(); }
+
+  virtual BlameContext* frameBlameContext() { return nullptr; }
+
+  virtual void setHasReceivedUserGesture() {}
 };
 
 }  // namespace blink

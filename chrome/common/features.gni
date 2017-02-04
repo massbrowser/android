@@ -11,15 +11,10 @@ import("//media/media_options.gni")
 import("//net/features.gni")
 import("//ppapi/features/features.gni")
 import("//printing/features/features.gni")
+import("//ui/base/ui_features.gni")
 
 # Please keep features in alphabetical order.
 declare_args() {
-  # Whether the Java UI is being used (Java infobars and popups, Java native
-  # settings and first run experience, sign-in etc.).
-  # Default to true if compiling for android, but allow this being overriden
-  # through the environment.
-  android_java_ui = is_android
-
   enable_app_list = is_chromeos
 
   # Enables support for background apps.
@@ -61,8 +56,10 @@ declare_args() {
 
   enable_supervised_users = !is_ios && !is_chromecast
 
-  # Enables vr shell.
-  enable_vr_shell = false
+  # Enables vr shell (enabled on same architectures as webvr).
+  # TODO(amp): Collapse webvr and vr shell build flags into a single vr flag.
+  enable_vr_shell =
+      is_android && (current_cpu == "arm" || current_cpu == "arm64")
 
   # Enables vr shell UI development on local or remote page.
   enable_vr_shell_ui_dev = false
@@ -99,6 +96,7 @@ chrome_grit_defines = [
   "enable_vr_shell=$enable_vr_shell",
   "enable_webrtc=$enable_webrtc",
   "enable_webvr=$enable_webvr",
+  "mac_views_browser=$mac_views_browser",
   "safe_browsing_mode=$safe_browsing_mode",
   "use_vulcanize=$use_vulcanize",
 ]

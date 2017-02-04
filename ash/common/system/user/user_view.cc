@@ -16,6 +16,7 @@
 #include "ash/common/system/tray/system_tray_controller.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/tray_constants.h"
+#include "ash/common/system/tray/tray_popup_item_style.h"
 #include "ash/common/system/tray/tray_popup_label_button.h"
 #include "ash/common/system/tray/tray_popup_label_button_border.h"
 #include "ash/common/system/tray/tray_popup_utils.h"
@@ -24,11 +25,12 @@
 #include "ash/common/system/user/rounded_image_view.h"
 #include "ash/common/system/user/user_card_view.h"
 #include "ash/common/wm_lookup.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/resources/vector_icons/vector_icons.h"
+#include "ash/root_window_controller.h"
+#include "base/memory/ptr_util.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_info.h"
 #include "grit/ash_resources.h"
@@ -104,16 +106,16 @@ bool IsMultiProfileSupportedAndUserActive() {
 }
 
 // Creates the view shown in the user switcher popup ("AddUserMenuOption").
-views::View* CreateAddUserView(AddUserSessionPolicy policy) {
+views::View* CreateAddUserView(AddUserSessionPolicy policy,
+                               views::ButtonListener* listener) {
   DCHECK(UseMd());
   auto view = new views::View;
-  auto layout = new views::BoxLayout(
-      views::BoxLayout::kHorizontal, (kMenuButtonSize - kMenuIconSize) / 2,
-      kMenuSeparatorVerticalPadding, kTrayPopupPaddingBetweenItems);
+  const int icon_padding = (kMenuButtonSize - kMenuIconSize) / 2;
+  auto layout =
+      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0,
+                           kTrayPopupLabelHorizontalPadding + icon_padding);
   layout->set_minimum_cross_axis_size(
-      policy == AddUserSessionPolicy::ALLOWED
-          ? GetTrayConstant(TRAY_POPUP_ITEM_MIN_HEIGHT)
-          : 56);
+      GetTrayConstant(TRAY_POPUP_ITEM_MIN_HEIGHT));
   view->SetLayoutManager(layout);
   view->set_background(
       views::Background::CreateSolidBackground(kBackgroundColor));
@@ -143,7 +145,29 @@ views::View* CreateAddUserView(AddUserSessionPolicy policy) {
   auto command_label = new views::Label(l10n_util::GetStringUTF16(message_id));
   command_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   command_label->SetMultiLine(true);
+
+  TrayPopupItemStyle label_style(
+      TrayPopupItemStyle::FontStyle::DETAILED_VIEW_LABEL);
+  int vertical_padding = kMenuSeparatorVerticalPadding;
+  if (policy != AddUserSessionPolicy::ALLOWED) {
+    label_style.set_font_style(TrayPopupItemStyle::FontStyle::CAPTION);
+    label_style.set_color_style(TrayPopupItemStyle::ColorStyle::INACTIVE);
+    vertical_padding += kMenuSeparatorVerticalPadding;
+  }
+  label_style.SetupLabel(command_label);
   view->AddChildView(command_label);
+  view->SetBorder(views::CreateEmptyBorder(vertical_padding, icon_padding,
+                                           vertical_padding,
+                                           kTrayPopupLabelHorizontalPadding));
+  if (policy == AddUserSessionPolicy::ALLOWED) {
+    auto button =
+        new ButtonFromView(view, listener, TrayPopupInkDropStyle::INSET_BOUNDS,
+                           false, gfx::Insets());
+    button->SetAccessibleName(
+        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SIGN_IN_ANOTHER_ACCOUNT));
+    return button;
+  }
+
   return view;
 }
 
@@ -282,7 +306,8 @@ class ActiveUserBorder : public views::Border {
   }
 
   gfx::Insets GetInsets() const override {
-    return gfx::Insets(kMenuSeparatorVerticalPadding, 0,
+    return gfx::Insets(kMenuSeparatorVerticalPadding,
+                       kMenuExtraMarginFromLeftEdge,
                        kMenuSeparatorVerticalPadding * 2, 0);
   }
 
@@ -316,8 +341,7 @@ UserView::UserView(SystemTrayItem* owner, LoginStatus login, UserIndex index)
   AddUserCard(login);
 
   if (UseMd()) {
-    auto* layout = new views::BoxLayout(views::BoxLayout::kHorizontal,
-                                        kMenuExtraMarginFromLeftEdge, 0, 0);
+    auto layout = new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0);
     SetLayoutManager(layout);
     layout->set_cross_axis_alignment(
         views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
@@ -473,10 +497,7 @@ void UserView::AddLogoutButton(LoginStatus login) {
   logout_button->SetAccessibleName(title);
   logout_button_ = logout_button;
   if (UseMd()) {
-    views::View* separator = TrayPopupUtils::CreateVerticalSeparator();
-    separator->SetBorder(views::CreateEmptyBorder(
-        gfx::Insets(0, 0, 0, kTrayPopupLabelHorizontalPadding)));
-    AddChildView(separator);
+    AddChildView(TrayPopupUtils::CreateVerticalSeparator());
   } else if (login == LoginStatus::PUBLIC) {
     // In public account mode, the logout button border has a custom color.
     std::unique_ptr<TrayPopupLabelButtonBorder> border(
@@ -609,15 +630,6 @@ void UserView::ToggleAddUserMenuOption() {
   add_user_enabled_ = add_user_policy == AddUserSessionPolicy::ALLOWED;
 
   if (UseMd()) {
-    ButtonFromView* button = new ButtonFromView(
-        CreateAddUserView(add_user_policy), add_user_enabled_ ? this : nullptr,
-        IsActiveUser() ? TrayPopupInkDropStyle::INSET_BOUNDS
-                       : TrayPopupInkDropStyle::FILL_BOUNDS,
-        false, gfx::Insets());
-    button->SetAccessibleName(
-        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SIGN_IN_ANOTHER_ACCOUNT));
-    button->ForceBorderVisible(true);
-
     // Position the widget on top of the user card view (which is still in the
     // system menu). The top half of the widget will be transparent to allow
     // the active user to show through.
@@ -631,8 +643,14 @@ void UserView::ToggleAddUserMenuOption() {
         views::CreateSolidSidedBorder(0, 0, 0, kSeparatorWidth,
                                       kBackgroundColor),
         gfx::Insets(row_height, 0, 0, 0)));
+    views::View* add_user_padding = new views::View();
+    add_user_padding->SetBorder(views::CreateSolidSidedBorder(
+        kMenuSeparatorVerticalPadding, 0, 0, 0, kBackgroundColor));
+    views::View* add_user_view = CreateAddUserView(add_user_policy, this);
+    add_user_padding->AddChildView(add_user_view);
+    add_user_padding->SetLayoutManager(new views::FillLayout());
+    container->AddChildView(add_user_padding);
     container->SetLayoutManager(new views::FillLayout());
-    container->AddChildView(button);
     add_menu_option_->SetContentsView(container);
 
     bounds.set_height(container->GetPreferredSize().height());
@@ -644,8 +662,8 @@ void UserView::ToggleAddUserMenuOption() {
 
     // We activate the entry automatically if invoked with focus.
     if (add_user_enabled_ && user_card_view_->HasFocus()) {
-      button->GetFocusManager()->SetFocusedView(button);
-      user_card_view_->GetFocusManager()->SetFocusedView(button);
+      add_user_view->GetFocusManager()->SetFocusedView(add_user_view);
+      user_card_view_->GetFocusManager()->SetFocusedView(add_user_view);
     }
   } else {
     AddUserView* add_user_view =

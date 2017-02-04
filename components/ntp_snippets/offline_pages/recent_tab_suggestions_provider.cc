@@ -15,11 +15,12 @@
 #include "components/ntp_snippets/features.h"
 #include "components/ntp_snippets/pref_names.h"
 #include "components/ntp_snippets/pref_util.h"
-#include "components/offline_pages/client_policy_controller.h"
-#include "components/offline_pages/offline_page_item.h"
-#include "components/offline_pages/offline_page_model_query.h"
+#include "components/offline_pages/core/client_policy_controller.h"
+#include "components/offline_pages/core/offline_page_item.h"
+#include "components/offline_pages/core/offline_page_model_query.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "components/variations/variations_associated_data.h"
 #include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/image/image.h"
@@ -38,9 +39,9 @@ const int kDefaultMaxSuggestionsCount = 5;
 const char* kMaxSuggestionsCountParamName = "recent_tabs_max_count";
 
 int GetMaxSuggestionsCount() {
-  return GetParamAsInt(kRecentOfflineTabSuggestionsFeature,
-                       kMaxSuggestionsCountParamName,
-                       kDefaultMaxSuggestionsCount);
+  return variations::GetVariationParamByFeatureAsInt(
+      kRecentOfflineTabSuggestionsFeature, kMaxSuggestionsCountParamName,
+      kDefaultMaxSuggestionsCount);
 }
 
 struct OrderOfflinePagesByMostRecentlyCreatedFirst {
@@ -68,17 +69,22 @@ std::unique_ptr<OfflinePageModelQuery> BuildRecentTabsQuery(
   return builder.Build(model->GetPolicyController());
 }
 
+bool IsRecentTab(offline_pages::ClientPolicyController* policy_controller,
+                 const OfflinePageItem& offline_page) {
+  return policy_controller->IsShownAsRecentlyVisitedSite(
+      offline_page.client_id.name_space);
+}
+
 }  // namespace
 
 RecentTabSuggestionsProvider::RecentTabSuggestionsProvider(
     ContentSuggestionsProvider::Observer* observer,
-    CategoryFactory* category_factory,
     offline_pages::OfflinePageModel* offline_page_model,
     PrefService* pref_service)
-    : ContentSuggestionsProvider(observer, category_factory),
+    : ContentSuggestionsProvider(observer),
       category_status_(CategoryStatus::AVAILABLE_LOADING),
       provided_category_(
-          category_factory->FromKnownCategory(KnownCategories::RECENT_TABS)),
+          Category::FromKnownCategory(KnownCategories::RECENT_TABS)),
       offline_page_model_(offline_page_model),
       pref_service_(pref_service),
       weak_ptr_factory_(this) {
@@ -105,13 +111,10 @@ CategoryInfo RecentTabSuggestionsProvider::GetCategoryInfo(Category category) {
   return CategoryInfo(
       l10n_util::GetStringUTF16(IDS_NTP_RECENT_TAB_SUGGESTIONS_SECTION_HEADER),
       ContentSuggestionsCardLayout::MINIMAL_CARD,
-      /*has_more_action=*/false,
-      /*has_reload_action=*/false,
+      /*has_fetch_action=*/false,
       /*has_view_all_action=*/false,
       /*show_if_empty=*/false,
-      l10n_util::GetStringUTF16(IDS_NTP_SUGGESTIONS_SECTION_EMPTY));
-  // TODO(vitaliii): Replace IDS_NTP_SUGGESTIONS_SECTION_EMPTY with a
-  // category-specific string.
+      l10n_util::GetStringUTF16(IDS_NTP_RECENT_TAB_SUGGESTIONS_SECTION_EMPTY));
 }
 
 void RecentTabSuggestionsProvider::DismissSuggestion(
@@ -208,10 +211,13 @@ void RecentTabSuggestionsProvider::
 void RecentTabSuggestionsProvider::OfflinePageModelLoaded(
     offline_pages::OfflinePageModel* model) {}
 
-void RecentTabSuggestionsProvider::OfflinePageModelChanged(
-    offline_pages::OfflinePageModel* model) {
+void RecentTabSuggestionsProvider::OfflinePageAdded(
+    offline_pages::OfflinePageModel* model,
+    const offline_pages::OfflinePageItem& added_page) {
   DCHECK_EQ(offline_page_model_, model);
-  FetchRecentTabs();
+  if (IsRecentTab(model->GetPolicyController(), added_page)) {
+    FetchRecentTabs();
+  }
 }
 
 void RecentTabSuggestionsProvider::
@@ -284,7 +290,10 @@ ContentSuggestion RecentTabSuggestionsProvider::ConvertOfflinePage(
   suggestion.set_publish_date(offline_page.creation_time);
   suggestion.set_publisher_name(base::UTF8ToUTF16(offline_page.url.host()));
   auto extra = base::MakeUnique<RecentTabSuggestionExtra>();
-  extra->tab_id = offline_page.client_id.id;
+  int tab_id;
+  bool success = base::StringToInt(offline_page.client_id.id, &tab_id);
+  DCHECK(success);
+  extra->tab_id = tab_id;
   extra->offline_page_id = offline_page.offline_id;
   suggestion.set_recent_tab_suggestion_extra(std::move(extra));
   return suggestion;

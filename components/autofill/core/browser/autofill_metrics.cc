@@ -675,6 +675,20 @@ void AutofillMetrics::LogIsQueriedCreditCardFormSecure(bool is_secure) {
   UMA_HISTOGRAM_BOOLEAN("Autofill.QueriedCreditCardFormIsSecure", is_secure);
 }
 
+// static
+void AutofillMetrics::LogWalletAddressConversionType(
+    WalletAddressConversionType type) {
+  DCHECK_LT(type, NUM_CONVERTED_ADDRESS_CONVERSION_TYPES);
+  UMA_HISTOGRAM_ENUMERATION("Autofill.WalletAddressConversionType", type,
+                            NUM_CONVERTED_ADDRESS_CONVERSION_TYPES);
+}
+
+// static
+void AutofillMetrics::LogShowedHttpNotSecureExplanation() {
+  base::RecordAction(
+      base::UserMetricsAction("Autofill_ShowedHttpNotSecureExplanation"));
+}
+
 AutofillMetrics::FormEventLogger::FormEventLogger(bool is_for_credit_card)
     : is_for_credit_card_(is_for_credit_card),
       is_server_data_available_(false),
@@ -814,6 +828,10 @@ void AutofillMetrics::FormEventLogger::OnWillSubmitForm() {
     Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_WILL_SUBMIT_ONCE);
   }
 
+  if (has_logged_suggestions_shown_) {
+    Log(AutofillMetrics::FORM_EVENT_SUGGESTION_SHOWN_WILL_SUBMIT_ONCE);
+  }
+
   base::RecordAction(base::UserMetricsAction("Autofill_OnWillSubmitForm"));
 }
 
@@ -836,6 +854,10 @@ void AutofillMetrics::FormEventLogger::OnFormSubmitted() {
     Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_SUBMITTED_ONCE);
   } else {
     Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_SUBMITTED_ONCE);
+  }
+
+  if (has_logged_suggestions_shown_) {
+    Log(AutofillMetrics::FORM_EVENT_SUGGESTION_SHOWN_SUBMITTED_ONCE);
   }
 }
 

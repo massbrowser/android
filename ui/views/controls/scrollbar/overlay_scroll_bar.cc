@@ -5,6 +5,7 @@
 #include "ui/views/controls/scrollbar/overlay_scroll_bar.h"
 
 #include "base/macros.h"
+#include "cc/paint/paint_flags.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
@@ -34,7 +35,7 @@ OverlayScrollBar::Thumb::Thumb(OverlayScrollBar* scroll_bar)
 OverlayScrollBar::Thumb::~Thumb() {}
 
 void OverlayScrollBar::Thumb::Init() {
-  SetPaintToLayer(true);
+  SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
   // Animate all changes to the layer except the first one.
   OnStateChanged();
@@ -51,8 +52,8 @@ gfx::Size OverlayScrollBar::Thumb::GetPreferredSize() const {
 }
 
 void OverlayScrollBar::Thumb::OnPaint(gfx::Canvas* canvas) {
-  SkPaint fill_paint;
-  fill_paint.setStyle(SkPaint::kFill_Style);
+  cc::PaintFlags fill_paint;
+  fill_paint.setStyle(cc::PaintFlags::kFill_Style);
   fill_paint.setColor(SK_ColorBLACK);
   gfx::RectF fill_bounds(GetLocalBounds());
   fill_bounds.Inset(gfx::InsetsF(IsHorizontal() ? kThumbHoverOffset : 0,
@@ -62,8 +63,8 @@ void OverlayScrollBar::Thumb::OnPaint(gfx::Canvas* canvas) {
                                  IsHorizontal() ? kThumbStroke : 0));
   canvas->DrawRect(fill_bounds, fill_paint);
 
-  SkPaint stroke_paint;
-  stroke_paint.setStyle(SkPaint::kStroke_Style);
+  cc::PaintFlags stroke_paint;
+  stroke_paint.setStyle(cc::PaintFlags::kStroke_Style);
   stroke_paint.setColor(SK_ColorWHITE);
   stroke_paint.setStrokeWidth(kThumbStroke);
   gfx::RectF stroke_bounds(fill_bounds);
@@ -113,7 +114,7 @@ OverlayScrollBar::OverlayScrollBar(bool horizontal)
   SetThumb(thumb);
   thumb->Init();
   set_notify_enter_exit_on_child(true);
-  SetPaintToLayer(true);
+  SetPaintToLayer();
   layer()->SetMasksToBounds(true);
   layer()->SetFillsBoundsOpaquely(false);
 }
@@ -128,12 +129,25 @@ gfx::Rect OverlayScrollBar::GetTrackBounds() const {
   return local;
 }
 
-int OverlayScrollBar::GetLayoutSize() const {
-  return 0;
+int OverlayScrollBar::GetThickness() const {
+  return kThumbThickness;
 }
 
-int OverlayScrollBar::GetContentOverlapSize() const {
-  return kThumbThickness;
+bool OverlayScrollBar::OverlapsContent() const {
+  return true;
+}
+
+void OverlayScrollBar::Layout() {
+  gfx::Rect thumb_bounds = GetTrackBounds();
+  BaseScrollBarThumb* thumb = GetThumb();
+  if (IsHorizontal()) {
+    thumb_bounds.set_x(thumb->x());
+    thumb_bounds.set_width(thumb->width());
+  } else {
+    thumb_bounds.set_y(thumb->y());
+    thumb_bounds.set_height(thumb->height());
+  }
+  thumb->SetBoundsRect(thumb_bounds);
 }
 
 void OverlayScrollBar::OnMouseEntered(const ui::MouseEvent& event) {
@@ -161,19 +175,6 @@ void OverlayScrollBar::StartHideCountdown() {
   hide_timer_.Start(
       FROM_HERE, base::TimeDelta::FromSeconds(1),
       base::Bind(&OverlayScrollBar::Hide, base::Unretained(this)));
-}
-
-void OverlayScrollBar::Layout() {
-  gfx::Rect thumb_bounds = GetTrackBounds();
-  BaseScrollBarThumb* thumb = GetThumb();
-  if (IsHorizontal()) {
-    thumb_bounds.set_x(thumb->x());
-    thumb_bounds.set_width(thumb->width());
-  } else {
-    thumb_bounds.set_y(thumb->y());
-    thumb_bounds.set_height(thumb->height());
-  }
-  thumb->SetBoundsRect(thumb_bounds);
 }
 
 }  // namespace views

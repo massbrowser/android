@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_SPEECH_SPEECH_RECOGNIZER_IMPL_H_
 
 #include <memory>
+#include <string>
 
 #include "base/macros.h"
 #include "content/browser/speech/endpointer/endpointer.h"
@@ -32,6 +33,7 @@ class SpeechRecognitionEventListener;
 class CONTENT_EXPORT SpeechRecognizerImpl
     : public SpeechRecognizer,
       public media::AudioInputController::EventHandler,
+      public media::AudioInputController::SyncWriter,
       public NON_EXPORTED_BASE(SpeechRecognitionEngine::Delegate) {
  public:
   static const int kAudioSampleRate;
@@ -132,13 +134,17 @@ class CONTENT_EXPORT SpeechRecognizerImpl
 
   // AudioInputController::EventHandler methods.
   void OnCreated(media::AudioInputController* controller) override {}
-  void OnRecording(media::AudioInputController* controller) override {}
   void OnError(media::AudioInputController* controller,
                media::AudioInputController::ErrorCode error_code) override;
-  void OnData(media::AudioInputController* controller,
-              const media::AudioBus* data) override;
   void OnLog(media::AudioInputController* controller,
              const std::string& message) override {}
+
+  // AudioInputController::SyncWriter methods.
+  void Write(const media::AudioBus* data,
+             double volume,
+             bool key_pressed,
+             uint32_t hardware_delay_bytes) override;
+  void Close() override;
 
   // SpeechRecognitionEngineDelegate methods.
   void OnSpeechRecognitionEngineResults(

@@ -32,9 +32,9 @@
 #include "core/dom/Element.h"
 #include "core/dom/ExecutionContextTask.h"
 #include "core/dom/SandboxFlags.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/EventQueue.h"
 #include "core/events/SecurityPolicyViolationEvent.h"
-#include "core/fetch/IntegrityMetadata.h"
 #include "core/frame/FrameClient.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
@@ -43,6 +43,7 @@
 #include "core/frame/csp/CSPSource.h"
 #include "core/frame/csp/MediaListDirective.h"
 #include "core/frame/csp/SourceListDirective.h"
+#include "core/html/HTMLScriptElement.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/loader/DocumentLoader.h"
@@ -51,6 +52,7 @@
 #include "core/workers/WorkerGlobalScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/json/JSONValues.h"
+#include "platform/loader/fetch/IntegrityMetadata.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
 #include "platform/network/EncodedFormData.h"
@@ -74,8 +76,13 @@
 namespace blink {
 
 bool ContentSecurityPolicy::isNonceableElement(const Element* element) {
-  if (!element->fastHasAttribute(HTMLNames::nonceAttr))
+  if (RuntimeEnabledFeatures::hideNonceContentAttributeEnabled() &&
+      isHTMLScriptElement(element)) {
+    if (toHTMLScriptElement(element)->nonce().isNull())
+      return false;
+  } else if (!element->fastHasAttribute(HTMLNames::nonceAttr)) {
     return false;
+  }
 
   bool nonceable = true;
 
@@ -303,7 +310,7 @@ void ContentSecurityPolicy::addPolicyFromHeaderValue(
         m_disableEvalErrorMessage.isNull())
       m_disableEvalErrorMessage = policy->evalDisabledErrorMessage();
 
-    m_policies.append(policy.release());
+    m_policies.push_back(policy.release());
 
     // Skip the comma, and begin the next header from the current position.
     ASSERT(position == end || *position == ',');
@@ -360,10 +367,10 @@ void ContentSecurityPolicy::setOverrideURLForSelf(const KURL& url) {
 std::unique_ptr<Vector<CSPHeaderAndType>> ContentSecurityPolicy::headers()
     const {
   std::unique_ptr<Vector<CSPHeaderAndType>> headers =
-      wrapUnique(new Vector<CSPHeaderAndType>);
+      WTF::wrapUnique(new Vector<CSPHeaderAndType>);
   for (const auto& policy : m_policies) {
     CSPHeaderAndType headerAndType(policy->header(), policy->headerType());
-    headers->append(headerAndType);
+    headers->push_back(headerAndType);
   }
   return headers;
 }
@@ -1131,7 +1138,7 @@ void ContentSecurityPolicy::reportViolation(
   // we're not processing 'frame-ancestors').
   if (m_executionContext) {
     m_executionContext->postTask(
-        BLINK_FROM_HERE,
+        TaskType::Networking, BLINK_FROM_HERE,
         createSameThreadTask(&ContentSecurityPolicy::dispatchViolationEvents,
                              wrapPersistent(this), violationData,
                              wrapPersistent(element)));
@@ -1425,7 +1432,7 @@ void ContentSecurityPolicy::logToConsole(ConsoleMessage* consoleMessage,
   else if (m_executionContext)
     m_executionContext->addConsoleMessage(consoleMessage);
   else
-    m_consoleMessages.append(consoleMessage);
+    m_consoleMessages.push_back(consoleMessage);
 }
 
 void ContentSecurityPolicy::reportBlockedScriptExecutionToInspector(
@@ -1487,7 +1494,7 @@ bool ContentSecurityPolicy::shouldSendViolationReport(
 }
 
 void ContentSecurityPolicy::didSendViolationReport(const String& report) {
-  m_violationReportsSent.add(report.impl()->hash());
+  m_violationReportsSent.insert(report.impl()->hash());
 }
 
 const char* ContentSecurityPolicy::getDirectiveName(const DirectiveType& type) {
@@ -1593,6 +1600,22 @@ ContentSecurityPolicy::DirectiveType ContentSecurityPolicy::getDirectiveType(
     return DirectiveType::WorkerSrc;
 
   return DirectiveType::Undefined;
+}
+
+bool ContentSecurityPolicy::subsumes(const ContentSecurityPolicy& other) const {
+  if (!m_policies.size() || !other.m_policies.size())
+    return !m_policies.size();
+  // Embedding-CSP must specify only one policy.
+  if (m_policies.size() != 1)
+    return false;
+
+  CSPDirectiveListVector otherVector;
+  for (const auto& policy : other.m_policies) {
+    if (!policy->isReportOnly())
+      otherVector.push_back(policy);
+  }
+
+  return m_policies[0]->subsumes(otherVector);
 }
 
 }  // namespace blink

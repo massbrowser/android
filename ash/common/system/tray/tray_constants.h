@@ -34,6 +34,10 @@ extern const int kTrayLabelItemVerticalPaddingVerticalAlignment;
 extern const int kTrayMenuBottomRowPadding;
 extern const int kTrayMenuBottomRowPaddingBetweenItems;
 
+// The minimum width of the tray menu.
+extern const int kTrayMenuMinimumWidth;
+extern const int kTrayMenuMinimumWidthMd;
+
 extern const int kTrayPopupAutoCloseDelayInSeconds;
 extern const int kTrayPopupAutoCloseDelayForTextInSeconds;
 extern const int kTrayPopupPaddingHorizontal;
@@ -135,6 +139,9 @@ extern const int kTrayPopupInkDropInset;
 
 // The radius used to draw the corners of the rounded rect style ink drops.
 extern const int kTrayPopupInkDropCornerRadius;
+
+// The height of the system info row.
+extern const int kTrayPopupSystemInfoRowHeight;
 
 enum TrayConstant {
   // A legacy height value used in non-MD calculations for applying additional

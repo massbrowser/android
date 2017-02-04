@@ -215,7 +215,7 @@ void MessageCenterViewTest::SetUp() {
 
   // Then create a new MessageCenterView with that single notification.
   message_center_view_.reset(new MessageCenterView(
-      message_center_.get(), NULL, 100, false, /*top_down =*/false));
+      message_center_.get(), NULL, 100, false));
   GetMessageListView()->quit_message_loop_after_animation_for_test_ = true;
   GetMessageCenterView()->SetBounds(0, 0, 380, 600);
   message_center_view_->SetNotifications(notifications);
@@ -755,6 +755,18 @@ TEST_F(MessageCenterViewTest, LockScreen) {
   EXPECT_TRUE(GetNotificationView(kNotificationId1)->IsDrawn());
   EXPECT_TRUE(GetNotificationView(kNotificationId2)->IsDrawn());
 
+  views::Button* close_button = GetButtonBar()->GetCloseAllButtonForTest();
+  ASSERT_NE(nullptr, close_button);
+  views::Button* quiet_mode_button =
+      GetButtonBar()->GetQuietModeButtonForTest();
+  ASSERT_NE(nullptr, quiet_mode_button);
+  views::Button* settings_button = GetButtonBar()->GetSettingsButtonForTest();
+  ASSERT_NE(nullptr, settings_button);
+
+  EXPECT_TRUE(close_button->visible());
+  EXPECT_TRUE(quiet_mode_button->visible());
+  EXPECT_TRUE(settings_button->visible());
+
   // Lock!
   SetLockedState(true);
 
@@ -785,6 +797,10 @@ TEST_F(MessageCenterViewTest, LockScreen) {
   GetMessageCenterView()->SizeToPreferredSize();
   EXPECT_EQ(kLockedMessageCenterViewHeight, GetMessageCenterView()->height());
 
+  EXPECT_FALSE(close_button->visible());
+  EXPECT_FALSE(quiet_mode_button->visible());
+  EXPECT_FALSE(settings_button->visible());
+
   // Unlock!
   SetLockedState(false);
 
@@ -793,6 +809,10 @@ TEST_F(MessageCenterViewTest, LockScreen) {
   GetMessageCenterView()->SizeToPreferredSize();
   EXPECT_NE(kLockedMessageCenterViewHeight, GetMessageCenterView()->height());
 
+  EXPECT_TRUE(close_button->visible());
+  EXPECT_TRUE(quiet_mode_button->visible());
+  EXPECT_TRUE(settings_button->visible());
+
   // Lock!
   SetLockedState(true);
 
@@ -800,6 +820,10 @@ TEST_F(MessageCenterViewTest, LockScreen) {
 
   GetMessageCenterView()->SizeToPreferredSize();
   EXPECT_EQ(kLockedMessageCenterViewHeight, GetMessageCenterView()->height());
+
+  EXPECT_FALSE(close_button->visible());
+  EXPECT_FALSE(quiet_mode_button->visible());
+  EXPECT_FALSE(settings_button->visible());
 }
 
 TEST_F(MessageCenterViewTest, NoNotification) {

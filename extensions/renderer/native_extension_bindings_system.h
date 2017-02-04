@@ -9,7 +9,9 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/memory/weak_ptr.h"
 #include "extensions/renderer/api_bindings_system.h"
+#include "extensions/renderer/event_emitter.h"
 #include "extensions/renderer/extension_bindings_system.h"
 #include "v8/include/v8.h"
 
@@ -26,11 +28,17 @@ class ScriptContext;
 // Designed to be used in a single thread, but for all contexts on that thread.
 class NativeExtensionBindingsSystem : public ExtensionBindingsSystem {
  public:
-  using SendIPCMethod =
+  using SendRequestIPCMethod =
       base::Callback<void(ScriptContext*,
                           const ExtensionHostMsg_Request_Params&)>;
+  using SendEventListenerIPCMethod =
+      base::Callback<void(binding::EventListenersChanged,
+                          ScriptContext*,
+                          const std::string& event_name)>;
 
-  explicit NativeExtensionBindingsSystem(const SendIPCMethod& send_ipc);
+  NativeExtensionBindingsSystem(
+      const SendRequestIPCMethod& send_request_ipc,
+      const SendEventListenerIPCMethod& send_event_listener_ipc);
   ~NativeExtensionBindingsSystem() override;
 
   // ExtensionBindingsSystem:
@@ -50,14 +58,30 @@ class NativeExtensionBindingsSystem : public ExtensionBindingsSystem {
  private:
   // Handles sending a given |request|, forwarding it on to the send_ipc_ after
   // adding additional info.
-  void SendRequest(std::unique_ptr<APIBindingsSystem::Request> request,
+  void SendRequest(std::unique_ptr<APIBinding::Request> request,
                    v8::Local<v8::Context> context);
 
-  // Handler to send IPCs. Abstracted out for testing purposes.
-  SendIPCMethod send_ipc_;
+  // Called when listeners for a given event have changed, and forwards it along
+  // to |send_event_listener_ipc_|.
+  void OnEventListenerChanged(const std::string& event_name,
+                              binding::EventListenersChanged change,
+                              v8::Local<v8::Context> context);
+
+  // Getter callback for an extension API, since APIs are constructed lazily.
+  static void GetAPIHelper(v8::Local<v8::Name> name,
+                           const v8::PropertyCallbackInfo<v8::Value>& info);
+
+  // Handler to send request IPCs. Abstracted out for testing purposes.
+  SendRequestIPCMethod send_request_ipc_;
+
+  // Handler to notify the browser of event registrations. Abstracted out for
+  // testing purposes.
+  SendEventListenerIPCMethod send_event_listener_ipc_;
 
   // The APIBindingsSystem associated with this class.
   APIBindingsSystem api_system_;
+
+  base::WeakPtrFactory<NativeExtensionBindingsSystem> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeExtensionBindingsSystem);
 };

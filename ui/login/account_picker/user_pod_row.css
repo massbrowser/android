@@ -54,6 +54,10 @@ pin-keyboard {
   top: -87px !important;
 }
 
+.disable-pin-animation .pod.pin-enabled {
+  transition: none;
+}
+
 .pod .pin-container {
   height: 204px;
   position: absolute;
@@ -222,6 +226,10 @@ html[dir=rtl] .main-pane {
 .auth-container,
 .password-entry-container,
 .reauth-hint-container {
+  display: none;
+}
+
+.pod[is-active-directory] .reauth-warning {
   display: none;
 }
 

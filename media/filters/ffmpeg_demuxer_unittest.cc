@@ -17,6 +17,7 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/test/mock_callback.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/base/decrypt_config.h"
@@ -110,7 +111,7 @@ class FFmpegDemuxerTest : public testing::Test {
                                  media::PipelineStatus expected_pipeline_status,
                                  base::Time timeline_offset) {
     if (expected_pipeline_status == PIPELINE_OK)
-      EXPECT_CALL(host_, SetDuration(_));
+      EXPECT_CALL(host_, SetDuration(_)).Times(AnyNumber());
     WaitableMessageLoopEvent event;
     demuxer_->Initialize(&host_, event.GetPipelineStatusCB(), enable_text);
     demuxer_->timeline_offset_ = timeline_offset;
@@ -222,8 +223,10 @@ class FFmpegDemuxerTest : public testing::Test {
   }
 
   // Accessor to demuxer internals.
-  void set_duration_known(bool duration_known) {
+  void SetDurationKnown(bool duration_known) {
     demuxer_->duration_known_ = duration_known;
+    if (!duration_known)
+      demuxer_->duration_ = kInfiniteDuration;
   }
 
   bool IsStreamStopped(DemuxerStream::Type type) {
@@ -437,6 +440,10 @@ TEST_F(FFmpegDemuxerTest, AbortPendingReads) {
   demuxer_->AbortPendingReads();
   base::RunLoop().Run();
 
+  // Additional reads should also be aborted (until a Seek()).
+  audio->Read(NewReadCB(FROM_HERE, 29, 0, true, DemuxerStream::kAborted));
+  base::RunLoop().Run();
+
   // Ensure blocking thread has completed outstanding work.
   demuxer_->Stop();
   EXPECT_EQ(format_context()->pb->eof_reached, 0);
@@ -532,15 +539,22 @@ TEST_F(FFmpegDemuxerTest, Seeking_PreferredStreamSelection) {
   // prefer the video stream for seeking.
   EXPECT_EQ(video, preferred_seeking_stream(video_start_time));
 
-  // A disabled stream should not be preferred for seeking.
+  // A disabled stream should be preferred only when there's no other viable
+  // option among enabled streams.
   audio->set_enabled(false, base::TimeDelta());
-  EXPECT_EQ(video, preferred_seeking_stream(base::TimeDelta()));
-  EXPECT_EQ(video, preferred_seeking_stream(audio_start_time));
   EXPECT_EQ(video, preferred_seeking_stream(video_start_time));
+  // Audio stream is preferred, even though it is disabled, since video stream
+  // start time is higher than the seek target == audio_start_time in this case.
+  EXPECT_EQ(audio, preferred_seeking_stream(audio_start_time));
 
   audio->set_enabled(true, base::TimeDelta());
   video->set_enabled(false, base::TimeDelta());
-  EXPECT_EQ(audio, preferred_seeking_stream(base::TimeDelta()));
+  EXPECT_EQ(audio, preferred_seeking_stream(audio_start_time));
+  EXPECT_EQ(audio, preferred_seeking_stream(video_start_time));
+
+  // When both audio and video streams are disabled and there's no enabled
+  // streams, then audio is preferred since it has lower start time.
+  audio->set_enabled(false, base::TimeDelta());
   EXPECT_EQ(audio, preferred_seeking_stream(audio_start_time));
   EXPECT_EQ(audio, preferred_seeking_stream(video_start_time));
 }
@@ -803,8 +817,8 @@ TEST_F(FFmpegDemuxerTest, Read_EndOfStream_NoDuration) {
   // Verify that end of stream buffers are created.
   CreateDemuxer("bear-320x240.webm");
   InitializeDemuxer();
-  set_duration_known(false);
-  EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2767)));
+  SetDurationKnown(false);
+  EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2744)));
   ReadUntilEndOfStream(demuxer_->GetStream(DemuxerStream::AUDIO));
   ReadUntilEndOfStream(demuxer_->GetStream(DemuxerStream::VIDEO));
 }
@@ -813,8 +827,8 @@ TEST_F(FFmpegDemuxerTest, Read_EndOfStream_NoDuration_VideoOnly) {
   // Verify that end of stream buffers are created.
   CreateDemuxer("bear-320x240-video-only.webm");
   InitializeDemuxer();
-  set_duration_known(false);
-  EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2736)));
+  SetDurationKnown(false);
+  EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2703)));
   ReadUntilEndOfStream(demuxer_->GetStream(DemuxerStream::VIDEO));
 }
 
@@ -822,8 +836,8 @@ TEST_F(FFmpegDemuxerTest, Read_EndOfStream_NoDuration_AudioOnly) {
   // Verify that end of stream buffers are created.
   CreateDemuxer("bear-320x240-audio-only.webm");
   InitializeDemuxer();
-  set_duration_known(false);
-  EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2767)));
+  SetDurationKnown(false);
+  EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(2744)));
   ReadUntilEndOfStream(demuxer_->GetStream(DemuxerStream::AUDIO));
 }
 
@@ -832,8 +846,8 @@ TEST_F(FFmpegDemuxerTest, Read_EndOfStream_NoDuration_UnsupportedStream) {
   // if there are streams in the file that we don't support.
   CreateDemuxer("vorbis_audio_wmv_video.mkv");
   InitializeDemuxer();
-  set_duration_known(false);
-  EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(1014)));
+  SetDurationKnown(false);
+  EXPECT_CALL(host_, SetDuration(base::TimeDelta::FromMilliseconds(991)));
   ReadUntilEndOfStream(demuxer_->GetStream(DemuxerStream::AUDIO));
 }
 
@@ -951,17 +965,6 @@ TEST_F(FFmpegDemuxerTest, SeekText) {
   base::RunLoop().Run();
 }
 
-class MockReadCB {
- public:
-  MockReadCB() {}
-  ~MockReadCB() {}
-
-  MOCK_METHOD2(Run, void(DemuxerStream::Status status,
-                         const scoped_refptr<DecoderBuffer>& buffer));
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockReadCB);
-};
-
 TEST_F(FFmpegDemuxerTest, Stop) {
   // Tests that calling Read() on a stopped demuxer stream immediately deletes
   // the callback.
@@ -975,11 +978,11 @@ TEST_F(FFmpegDemuxerTest, Stop) {
   demuxer_->Stop();
 
   // Reads after being stopped are all EOS buffers.
-  StrictMock<MockReadCB> callback;
+  StrictMock<base::MockCallback<DemuxerStream::ReadCB>> callback;
   EXPECT_CALL(callback, Run(DemuxerStream::kOk, IsEndOfStreamBuffer()));
 
   // Attempt the read...
-  audio->Read(base::Bind(&MockReadCB::Run, base::Unretained(&callback)));
+  audio->Read(callback.Get());
   base::RunLoop().RunUntilIdle();
 
   // Don't let the test call Stop() again.
@@ -1025,7 +1028,7 @@ TEST_F(FFmpegDemuxerTest, SeekWithCuesBeforeFirstCluster) {
   base::RunLoop().Run();
 }
 
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 // Ensure ID3v1 tag reading is disabled.  id3_test.mp3 has an ID3v1 tag with the
 // field "title" set to "sample for id3 test".
 TEST_F(FFmpegDemuxerTest, NoID3TagData) {
@@ -1035,7 +1038,7 @@ TEST_F(FFmpegDemuxerTest, NoID3TagData) {
 }
 #endif
 
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 // Ensure MP3 files with large image/video based ID3 tags demux okay.  FFmpeg
 // will hand us a video stream to the data which will likely be in a format we
 // don't accept as video; e.g. PNG.
@@ -1071,7 +1074,7 @@ TEST_F(FFmpegDemuxerTest, UnsupportedVideoSupportedAudioDemux) {
   EXPECT_TRUE(demuxer_->GetStream(DemuxerStream::AUDIO));
 }
 
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 // FFmpeg returns null data pointers when samples have zero size, leading to
 // mistakenly creating end of stream buffers http://crbug.com/169133
 TEST_F(FFmpegDemuxerTest, MP4_ZeroStszEntry) {
@@ -1351,7 +1354,7 @@ TEST_F(FFmpegDemuxerTest, Read_Mp4_Crbug657437) {
   InitializeDemuxer();
 }
 
-#endif  // defined(USE_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 TEST_F(FFmpegDemuxerTest, Read_Webm_Multiple_Tracks) {
   CreateDemuxer("multitrack-3video-2audio.webm");
@@ -1469,6 +1472,40 @@ TEST_F(FFmpegDemuxerTest, Read_Flac) {
   EXPECT_EQ(CHANNEL_LAYOUT_MONO, audio_config.channel_layout());
   EXPECT_EQ(44100, audio_config.samples_per_second());
   EXPECT_EQ(kSampleFormatS32, audio_config.sample_format());
+}
+
+// Verify that FFmpeg demuxer falls back to choosing disabled streams for
+// seeking if there's no suitable enabled stream found.
+TEST_F(FFmpegDemuxerTest, Seek_FallbackToDisabledVideoStream) {
+  // Input has only video stream, no audio.
+  CreateDemuxer("bear-320x240-video-only.webm");
+  InitializeDemuxer();
+  EXPECT_EQ(nullptr, demuxer_->GetStream(DemuxerStream::AUDIO));
+  DemuxerStream* vstream = demuxer_->GetStream(DemuxerStream::VIDEO);
+  EXPECT_NE(nullptr, vstream);
+  EXPECT_EQ(vstream, preferred_seeking_stream(base::TimeDelta()));
+
+  // Now pretend that video stream got disabled, e.g. due to current tab going
+  // into background.
+  vstream->set_enabled(false, base::TimeDelta());
+  // Since there's no other enabled streams, the preferred seeking stream should
+  // still be the video stream.
+  EXPECT_EQ(vstream, preferred_seeking_stream(base::TimeDelta()));
+}
+
+TEST_F(FFmpegDemuxerTest, Seek_FallbackToDisabledAudioStream) {
+  CreateDemuxer("bear-320x240-audio-only.webm");
+  InitializeDemuxer();
+  DemuxerStream* astream = demuxer_->GetStream(DemuxerStream::AUDIO);
+  EXPECT_NE(nullptr, astream);
+  EXPECT_EQ(nullptr, demuxer_->GetStream(DemuxerStream::VIDEO));
+  EXPECT_EQ(astream, preferred_seeking_stream(base::TimeDelta()));
+
+  // Now pretend that audio stream got disabled.
+  astream->set_enabled(false, base::TimeDelta());
+  // Since there's no other enabled streams, the preferred seeking stream should
+  // still be the audio stream.
+  EXPECT_EQ(astream, preferred_seeking_stream(base::TimeDelta()));
 }
 
 }  // namespace media

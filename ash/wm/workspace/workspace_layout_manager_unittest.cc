@@ -7,7 +7,6 @@
 #include <string>
 #include <utility>
 
-#include "ash/aura/wm_window_aura.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/shelf_constants.h"
 #include "ash/common/shelf/shelf_layout_manager.h"
@@ -22,8 +21,8 @@
 #include "ash/common/wm/wm_screen_util.h"
 #include "ash/common/wm/workspace/workspace_window_resizer.h"
 #include "ash/common/wm_lookup.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
@@ -36,7 +35,7 @@
 #include "base/run_loop.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/display/manager/display_layout.h"
+#include "ui/display/display_layout.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/display/test/display_manager_test_api.h"
@@ -119,9 +118,6 @@ TEST_F(WorkspaceLayoutManagerTest, RestoreFromMinimizeKeepsRestore) {
   EXPECT_EQ("0,0 100x100", window_state->GetRestoreBoundsInScreen().ToString());
   EXPECT_EQ("10,15 25x35", window->GetBounds().ToString());
 
-  if (!SupportsMultipleDisplays())
-    return;
-
   UpdateDisplay("400x300,500x400");
   window->SetBoundsInScreen(gfx::Rect(600, 0, 100, 100), GetSecondaryDisplay());
   EXPECT_EQ(WmShell::Get()->GetAllRootWindows()[1], window->GetRootWindow());
@@ -142,9 +138,6 @@ TEST_F(WorkspaceLayoutManagerTest, RestoreFromMinimizeKeepsRestore) {
 }
 
 TEST_F(WorkspaceLayoutManagerTest, KeepMinimumVisibilityInDisplays) {
-  if (!SupportsMultipleDisplays())
-    return;
-
   UpdateDisplay("300x400,400x500");
   WmWindow::Windows root_windows = WmShell::Get()->GetAllRootWindows();
 
@@ -220,8 +213,6 @@ TEST_F(WorkspaceLayoutManagerTest, KeepRestoredWindowInDisplay) {
 }
 
 TEST_F(WorkspaceLayoutManagerTest, MaximizeInDisplayToBeRestored) {
-  if (!SupportsMultipleDisplays())
-    return;
   UpdateDisplay("300x400,400x500");
 
   WmWindow::Windows root_windows = WmShell::Get()->GetAllRootWindows();
@@ -282,8 +273,6 @@ TEST_F(WorkspaceLayoutManagerTest, MaximizeInDisplayToBeRestored) {
 }
 
 TEST_F(WorkspaceLayoutManagerTest, FullscreenInDisplayToBeRestored) {
-  if (!SupportsMultipleDisplays())
-    return;
   UpdateDisplay("300x400,400x500");
 
   WmWindow::Windows root_windows = WmShell::Get()->GetAllRootWindows();
@@ -629,13 +618,7 @@ TEST_F(WorkspaceLayoutManagerSoloTest, FocusDuringUnminimize) {
 }
 
 // Tests maximized window size during root window resize.
-#if defined(OS_WIN) && !defined(USE_ASH)
-// TODO(msw): Broken on Windows. http://crbug.com/584038
-#define MAYBE_MaximizeRootWindowResize DISABLED_MaximizeRootWindowResize
-#else
-#define MAYBE_MaximizeRootWindowResize MaximizeRootWindowResize
-#endif
-TEST_F(WorkspaceLayoutManagerSoloTest, MAYBE_MaximizeRootWindowResize) {
+TEST_F(WorkspaceLayoutManagerSoloTest, MaximizeRootWindowResize) {
   gfx::Rect bounds(100, 100, 200, 200);
   std::unique_ptr<WindowOwner> window_owner(CreateTestWindow(bounds));
   WmWindow* window = window_owner->window();

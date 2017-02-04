@@ -83,24 +83,6 @@ void ScopedStyleResolver::addFontFaceRules(const RuleSet& ruleSet) {
     document.styleResolver()->invalidateMatchedPropertiesCache();
 }
 
-void ScopedStyleResolver::appendCSSStyleSheet(CSSStyleSheet& cssSheet) {
-  RuleSet* ruleSet =
-      treeScope().document().styleEngine().ruleSetForSheet(cssSheet);
-
-  m_viewportDependentMediaQueryResults.appendVector(
-      cssSheet.viewportDependentMediaQueryResults());
-  m_deviceDependentMediaQueryResults.appendVector(
-      cssSheet.deviceDependentMediaQueryResults());
-  if (!ruleSet)
-    return;
-
-  unsigned index = m_authorStyleSheets.size();
-  m_authorStyleSheets.append(&cssSheet);
-  addKeyframeRules(*ruleSet);
-  addFontFaceRules(*ruleSet);
-  addTreeBoundaryCrossingRules(*ruleSet, &cssSheet, index);
-}
-
 void ScopedStyleResolver::appendActiveStyleSheets(
     unsigned index,
     const ActiveStyleSheetVector& activeSheets) {
@@ -114,7 +96,7 @@ void ScopedStyleResolver::appendActiveStyleSheets(
     if (!activeIterator->second)
       continue;
     const RuleSet& ruleSet = *activeIterator->second;
-    m_authorStyleSheets.append(sheet);
+    m_authorStyleSheets.push_back(sheet);
     addKeyframeRules(ruleSet);
     addFontFaceRules(ruleSet);
     addTreeBoundaryCrossingRules(ruleSet, sheet, index++);
@@ -134,7 +116,7 @@ void ScopedStyleResolver::collectFeaturesTo(
     ASSERT(m_authorStyleSheets[i]->ownerNode());
     StyleSheetContents* contents = m_authorStyleSheets[i]->contents();
     if (contents->hasOneClient() ||
-        visitedSharedStyleSheetContents.add(contents).isNewEntry)
+        visitedSharedStyleSheetContents.insert(contents).isNewEntry)
       features.add(contents->ruleSet().features());
   }
 
@@ -312,8 +294,30 @@ void ScopedStyleResolver::addTreeBoundaryCrossingRules(
         treeScope());
   }
 
-  m_treeBoundaryCrossingRuleSet->append(
+  m_treeBoundaryCrossingRuleSet->push_back(
       RuleSubSet::create(parentStyleSheet, sheetIndex, ruleSetForScope));
+}
+
+bool ScopedStyleResolver::haveSameStyles(const ScopedStyleResolver* first,
+                                         const ScopedStyleResolver* second) {
+  // This method will return true if the two resolvers are either both empty, or
+  // if they contain the same active stylesheets by sharing the same
+  // StyleSheetContents. It is used to check if we can share ComputedStyle
+  // between two shadow hosts. This typically works when we have multiple
+  // instantiations of the same web component where the style elements are in
+  // the same order and contain the exact same source string in which case we
+  // will get a cache hit for sharing StyleSheetContents.
+
+  size_t firstCount = first ? first->m_authorStyleSheets.size() : 0;
+  size_t secondCount = second ? second->m_authorStyleSheets.size() : 0;
+  if (firstCount != secondCount)
+    return false;
+  while (firstCount--) {
+    if (first->m_authorStyleSheets[firstCount]->contents() !=
+        second->m_authorStyleSheets[firstCount]->contents())
+      return false;
+  }
+  return true;
 }
 
 DEFINE_TRACE(ScopedStyleResolver::RuleSubSet) {

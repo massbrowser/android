@@ -45,12 +45,19 @@
     live_region_changed,       // Web
     load_complete,             // Web
     location_changed,          // Web
+    media_started_playing,     // Automation
+    media_stopped_playing,     // Automation
     menu_end,                  // Native / Win
     menu_list_item_selected,   // Web
     menu_list_value_changed,   // Web
     menu_popup_end,            // Native / Win
     menu_popup_start,          // Native / Win
     menu_start,                // Native / Win
+    mouse_canceled,
+    mouse_dragged,
+    mouse_moved,
+    mouse_pressed,
+    mouse_released,
     row_collapsed,             // Web / Mac
     row_count_changed,         // Web / Mac
     row_expanded,              // Web / Mac
@@ -108,6 +115,7 @@
     div,
     document,
     embedded_object,
+    feed,
     figcaption,
     figure,
     footer,
@@ -184,6 +192,7 @@
     tab,
     table_header_container,
     table,
+    term,
     text_field,
     time,
     timer,
@@ -232,6 +241,8 @@
   };
 
   // An action to be taken on an accessibility node.
+  // In contrast to |AXSupportedAction|, these describe what happens to the
+  // object, e.g. "FOCUS".
   enum AXAction {
     blur,
 
@@ -287,6 +298,21 @@
     request_inline_text_boxes
   };
 
+  // Lists the actions that can be performed on a given node.
+  // In contrast to |AXAction|, these describe what the user can do on the
+  // object, e.g. "PRESS", not what happens to the object as a result.
+  // Only one action is supported for now.
+  enum AXSupportedAction {
+    activate,
+    check,
+    click,
+    jump,
+    open,
+    press,
+    select,
+    uncheck
+  };
+
   // A change to the accessibility tree.
   enum AXMutation {
     node_created,
@@ -297,10 +323,10 @@
 
   [cpp_enum_prefix_override="ax_attr"] enum AXStringAttribute {
     access_key,
-    action,
     // Only used when invalid_state == invalid_state_other.
     aria_invalid_value,
     auto_complete,
+    chrome_channel,  // Automation only.
     container_live_relevant,
     container_live_status,
     description,
@@ -322,6 +348,7 @@
   };
 
   [cpp_enum_prefix_override="ax_attr"] enum AXIntAttribute {
+    action,
     // Scrollable container attributes.
     scroll_x,
     scroll_x_min,
@@ -333,6 +360,12 @@
     // Attributes for retrieving the endpoints of a selection.
     text_sel_start,
     text_sel_end,
+
+    // aria_col* and aria_row* attributes
+    aria_col_count,
+    aria_col_index,
+    aria_row_count,
+    aria_row_index,
 
     // Table attributes.
     table_row_count,
@@ -450,6 +483,11 @@
     describedby_ids,
     flowto_ids,
     labelledby_ids,
+
+    // For static text. Character indices where line breaks occur. Note that
+    // this attribute is only available on Chrome OS and will be deprecated
+    // soon.
+    line_breaks,
 
     // For static text. These int lists must be the same size; they represent
     // the start and end character offset of each marker. Examples of markers

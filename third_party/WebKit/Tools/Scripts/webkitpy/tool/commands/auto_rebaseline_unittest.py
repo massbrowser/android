@@ -5,7 +5,7 @@
 import optparse
 
 from webkitpy.common.net.buildbot import Build
-from webkitpy.common.net.layouttestresults import LayoutTestResults
+from webkitpy.common.net.layout_test_results import LayoutTestResults
 from webkitpy.common.system.executive_mock import MockExecutive
 from webkitpy.layout_tests.builder_list import BuilderList
 from webkitpy.tool.commands.auto_rebaseline import AutoRebaseline
@@ -107,22 +107,26 @@ class TestAutoRebaseline(BaseTestCase):
         commit = "abcd567"
         bugs = set()
         self.assertEqual(self.command.commit_message(author, revision, commit, bugs),
-                         """Auto-rebaseline for r1234
-
-https://chromium.googlesource.com/chromium/src/+/abcd567
-
-TBR=foo@chromium.org
-""")
+                         'Auto-rebaseline for r1234\n\n'
+                         'https://chromium.googlesource.com/chromium/src/+/abcd567\n\n'
+                         'TBR=foo@chromium.org\n')
 
         bugs = set(["234", "345"])
         self.assertEqual(self.command.commit_message(author, revision, commit, bugs),
-                         """Auto-rebaseline for r1234
+                         'Auto-rebaseline for r1234\n\n'
+                         'https://chromium.googlesource.com/chromium/src/+/abcd567\n\n'
+                         'BUG=234,345\n'
+                         'TBR=foo@chromium.org\n')
 
-https://chromium.googlesource.com/chromium/src/+/abcd567
-
-BUG=234,345
-TBR=foo@chromium.org
-""")
+        self.tool.environ['BUILDBOT_MASTERNAME'] = 'my.master'
+        self.tool.environ['BUILDBOT_BUILDERNAME'] = 'b'
+        self.tool.environ['BUILDBOT_BUILDNUMBER'] = '123'
+        self.assertEqual(self.command.commit_message(author, revision, commit, bugs),
+                         'Auto-rebaseline for r1234\n\n'
+                         'Build: https://build.chromium.org/p/my.master/builders/b/builds/123\n\n'
+                         'https://chromium.googlesource.com/chromium/src/+/abcd567\n\n'
+                         'BUG=234,345\n'
+                         'TBR=foo@chromium.org\n')
 
     def test_no_needs_rebaseline_lines(self):
         def blame(_):
@@ -245,6 +249,7 @@ crbug.com/24182 path/to/locally-changed-lined.html [ NeedsRebaseline ]
             ['git', 'pull'],
             ['git', 'cl', 'land', '-f', '-v'],
             ['git', 'config', 'branch.auto-rebaseline-temporary-branch.rietveldissue'],
+            ['git', 'cl', 'set_close'],
         ])
 
         # The mac ports should both be removed since they're the only ones in builders._exact_matches.
@@ -349,6 +354,7 @@ Bug(foo) fast/dom/prototype-taco.html [ NeedsRebaseline ]
             ['git', 'pull'],
             ['git', 'cl', 'land', '-f', '-v'],
             ['git', 'config', 'branch.auto-rebaseline-temporary-branch.rietveldissue'],
+            ['git', 'cl', 'set_close'],
         ])
 
         # The mac ports should both be removed since they're the only ones in builders._exact_matches.
@@ -400,6 +406,7 @@ Bug(foo) fast/dom/prototype-taco.html [ NeedsRebaseline ]
                 ['git', 'pull'],
                 ['git', 'cl', 'land', '-f', '-v'],
                 ['git', 'config', 'branch.auto-rebaseline-alt-temporary-branch.rietveldissue'],
+                ['git', 'cl', 'set_close'],
             ])
 
             self.assertEqual(self.tool.filesystem.read_text_file(test_port.path_to_generic_test_expectations_file()), """
@@ -452,6 +459,7 @@ Bug(foo) fast/dom/prototype-taco.html [ NeedsRebaseline ]
                 ['git', 'pull'],
                 ['git', 'cl', 'land', '-f', '-v'],
                 ['git', 'config', 'branch.auto-rebaseline-temporary-branch.rietveldissue'],
+                ['git', 'cl', 'set_close'],
             ])
 
             self.assertEqual(self.tool.filesystem.read_text_file(test_port.path_to_generic_test_expectations_file()), """
@@ -515,6 +523,7 @@ Bug(foo) [ Linux Win ] fast/dom/prototype-taco.html [ NeedsRebaseline ]
                 ['git', 'pull'],
                 ['git', 'cl', 'land', '-f', '-v', '--auth-refresh-token-json', rietveld_refresh_token],
                 ['git', 'config', 'branch.auto-rebaseline-temporary-branch.rietveldissue'],
+                ['git', 'cl', 'set_close', '--auth-refresh-token-json', rietveld_refresh_token],
             ],
             auth_refresh_token_json=rietveld_refresh_token)
 

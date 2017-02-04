@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/memory/ptr_util.h"
-#include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
@@ -20,6 +19,9 @@
 #include "net/quic/core/quic_server_id.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/core/spdy_utils.h"
+#include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_stack_trace.h"
+#include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/quic_connection_peer.h"
 #include "net/quic/test_tools/quic_spdy_session_peer.h"
@@ -292,7 +294,7 @@ ssize_t QuicTestClient::GetOrCreateStreamAndSendRequest(
     const SpdyHeaderBlock* headers,
     StringPiece body,
     bool fin,
-    QuicAckListenerInterface* delegate) {
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
   if (headers) {
     QuicClientPushPromiseIndex::TryHandle* handle;
     QuicAsyncStatus rv =
@@ -304,7 +306,7 @@ ssize_t QuicTestClient::GetOrCreateStreamAndSendRequest(
       std::unique_ptr<SpdyHeaderBlock> new_headers(
           new SpdyHeaderBlock(headers->Clone()));
       push_promise_data_to_resend_.reset(new TestClientDataToResend(
-          std::move(new_headers), body, fin, this, delegate));
+          std::move(new_headers), body, fin, this, std::move(ack_listener)));
       return 1;
     }
   }
@@ -326,17 +328,17 @@ ssize_t QuicTestClient::GetOrCreateStreamAndSendRequest(
     ret = stream->SendRequest(std::move(spdy_headers), body, fin);
     ++num_requests_;
   } else {
-    stream->WriteOrBufferBody(body.as_string(), fin, delegate);
+    stream->WriteOrBufferBody(body.as_string(), fin, ack_listener);
     ret = body.length();
   }
-  if (FLAGS_enable_quic_stateless_reject_support) {
+  if (FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support) {
     std::unique_ptr<SpdyHeaderBlock> new_headers;
     if (headers) {
       new_headers.reset(new SpdyHeaderBlock(headers->Clone()));
     }
     std::unique_ptr<QuicClientBase::QuicDataToResend> data_to_resend(
         new TestClientDataToResend(std::move(new_headers), body, fin, this,
-                                   delegate));
+                                   ack_listener));
     client()->MaybeAddQuicDataToResend(std::move(data_to_resend));
   }
   return ret;
@@ -374,11 +376,12 @@ ssize_t QuicTestClient::SendData(const string& data, bool last_data) {
   return SendData(data, last_data, nullptr);
 }
 
-ssize_t QuicTestClient::SendData(const string& data,
-                                 bool last_data,
-                                 QuicAckListenerInterface* delegate) {
+ssize_t QuicTestClient::SendData(
+    const string& data,
+    bool last_data,
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
   return GetOrCreateStreamAndSendRequest(nullptr, StringPiece(data), last_data,
-                                         delegate);
+                                         std::move(ack_listener));
 }
 
 bool QuicTestClient::response_complete() const {
@@ -405,7 +408,7 @@ string QuicTestClient::SendCustomSynchronousRequest(
     const SpdyHeaderBlock& headers,
     const string& body) {
   if (SendMessage(headers, body) == 0) {
-    DLOG(ERROR) << "Failed the request for: " << headers.DebugString();
+    QUIC_DLOG(ERROR) << "Failed the request for: " << headers.DebugString();
     // Set the response_ explicitly.  Otherwise response_ will contain the
     // response from the previously successful request.
     response_ = "";
@@ -545,7 +548,8 @@ bool QuicTestClient::WaitUntil(int timeout_ms, std::function<bool()> trigger) {
     epoll_server()->set_timeout_in_us(old_timeout_us);
   }
   if (trigger && !trigger()) {
-    VLOG(1) << "Client WaitUntil returning with trigger returning false.";
+    VLOG(1) << "Client WaitUntil returning with trigger returning false."
+            << QuicStackTrace();
     return false;
   }
   return true;
@@ -567,6 +571,13 @@ const SpdyHeaderBlock* QuicTestClient::response_headers() const {
     response_headers_ = stream_->response_headers().Clone();
   }
   return &response_headers_;
+}
+
+const SpdyHeaderBlock* QuicTestClient::preliminary_headers() const {
+  if (stream_ != nullptr) {
+    preliminary_headers_ = stream_->preliminary_headers().Clone();
+  }
+  return &preliminary_headers_;
 }
 
 const SpdyHeaderBlock& QuicTestClient::response_trailers() const {
@@ -615,6 +626,7 @@ void QuicTestClient::OnClose(QuicSpdyStream* stream) {
   response_headers_complete_ = stream_->headers_decompressed();
   response_headers_ = stream_->response_headers().Clone();
   response_trailers_ = stream_->received_trailers().Clone();
+  preliminary_headers_ = stream_->preliminary_headers().Clone();
   stream_error_ = stream_->stream_error();
   bytes_read_ = stream_->stream_bytes_read() + stream_->header_bytes_read();
   bytes_written_ =
@@ -671,17 +683,29 @@ void QuicTestClient::WaitForWriteToFlush() {
   }
 }
 
+QuicTestClient::TestClientDataToResend::TestClientDataToResend(
+    std::unique_ptr<SpdyHeaderBlock> headers,
+    base::StringPiece body,
+    bool fin,
+    QuicTestClient* test_client,
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener)
+    : QuicClient::QuicDataToResend(std::move(headers), body, fin),
+      test_client_(test_client),
+      ack_listener_(std::move(ack_listener)) {}
+
+QuicTestClient::TestClientDataToResend::~TestClientDataToResend() {}
+
 void QuicTestClient::TestClientDataToResend::Resend() {
   test_client_->GetOrCreateStreamAndSendRequest(headers_.get(), body_, fin_,
-                                                delegate_);
+                                                ack_listener_);
   headers_.reset();
 }
 
 bool QuicTestClient::PopulateHeaderBlockFromUrl(const string& uri,
                                                 SpdyHeaderBlock* headers) {
   string url;
-  if (base::StartsWith(uri, "https://", base::CompareCase::INSENSITIVE_ASCII) ||
-      base::StartsWith(uri, "http://", base::CompareCase::INSENSITIVE_ASCII)) {
+  if (QuicTextUtils::StartsWith(uri, "https://") ||
+      QuicTextUtils::StartsWith(uri, "http://")) {
     url = uri;
   } else if (uri[0] == '/') {
     url = "https://" + client_->server_id().host() + uri;

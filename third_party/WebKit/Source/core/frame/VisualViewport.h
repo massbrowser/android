@@ -146,6 +146,7 @@ class CORE_EXPORT VisualViewport final
   // necessary adjustments so that we don't incorrectly clamp scroll offsets
   // coming from the compositor. crbug.com/422328
   void setBrowserControlsAdjustment(float);
+  float browserControlsAdjustment() const;
 
   // Adjust the viewport's offset so that it remains bounded by the outer
   // viepwort.
@@ -176,7 +177,7 @@ class CORE_EXPORT VisualViewport final
   bool isScrollCornerVisible() const override { return false; }
   IntRect scrollCornerRect() const override { return IntRect(); }
   IntSize scrollOffsetInt() const override { return flooredIntSize(m_offset); }
-  ScrollOffset scrollOffset() const override { return m_offset; }
+  ScrollOffset getScrollOffset() const override { return m_offset; }
   IntSize minimumScrollOffsetInt() const override;
   IntSize maximumScrollOffsetInt() const override;
   ScrollOffset maximumScrollOffset() const override;
@@ -195,9 +196,11 @@ class CORE_EXPORT VisualViewport final
   GraphicsLayer* layerForHorizontalScrollbar() const override;
   GraphicsLayer* layerForVerticalScrollbar() const override;
   Widget* getWidget() override;
+  CompositorAnimationHost* compositorAnimationHost() const override;
   CompositorAnimationTimeline* compositorAnimationTimeline() const override;
   IntRect visibleContentRect(
       IncludeScrollbarsInRect = ExcludeScrollbars) const override;
+  RefPtr<WebTaskRunner> getTimerTaskRunner() const final;
 
   // Visual Viewport API implementation.
   double scrollLeft();

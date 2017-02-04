@@ -2,23 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_FRAMER_H_
-#define NET_QUIC_QUIC_FRAMER_H_
+#ifndef NET_QUIC_CORE_QUIC_FRAMER_H_
+#define NET_QUIC_CORE_QUIC_FRAMER_H_
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string_piece.h"
-#include "net/base/net_export.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
+#include "net/quic/platform/api/quic_export.h"
 
 namespace net {
 
@@ -62,7 +59,7 @@ const size_t kMaxAckBlocks = (1 << (kNumberOfAckBlocksSize * 8)) - 1;
 
 // This class receives callbacks from the framer when packets
 // are processed.
-class NET_EXPORT_PRIVATE QuicFramerVisitorInterface {
+class QUIC_EXPORT_PRIVATE QuicFramerVisitorInterface {
  public:
   virtual ~QuicFramerVisitorInterface() {}
 
@@ -148,7 +145,7 @@ class NET_EXPORT_PRIVATE QuicFramerVisitorInterface {
 
 // Class for parsing and constructing QUIC packets.  It has a
 // QuicFramerVisitorInterface that is called when packets are parsed.
-class NET_EXPORT_PRIVATE QuicFramer {
+class QUIC_EXPORT_PRIVATE QuicFramer {
  public:
   // Constructs a new framer that installs a kNULL QuicEncrypter and
   // QuicDecrypter for level ENCRYPTION_NONE. |supported_versions| specifies the
@@ -347,11 +344,10 @@ class NET_EXPORT_PRIVATE QuicFramer {
 
   typedef std::map<QuicPacketNumber, uint8_t> NackRangeMap;
 
-  // TODO(rch): Rename this to remove "New" from the name here, and elsewhere.
-  struct NewAckFrameInfo {
-    NewAckFrameInfo();
-    NewAckFrameInfo(const NewAckFrameInfo& other);
-    ~NewAckFrameInfo();
+  struct AckFrameInfo {
+    AckFrameInfo();
+    AckFrameInfo(const AckFrameInfo& other);
+    ~AckFrameInfo();
 
     // The maximum ack block length.
     QuicPacketNumber max_block_length;
@@ -390,9 +386,9 @@ class NET_EXPORT_PRIVATE QuicFramer {
   bool ProcessStreamFrame(QuicDataReader* reader,
                           uint8_t frame_type,
                           QuicStreamFrame* frame);
-  bool ProcessNewAckFrame(QuicDataReader* reader,
-                          uint8_t frame_type,
-                          QuicAckFrame* frame);
+  bool ProcessAckFrame(QuicDataReader* reader,
+                       uint8_t frame_type,
+                       QuicAckFrame* frame);
   bool ProcessTimestampsInAckFrame(QuicDataReader* reader, QuicAckFrame* frame);
   bool ProcessStopWaitingFrame(QuicDataReader* reader,
                                const QuicPacketHeader& public_header,
@@ -442,7 +438,7 @@ class NET_EXPORT_PRIVATE QuicFramer {
                          QuicPacketNumberLength packet_number_length);
 
   // Computes the wire size in bytes of the |ack| frame.
-  size_t GetNewAckFrameSize(const QuicAckFrame& ack);
+  size_t GetAckFrameSize(const QuicAckFrame& ack);
 
   // Computes the wire size in bytes of the payload of |frame|.
   size_t ComputeFrameLength(const QuicFrame& frame,
@@ -464,13 +460,13 @@ class NET_EXPORT_PRIVATE QuicFramer {
   static uint8_t GetSequenceNumberFlags(
       QuicPacketNumberLength packet_number_length);
 
-  static NewAckFrameInfo GetNewAckFrameInfo(const QuicAckFrame& frame);
+  static AckFrameInfo GetAckFrameInfo(const QuicAckFrame& frame);
 
   // The Append* methods attempt to write the provided header or frame using the
   // |writer|, and return true if successful.
 
-  bool AppendNewAckFrameAndTypeByte(const QuicAckFrame& frame,
-                                    QuicDataWriter* builder);
+  bool AppendAckFrameAndTypeByte(const QuicAckFrame& frame,
+                                 QuicDataWriter* builder);
   bool AppendTimestampToAckFrame(const QuicAckFrame& frame,
                                  QuicDataWriter* builder);
   bool AppendStopWaitingFrame(const QuicPacketHeader& header,
@@ -555,4 +551,4 @@ class NET_EXPORT_PRIVATE QuicFramer {
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_FRAMER_H_
+#endif  // NET_QUIC_CORE_QUIC_FRAMER_H_

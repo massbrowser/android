@@ -7,11 +7,10 @@
 // packets on one path at the same time. Currently, next packet number is
 // tracked per-path.
 
-#ifndef NET_QUIC_QUIC_PACKET_CREATOR_H_
-#define NET_QUIC_QUIC_PACKET_CREATOR_H_
+#ifndef NET_QUIC_CORE_QUIC_PACKET_CREATOR_H_
+#define NET_QUIC_CORE_QUIC_PACKET_CREATOR_H_
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -20,21 +19,22 @@
 
 #include "base/macros.h"
 #include "base/strings/string_piece.h"
-#include "net/base/net_export.h"
 #include "net/quic/core/quic_connection_close_delegate_interface.h"
 #include "net/quic/core/quic_framer.h"
 #include "net/quic/core/quic_iovector.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
+#include "net/quic/core/quic_pending_retransmission.h"
+#include "net/quic/platform/api/quic_export.h"
 
 namespace net {
 namespace test {
 class QuicPacketCreatorPeer;
 }
 
-class NET_EXPORT_PRIVATE QuicPacketCreator {
+class QUIC_EXPORT_PRIVATE QuicPacketCreator {
  public:
   // A delegate interface for further processing serialized packet.
-  class NET_EXPORT_PRIVATE DelegateInterface
+  class QUIC_EXPORT_PRIVATE DelegateInterface
       : public QuicConnectionCloseDelegateInterface {
    public:
     ~DelegateInterface() override {}
@@ -47,7 +47,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator {
   // Interface which gets callbacks from the QuicPacketCreator at interesting
   // points.  Implementations must not mutate the state of the creator
   // as a result of these callbacks.
-  class NET_EXPORT_PRIVATE DebugDelegate {
+  class QUIC_EXPORT_PRIVATE DebugDelegate {
    public:
     virtual ~DebugDelegate() {}
 
@@ -106,7 +106,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator {
 
   // Re-serializes frames with the original packet's packet number length.
   // Used for retransmitting packets to ensure they aren't too long.
-  void ReserializeAllFrames(const PendingRetransmission& retransmission,
+  void ReserializeAllFrames(const QuicPendingRetransmission& retransmission,
                             char* buffer,
                             size_t buffer_len);
 
@@ -118,13 +118,14 @@ class NET_EXPORT_PRIVATE QuicPacketCreator {
   // QuicStreamFrame to the returned SerializedPacket.  Sets
   // |num_bytes_consumed| to the number of bytes consumed to create the
   // QuicStreamFrame.
-  void CreateAndSerializeStreamFrame(QuicStreamId id,
-                                     const QuicIOVector& iov,
-                                     QuicStreamOffset iov_offset,
-                                     QuicStreamOffset stream_offset,
-                                     bool fin,
-                                     QuicAckListenerInterface* listener,
-                                     size_t* num_bytes_consumed);
+  void CreateAndSerializeStreamFrame(
+      QuicStreamId id,
+      const QuicIOVector& iov,
+      QuicStreamOffset iov_offset,
+      QuicStreamOffset stream_offset,
+      bool fin,
+      QuicReferenceCountedPointer<QuicAckListenerInterface> listener,
+      size_t* num_bytes_consumed);
 
   // Returns true if there are frames pending to be serialized.
   bool HasPendingFrames() const;
@@ -158,10 +159,11 @@ class NET_EXPORT_PRIVATE QuicPacketCreator {
   // Identical to AddSavedFrame, but allows the frame to be padded.
   bool AddPaddedSavedFrame(const QuicFrame& frame);
 
-  // Adds |listener| to the next serialized packet and notifies the
-  // std::listener with |length| as the number of acked bytes.
-  void AddAckListener(QuicAckListenerInterface* listener,
-                      QuicPacketLength length);
+  // Adds |listener| to the next serialized packet and notifies the listener
+  // with |length| as the number of acked bytes.
+  void AddAckListener(
+      QuicReferenceCountedPointer<QuicAckListenerInterface> listener,
+      QuicPacketLength length);
 
   // Creates a version negotiation packet which supports |supported_versions|.
   std::unique_ptr<QuicEncryptedPacket> SerializeVersionNegotiationPacket(
@@ -316,4 +318,4 @@ class NET_EXPORT_PRIVATE QuicPacketCreator {
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_PACKET_CREATOR_H_
+#endif  // NET_QUIC_CORE_QUIC_PACKET_CREATOR_H_

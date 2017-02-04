@@ -5,10 +5,10 @@
 #include "base/message_loop/message_loop.h"
 #include "cc/input/selection.h"
 #include "cc/ipc/traits_test_service.mojom.h"
+#include "cc/output/copy_output_result.h"
 #include "cc/quads/debug_border_draw_quad.h"
 #include "cc/quads/render_pass.h"
 #include "cc/quads/render_pass_draw_quad.h"
-#include "cc/quads/render_pass_id.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/stream_video_draw_quad.h"
 #include "cc/quads/surface_draw_quad.h"
@@ -51,6 +51,18 @@ class StructTraitsTest : public testing::Test, public mojom::TraitsTestService {
     callback.Run(c);
   }
 
+  void EchoCopyOutputRequest(
+      const CopyOutputRequest& c,
+      const EchoCopyOutputRequestCallback& callback) override {
+    callback.Run(std::move(c));
+  }
+
+  void EchoCopyOutputResult(
+      const CopyOutputResult& c,
+      const EchoCopyOutputResultCallback& callback) override {
+    callback.Run(c);
+  }
+
   void EchoFilterOperation(
       const FilterOperation& f,
       const EchoFilterOperationCallback& callback) override {
@@ -66,11 +78,6 @@ class StructTraitsTest : public testing::Test, public mojom::TraitsTestService {
   void EchoRenderPass(std::unique_ptr<RenderPass> r,
                       const EchoRenderPassCallback& callback) override {
     callback.Run(std::move(r));
-  }
-
-  void EchoRenderPassId(const RenderPassId& r,
-                        const EchoRenderPassIdCallback& callback) override {
-    callback.Run(r);
   }
 
   void EchoReturnedResource(
@@ -95,10 +102,21 @@ class StructTraitsTest : public testing::Test, public mojom::TraitsTestService {
     callback.Run(s);
   }
 
+  void EchoSurfaceReference(
+      const SurfaceReference& s,
+      const EchoSurfaceReferenceCallback& callback) override {
+    callback.Run(s);
+  }
+
   void EchoSurfaceSequence(
       const SurfaceSequence& s,
       const EchoSurfaceSequenceCallback& callback) override {
     callback.Run(s);
+  }
+
+  void EchoTextureMailbox(const TextureMailbox& t,
+                          const EchoTextureMailboxCallback& callback) override {
+    callback.Run(t);
   }
 
   void EchoTransferableResource(
@@ -110,6 +128,11 @@ class StructTraitsTest : public testing::Test, public mojom::TraitsTestService {
   mojo::BindingSet<TraitsTestService> traits_test_bindings_;
   DISALLOW_COPY_AND_ASSIGN(StructTraitsTest);
 };
+
+void StubCopyOutputRequestCallback(std::unique_ptr<CopyOutputResult> result) {}
+
+void StubCopyOutputResultCallback(const gpu::SyncToken& sync_token,
+                                  bool is_lost) {}
 
 }  // namespace
 
@@ -140,6 +163,7 @@ TEST_F(StructTraitsTest, BeginFrameArgs) {
 // RenderPass, and QuadListBasic unit tests.
 TEST_F(StructTraitsTest, CompositorFrame) {
   std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
+  render_pass->SetNew(1, gfx::Rect(5, 6), gfx::Rect(2, 3), gfx::Transform());
 
   // SharedQuadState.
   const gfx::Transform sqs_quad_to_target_transform(
@@ -279,10 +303,9 @@ TEST_F(StructTraitsTest, CompositorFrameMetadata) {
   latency_info.AddLatencyNumber(
       ui::LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT, 1337, 7331);
   std::vector<ui::LatencyInfo> latency_infos = {latency_info};
-  std::vector<uint32_t> satisfies_sequences = {1234, 1337};
   std::vector<SurfaceId> referenced_surfaces;
   SurfaceId id(FrameSinkId(1234, 4321),
-               LocalFrameId(5678, base::UnguessableToken::Create()));
+               LocalSurfaceId(5678, base::UnguessableToken::Create()));
   referenced_surfaces.push_back(id);
 
   CompositorFrameMetadata input;
@@ -305,7 +328,6 @@ TEST_F(StructTraitsTest, CompositorFrameMetadata) {
   input.root_background_color = root_background_color;
   input.selection = selection;
   input.latency_info = latency_infos;
-  input.satisfies_sequences = satisfies_sequences;
   input.referenced_surfaces = referenced_surfaces;
 
   mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
@@ -335,12 +357,99 @@ TEST_F(StructTraitsTest, CompositorFrameMetadata) {
       ui::LATENCY_BEGIN_SCROLL_LISTENER_UPDATE_MAIN_COMPONENT, 1337,
       &component));
   EXPECT_EQ(7331, component.sequence_number);
-  EXPECT_EQ(satisfies_sequences.size(), output.satisfies_sequences.size());
-  for (uint32_t i = 0; i < satisfies_sequences.size(); ++i)
-    EXPECT_EQ(satisfies_sequences[i], output.satisfies_sequences[i]);
   EXPECT_EQ(referenced_surfaces.size(), output.referenced_surfaces.size());
   for (uint32_t i = 0; i < referenced_surfaces.size(); ++i)
     EXPECT_EQ(referenced_surfaces[i], output.referenced_surfaces[i]);
+}
+
+TEST_F(StructTraitsTest, CopyOutputRequest) {
+  const gfx::Rect area(5, 7, 44, 55);
+  const auto callback = base::Bind(StubCopyOutputRequestCallback);
+  const int8_t mailbox_name[GL_MAILBOX_SIZE_CHROMIUM] = {
+      0, 9, 8, 7, 6, 5, 4, 3, 2, 1, 9, 7, 5, 3, 1, 3};
+  const uint32_t target = 3;
+  const auto source =
+      base::UnguessableToken::Deserialize(0xdeadbeef, 0xdeadf00d);
+  gpu::Mailbox mailbox;
+  mailbox.SetName(mailbox_name);
+  TextureMailbox texture_mailbox(mailbox, gpu::SyncToken(), target);
+
+  // Test with bitmap.
+  std::unique_ptr<CopyOutputRequest> input;
+  input = CopyOutputRequest::CreateBitmapRequest(callback);
+  input->set_area(area);
+  input->set_source(source);
+  mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
+  CopyOutputRequest output;
+  proxy->EchoCopyOutputRequest(*input.get(), &output);
+
+  EXPECT_TRUE(output.force_bitmap_result());
+  EXPECT_FALSE(output.has_texture_mailbox());
+  EXPECT_TRUE(output.has_area());
+  EXPECT_EQ(area, output.area());
+  EXPECT_EQ(source, output.source());
+
+  // Test with texture mailbox.
+  input = CopyOutputRequest::CreateRequest(callback);
+  input->SetTextureMailbox(texture_mailbox);
+
+  CopyOutputRequest output2;
+  proxy->EchoCopyOutputRequest(*input.get(), &output2);
+
+  EXPECT_TRUE(output2.has_texture_mailbox());
+  EXPECT_FALSE(output2.has_area());
+  EXPECT_EQ(mailbox, output2.texture_mailbox().mailbox());
+  EXPECT_EQ(target, output2.texture_mailbox().target());
+  EXPECT_FALSE(output2.has_source());
+}
+
+TEST_F(StructTraitsTest, CopyOutputResult_Bitmap) {
+  auto bitmap = base::MakeUnique<SkBitmap>();
+  bitmap->allocN32Pixels(7, 8);
+  bitmap->eraseARGB(123, 213, 77, 33);
+  auto input = CopyOutputResult::CreateBitmapResult(std::move(bitmap));
+
+  mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
+  CopyOutputResult output;
+  proxy->EchoCopyOutputResult(*input, &output);
+
+  EXPECT_TRUE(output.HasBitmap());
+  EXPECT_FALSE(output.HasTexture());
+  EXPECT_EQ(input->size(), output.size());
+
+  std::unique_ptr<SkBitmap> in_bitmap = input->TakeBitmap();
+  std::unique_ptr<SkBitmap> out_bitmap = output.TakeBitmap();
+  EXPECT_EQ(in_bitmap->getSize(), out_bitmap->getSize());
+  EXPECT_EQ(0, std::memcmp(in_bitmap->getPixels(), out_bitmap->getPixels(),
+                           in_bitmap->getSize()));
+}
+
+TEST_F(StructTraitsTest, CopyOutputResult_Texture) {
+  const gfx::Size size(1234, 5678);
+  const int8_t mailbox_name[GL_MAILBOX_SIZE_CHROMIUM] = {
+      0, 9, 8, 7, 6, 5, 4, 3, 2, 1, 9, 7, 5, 3, 1, 3};
+  const uint32_t target = 3;
+  auto callback =
+      SingleReleaseCallback::Create(base::Bind(StubCopyOutputResultCallback));
+  gpu::Mailbox mailbox;
+  mailbox.SetName(mailbox_name);
+  TextureMailbox texture_mailbox(mailbox, gpu::SyncToken(), target);
+
+  auto input = CopyOutputResult::CreateTextureResult(size, texture_mailbox,
+                                                     std::move(callback));
+
+  mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
+  CopyOutputResult output;
+  proxy->EchoCopyOutputResult(*input, &output);
+
+  EXPECT_FALSE(output.HasBitmap());
+  EXPECT_TRUE(output.HasTexture());
+  EXPECT_EQ(size, output.size());
+
+  TextureMailbox out_mailbox;
+  std::unique_ptr<SingleReleaseCallback> out_callback;
+  output.TakeTexture(&out_mailbox, &out_callback);
+  EXPECT_EQ(mailbox, out_mailbox.mailbox());
 }
 
 TEST_F(StructTraitsTest, FilterOperation) {
@@ -414,8 +523,7 @@ TEST_F(StructTraitsTest, FilterOperations) {
 
 TEST_F(StructTraitsTest, QuadListBasic) {
   std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
-  render_pass->SetNew(RenderPassId(1, 1), gfx::Rect(), gfx::Rect(),
-                      gfx::Transform());
+  render_pass->SetNew(1, gfx::Rect(), gfx::Rect(), gfx::Transform());
 
   SharedQuadState* sqs = render_pass->CreateAndAppendSharedQuadState();
 
@@ -436,31 +544,24 @@ TEST_F(StructTraitsTest, QuadListBasic) {
   const gfx::Rect rect3(1029, 3847, 5610, 2938);
   const SurfaceId surface_id(
       FrameSinkId(1234, 4321),
-      LocalFrameId(5678, base::UnguessableToken::Create()));
+      LocalSurfaceId(5678, base::UnguessableToken::Create()));
   SurfaceDrawQuad* surface_quad =
       render_pass->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
   surface_quad->SetNew(sqs, rect3, rect3, surface_id);
 
   const gfx::Rect rect4(1234, 5678, 9101112, 13141516);
   const ResourceId resource_id4(1337);
-  const RenderPassId render_pass_id(1234, 5678);
+  const int render_pass_id = 1234;
   const gfx::Vector2dF mask_uv_scale(1337.1f, 1234.2f);
   const gfx::Size mask_texture_size(1234, 5678);
-  FilterOperations filters;
-  filters.Append(FilterOperation::CreateBlurFilter(0.f));
-  filters.Append(FilterOperation::CreateZoomFilter(2.0f, 1));
   gfx::Vector2dF filters_scale(1234.1f, 4321.2f);
   gfx::PointF filters_origin(8765.4f, 4567.8f);
-  FilterOperations background_filters;
-  background_filters.Append(FilterOperation::CreateSaturateFilter(4.f));
-  background_filters.Append(FilterOperation::CreateZoomFilter(2.0f, 1));
-  background_filters.Append(FilterOperation::CreateSaturateFilter(2.f));
 
   RenderPassDrawQuad* render_pass_quad =
       render_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
   render_pass_quad->SetNew(sqs, rect4, rect4, render_pass_id, resource_id4,
-                           mask_uv_scale, mask_texture_size, filters,
-                           filters_scale, filters_origin, background_filters);
+                           mask_uv_scale, mask_texture_size, filters_scale,
+                           filters_origin);
 
   const gfx::Rect rect5(123, 567, 91011, 131415);
   const ResourceId resource_id5(1337);
@@ -472,9 +573,12 @@ TEST_F(StructTraitsTest, QuadListBasic) {
   const bool y_flipped = true;
   const bool nearest_neighbor = true;
   const bool secure_output_only = true;
+  const bool needs_blending = true;
+  const gfx::Size resource_size_in_pixels5(1234, 5678);
   TextureDrawQuad* texture_draw_quad =
       render_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
-  texture_draw_quad->SetNew(sqs, rect5, rect5, rect5, resource_id5,
+  texture_draw_quad->SetAll(sqs, rect5, rect5, rect5, needs_blending,
+                            resource_id5, resource_size_in_pixels5,
                             premultiplied_alpha, uv_top_left, uv_bottom_right,
                             background_color, vertex_opacity, y_flipped,
                             nearest_neighbor, secure_output_only);
@@ -524,22 +628,17 @@ TEST_F(StructTraitsTest, QuadListBasic) {
   EXPECT_EQ(render_pass_id, out_render_pass_draw_quad->render_pass_id);
   EXPECT_EQ(resource_id4, out_render_pass_draw_quad->mask_resource_id());
   EXPECT_EQ(mask_texture_size, out_render_pass_draw_quad->mask_texture_size);
-  EXPECT_EQ(filters.size(), out_render_pass_draw_quad->filters.size());
-  for (size_t i = 0; i < filters.size(); ++i)
-    EXPECT_EQ(filters.at(i), out_render_pass_draw_quad->filters.at(i));
   EXPECT_EQ(filters_scale, out_render_pass_draw_quad->filters_scale);
-  EXPECT_EQ(background_filters.size(),
-            out_render_pass_draw_quad->background_filters.size());
-  for (size_t i = 0; i < background_filters.size(); ++i)
-    EXPECT_EQ(background_filters.at(i),
-              out_render_pass_draw_quad->background_filters.at(i));
 
   const TextureDrawQuad* out_texture_draw_quad =
       TextureDrawQuad::MaterialCast(output->quad_list.ElementAt(4));
   EXPECT_EQ(rect5, out_texture_draw_quad->rect);
   EXPECT_EQ(rect5, out_texture_draw_quad->opaque_rect);
   EXPECT_EQ(rect5, out_texture_draw_quad->visible_rect);
+  EXPECT_EQ(needs_blending, out_texture_draw_quad->needs_blending);
   EXPECT_EQ(resource_id5, out_texture_draw_quad->resource_id());
+  EXPECT_EQ(resource_size_in_pixels5,
+            out_texture_draw_quad->resource_size_in_pixels());
   EXPECT_EQ(premultiplied_alpha, out_texture_draw_quad->premultiplied_alpha);
   EXPECT_EQ(uv_top_left, out_texture_draw_quad->uv_top_left);
   EXPECT_EQ(uv_bottom_right, out_texture_draw_quad->uv_bottom_right);
@@ -564,15 +663,22 @@ TEST_F(StructTraitsTest, QuadListBasic) {
 }
 
 TEST_F(StructTraitsTest, RenderPass) {
-  const RenderPassId id(3, 2);
+  const int id = 3;
   const gfx::Rect output_rect(45, 22, 120, 13);
   const gfx::Transform transform_to_root =
       gfx::Transform(1.0, 0.5, 0.5, -0.5, -1.0, 0.0);
   const gfx::Rect damage_rect(56, 123, 19, 43);
+  FilterOperations filters;
+  filters.Append(FilterOperation::CreateBlurFilter(0.f));
+  filters.Append(FilterOperation::CreateZoomFilter(2.0f, 1));
+  FilterOperations background_filters;
+  background_filters.Append(FilterOperation::CreateSaturateFilter(4.f));
+  background_filters.Append(FilterOperation::CreateZoomFilter(2.0f, 1));
+  background_filters.Append(FilterOperation::CreateSaturateFilter(2.f));
   const bool has_transparent_background = true;
   std::unique_ptr<RenderPass> input = RenderPass::Create();
-  input->SetAll(id, output_rect, damage_rect, transform_to_root,
-                has_transparent_background);
+  input->SetAll(id, output_rect, damage_rect, transform_to_root, filters,
+                background_filters, has_transparent_background);
 
   SharedQuadState* shared_state_1 = input->CreateAndAppendSharedQuadState();
   shared_state_1->SetAll(
@@ -608,7 +714,7 @@ TEST_F(StructTraitsTest, RenderPass) {
   surface_quad->SetNew(
       shared_state_2, surface_quad_rect, surface_quad_rect,
       SurfaceId(FrameSinkId(1337, 1234),
-                LocalFrameId(1234, base::UnguessableToken::Create())));
+                LocalSurfaceId(1234, base::UnguessableToken::Create())));
 
   std::unique_ptr<RenderPass> output;
   mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
@@ -622,6 +728,8 @@ TEST_F(StructTraitsTest, RenderPass) {
   EXPECT_EQ(damage_rect, output->damage_rect);
   EXPECT_EQ(transform_to_root, output->transform_to_root_target);
   EXPECT_EQ(has_transparent_background, output->has_transparent_background);
+  EXPECT_EQ(filters, output->filters);
+  EXPECT_EQ(background_filters, output->background_filters);
 
   SharedQuadState* out_sqs1 = output->shared_quad_state_list.ElementAt(0);
   EXPECT_EQ(shared_state_1->quad_to_target_transform,
@@ -673,7 +781,7 @@ TEST_F(StructTraitsTest, RenderPass) {
 }
 
 TEST_F(StructTraitsTest, RenderPassWithEmptySharedQuadStateList) {
-  const RenderPassId id(3, 2);
+  const int id = 3;
   const gfx::Rect output_rect(45, 22, 120, 13);
   const gfx::Transform transform_to_root =
       gfx::Transform(1.0, 0.5, 0.5, -0.5, -1.0, 0.0);
@@ -681,6 +789,7 @@ TEST_F(StructTraitsTest, RenderPassWithEmptySharedQuadStateList) {
   const bool has_transparent_background = true;
   std::unique_ptr<RenderPass> input = RenderPass::Create();
   input->SetAll(id, output_rect, damage_rect, transform_to_root,
+                FilterOperations(), FilterOperations(),
                 has_transparent_background);
 
   // Unlike the previous test, don't add any quads to the list; we need to
@@ -697,17 +806,6 @@ TEST_F(StructTraitsTest, RenderPassWithEmptySharedQuadStateList) {
   EXPECT_EQ(damage_rect, output->damage_rect);
   EXPECT_EQ(transform_to_root, output->transform_to_root_target);
   EXPECT_EQ(has_transparent_background, output->has_transparent_background);
-}
-
-TEST_F(StructTraitsTest, RenderPassId) {
-  const int layer_id = 1337;
-  const uint32_t index = 0xdeadbeef;
-  RenderPassId input(layer_id, index);
-  mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
-  RenderPassId output;
-  proxy->EchoRenderPassId(input, &output);
-  EXPECT_EQ(layer_id, output.layer_id);
-  EXPECT_EQ(index, output.index);
 }
 
 TEST_F(StructTraitsTest, ReturnedResource) {
@@ -763,14 +861,32 @@ TEST_F(StructTraitsTest, Selection) {
 
 TEST_F(StructTraitsTest, SurfaceId) {
   static constexpr FrameSinkId frame_sink_id(1337, 1234);
-  static LocalFrameId local_frame_id(0xfbadbeef,
-                                     base::UnguessableToken::Create());
-  SurfaceId input(frame_sink_id, local_frame_id);
+  static LocalSurfaceId local_surface_id(0xfbadbeef,
+                                         base::UnguessableToken::Create());
+  SurfaceId input(frame_sink_id, local_surface_id);
   mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
   SurfaceId output;
   proxy->EchoSurfaceId(input, &output);
   EXPECT_EQ(frame_sink_id, output.frame_sink_id());
-  EXPECT_EQ(local_frame_id, output.local_frame_id());
+  EXPECT_EQ(local_surface_id, output.local_surface_id());
+}
+
+TEST_F(StructTraitsTest, SurfaceReference) {
+  const SurfaceId parent_id(
+      FrameSinkId(2016, 1234),
+      LocalSurfaceId(0xfbadbeef,
+                     base::UnguessableToken::Deserialize(123, 456)));
+  const SurfaceId child_id(
+      FrameSinkId(1111, 9999),
+      LocalSurfaceId(0xabcdabcd,
+                     base::UnguessableToken::Deserialize(333, 333)));
+  const SurfaceReference input(parent_id, child_id);
+
+  mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
+  SurfaceReference output;
+  proxy->EchoSurfaceReference(input, &output);
+  EXPECT_EQ(parent_id, output.parent_id());
+  EXPECT_EQ(child_id, output.child_id());
 }
 
 TEST_F(StructTraitsTest, SurfaceSequence) {
@@ -810,6 +926,57 @@ TEST_F(StructTraitsTest, SharedQuadState) {
   EXPECT_EQ(opacity, output_sqs.opacity);
   EXPECT_EQ(blend_mode, output_sqs.blend_mode);
   EXPECT_EQ(sorting_context_id, output_sqs.sorting_context_id);
+}
+
+TEST_F(StructTraitsTest, TextureMailbox) {
+  const int8_t mailbox_name[GL_MAILBOX_SIZE_CHROMIUM] = {
+      0, 9, 8, 7, 6, 5, 4, 3, 2, 1, 9, 7, 5, 3, 1, 2};
+  const gpu::CommandBufferNamespace command_buffer_namespace = gpu::IN_PROCESS;
+  const int32_t extra_data_field = 0xbeefbeef;
+  const gpu::CommandBufferId command_buffer_id(
+      gpu::CommandBufferId::FromUnsafeValue(0xdeadbeef));
+  const uint64_t release_count = 0xdeadbeefdeadL;
+  const gpu::SyncToken sync_token(command_buffer_namespace, extra_data_field,
+                                  command_buffer_id, release_count);
+  const uint32_t texture_target = 1337;
+  const gfx::Size size_in_pixels(93, 24);
+  const bool is_overlay_candidate = true;
+  const bool secure_output_only = true;
+  const bool nearest_neighbor = true;
+  const gfx::ColorSpace color_space(4, 5, 9, gfx::ColorSpace::RangeID::LIMITED);
+#if defined(OS_ANDROID)
+  const bool is_backed_by_surface_texture = true;
+  const bool wants_promotion_hint = true;
+#endif
+
+  gpu::Mailbox mailbox;
+  mailbox.SetName(mailbox_name);
+  TextureMailbox input(mailbox, sync_token, texture_target, size_in_pixels,
+                       is_overlay_candidate, secure_output_only);
+  input.set_nearest_neighbor(nearest_neighbor);
+  input.set_color_space(color_space);
+#if defined(OS_ANDROID)
+  input.set_is_backed_by_surface_texture(is_backed_by_surface_texture);
+  input.set_wants_promotion_hint(wants_promotion_hint);
+#endif
+
+  mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
+  TextureMailbox output;
+  proxy->EchoTextureMailbox(input, &output);
+
+  EXPECT_EQ(mailbox, output.mailbox());
+  EXPECT_EQ(sync_token, output.sync_token());
+  EXPECT_EQ(texture_target, output.target());
+  EXPECT_EQ(size_in_pixels, output.size_in_pixels());
+  EXPECT_EQ(is_overlay_candidate, output.is_overlay_candidate());
+  EXPECT_EQ(secure_output_only, output.secure_output_only());
+  EXPECT_EQ(nearest_neighbor, output.nearest_neighbor());
+  EXPECT_EQ(color_space, output.color_space());
+#if defined(OS_ANDROID)
+  EXPECT_EQ(is_backed_by_surface_texture,
+            output.is_backed_by_surface_texture());
+  EXPECT_EQ(wants_promotion_hint, output.wants_promotion_hint());
+#endif
 }
 
 TEST_F(StructTraitsTest, TransferableResource) {
@@ -862,8 +1029,7 @@ TEST_F(StructTraitsTest, TransferableResource) {
 
 TEST_F(StructTraitsTest, YUVDrawQuad) {
   std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
-  render_pass->SetNew(RenderPassId(1, 1), gfx::Rect(), gfx::Rect(),
-                      gfx::Transform());
+  render_pass->SetNew(1, gfx::Rect(), gfx::Rect(), gfx::Transform());
 
   const DrawQuad::Material material = DrawQuad::YUV_VIDEO_CONTENT;
   const gfx::Rect rect(1234, 4321, 1357, 7531);

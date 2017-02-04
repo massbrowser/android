@@ -13,8 +13,8 @@
 #import "base/mac/scoped_nsobject.h"
 #include "base/run_loop.h"
 #include "chrome/browser/download/download_shelf.h"
-#include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/download/download_item_controller.h"
+#include "chrome/browser/ui/cocoa/test/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/view_resizer_pong.h"
 #include "content/public/test/mock_download_item.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -388,7 +388,8 @@ TEST_F(DownloadShelfControllerTest, CancelAutoCloseOnExit) {
 
 // The view should not be hidden when the shelf is shown.
 // The view should be hidden after the closing animation.
-TEST_F(DownloadShelfControllerTest, ViewVisibility) {
+// Failing flakily on Mac 10.9, see: crbug.com/687447.
+TEST_F(DownloadShelfControllerTest, DISABLED_ViewVisibility) {
   [shelf_ showDownloadShelf:YES isUserAction:NO];
   EXPECT_FALSE([[shelf_ view] isHidden]);
 

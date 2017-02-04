@@ -18,7 +18,7 @@ namespace blink {
 
 PresentationReceiver::PresentationReceiver(LocalFrame* frame,
                                            WebPresentationClient* client)
-    : DOMWindowProperty(frame) {
+    : ContextClient(frame) {
   m_connectionList = new PresentationConnectionList(frame->document());
 
   if (client)
@@ -39,17 +39,15 @@ ScriptPromise PresentationReceiver::connectionList(ScriptState* scriptState) {
   return m_connectionListProperty->promise(scriptState->world());
 }
 
-void PresentationReceiver::onReceiverConnectionAvailable(
-    WebPresentationConnectionClient* connectionClient) {
-  DCHECK(connectionClient);
+WebPresentationConnection* PresentationReceiver::onReceiverConnectionAvailable(
+    const WebPresentationSessionInfo& sessionInfo) {
   // take() will call PresentationReceiver::registerConnection()
   // and register the connection.
-  auto connection =
-      PresentationConnection::take(this, wrapUnique(connectionClient));
+  auto connection = PresentationConnection::take(this, sessionInfo);
 
   // receiver.connectionList property not accessed
   if (!m_connectionListProperty)
-    return;
+    return nullptr;
 
   if (m_connectionListProperty->getState() ==
       ScriptPromisePropertyBase::Pending)
@@ -57,6 +55,8 @@ void PresentationReceiver::onReceiverConnectionAvailable(
   else if (m_connectionListProperty->getState() ==
            ScriptPromisePropertyBase::Resolved)
     m_connectionList->dispatchConnectionAvailableEvent(connection);
+
+  return connection;
 }
 
 void PresentationReceiver::registerConnection(
@@ -68,6 +68,7 @@ void PresentationReceiver::registerConnection(
 DEFINE_TRACE(PresentationReceiver) {
   visitor->trace(m_connectionList);
   visitor->trace(m_connectionListProperty);
-  DOMWindowProperty::trace(visitor);
+  ContextClient::trace(visitor);
 }
+
 }  // namespace blink

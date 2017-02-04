@@ -6,6 +6,7 @@
 
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -70,8 +71,6 @@ void ExtensionWebContentsObserver::InitializeRenderFrame(
       content::ChildProcessSecurityPolicy::GetInstance();
   int process_id = render_frame_host->GetProcess()->GetID();
   security_policy->GrantScheme(process_id, extensions::kExtensionScheme);
-  security_policy->GrantScheme(process_id,
-                               extensions::kExtensionResourceScheme);
 
   // Notify the render frame of the view type.
   render_frame_host->Send(new ExtensionMsg_NotifyRenderViewType(
@@ -137,12 +136,15 @@ void ExtensionWebContentsObserver::RenderFrameDeleted(
   ExtensionApiFrameIdMap::Get()->RemoveFrameData(render_frame_host);
 }
 
-void ExtensionWebContentsObserver::DidCommitProvisionalLoadForFrame(
-    content::RenderFrameHost* render_frame_host,
-    const GURL& url,
-    ui::PageTransition transition_type) {
+void ExtensionWebContentsObserver::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->HasCommitted())
+    return;
+
   ProcessManager* pm = ProcessManager::Get(browser_context_);
 
+  content::RenderFrameHost* render_frame_host =
+      navigation_handle->GetRenderFrameHost();
   if (pm->IsRenderFrameHostRegistered(render_frame_host)) {
     const Extension* frame_extension =
         GetExtensionFromFrame(render_frame_host, true);
@@ -164,7 +166,7 @@ void ExtensionWebContentsObserver::DidNavigateAnyFrame(
   ProcessManager* pm = ProcessManager::Get(browser_context_);
 
   if (!frame_extension) {
-    // Should have been unregistered by DidCommitProvisionalLoadForFrame.
+    // Should have been unregistered by DidFinishNavigation.
     DCHECK(!pm->IsRenderFrameHostRegistered(render_frame_host));
     return;
   }

@@ -76,7 +76,7 @@ void GLSurfaceTestSupport::InitializeOneOffImplementation(
 
   // This method may be called multiple times in the same process to set up
   // bindings in different ways.
-  init::ClearGLBindings();
+  init::ShutdownGL();
 
   bool gpu_service_logging = false;
   bool disable_gl_drawing = false;
@@ -92,6 +92,14 @@ void GLSurfaceTestSupport::InitializeOneOffWithMockBindings() {
   ui::OzonePlatform::InitializeForGPU();
 #endif
   InitializeOneOffImplementation(kGLImplementationMockGL, false);
+}
+
+void GLSurfaceTestSupport::InitializeOneOffWithStubBindings() {
+#if defined(USE_OZONE)
+  // This function skips where Ozone is otherwise initialized.
+  ui::OzonePlatform::InitializeForGPU();
+#endif
+  InitializeOneOffImplementation(kGLImplementationStubGL, false);
 }
 
 }  // namespace gl

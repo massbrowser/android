@@ -53,7 +53,7 @@ class AutofillClientIOS : public AutofillClient {
   PrefService* GetPrefs() override;
   syncer::SyncService* GetSyncService() override;
   IdentityProvider* GetIdentityProvider() override;
-  rappor::RapporService* GetRapporService() override;
+  rappor::RapporServiceImpl* GetRapporServiceImpl() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(const CreditCard& card,
                         UnmaskCardReason reason,
@@ -91,6 +91,7 @@ class AutofillClientIOS : public AutofillClient {
   bool IsContextSecure(const GURL& form_origin) override;
   bool ShouldShowSigninPromo() override;
   void StartSigninFlow() override;
+  void ShowHttpNotSecureExplanation() override;
 
  private:
   ios::ChromeBrowserState* browser_state_;

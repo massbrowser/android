@@ -30,12 +30,20 @@ SelectionTreeNode.prototype.addChild = function(index, path) {
 var HistoryListBehavior = {
   properties: {
     /**
+     * Allows data to be imported into the list as soon as it is upgraded.
+     * @type {!Array<!HistoryEntry>}
+     */
+    initialData: Array,
+
+    /**
      * Polymer paths to the history items contained in this list.
      * @type {!Set<string>} selectedPaths
      */
     selectedPaths: {
       type: Object,
-      value: /** @return {!Set<string>} */ function() { return new Set(); }
+      value: /** @return {!Set<string>} */ function() {
+        return new Set();
+      },
     },
 
     lastSelectedPath: String,
@@ -45,12 +53,29 @@ var HistoryListBehavior = {
     'history-checkbox-select': 'itemSelected_',
   },
 
+  /** @override */
+  attached: function() {
+    if (this.initialData)
+      this.addNewResults(this.initialData, false, false);
+  },
+
+  /**
+   * @param {!Array<!HistoryEntry>} results
+   * @param {boolean} incremental True if the results are from an incremental
+   *     query.
+   * @param {boolean} finished True if this is the end of available results.
+   * @abstract
+   */
+  addNewResults: function(results, incremental, finished) {},
+
   /**
    * @param {number} historyDataLength
    * @return {boolean}
    * @private
    */
-  hasResults: function(historyDataLength) { return historyDataLength > 0; },
+  hasResults: function(historyDataLength) {
+    return historyDataLength > 0;
+  },
 
   /**
    * @param {string} searchedTerm
@@ -161,7 +186,9 @@ var HistoryListBehavior = {
     var array = this.get(node.currentPath);
     var splices = [];
 
-    node.indexes.sort(function(a, b) { return b - a; });
+    node.indexes.sort(function(a, b) {
+      return b - a;
+    });
     node.indexes.forEach(function(index) {
       if (node.leaf || this.removeItemsBeneathNode_(node.children[index])) {
         var item = array.splice(index, 1)[0];

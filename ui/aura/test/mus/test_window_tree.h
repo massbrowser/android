@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#include <set>
+#include <vector>
 
 #include "base/macros.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
@@ -51,6 +51,10 @@ class TestWindowTree : public ui::mojom::WindowTree {
   uint32_t window_id() const { return window_id_; }
 
   bool WasEventAcked(uint32_t event_id) const;
+
+  // Returns the result of the specified event. UNHANDLED if |event_id| was
+  // not acked (use WasEventAcked() to determine if the event was acked).
+  ui::mojom::EventResult GetEventResult(uint32_t event_id) const;
 
   base::Optional<std::vector<uint8_t>> GetLastPropertyValue();
 
@@ -135,7 +139,6 @@ class TestWindowTree : public ui::mojom::WindowTree {
                         float opacity) override;
   void AttachCompositorFrameSink(
       uint32_t window_id,
-      ui::mojom::CompositorFrameSinkType type,
       mojo::InterfaceRequest<cc::mojom::MojoCompositorFrameSink> surface,
       cc::mojom::MojoCompositorFrameSinkClientPtr client) override;
   void AddWindow(uint32_t change_id, uint32_t parent, uint32_t child) override;
@@ -162,7 +165,8 @@ class TestWindowTree : public ui::mojom::WindowTree {
              const EmbedCallback& callback) override;
   void SetFocus(uint32_t change_id, uint32_t window_id) override;
   void SetCanFocus(uint32_t window_id, bool can_focus) override;
-  void SetCanAcceptEvents(uint32_t window_id, bool can_accept_events) override;
+  void SetEventTargetingPolicy(uint32_t window_id,
+                               ui::mojom::EventTargetingPolicy policy) override;
   void SetPredefinedCursor(uint32_t change_id,
                            uint32_t window_id,
                            ui::mojom::Cursor cursor_id) override;
@@ -173,6 +177,10 @@ class TestWindowTree : public ui::mojom::WindowTree {
                         mojo::TextInputStatePtr state) override;
   void OnWindowInputEventAck(uint32_t event_id,
                              ui::mojom::EventResult result) override;
+  void DeactivateWindow(uint32_t window_id) override;
+  void StackAbove(uint32_t change_id, uint32_t above_id,
+                  uint32_t below_id) override;
+  void StackAtTop(uint32_t change_id, uint32_t window_id) override;
   void GetWindowManagerClient(
       mojo::AssociatedInterfaceRequest<ui::mojom::WindowManagerClient> internal)
       override;
@@ -190,7 +198,11 @@ class TestWindowTree : public ui::mojom::WindowTree {
                          const gfx::Point& cursor_location) override;
   void CancelWindowMove(uint32_t window_id) override;
 
-  std::set<uint32_t> acked_events_;
+  struct AckedEvent {
+    uint32_t event_id;
+    ui::mojom::EventResult result;
+  };
+  std::vector<AckedEvent> acked_events_;
   uint32_t window_id_ = 0u;
 
   base::Optional<std::vector<uint8_t>> last_property_value_;

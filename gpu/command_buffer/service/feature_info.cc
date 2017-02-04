@@ -129,6 +129,7 @@ FeatureInfo::FeatureFlags::FeatureFlags()
       angle_pack_reverse_row_order(false),
       arb_texture_rectangle(false),
       angle_instanced_arrays(false),
+      occlusion_query(false),
       occlusion_query_boolean(false),
       use_arb_occlusion_query2_for_occlusion_query_boolean(false),
       use_arb_occlusion_query_for_occlusion_query_boolean(false),
@@ -572,11 +573,13 @@ void FeatureInfo::InitializeFeatures() {
     validators_.index_type.AddValue(GL_UNSIGNED_INT);
   }
 
+  bool has_srgb_framebuffer_support = false;
   if (gl_version_info_->IsAtLeastGL(3, 2) ||
       (gl_version_info_->IsAtLeastGL(2, 0) &&
        (extensions.Contains("GL_EXT_framebuffer_sRGB") ||
         extensions.Contains("GL_ARB_framebuffer_sRGB")))) {
     feature_flags_.desktop_srgb_support = true;
+    has_srgb_framebuffer_support = true;
   }
   // With EXT_sRGB, unsized SRGB_EXT and SRGB_ALPHA_EXT are accepted by the
   // <format> and <internalformat> parameter of TexImage2D. GLES3 adds support
@@ -589,6 +592,7 @@ void FeatureInfo::InitializeFeatures() {
         extensions.Contains("GL_EXT_sRGB")) ||
        feature_flags_.desktop_srgb_support) &&
        IsWebGL1OrES2Context()) {
+    feature_flags_.ext_srgb = true;
     AddExtensionString("GL_EXT_sRGB");
     validators_.texture_internal_format.AddValue(GL_SRGB_EXT);
     validators_.texture_internal_format.AddValue(GL_SRGB_ALPHA_EXT);
@@ -599,15 +603,50 @@ void FeatureInfo::InitializeFeatures() {
         GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT);
     validators_.texture_unsized_internal_format.AddValue(GL_SRGB_EXT);
     validators_.texture_unsized_internal_format.AddValue(GL_SRGB_ALPHA_EXT);
+    has_srgb_framebuffer_support = true;
+  }
+  if (gl_version_info_->is_es3)
+    has_srgb_framebuffer_support = true;
+
+  if (has_srgb_framebuffer_support && !IsWebGLContext()) {
+    // GL_FRAMEBUFFER_SRGB_EXT is exposed by the GLES extension
+    // GL_EXT_sRGB_write_control (which is not part of the core, even in GLES3),
+    // and the desktop extension GL_ARB_framebuffer_sRGB (part of the core in
+    // 3.0).
+    if (feature_flags_.desktop_srgb_support ||
+        extensions.Contains("GL_EXT_sRGB_write_control")) {
+      feature_flags_.ext_srgb_write_control = true;
+      AddExtensionString("GL_EXT_sRGB_write_control");
+      validators_.capability.AddValue(GL_FRAMEBUFFER_SRGB_EXT);
+    }
   }
 
-  // On desktop, GL_EXT_texture_sRGB is required regardless of GL version,
-  // since the sRGB formats in OpenGL 3.0 Core do not support S3TC.
-  // TODO(kainino): Support GL_EXT_texture_compression_s3tc_srgb once ratified.
-  if ((gl_version_info_->is_es && extensions.Contains("GL_NV_sRGB_formats")) ||
-      (!gl_version_info_->is_es &&
-       extensions.Contains("GL_EXT_texture_sRGB") &&
-       extensions.Contains("GL_EXT_texture_compression_s3tc"))) {
+  // The extension GL_EXT_texture_sRGB_decode is the same on desktop and GLES.
+  if (extensions.Contains("GL_EXT_texture_sRGB_decode") && !IsWebGLContext()) {
+    AddExtensionString("GL_EXT_texture_sRGB_decode");
+    validators_.texture_parameter.AddValue(GL_TEXTURE_SRGB_DECODE_EXT);
+  }
+
+  bool have_s3tc_srgb = false;
+  if (gl_version_info_->is_es) {
+    // On mobile, the only extension that supports S3TC+sRGB is NV_sRGB_formats.
+    // The draft extension EXT_texture_compression_s3tc_srgb also supports it
+    // and is used if available (e.g. if ANGLE exposes it).
+    have_s3tc_srgb = extensions.Contains("GL_NV_sRGB_formats") ||
+        extensions.Contains("GL_EXT_texture_compression_s3tc_srgb");
+  } else {
+    // On desktop, strictly-speaking, S3TC+sRGB is only available if both
+    // EXT_texture_sRGB and EXT_texture_compression_s3tc_srgb are available.
+    //
+    // However, on macOS, S3TC+sRGB is supported on OpenGL 4.1 with only
+    // EXT_texture_compression_s3tc_srgb, so we allow that as well.
+    if (extensions.Contains("GL_EXT_texture_sRGB") ||
+        gl_version_info_->IsAtLeastGL(4, 1)) {
+      have_s3tc_srgb = extensions.Contains("GL_EXT_texture_compression_s3tc");
+    }
+  }
+
+  if (have_s3tc_srgb) {
     AddExtensionString("GL_EXT_texture_compression_s3tc_srgb");
 
     validators_.compressed_texture_format.AddValue(
@@ -1000,7 +1039,11 @@ void FeatureInfo::InitializeFeatures() {
     validators_.g_l_state.AddValue(GL_TEXTURE_BINDING_EXTERNAL_OES);
   }
 
-  if (extensions.Contains("GL_OES_compressed_ETC1_RGB8_texture")) {
+  // TODO(kainino): If we add a way to query whether ANGLE is exposing
+  // native support for ETC1 textures, require that here. Otherwise, we could
+  // co-opt the native-ETC2-support query discussed below.
+  if (extensions.Contains("GL_OES_compressed_ETC1_RGB8_texture") &&
+      !gl_version_info_->is_angle) {
     AddExtensionString("GL_OES_compressed_ETC1_RGB8_texture");
     feature_flags_.oes_compressed_etc1_rgb8_texture = true;
     validators_.compressed_texture_format.AddValue(GL_ETC1_RGB8_OES);
@@ -1131,12 +1174,15 @@ void FeatureInfo::InitializeFeatures() {
   bool have_arb_occlusion_query2 =
       extensions.Contains("GL_ARB_occlusion_query2");
   bool have_arb_occlusion_query =
+      (gl_version_info_->is_desktop_core_profile &&
+       gl_version_info_->IsAtLeastGL(1, 5)) ||
       extensions.Contains("GL_ARB_occlusion_query");
 
   if (have_occlusion_query ||
       have_ext_occlusion_query_boolean ||
       have_arb_occlusion_query2 ||
       have_arb_occlusion_query) {
+    feature_flags_.occlusion_query = have_arb_occlusion_query;
     if (context_type_ == CONTEXT_TYPE_OPENGLES2) {
       AddExtensionString("GL_EXT_occlusion_query_boolean");
     }
@@ -1490,6 +1536,13 @@ void FeatureInfo::EnableES3Validators() {
         GL_BGRA8_EXT);
     validators_.texture_sized_texture_filterable_internal_format.AddValue(
         GL_BGRA8_EXT);
+  }
+
+  if (!IsWebGLContext()) {
+    validators_.texture_parameter.AddValue(GL_TEXTURE_SWIZZLE_R);
+    validators_.texture_parameter.AddValue(GL_TEXTURE_SWIZZLE_G);
+    validators_.texture_parameter.AddValue(GL_TEXTURE_SWIZZLE_B);
+    validators_.texture_parameter.AddValue(GL_TEXTURE_SWIZZLE_A);
   }
 }
 

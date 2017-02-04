@@ -6,14 +6,14 @@
 
 #include <algorithm>
 
-#include "base/logging.h"
 #include "net/quic/core/crypto/crypto_handshake_message.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
-#include "net/quic/core/quic_bug_tracker.h"
+#include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_socket_address_coder.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_logging.h"
 
-using std::min;
 using std::string;
 
 namespace net {
@@ -109,7 +109,7 @@ QuicErrorCode QuicNegotiableUint32::ProcessPeerHello(
   }
 
   set_negotiated(true);
-  negotiated_value_ = min(value, max_value_);
+  negotiated_value_ = std::min(value, max_value_);
   return QUIC_NO_ERROR;
 }
 
@@ -242,7 +242,7 @@ QuicErrorCode QuicFixedTagVector::ProcessPeerHello(
       *error_details = "Missing " + QuicTagToString(tag_);
       break;
     case QUIC_NO_ERROR:
-      DVLOG(1) << "Received Connection Option tags from receiver.";
+      QUIC_DVLOG(1) << "Received Connection Option tags from receiver.";
       has_receive_values_ = true;
       for (size_t i = 0; i < received_tags_length; ++i) {
         receive_values_.push_back(received_tags[i]);
@@ -326,6 +326,7 @@ QuicConfig::QuicConfig()
       max_idle_time_before_crypto_handshake_(QuicTime::Delta::Zero()),
       max_undecryptable_packets_(0),
       connection_options_(kCOPT, PRESENCE_OPTIONAL),
+      client_connection_options_(kCLOP, PRESENCE_OPTIONAL),
       idle_network_timeout_seconds_(kICSL, PRESENCE_REQUIRED),
       silent_close_(kSCLS, PRESENCE_OPTIONAL),
       max_streams_per_connection_(kMSPC, PRESENCE_OPTIONAL),
@@ -338,7 +339,8 @@ QuicConfig::QuicConfig()
       multipath_enabled_(kMPTH, PRESENCE_OPTIONAL),
       connection_migration_disabled_(kNCMR, PRESENCE_OPTIONAL),
       alternate_server_address_(kASAD, PRESENCE_OPTIONAL),
-      force_hol_blocking_(kFHL2, PRESENCE_OPTIONAL) {
+      force_hol_blocking_(kFHL2, PRESENCE_OPTIONAL),
+      support_max_header_list_size_(kSMHL, PRESENCE_OPTIONAL) {
   SetDefaults();
 }
 
@@ -390,6 +392,23 @@ bool QuicConfig::HasClientSentConnectionOption(QuicTag tag,
     return true;
   }
   return false;
+}
+
+void QuicConfig::SetClientConnectionOptions(
+    const QuicTagVector& client_connection_options) {
+  client_connection_options_.SetSendValues(client_connection_options);
+}
+
+bool QuicConfig::HasClientRequestedIndependentOption(
+    QuicTag tag,
+    Perspective perspective) const {
+  if (perspective == Perspective::IS_SERVER) {
+    return (HasReceivedConnectionOptions() &&
+            ContainsQuicTag(ReceivedConnectionOptions(), tag));
+  }
+
+  return (client_connection_options_.HasSendValues() &&
+          ContainsQuicTag(client_connection_options_.GetSendValues(), tag));
 }
 
 void QuicConfig::SetIdleNetworkTimeout(
@@ -576,6 +595,14 @@ bool QuicConfig::ForceHolBlocking(Perspective perspective) const {
   }
 }
 
+void QuicConfig::SetSupportMaxHeaderListSize() {
+  support_max_header_list_size_.SetSendValue(1);
+}
+
+bool QuicConfig::SupportMaxHeaderListSize() const {
+  return support_max_header_list_size_.HasReceivedValue();
+}
+
 bool QuicConfig::negotiated() const {
   // TODO(ianswett): Add the negotiated parameters once and iterate over all
   // of them in negotiated, ToHandshakeMessage, ProcessClientHello, and
@@ -599,6 +626,9 @@ void QuicConfig::SetDefaults() {
 
   SetInitialStreamFlowControlWindowToSend(kMinimumFlowControlSendWindow);
   SetInitialSessionFlowControlWindowToSend(kMinimumFlowControlSendWindow);
+  if (FLAGS_quic_reloadable_flag_quic_send_max_header_list_size) {
+    SetSupportMaxHeaderListSize();
+  }
 }
 
 void QuicConfig::ToHandshakeMessage(CryptoHandshakeMessage* out) const {
@@ -615,6 +645,7 @@ void QuicConfig::ToHandshakeMessage(CryptoHandshakeMessage* out) const {
   connection_options_.ToHandshakeMessage(out);
   alternate_server_address_.ToHandshakeMessage(out);
   force_hol_blocking_.ToHandshakeMessage(out);
+  support_max_header_list_size_.ToHandshakeMessage(out);
 }
 
 QuicErrorCode QuicConfig::ProcessPeerHello(
@@ -675,6 +706,10 @@ QuicErrorCode QuicConfig::ProcessPeerHello(
   if (error == QUIC_NO_ERROR) {
     error = force_hol_blocking_.ProcessPeerHello(peer_hello, hello_type,
                                                  error_details);
+  }
+  if (error == QUIC_NO_ERROR) {
+    error = support_max_header_list_size_.ProcessPeerHello(
+        peer_hello, hello_type, error_details);
   }
   return error;
 }

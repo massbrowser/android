@@ -733,6 +733,7 @@ bool Validators::QueryObjectParameterValidator::IsValid(
 
 bool Validators::QueryTargetValidator::IsValid(const GLenum value) const {
   switch (value) {
+    case GL_SAMPLES_PASSED_ARB:
     case GL_ANY_SAMPLES_PASSED_EXT:
     case GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT:
     case GL_COMMANDS_ISSUED_CHROMIUM:
@@ -1214,6 +1215,16 @@ static const GLenum
         GL_RGB_YCRCB_420_CHROMIUM,
         GL_RGB_YCBCR_422_CHROMIUM,
         GL_RGB_YCBCR_420V_CHROMIUM,
+};
+
+bool Validators::TextureSrgbDecodeExtValidator::IsValid(
+    const GLenum value) const {
+  switch (value) {
+    case GL_DECODE_EXT:
+    case GL_SKIP_DECODE_EXT:
+      return true;
+  }
+  return false;
 };
 
 static const GLenum

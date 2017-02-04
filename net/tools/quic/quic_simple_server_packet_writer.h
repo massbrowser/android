@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_TOOLS_QUIC_SIMPLE_SERVER_PACKET_WRITER_H_
-#define NET_QUIC_TOOLS_QUIC_SIMPLE_SERVER_PACKET_WRITER_H_
+#ifndef NET_TOOLS_QUIC_QUIC_SIMPLE_SERVER_PACKET_WRITER_H_
+#define NET_TOOLS_QUIC_QUIC_SIMPLE_SERVER_PACKET_WRITER_H_
 
 #include <stddef.h>
 
@@ -12,7 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_packet_writer.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 
 namespace net {
 
@@ -73,4 +73,4 @@ class QuicSimpleServerPacketWriter : public QuicPacketWriter {
 
 }  // namespace net
 
-#endif  // NET_QUIC_TOOLS_QUIC_SIMPLE_SERVER_PACKET_WRITER_H_
+#endif  // NET_TOOLS_QUIC_QUIC_SIMPLE_SERVER_PACKET_WRITER_H_

@@ -95,7 +95,8 @@ class BrowserProcessImpl : public BrowserProcess,
   metrics_services_manager::MetricsServicesManager* GetMetricsServicesManager()
       override;
   metrics::MetricsService* metrics_service() override;
-  rappor::RapporService* rappor_service() override;
+  rappor::RapporServiceImpl* rappor_service() override;
+  ukm::UkmService* ukm_service() override;
   IOThread* io_thread() override;
   WatchDogThread* watchdog_thread() override;
   ProfileManager* profile_manager() override;

@@ -185,7 +185,7 @@ class MockClientSocket : public StreamSocket {
   void SetSubresourceSpeculation() override {}
   void SetOmniboxSpeculation() override {}
   bool WasEverUsed() const override { return was_used_to_convey_data_; }
-  bool WasNpnNegotiated() const override { return false; }
+  bool WasAlpnNegotiated() const override { return false; }
   NextProto GetNegotiatedProtocol() const override { return kProtoUnknown; }
   bool GetSSLInfo(SSLInfo* ssl_info) override { return false; }
   void GetConnectionAttempts(ConnectionAttempts* out) const override {
@@ -290,7 +290,8 @@ class TestConnectJob : public ConnectJob {
             request.priority(),
             request.respect_limits(),
             delegate,
-            NetLogWithSource::Make(net_log, NetLogSourceType::CONNECT_JOB)),
+            NetLogWithSource::Make(net_log,
+                                   NetLogSourceType::TRANSPORT_CONNECT_JOB)),
         job_type_(job_type),
         client_socket_factory_(client_socket_factory),
         load_state_(LOAD_STATE_IDLE),

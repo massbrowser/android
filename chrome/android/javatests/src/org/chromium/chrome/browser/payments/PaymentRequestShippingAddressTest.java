@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.payments;
 
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
@@ -112,5 +112,39 @@ public class PaymentRequestShippingAddressTest extends PaymentRequestTestBase {
         // Make sure that the shipping label does not include the country.
         assertTrue(getShippingAddressOptionRowAtIndex(0).getLabelText().toString().equals(
                 "Seb Doe\nGoogle, 340 Main St, Los Angeles, CA 90291\n555-555-5555"));
+    }
+
+    /** Test that going into the editor and cancelling will leave the row checked. */
+    @MediumTest
+    @Feature({"Payments"})
+    public void testEditShippingAddressAndCancelEditorShouldKeepAddressSelected()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        triggerUIAndWait(mReadyToPay);
+        clickInShippingSummaryAndWait(R.id.payments_section, mReadyForInput);
+        expectShippingAddressRowIsSelected(0);
+        clickInShippingAddressAndWait(R.id.payments_open_editor_pencil_button, mReadyToEdit);
+
+        // Cancel the editor.
+        clickInEditorAndWait(R.id.payments_edit_cancel_button, mReadyToPay);
+
+        // Expect the row to still be selected in the Shipping Address section.
+        expectShippingAddressRowIsSelected(0);
+    }
+
+    /** Test that going into the "add" flow  and cancelling will leave the existing row checked. */
+    @MediumTest
+    @Feature({"Payments"})
+    public void testAddShippingAddressAndCancelEditorShouldKeepAddressSelected()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        triggerUIAndWait(mReadyToPay);
+        clickInShippingSummaryAndWait(R.id.payments_section, mReadyForInput);
+        expectShippingAddressRowIsSelected(0);
+        clickInShippingAddressAndWait(R.id.payments_add_option_button, mReadyToEdit);
+
+        // Cancel the editor.
+        clickInEditorAndWait(R.id.payments_edit_cancel_button, mReadyToPay);
+
+        // Expect the existing row to still be selected in the Shipping Address section.
+        expectShippingAddressRowIsSelected(0);
     }
 }

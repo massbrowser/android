@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/win/windows_version.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -56,6 +55,7 @@
 
 #if defined(OS_WIN)
 #include "base/win/shortcut.h"
+#include "base/win/windows_version.h"
 #endif  // defined(OS_WIN)
 
 namespace {
@@ -184,7 +184,7 @@ void AppInfoView::OnPaint(gfx::Canvas* canvas) {
     SkIntToScalar(bounds.bottom())
   };
 
-  SkPaint border_paint;
+  cc::PaintFlags border_paint;
   border_paint.setAntiAlias(true);
   border_paint.setARGB(0xFF, 0xC8, 0xC8, 0xC8);
 
@@ -198,7 +198,7 @@ void AppInfoView::OnPaint(gfx::Canvas* canvas) {
     border_rect.fBottom - SkDoubleToScalar(0.5),
   };
 
-  SkPaint inner_paint;
+  cc::PaintFlags inner_paint;
   inner_paint.setAntiAlias(true);
   inner_paint.setARGB(0xFF, 0xF8, 0xF8, 0xF8);
   canvas->sk_canvas()->drawRoundRect(inner_rect, SkDoubleToScalar(1.5),

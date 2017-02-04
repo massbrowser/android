@@ -7,7 +7,7 @@
 #include "core/dom/CompositorProxy.h"
 #include "modules/compositorworker/CompositorWorkerGlobalScope.h"
 #include "platform/graphics/CompositorMutableStateProvider.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 #include "web/CompositorMutatorImpl.h"
 #include "wtf/CurrentTime.h"
 
@@ -109,7 +109,7 @@ bool CompositorProxyClientImpl::executeAnimationFrameCallbacks(
 
 void CompositorProxyClientImpl::registerCompositorProxy(
     CompositorProxy* proxy) {
-  m_proxies.add(proxy);
+  m_proxies.insert(proxy);
 }
 
 void CompositorProxyClientImpl::unregisterCompositorProxy(

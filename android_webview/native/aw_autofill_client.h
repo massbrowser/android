@@ -20,14 +20,11 @@
 #include "ui/android/view_android.h"
 
 namespace autofill {
-class AutofillMetrics;
 class AutofillPopupDelegate;
 class CardUnmaskDelegate;
 class CreditCard;
 class FormStructure;
-class PasswordGenerator;
 class PersonalDataManager;
-struct FormData;
 }
 
 namespace content {
@@ -68,7 +65,7 @@ class AwAutofillClient : public autofill::AutofillClient,
   PrefService* GetPrefs() override;
   syncer::SyncService* GetSyncService() override;
   IdentityProvider* GetIdentityProvider() override;
-  rappor::RapporService* GetRapporService() override;
+  rappor::RapporServiceImpl* GetRapporServiceImpl() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(
       const autofill::CreditCard& card,
@@ -106,6 +103,7 @@ class AwAutofillClient : public autofill::AutofillClient,
   bool IsContextSecure(const GURL& form_origin) override;
   bool ShouldShowSigninPromo() override;
   void StartSigninFlow() override;
+  void ShowHttpNotSecureExplanation() override;
 
   void Dismissed(JNIEnv* env,
                  const base::android::JavaParamRef<jobject>& obj);

@@ -10,7 +10,7 @@
 #include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
 #include "core/inspector/ConsoleMessage.h"
-#include "core/workers/WorkerGlobalScope.h"
+#include "core/workers/WorkerOrWorkletGlobalScope.h"
 
 namespace {
 
@@ -54,8 +54,6 @@ String willBeRemoved(const char* feature,
       feature, milestoneString(milestone), details);
 }
 
-#if 0
-// TODO(jsbell): Currently unused, but likely to be needed in the future.
 String replacedWillBeRemoved(const char* feature,
                              const char* replacement,
                              Milestone milestone,
@@ -65,7 +63,6 @@ String replacedWillBeRemoved(const char* feature,
       "https://www.chromestatus.com/features/%s for more details.",
       feature, milestoneString(milestone), replacement, details);
 }
-#endif
 
 }  // anonymous namespace
 
@@ -118,15 +115,22 @@ void Deprecation::warnOnDeprecatedProperties(const LocalFrame* frame,
 String Deprecation::deprecationMessage(CSSPropertyID unresolvedProperty) {
   switch (unresolvedProperty) {
     case CSSPropertyAliasMotionOffset:
-      return willBeRemoved("motion-offset", M58, "6390764217040896");
+      return replacedWillBeRemoved("motion-offset", "offset-distance", M58,
+                                   "6390764217040896");
     case CSSPropertyAliasMotionRotation:
-      return willBeRemoved("motion-rotation", M58, "6390764217040896");
+      return replacedWillBeRemoved("motion-rotation", "offset-rotate", M58,
+                                   "6390764217040896");
     case CSSPropertyAliasMotionPath:
+      return replacedWillBeRemoved("motion-path", "offset-path", M58,
+                                   "6390764217040896");
     case CSSPropertyMotion:
-      return willBeRemoved("motion-path", M58, "6390764217040896");
+      return replacedWillBeRemoved("motion", "offset", M58, "6390764217040896");
+    case CSSPropertyOffsetRotation:
+      return replacedWillBeRemoved("offset-rotation", "offset-rotate", M58,
+                                   "6390764217040896");
 
     default:
-      return emptyString();
+      return emptyString;
   }
 }
 
@@ -156,22 +160,13 @@ void Deprecation::countDeprecation(ExecutionContext* context,
     Deprecation::countDeprecation(*toDocument(context), feature);
     return;
   }
-  if (context->isWorkerGlobalScope())
-    toWorkerGlobalScope(context)->countDeprecation(feature);
+  if (context->isWorkerOrWorkletGlobalScope())
+    toWorkerOrWorkletGlobalScope(context)->countDeprecation(feature);
 }
 
 void Deprecation::countDeprecation(const Document& document,
                                    UseCounter::Feature feature) {
   Deprecation::countDeprecation(document.frame(), feature);
-}
-
-void Deprecation::countDeprecationIfNotPrivateScript(
-    v8::Isolate* isolate,
-    ExecutionContext* context,
-    UseCounter::Feature feature) {
-  if (DOMWrapperWorld::current(isolate).isPrivateScriptIsolatedWorld())
-    return;
-  Deprecation::countDeprecation(context, feature);
 }
 
 void Deprecation::countDeprecationCrossOriginIframe(
@@ -211,11 +206,6 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
              "deprecated. Please pass the index argument as well: "
              "insertRule(x, 0).";
 
-    case UseCounter::MapNameMatchingASCIICaseless:
-    case UseCounter::MapNameMatchingUnicodeLower:
-      return willBeRemoved("Case-insensitive matching for usemap attribute",
-                           M58, "5760965337415680");
-
     case UseCounter::PrefixedVideoSupportsFullscreen:
       return replacedBy("'HTMLVideoElement.webkitSupportsFullscreen'",
                         "'Document.fullscreenEnabled'");
@@ -252,12 +242,6 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
       return "<source src> with a <picture> parent is invalid and therefore "
              "ignored. Please use <source srcset> instead.";
 
-    case UseCounter::RadioNameMatchingASCIICaseless:
-    case UseCounter::RadioNameMatchingCaseFolding:
-      return willBeRemoved(
-          "Case-insensitive matching for <input type=radio name=...>", M57,
-          "6165799291060224");
-
     case UseCounter::ConsoleTimeline:
       return replacedBy("'console.timeline'", "'console.time'");
 
@@ -276,14 +260,26 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
     case UseCounter::PrefixedWindowURL:
       return replacedBy("'webkitURL'", "'URL'");
 
-    case UseCounter::PrefixedAudioContext:
-      return replacedBy("'webkitAudioContext'", "'AudioContext'");
-
-    case UseCounter::PrefixedOfflineAudioContext:
-      return replacedBy("'webkitOfflineAudioContext'", "'OfflineAudioContext'");
-
     case UseCounter::RangeExpand:
       return replacedBy("'Range.expand()'", "'Selection.modify()'");
+
+    // Blocked subresource requests:
+    case UseCounter::LegacyProtocolEmbeddedAsSubresource:
+      return String::format(
+          "Subresource requests using legacy protocols (like `ftp:`) are "
+          "deprecated, and will be blocked in %s. Please deliver "
+          "web-accessible resources over modern protocols like HTTPS. "
+          "See https://www.chromestatus.com/feature/5709390967472128 for more "
+          "details.",
+          milestoneString(M59));
+
+    case UseCounter::RequestedSubresourceWithEmbeddedCredentials:
+      return String::format(
+          "Subresource requests whose URLs contain embedded credentials (e.g. "
+          "`https://user:pass@host/`) are deprecated, and will be blocked in "
+          "%s. See https://www.chromestatus.com/feature/5669008342777856 for "
+          "more details.",
+          milestoneString(M59));
 
     // Powerful features on insecure origins (https://goo.gl/rStTGz)
     case UseCounter::DeviceMotionInsecureOrigin:
@@ -326,10 +322,12 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
              "details.";
 
     case UseCounter::EncryptedMediaInsecureOrigin:
-      return "requestMediaKeySystemAccess() is deprecated on insecure origins "
-             "in the specification. Support will be removed in the future. You "
-             "should consider switching your application to a secure origin, "
-             "such as HTTPS. See https://goo.gl/rStTGz for more details.";
+      return String::format(
+          "Using requestMediaKeySystemAccess() on insecure origins is "
+          "deprecated and will be removed in %s. You should consider "
+          "switching your application to a secure origin, such as HTTPS. See "
+          "https://goo.gl/rStTGz for more details.",
+          milestoneString(M58));
 
     case UseCounter::MediaSourceAbortRemove:
       return "Using SourceBuffer.abort() to abort remove()'s asynchronous "
@@ -372,28 +370,21 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
              "https://www.chromestatus.com/features/6750456638341120 for more "
              "details.";
 
-    case UseCounter::PrefixedPerformanceClearResourceTimings:
-      return replacedBy("'Performance.webkitClearResourceTimings'",
-                        "'Performance.clearResourceTimings'");
-
-    case UseCounter::PrefixedPerformanceSetResourceTimingBufferSize:
-      return replacedBy("'Performance.webkitSetResourceTimingBufferSize'",
-                        "'Performance.setResourceTimingBufferSize'");
-
-    case UseCounter::PrefixedPerformanceResourceTimingBufferFull:
-      return replacedBy("'Performance.onwebkitresourcetimingbufferfull'",
-                        "'Performance.onresourcetimingbufferfull'");
-
-    case UseCounter::HTMLKeygenElement:
-      return willBeRemoved("The <keygen> element", M57, "5716060992962560");
-
     case UseCounter::EncryptedMediaAllSelectedContentTypesMissingCodecs:
       return String::format(
           "EME requires that contentType strings accepted by "
           "requestMediaKeySystemAccess() include codecs. Non-standard support "
           "for contentType strings without codecs will be removed in %s. "
           "Please specify the desired codec(s) as part of the contentType.",
-          milestoneString(M56));
+          milestoneString(M58));
+
+    case UseCounter::EncryptedMediaCapabilityNotProvided:
+      return String::format(
+          "EME requires that one of 'audioCapabilities' and "
+          "'videoCapabilities' must be non-empty. Non-standard support for "
+          "this will be removed in %s. Please specify at least one valid "
+          "capability for 'audioCapabilities' or 'videoCapabilities'.",
+          milestoneString(M58));
 
     case UseCounter::VRDeprecatedFieldOfView:
       return replacedBy("VREyeParameters.fieldOfView",
@@ -409,6 +400,30 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
     case UseCounter::HTMLObjectElementLegacyCall:
       return willBeRemoved("HTMLObjectElement legacy caller", M58,
                            "5715026367217664");
+    case UseCounter::
+        ServiceWorkerRespondToNavigationRequestWithRedirectedResponse:
+      return String::format(
+          "The service worker responded to the navigation request with a "
+          "redirected response. This will result in an error in %s.",
+          milestoneString(M59));
+
+    case UseCounter::CSSSelectorInternalMediaControlsCastButton:
+      return willBeRemoved("-internal-media-controls-cast-button selector", M59,
+                           "5734009183141888");
+
+    case UseCounter::CSSSelectorInternalMediaControlsOverlayCastButton:
+      return willBeRemoved(
+          "-internal-media-controls-overlay-cast-button selector", M59,
+          "5714245488476160");
+
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackList:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListItem:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListItemInput:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListKindCaptions:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListKindSubtitles:
+      return willBeRemoved(
+          "-internal-media-controls-text-track-list* selectors", M59,
+          "5661431349379072");
 
     // Features that aren't deprecated don't have a deprecation message.
     default:

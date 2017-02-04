@@ -14,12 +14,12 @@
 #import "base/mac/scoped_nsobject.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/values.h"
 #include "components/physical_web/data_source/physical_web_data_source.h"
 #include "device/bluetooth/uribeacon/uri_encoder.h"
 #import "ios/chrome/common/physical_web/physical_web_device.h"
 #import "ios/chrome/common/physical_web/physical_web_request.h"
 #import "ios/chrome/common/physical_web/physical_web_types.h"
+#include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -161,9 +161,15 @@ enum BeaconType {
   }
   pendingStart_ = NO;
   started_ = NO;
+  if (onLostDetectionEnabled_ && [devices_ count]) {
+    [delegate_ scannerUpdatedDevices:self];
+  }
 }
 
 - (NSArray*)devices {
+  if (![self bluetoothEnabled]) {
+    return [NSArray array];
+  }
   return [devices_ sortedArrayUsingComparator:^(id obj1, id obj2) {
     PhysicalWebDevice* device1 = obj1;
     PhysicalWebDevice* device2 = obj2;
@@ -178,8 +184,8 @@ enum BeaconType {
   }];
 }
 
-- (std::unique_ptr<base::ListValue>)metadata {
-  auto metadataList = base::MakeUnique<base::ListValue>();
+- (std::unique_ptr<physical_web::MetadataList>)metadataList {
+  auto metadataRet = base::MakeUnique<physical_web::MetadataList>();
 
   for (PhysicalWebDevice* device in [self devices]) {
     std::string scannedUrl =
@@ -190,16 +196,16 @@ enum BeaconType {
     std::string title = base::SysNSStringToUTF8([device title]);
     std::string description = base::SysNSStringToUTF8([device description]);
 
-    auto metadataItem = base::MakeUnique<base::DictionaryValue>();
-    metadataItem->SetString(physical_web::kScannedUrlKey, scannedUrl);
-    metadataItem->SetString(physical_web::kResolvedUrlKey, resolvedUrl);
-    metadataItem->SetString(physical_web::kIconUrlKey, icon);
-    metadataItem->SetString(physical_web::kTitleKey, title);
-    metadataItem->SetString(physical_web::kDescriptionKey, description);
-    metadataList->Append(std::move(metadataItem));
+    metadataRet->emplace_back();
+    physical_web::Metadata& metadataItem = metadataRet->back();
+    metadataItem.scanned_url = GURL(scannedUrl);
+    metadataItem.resolved_url = GURL(resolvedUrl);
+    metadataItem.icon_url = GURL(icon);
+    metadataItem.title = title;
+    metadataItem.description = description;
   }
 
-  return metadataList;
+  return metadataRet;
 }
 
 - (void)setNetworkRequestEnabled:(BOOL)enabled {
@@ -266,11 +272,6 @@ enum BeaconType {
 }
 
 - (void)reallyStop {
-  if (updateTimer_.get()) {
-    [updateTimer_ invalidate];
-    updateTimer_.reset();
-  }
-
   [centralManager_ stopScan];
 }
 
@@ -321,12 +322,19 @@ enum BeaconType {
   // For unknown reasons, when scanning for longer periods (on the order of
   // minutes), the scanner is less reliable at detecting all nearby URLs. As a
   // workaround, we restart the scanner each time we check for lost URLs.
-  NSArray* serviceUUIDs = @[
-    [CBUUID UUIDWithString:kUriBeaconServiceUUID],
-    [CBUUID UUIDWithString:kEddystoneBeaconServiceUUID]
-  ];
-  [centralManager_ stopScan];
-  [centralManager_ scanForPeripheralsWithServices:serviceUUIDs options:nil];
+  if (!pendingStart_) {
+    NSArray* serviceUUIDs = @[
+      [CBUUID UUIDWithString:kUriBeaconServiceUUID],
+      [CBUUID UUIDWithString:kEddystoneBeaconServiceUUID]
+    ];
+    [centralManager_ stopScan];
+    [centralManager_ scanForPeripheralsWithServices:serviceUUIDs options:nil];
+  }
+
+  if (updateTimer_.get() && pendingStart_ && [devices_ count] == 0) {
+    [updateTimer_ invalidate];
+    updateTimer_.reset();
+  }
 }
 
 #pragma mark -
@@ -339,7 +347,6 @@ enum BeaconType {
   } else {
     if (started_ && !pendingStart_) {
       pendingStart_ = YES;
-      [self reallyStop];
     }
   }
   [delegate_ scannerBluetoothStatusUpdated:self];

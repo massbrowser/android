@@ -31,13 +31,12 @@
 #include "core/html/canvas/CanvasContextCreationAttributes.h"
 #include "core/layout/HitTestCanvasResult.h"
 #include "core/offscreencanvas/OffscreenCanvas.h"
+#include "platform/graphics/ColorBehavior.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "wtf/HashSet.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/text/StringHash.h"
-
-class SkCanvas;
 
 namespace blink {
 
@@ -51,6 +50,8 @@ enum CanvasColorSpace {
   kLegacyCanvasColorSpace,
   kSRGBCanvasColorSpace,
   kLinearRGBCanvasColorSpace,
+  kRec2020CanvasColorSpace,
+  kP3CanvasColorSpace,
 };
 
 class CORE_EXPORT CanvasRenderingContext
@@ -85,14 +86,19 @@ class CORE_EXPORT CanvasRenderingContext
 
   CanvasColorSpace colorSpace() const { return m_colorSpace; };
   WTF::String colorSpaceAsString() const;
-  sk_sp<SkColorSpace> skColorSpace() const;
+  // The color space in which the the content should be interpreted by the
+  // compositor. This is always defined.
+  gfx::ColorSpace gfxColorSpace() const;
+  // The color space that should be used for SkSurface creation. This may
+  // be nullptr.
+  sk_sp<SkColorSpace> skSurfaceColorSpace() const;
   SkColorType colorType() const;
+  ColorBehavior colorBehaviorForMediaDrawnToCanvas() const;
+  bool skSurfacesUseColorSpace() const;
 
   virtual PassRefPtr<Image> getImage(AccelerationHint,
                                      SnapshotReason) const = 0;
-  virtual ImageData* toImageData(SnapshotReason reason) const {
-    return nullptr;
-  }
+  virtual ImageData* toImageData(SnapshotReason reason) { return nullptr; }
   virtual ContextType getContextType() const = 0;
   virtual bool isAccelerated() const { return false; }
   virtual bool shouldAntialias() const { return false; }
@@ -127,7 +133,7 @@ class CORE_EXPORT CanvasRenderingContext
 
   // Canvas2D-specific interface
   virtual bool is2d() const { return false; }
-  virtual void restoreCanvasMatrixClipStack(SkCanvas*) const {}
+  virtual void restoreCanvasMatrixClipStack(PaintCanvas*) const {}
   virtual void reset() {}
   virtual void clearRect(double x, double y, double width, double height) {}
   virtual void didSetSurfaceSize() {}
@@ -164,13 +170,14 @@ class CORE_EXPORT CanvasRenderingContext
   virtual bool paint(GraphicsContext&, const IntRect&) { return false; }
 
   // OffscreenCanvas-specific methods
-  OffscreenCanvas* getOffscreenCanvas() const { return m_offscreenCanvas; }
+  OffscreenCanvas* offscreenCanvas() const { return m_offscreenCanvas; }
   virtual ImageBitmap* transferToImageBitmap(ScriptState*) { return nullptr; }
 
   bool wouldTaintOrigin(CanvasImageSource*, SecurityOrigin* = nullptr);
   void didMoveToNewDocument(Document*);
 
   void detachCanvas() { m_canvas = nullptr; }
+  void detachOffscreenCanvas() { m_offscreenCanvas = nullptr; }
 
   const CanvasContextCreationAttributes& creationAttributes() const {
     return m_creationAttributes;

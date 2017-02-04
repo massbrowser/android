@@ -114,15 +114,15 @@ LocalFrame* Geolocation::frame() const {
   return document() ? document()->frame() : 0;
 }
 
-void Geolocation::contextDestroyed() {
+void Geolocation::contextDestroyed(ExecutionContext*) {
   m_permissionService.reset();
   cancelAllRequests();
   stopUpdating();
   m_geolocationPermission = PermissionDenied;
   m_pendingForPermissionNotifiers.clear();
   m_lastPosition = nullptr;
-  ContextLifecycleObserver::clearContext();
-  PageVisibilityObserver::clearContext();
+  m_oneShots.clear();
+  m_watchers.clear();
 }
 
 void Geolocation::recordOriginTypeAccess() const {
@@ -139,7 +139,7 @@ void Geolocation::recordOriginTypeAccess() const {
     UseCounter::count(document, UseCounter::GeolocationSecureOrigin);
     UseCounter::countCrossOriginIframe(
         *document, UseCounter::GeolocationSecureOriginIframe);
-  } else if (frame()->settings()->allowGeolocationOnInsecureOrigins()) {
+  } else if (frame()->settings()->getAllowGeolocationOnInsecureOrigins()) {
     // TODO(jww): This should be removed after WebView is fixed so that it
     // disallows geolocation in insecure contexts.
     //
@@ -171,7 +171,7 @@ void Geolocation::getCurrentPosition(PositionCallback* successCallback,
       GeoNotifier::create(this, successCallback, errorCallback, options);
   startRequest(notifier);
 
-  m_oneShots.add(notifier);
+  m_oneShots.insert(notifier);
 }
 
 int Geolocation::watchPosition(PositionCallback* successCallback,
@@ -196,7 +196,7 @@ int Geolocation::watchPosition(PositionCallback* successCallback,
 void Geolocation::startRequest(GeoNotifier* notifier) {
   recordOriginTypeAccess();
   String errorMessage;
-  if (!frame()->settings()->allowGeolocationOnInsecureOrigins() &&
+  if (!frame()->settings()->getAllowGeolocationOnInsecureOrigins() &&
       !getExecutionContext()->isSecureContext(errorMessage)) {
     notifier->setFatalError(
         PositionError::create(PositionError::kPermissionDenied, errorMessage));
@@ -216,7 +216,7 @@ void Geolocation::startRequest(GeoNotifier* notifier) {
   else if (!isAllowed()) {
     // If we don't yet have permission, request for permission before calling
     // startUpdating()
-    m_pendingForPermissionNotifiers.add(notifier);
+    m_pendingForPermissionNotifiers.insert(notifier);
     requestPermission();
   } else {
     startUpdating(notifier);
@@ -365,9 +365,9 @@ void Geolocation::extractNotifiersWithCachedPosition(
   for (GeoNotifier* notifier : notifiers) {
     if (notifier->useCachedPosition()) {
       if (cached)
-        cached->append(notifier);
+        cached->push_back(notifier);
     } else
-      nonCached.append(notifier);
+      nonCached.push_back(notifier);
   }
   notifiers.swap(nonCached);
 }
@@ -375,7 +375,7 @@ void Geolocation::extractNotifiersWithCachedPosition(
 void Geolocation::copyToSet(const GeoNotifierVector& src,
                             GeoNotifierSet& dest) {
   for (GeoNotifier* notifier : src)
-    dest.add(notifier);
+    dest.insert(notifier);
 }
 
 void Geolocation::handleError(PositionError* error) {
@@ -425,7 +425,7 @@ void Geolocation::requestPermission() {
 
   m_geolocationPermission = PermissionRequested;
   frame->interfaceProvider()->getInterface(
-      mojo::GetProxy(&m_permissionService));
+      mojo::MakeRequest(&m_permissionService));
   m_permissionService.set_connection_error_handler(
       convertToBaseCallback(WTF::bind(&Geolocation::onPermissionConnectionError,
                                       wrapWeakPersistent(this))));
@@ -497,7 +497,7 @@ void Geolocation::updateGeolocationServiceConnection() {
     return;
 
   frame()->interfaceProvider()->getInterface(
-      mojo::GetProxy(&m_geolocationService));
+      mojo::MakeRequest(&m_geolocationService));
   m_geolocationService.set_connection_error_handler(convertToBaseCallback(
       WTF::bind(&Geolocation::onGeolocationConnectionError,
                 wrapWeakPersistent(this))));

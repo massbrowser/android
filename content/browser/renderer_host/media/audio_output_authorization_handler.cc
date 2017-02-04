@@ -4,6 +4,7 @@
 
 #include "content/browser/renderer_host/media/audio_output_authorization_handler.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/task_runner_util.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
@@ -82,8 +83,8 @@ void AudioOutputAuthorizationHandler::RequestDeviceAuthorization(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!IsValidDeviceId(device_id)) {
-    bad_message::ReceivedBadMessage(render_process_id_,
-                                    bad_message::AOAH_NONSENSE_DEVICE_ID);
+    cb.Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND, false,
+           media::AudioParameters::UnavailableDeviceParams(), std::string());
     return;
   }
 

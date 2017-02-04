@@ -33,7 +33,7 @@
 #include "wtf/TypeTraits.h"
 #include <cstddef>
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 #include "wtf/Noncopyable.h"
 #include "wtf/Threading.h"
 
@@ -43,13 +43,14 @@ class WTF_EXPORT StaticLocalVerifier {
  public:
   StaticLocalVerifier()
       : m_safelyInitialized(WTF::isBeforeThreadCreated()),
-        m_thread(WTF::currentThread()) {}
+        m_thread(WTF::internal::currentThreadSyscall()) {}
 
   bool isNotRacy() {
     // Make sure that this 1) is safely initialized, 2) keeps being called
     // on the same thread, or 3) is called within
     // AtomicallyInitializedStatic (i.e. with a lock held).
-    return m_safelyInitialized || m_thread == WTF::currentThread() ||
+    return m_safelyInitialized ||
+           m_thread == WTF::internal::currentThreadSyscall() ||
            WTF::isAtomicallyInitializedStaticMutexLockHeld();
   }
 
@@ -80,20 +81,20 @@ class StaticLocalWrapper<T, true> {
   using WrapType = blink::Persistent<T>;
 
   static T& unwrap(blink::Persistent<T>* singleton) {
-    ASSERT(singleton);
+    DCHECK(singleton);
     // If this assert triggers, you're supplying an empty ("()") 'Arguments'
     // argument to DEFINE_STATIC_LOCAL() - it must be the heap object you wish
     // to create as a static singleton and wrapped up with a Persistent
     // reference.
-    ASSERT(*singleton);
+    DCHECK(*singleton);
     return **singleton;
   }
 };
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 #define DEFINE_STATIC_LOCAL_CHECK_THREADSAFE_ACCESS(Name) \
   static StaticLocalVerifier Name##StaticLocalVerifier;   \
-  ASSERT(Name##StaticLocalVerifier.isNotRacy())
+  DCHECK(Name##StaticLocalVerifier.isNotRacy())
 #else
 #define DEFINE_STATIC_LOCAL_CHECK_THREADSAFE_ACCESS(Name)
 #endif
@@ -145,13 +146,13 @@ bool isPointerTypeAlignmentOkay(Type* ptr) {
 
 template <typename TypePtr>
 TypePtr reinterpret_cast_ptr(void* ptr) {
-  ASSERT(isPointerTypeAlignmentOkay(reinterpret_cast<TypePtr>(ptr)));
+  DCHECK(isPointerTypeAlignmentOkay(reinterpret_cast<TypePtr>(ptr)));
   return reinterpret_cast<TypePtr>(ptr);
 }
 
 template <typename TypePtr>
 TypePtr reinterpret_cast_ptr(const void* ptr) {
-  ASSERT(isPointerTypeAlignmentOkay(reinterpret_cast<TypePtr>(ptr)));
+  DCHECK(isPointerTypeAlignmentOkay(reinterpret_cast<TypePtr>(ptr)));
   return reinterpret_cast<TypePtr>(ptr);
 }
 #else
@@ -237,7 +238,7 @@ char (&ArrayLengthHelperFunction(T (&)[0]))[0];
 // This version of placement new omits a 0 check.
 enum NotNullTag { NotNull };
 inline void* operator new(size_t, NotNullTag, void* location) {
-  ASSERT(location);
+  DCHECK(location);
   return location;
 }
 

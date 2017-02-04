@@ -5,12 +5,11 @@
 #include "net/quic/core/quic_received_packet_manager.h"
 
 #include <algorithm>
+#include <ostream>
 #include <vector>
 
 #include "net/quic/core/quic_connection_stats.h"
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/test_tools/quic_received_packet_manager_peer.h"
-#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {

@@ -94,7 +94,7 @@ struct LayoutBoxRareData {
 
   SnapAreaSet& ensureSnapAreas() {
     if (!m_snapAreas)
-      m_snapAreas = wrapUnique(new SnapAreaSet);
+      m_snapAreas = WTF::wrapUnique(new SnapAreaSet);
 
     return *m_snapAreas;
   }
@@ -212,25 +212,25 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     if (x == m_frameRect.x())
       return;
     m_frameRect.setX(x);
-    frameRectChanged();
+    locationChanged();
   }
   void setY(LayoutUnit y) {
     if (y == m_frameRect.y())
       return;
     m_frameRect.setY(y);
-    frameRectChanged();
+    locationChanged();
   }
   void setWidth(LayoutUnit width) {
     if (width == m_frameRect.width())
       return;
     m_frameRect.setWidth(width);
-    frameRectChanged();
+    sizeChanged();
   }
   void setHeight(LayoutUnit height) {
     if (height == m_frameRect.height())
       return;
     m_frameRect.setHeight(height);
-    frameRectChanged();
+    sizeChanged();
   }
 
   LayoutUnit logicalLeft() const {
@@ -324,10 +324,10 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     if (location == m_frameRect.location())
       return;
     m_frameRect.setLocation(location);
-    frameRectChanged();
+    locationChanged();
   }
 
-  // The ancestor box that this object's location and topLeftLocation are
+  // The ancestor box that this object's location and physicalLocation are
   // relative to.
   virtual LayoutBox* locationContainer() const;
 
@@ -342,13 +342,13 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     if (size == m_frameRect.size())
       return;
     m_frameRect.setSize(size);
-    frameRectChanged();
+    sizeChanged();
   }
   void move(LayoutUnit dx, LayoutUnit dy) {
     if (!dx && !dy)
       return;
     m_frameRect.move(dx, dy);
-    frameRectChanged();
+    locationChanged();
   }
 
   // This function is in the container's coordinate system, meaning
@@ -356,10 +356,8 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // inline-start/block-start margins.
   LayoutRect frameRect() const { return m_frameRect; }
   void setFrameRect(const LayoutRect& rect) {
-    if (rect == m_frameRect)
-      return;
-    m_frameRect = rect;
-    frameRectChanged();
+    setLocation(rect.location());
+    setSize(rect.size());
   }
 
   // Note that those functions have their origin at this box's CSS border box.
@@ -391,7 +389,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   IntSize absoluteContentBoxOffset() const;
   // The content box converted to absolute coords (taking transforms into
   // account).
-  FloatQuad absoluteContentQuad() const;
+  FloatQuad absoluteContentQuad(MapCoordinatesFlags = 0) const;
   // The enclosing rectangle of the background with given opacity requirement.
   LayoutRect backgroundRect(BackgroundRectType) const;
 
@@ -666,7 +664,8 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
   void absoluteRects(Vector<IntRect>&,
                      const LayoutPoint& accumulatedOffset) const override;
-  void absoluteQuads(Vector<FloatQuad>&) const override;
+  void absoluteQuads(Vector<FloatQuad>&,
+                     MapCoordinatesFlags mode = 0) const override;
   FloatRect localBoundingBoxRectForAccessibility() const final;
 
   void layout() override;
@@ -779,6 +778,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // exactly at a page or column boundary.
   enum PageBoundaryRule { AssociateWithFormerPage, AssociateWithLatterPage };
   LayoutUnit pageLogicalHeightForOffset(LayoutUnit) const;
+  bool isPageLogicalHeightKnown() const;
   LayoutUnit pageRemainingLogicalHeightForOffset(LayoutUnit,
                                                  PageBoundaryRule) const;
 
@@ -1001,13 +1001,14 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   virtual void stopAutoscroll() {}
 
   DISABLE_CFI_PERF bool hasAutoVerticalScrollbar() const {
-    return hasOverflowClip() && (style()->overflowY() == OverflowAuto ||
-                                 style()->overflowY() == OverflowPagedY ||
-                                 style()->overflowY() == OverflowOverlay);
+    return hasOverflowClip() &&
+           (style()->overflowY() == EOverflow::kAuto ||
+            style()->overflowY() == EOverflow::kWebkitPagedY ||
+            style()->overflowY() == EOverflow::kOverlay);
   }
   DISABLE_CFI_PERF bool hasAutoHorizontalScrollbar() const {
-    return hasOverflowClip() && (style()->overflowX() == OverflowAuto ||
-                                 style()->overflowX() == OverflowOverlay);
+    return hasOverflowClip() && (style()->overflowX() == EOverflow::kAuto ||
+                                 style()->overflowX() == EOverflow::kOverlay);
   }
   DISABLE_CFI_PERF bool scrollsOverflow() const {
     return scrollsOverflowX() || scrollsOverflowY();
@@ -1025,11 +1026,11 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
            pixelSnappedScrollHeight() != pixelSnappedClientHeight();
   }
   virtual bool scrollsOverflowX() const {
-    return hasOverflowClip() && (style()->overflowX() == OverflowScroll ||
+    return hasOverflowClip() && (style()->overflowX() == EOverflow::kScroll ||
                                  hasAutoHorizontalScrollbar());
   }
   virtual bool scrollsOverflowY() const {
-    return hasOverflowClip() && (style()->overflowY() == OverflowScroll ||
+    return hasOverflowClip() && (style()->overflowY() == EOverflow::kScroll ||
                                  hasAutoVerticalScrollbar());
   }
 
@@ -1058,14 +1059,16 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
       int caretOffset,
       LayoutUnit* extraWidthToEndOfLine = nullptr) override;
 
+  // Returns whether content which overflows should be clipped. This is not just
+  // because of overflow clip, but other types of clip as well, such as
+  // control clips or contain: paint.
+  virtual bool shouldClipOverflow() const;
+
+  // Returns the intersection of all overflow clips which apply.
   virtual LayoutRect overflowClipRect(
       const LayoutPoint& location,
       OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const;
   LayoutRect clipRect(const LayoutPoint& location) const;
-  virtual bool hasControlClip() const { return false; }
-  virtual LayoutRect controlClipRect(const LayoutPoint&) const {
-    return LayoutRect();
-  }
 
   // Returns the combination of overflow clip, contain: paint clip and CSS clip
   // for this object, in local space.
@@ -1096,6 +1099,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
   bool shrinkToAvoidFloats() const;
   virtual bool avoidsFloats() const;
+  bool shouldBeConsideredAsReplaced() const;
 
   void updateFragmentationInfoForChild(LayoutBox&);
   bool childNeedsRelayoutForPagination(const LayoutBox&) const;
@@ -1179,14 +1183,13 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
       return;
     rect.setX(m_frameRect.width() - rect.maxX());
   }
-  // These represent your location relative to your container as a physical
-  // offset. In layout related methods you almost always want the logical
-  // location (e.g. x() and y()). Passing |container| causes flipped-block
-  // flipping w.r.t. that container, or containingBlock() otherwise.
-  LayoutPoint topLeftLocation(
+
+  // Passing |container| causes flipped-block flipping w.r.t. that container,
+  // or containingBlock() otherwise.
+  LayoutPoint physicalLocation(
       const LayoutBox* flippedBlocksContainer = nullptr) const;
-  LayoutSize topLeftLocationOffset() const {
-    return toLayoutSize(topLeftLocation());
+  LayoutSize physicalLocationOffset() const {
+    return toLayoutSize(physicalLocation());
   }
 
   LayoutRect logicalVisualOverflowRectForPropagation(
@@ -1289,9 +1292,8 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   SnapAreaSet* snapAreas() const;
   void clearSnapAreas();
 
-  bool hitTestClippedOutByRoundedBorder(
-      const HitTestLocation& locationInContainer,
-      const LayoutPoint& borderBoxLocation) const;
+  bool hitTestClippedOutByBorder(const HitTestLocation& locationInContainer,
+                                 const LayoutPoint& borderBoxLocation) const;
 
   static bool mustInvalidateFillLayersPaintOnWidthChange(const FillLayer&);
   static bool mustInvalidateFillLayersPaintOnHeightChange(const FillLayer&);
@@ -1306,7 +1308,13 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
   void ensureIsReadyForPaintInvalidation() override;
 
+  virtual bool hasControlClip() const { return false; }
+
  protected:
+  virtual LayoutRect controlClipRect(const LayoutPoint&) const {
+    return LayoutRect();
+  }
+
   void willBeDestroyed() override;
 
   void insertedIntoTree() override;
@@ -1483,7 +1491,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
   LayoutBoxRareData& ensureRareData() {
     if (!m_rareData)
-      m_rareData = makeUnique<LayoutBoxRareData>();
+      m_rareData = WTF::makeUnique<LayoutBoxRareData>();
     return *m_rareData.get();
   }
 
@@ -1492,7 +1500,8 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   bool isBox() const =
       delete;  // This will catch anyone doing an unnecessary check.
 
-  void frameRectChanged();
+  void locationChanged();
+  void sizeChanged();
 
   virtual bool isInSelfHitTestingPhase(HitTestAction hitTestAction) const {
     return hitTestAction == HitTestForeground;

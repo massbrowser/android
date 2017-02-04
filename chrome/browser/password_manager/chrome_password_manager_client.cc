@@ -25,7 +25,6 @@
 #include "chrome/browser/ui/passwords/passwords_client_ui_delegate.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/features.h"
 #include "chrome/common/url_constants.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
@@ -51,15 +50,19 @@
 #include "components/sessions/content/content_record_password_state.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/version_info/version_info.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/origin_util.h"
+#include "extensions/features/features.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
 #include "third_party/re2/src/re2/re2.h"
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/password_manager/account_chooser_dialog_android.h"
 #include "chrome/browser/password_manager/auto_signin_first_run_dialog_android.h"
@@ -67,6 +70,10 @@
 #include "chrome/browser/password_manager/save_password_infobar_delegate_android.h"
 #include "chrome/browser/password_manager/update_password_infobar_delegate_android.h"
 #include "chrome/browser/ui/android/snackbars/auto_signin_prompt_controller.h"
+#endif
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "extensions/common/constants.h"
 #endif
 
 using password_manager::ContentPasswordManagerDriverFactory;
@@ -144,6 +151,7 @@ ChromePasswordManagerClient::ChromePasswordManagerClient(
     : content::WebContentsObserver(web_contents),
       profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
       password_manager_(this),
+      password_reuse_detection_manager_(this),
       driver_factory_(nullptr),
       credential_manager_impl_(web_contents, this),
       password_manager_client_bindings_(web_contents, this),
@@ -231,12 +239,10 @@ bool ChromePasswordManagerClient::PromptUserToSaveOrUpdatePassword(
     bool update_password) {
   // Save password infobar and the password bubble prompts in case of
   // "webby" URLs and do not prompt in case of "non-webby" URLS (e.g. file://).
-  if (!BrowsingDataHelper::IsWebScheme(
-      web_contents()->GetLastCommittedURL().scheme())) {
+  if (!CanShowBubbleOnURL(web_contents()->GetLastCommittedURL()))
     return false;
-  }
 
-#if !BUILDFLAG(ANDROID_JAVA_UI)
+#if !defined(OS_ANDROID)
   PasswordsClientUIDelegate* manage_passwords_ui_controller =
       PasswordsClientUIDelegateFromWebContents(web_contents());
   if (update_password) {
@@ -257,7 +263,7 @@ bool ChromePasswordManagerClient::PromptUserToSaveOrUpdatePassword(
   }
   SavePasswordInfoBarDelegate::Create(web_contents(),
                                       std::move(form_to_save));
-#endif  // !BUILDFLAG(ANDROID_JAVA_UI)
+#endif  // !defined(OS_ANDROID)
   return true;
 }
 
@@ -316,7 +322,7 @@ void ChromePasswordManagerClient::NotifyUserAutoSignin(
   // If a site gets back a credential some navigations are likely to occur. They
   // shouldn't trigger the autofill password manager.
   password_manager_.DropFormManagers();
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   ShowAutoSigninPrompt(web_contents(), local_forms[0]->username_value);
 #else
   PasswordsClientUIDelegateFromWebContents(web_contents())
@@ -350,7 +356,7 @@ void ChromePasswordManagerClient::NotifyStorePasswordCalled() {
 
 void ChromePasswordManagerClient::AutomaticPasswordSave(
     std::unique_ptr<password_manager::PasswordFormManager> saved_form) {
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   GeneratedPasswordSavedInfoBarDelegateAndroid::Create(web_contents());
 #else
   PasswordsClientUIDelegate* manage_passwords_ui_controller =
@@ -364,7 +370,7 @@ void ChromePasswordManagerClient::PasswordWasAutofilled(
     const std::map<base::string16, const autofill::PasswordForm*>& best_matches,
     const GURL& origin,
     const std::vector<const autofill::PasswordForm*>* federated_matches) const {
-#if !BUILDFLAG(ANDROID_JAVA_UI)
+#if !defined(OS_ANDROID)
   PasswordsClientUIDelegate* manage_passwords_ui_controller =
       PasswordsClientUIDelegateFromWebContents(web_contents());
   manage_passwords_ui_controller->OnPasswordAutofilled(best_matches, origin,
@@ -375,6 +381,30 @@ void ChromePasswordManagerClient::PasswordWasAutofilled(
 void ChromePasswordManagerClient::HidePasswordGenerationPopup() {
   if (popup_controller_)
     popup_controller_->HideAndDestroy();
+}
+
+void ChromePasswordManagerClient::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
+    return;
+
+  password_reuse_detection_manager_.DidNavigateMainFrame(GetMainFrameURL());
+  // After some navigations RenderViewHost persists and just adding the observer
+  // will cause multiple call of OnInputEvent. Since Widget API doesn't allow to
+  // check whether the observer is already added, the observer is removed and
+  // added again, to ensure that it is added only once.
+  web_contents()->GetRenderViewHost()->GetWidget()->RemoveInputEventObserver(
+      this);
+  web_contents()->GetRenderViewHost()->GetWidget()->AddInputEventObserver(this);
+}
+
+void ChromePasswordManagerClient::OnInputEvent(
+    const blink::WebInputEvent& event) {
+  if (event.type() != blink::WebInputEvent::Char)
+    return;
+  const blink::WebKeyboardEvent& key_event =
+      static_cast<const blink::WebKeyboardEvent&>(event);
+  password_reuse_detection_manager_.OnKeyPressed(key_event.text);
 }
 
 PrefService* ChromePasswordManagerClient::GetPrefs() {
@@ -521,7 +551,7 @@ void ChromePasswordManagerClient::PromptUserToEnableAutosigninIfNecessary() {
       IsOffTheRecord())
     return;
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   // Dialog is deleted by the Java counterpart after user interacts with it.
   AutoSigninFirstRunDialogAndroid* auto_signin_first_run_dialog =
       new AutoSigninFirstRunDialogAndroid(web_contents());
@@ -539,6 +569,10 @@ void ChromePasswordManagerClient::GenerationAvailableForForm(
 
 const GURL& ChromePasswordManagerClient::GetMainFrameURL() const {
   return web_contents()->GetVisibleURL();
+}
+
+bool ChromePasswordManagerClient::IsMainFrameSecure() const {
+  return content::IsOriginSecure(web_contents()->GetVisibleURL());
 }
 
 const GURL& ChromePasswordManagerClient::GetLastCommittedEntryURL() const {
@@ -619,4 +653,15 @@ void ChromePasswordManagerClient::BindCredentialManager(
     return;
 
   instance->credential_manager_impl_.BindRequest(std::move(request));
+}
+
+// static
+bool ChromePasswordManagerClient::CanShowBubbleOnURL(const GURL& url) {
+  std::string scheme = url.scheme();
+  return (content::ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
+              scheme) &&
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+          scheme != extensions::kExtensionScheme &&
+#endif
+          scheme != content::kChromeDevToolsScheme);
 }

@@ -660,7 +660,7 @@ TEST_F(PasswordAutofillAgentTest, NoInitialAutocompleteForReadOnlyPassword) {
 // matches.
 TEST_F(PasswordAutofillAgentTest,
        AutocompletePasswordForReadonlyUsernameMatched) {
-  username_element_.setValue(username3_);
+  username_element_.setValue(WebString::fromUTF16(username3_));
   SetElementReadOnly(username_element_, true);
 
   // Filled even though username is not the preferred match.
@@ -1178,7 +1178,7 @@ TEST_F(PasswordAutofillAgentTest, ClearPreviewWithPasswordAutofilled) {
   EXPECT_TRUE(username_element_.value().isEmpty());
   EXPECT_TRUE(username_element_.suggestedValue().isEmpty());
   EXPECT_FALSE(username_element_.isAutofilled());
-  EXPECT_EQ(ASCIIToUTF16("sec"), password_element_.value());
+  EXPECT_EQ(ASCIIToUTF16("sec"), password_element_.value().utf16());
   EXPECT_TRUE(password_element_.suggestedValue().isEmpty());
   EXPECT_TRUE(password_element_.isAutofilled());
   CheckUsernameSelection(0, 0);
@@ -1204,7 +1204,7 @@ TEST_F(PasswordAutofillAgentTest, ClearPreviewWithUsernameAutofilled) {
   EXPECT_TRUE(
       password_autofill_agent_->DidClearAutofillSelection(username_element_));
 
-  EXPECT_EQ(ASCIIToUTF16("ali"), username_element_.value());
+  EXPECT_EQ(ASCIIToUTF16("ali"), username_element_.value().utf16());
   EXPECT_TRUE(username_element_.suggestedValue().isEmpty());
   EXPECT_TRUE(username_element_.isAutofilled());
   EXPECT_TRUE(password_element_.value().isEmpty());
@@ -1236,10 +1236,10 @@ TEST_F(PasswordAutofillAgentTest,
   EXPECT_TRUE(
       password_autofill_agent_->DidClearAutofillSelection(username_element_));
 
-  EXPECT_EQ(ASCIIToUTF16("ali"), username_element_.value());
+  EXPECT_EQ(ASCIIToUTF16("ali"), username_element_.value().utf16());
   EXPECT_TRUE(username_element_.suggestedValue().isEmpty());
   EXPECT_TRUE(username_element_.isAutofilled());
-  EXPECT_EQ(ASCIIToUTF16("sec"), password_element_.value());
+  EXPECT_EQ(ASCIIToUTF16("sec"), password_element_.value().utf16());
   EXPECT_TRUE(password_element_.suggestedValue().isEmpty());
   EXPECT_TRUE(password_element_.isAutofilled());
   CheckUsernameSelection(3, 3);
@@ -1770,7 +1770,7 @@ TEST_F(PasswordAutofillAgentTest, ShowPopupOnEmptyPasswordField) {
   SimulateSuggestionChoiceOfUsernameAndPassword(
       password_element_, base::string16(), ASCIIToUTF16(kAlicePassword));
   CheckSuggestions(std::string(), false);
-  EXPECT_EQ(ASCIIToUTF16(kAlicePassword), password_element_.value());
+  EXPECT_EQ(ASCIIToUTF16(kAlicePassword), password_element_.value().utf16());
   EXPECT_TRUE(password_element_.isAutofilled());
 }
 
@@ -1801,7 +1801,7 @@ TEST_F(PasswordAutofillAgentTest, ShowPopupOnAutofilledPasswordField) {
   SimulateSuggestionChoiceOfUsernameAndPassword(
       password_element_, base::string16(), ASCIIToUTF16(kAlicePassword));
   CheckSuggestions(std::string(), false);
-  EXPECT_EQ(ASCIIToUTF16(kAlicePassword), password_element_.value());
+  EXPECT_EQ(ASCIIToUTF16(kAlicePassword), password_element_.value().utf16());
   EXPECT_TRUE(password_element_.isAutofilled());
 }
 

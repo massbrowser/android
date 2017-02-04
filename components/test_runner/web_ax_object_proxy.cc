@@ -332,7 +332,7 @@ blink::WebFloatRect BoundsForObject(const blink::WebAXObject& object) {
   while (!container.isDetached()) {
     computedBounds.Offset(bounds.x, bounds.y);
     computedBounds.Offset(
-        -container.scrollOffset().x, -container.scrollOffset().y);
+        -container.getScrollOffset().x, -container.getScrollOffset().y);
     if (!matrix.isIdentity()) {
       gfx::Transform transform(matrix);
       transform.TransformRect(&computedBounds);
@@ -512,6 +512,41 @@ class AttributesCollector {
   DISALLOW_COPY_AND_ASSIGN(AttributesCollector);
 };
 
+class SparseAttributeAdapter : public blink::WebAXSparseAttributeClient {
+ public:
+  SparseAttributeAdapter() {}
+  ~SparseAttributeAdapter() override {}
+
+  std::map<blink::WebAXBoolAttribute, bool> bool_attributes;
+  std::map<blink::WebAXStringAttribute, blink::WebString> string_attributes;
+  std::map<blink::WebAXObjectAttribute, blink::WebAXObject> object_attributes;
+  std::map<blink::WebAXObjectVectorAttribute,
+           blink::WebVector<blink::WebAXObject>>
+      object_vector_attributes;
+
+ private:
+  void addBoolAttribute(blink::WebAXBoolAttribute attribute,
+                        bool value) override {
+    bool_attributes[attribute] = value;
+  }
+
+  void addStringAttribute(blink::WebAXStringAttribute attribute,
+                          const blink::WebString& value) override {
+    string_attributes[attribute] = value;
+  }
+
+  void addObjectAttribute(blink::WebAXObjectAttribute attribute,
+                          const blink::WebAXObject& value) override {
+    object_attributes[attribute] = value;
+  }
+
+  void addObjectVectorAttribute(
+      blink::WebAXObjectVectorAttribute attribute,
+      const blink::WebVector<blink::WebAXObject>& value) override {
+    object_vector_attributes[attribute] = value;
+  }
+};
+
 }  // namespace
 
 gin::WrapperInfo WebAXObjectProxy::kWrapperInfo = {
@@ -564,6 +599,7 @@ WebAXObjectProxy::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetProperty("isRichlyEditable", &WebAXObjectProxy::IsRichlyEditable)
       .SetProperty("isFocused", &WebAXObjectProxy::IsFocused)
       .SetProperty("isFocusable", &WebAXObjectProxy::IsFocusable)
+      .SetProperty("isModal", &WebAXObjectProxy::IsModal)
       .SetProperty("isSelected", &WebAXObjectProxy::IsSelected)
       .SetProperty("isSelectable", &WebAXObjectProxy::IsSelectable)
       .SetProperty("isMultiSelectable", &WebAXObjectProxy::IsMultiSelectable)
@@ -666,6 +702,7 @@ WebAXObjectProxy::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("nameElementAtIndex", &WebAXObjectProxy::NameElementAtIndex)
       .SetProperty("description", &WebAXObjectProxy::Description)
       .SetProperty("descriptionFrom", &WebAXObjectProxy::DescriptionFrom)
+      .SetProperty("placeholder", &WebAXObjectProxy::Placeholder)
       .SetProperty("misspellingsCount", &WebAXObjectProxy::MisspellingsCount)
       .SetMethod("descriptionElementCount",
                  &WebAXObjectProxy::DescriptionElementCount)
@@ -674,12 +711,9 @@ WebAXObjectProxy::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       //
       // NEW bounding rect calculation - low-level interface
       //
-      .SetMethod("offsetContainer",
-                 &WebAXObjectProxy::OffsetContainer)
-      .SetMethod("boundsInContainerX",
-                 &WebAXObjectProxy::BoundsInContainerX)
-      .SetMethod("boundsInContainerY",
-                 &WebAXObjectProxy::BoundsInContainerY)
+      .SetMethod("offsetContainer", &WebAXObjectProxy::OffsetContainer)
+      .SetMethod("boundsInContainerX", &WebAXObjectProxy::BoundsInContainerX)
+      .SetMethod("boundsInContainerY", &WebAXObjectProxy::BoundsInContainerY)
       .SetMethod("boundsInContainerWidth",
                  &WebAXObjectProxy::BoundsInContainerWidth)
       .SetMethod("boundsInContainerHeight",
@@ -944,6 +978,11 @@ bool WebAXObjectProxy::IsFocusable() {
   return accessibility_object_.canSetFocusAttribute();
 }
 
+bool WebAXObjectProxy::IsModal() {
+  accessibility_object_.updateLayoutAndCheckValidity();
+  return accessibility_object_.isModal();
+}
+
 bool WebAXObjectProxy::IsSelected() {
   accessibility_object_.updateLayoutAndCheckValidity();
   return accessibility_object_.isSelected();
@@ -1102,11 +1141,13 @@ bool WebAXObjectProxy::IsButtonStateMixed() {
 }
 
 v8::Local<v8::Object> WebAXObjectProxy::AriaControlsElementAtIndex(
-                                                                unsigned index)
-{
+    unsigned index) {
   accessibility_object_.updateLayoutAndCheckValidity();
-  blink::WebVector<blink::WebAXObject> elements;
-  accessibility_object_.ariaControls(elements);
+  SparseAttributeAdapter attribute_adapter;
+  accessibility_object_.getSparseAXAttributes(attribute_adapter);
+  blink::WebVector<blink::WebAXObject> elements =
+      attribute_adapter.object_vector_attributes
+          [blink::WebAXObjectVectorAttribute::AriaControls];
   size_t elementCount = elements.size();
   if (index >= elementCount)
     return v8::Local<v8::Object>();
@@ -1115,11 +1156,13 @@ v8::Local<v8::Object> WebAXObjectProxy::AriaControlsElementAtIndex(
 }
 
 v8::Local<v8::Object> WebAXObjectProxy::AriaFlowToElementAtIndex(
-                                                                unsigned index)
-{
+    unsigned index) {
   accessibility_object_.updateLayoutAndCheckValidity();
-  blink::WebVector<blink::WebAXObject> elements;
-  accessibility_object_.ariaFlowTo(elements);
+  SparseAttributeAdapter attribute_adapter;
+  accessibility_object_.getSparseAXAttributes(attribute_adapter);
+  blink::WebVector<blink::WebAXObject> elements =
+      attribute_adapter.object_vector_attributes
+          [blink::WebAXObjectVectorAttribute::AriaFlowTo];
   size_t elementCount = elements.size();
   if (index >= elementCount)
     return v8::Local<v8::Object>();
@@ -1398,12 +1441,12 @@ void WebAXObjectProxy::ScrollToGlobalPoint(int x, int y) {
 
 int WebAXObjectProxy::ScrollX() {
   accessibility_object_.updateLayoutAndCheckValidity();
-  return accessibility_object_.scrollOffset().x;
+  return accessibility_object_.getScrollOffset().x;
 }
 
 int WebAXObjectProxy::ScrollY() {
   accessibility_object_.updateLayoutAndCheckValidity();
-  return accessibility_object_.scrollOffset().y;
+  return accessibility_object_.getScrollOffset().y;
 }
 
 float WebAXObjectProxy::BoundsX() {
@@ -1552,14 +1595,20 @@ std::string WebAXObjectProxy::DescriptionFrom() {
       return "attribute";
     case blink::WebAXDescriptionFromContents:
       return "contents";
-    case blink::WebAXDescriptionFromPlaceholder:
-      return "placeholder";
     case blink::WebAXDescriptionFromRelatedElement:
       return "relatedElement";
   }
 
   NOTREACHED();
   return std::string();
+}
+
+std::string WebAXObjectProxy::Placeholder() {
+  accessibility_object_.updateLayoutAndCheckValidity();
+  blink::WebAXNameFrom nameFrom;
+  blink::WebVector<blink::WebAXObject> nameObjects;
+  accessibility_object_.name(nameFrom, nameObjects);
+  return accessibility_object_.placeholder(nameFrom).utf8();
 }
 
 int WebAXObjectProxy::MisspellingsCount() {

@@ -5,16 +5,18 @@
 #include "headless/lib/headless_content_main_delegate.h"
 
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_switches.h"
 #include "headless/lib/browser/headless_browser_impl.h"
 #include "headless/lib/browser/headless_content_browser_client.h"
-#include "headless/lib/renderer/headless_content_renderer_client.h"
-#include "headless/lib/utility/headless_content_utility_client.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_switches.h"
+#include "ui/gfx/switches.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/ozone/public/ozone_switches.h"
 
@@ -42,15 +44,21 @@ HeadlessContentMainDelegate::~HeadlessContentMainDelegate() {
 bool HeadlessContentMainDelegate::BasicStartupComplete(int* exit_code) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
+  // Make sure all processes know that we're in headless mode.
+  if (!command_line->HasSwitch(switches::kHeadless))
+    command_line->AppendSwitch(switches::kHeadless);
+
   if (browser_->options()->single_process_mode)
     command_line->AppendSwitch(switches::kSingleProcess);
 
   if (browser_->options()->disable_sandbox)
     command_line->AppendSwitch(switches::kNoSandbox);
 
+#if defined(USE_OZONE)
   // The headless backend is automatically chosen for a headless build, but also
   // adding it here allows us to run in a non-headless build too.
   command_line->AppendSwitchASCII(switches::kOzonePlatform, "headless");
+#endif
 
   if (!browser_->options()->gl_implementation.empty()) {
     command_line->AppendSwitchASCII(switches::kUseGL,
@@ -63,7 +71,62 @@ bool HeadlessContentMainDelegate::BasicStartupComplete(int* exit_code) {
   return false;
 }
 
+void HeadlessContentMainDelegate::InitLogging(
+    const base::CommandLine& command_line) {
+  if (!command_line.HasSwitch(switches::kEnableLogging))
+    return;
+
+  logging::LoggingDestination log_mode;
+  base::FilePath log_filename(FILE_PATH_LITERAL("chrome_debug.log"));
+  if (command_line.GetSwitchValueASCII(switches::kEnableLogging) == "stderr") {
+    log_mode = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  } else {
+    base::FilePath custom_filename(
+        command_line.GetSwitchValuePath(switches::kEnableLogging));
+    if (custom_filename.empty()) {
+      log_mode = logging::LOG_TO_ALL;
+    } else {
+      log_mode = logging::LOG_TO_FILE;
+      log_filename = custom_filename;
+    }
+  }
+
+  if (command_line.HasSwitch(switches::kLoggingLevel) &&
+      logging::GetMinLogLevel() >= 0) {
+    std::string log_level =
+        command_line.GetSwitchValueASCII(switches::kLoggingLevel);
+    int level = 0;
+    if (base::StringToInt(log_level, &level) && level >= 0 &&
+        level < logging::LOG_NUM_SEVERITIES) {
+      logging::SetMinLogLevel(level);
+    } else {
+      DLOG(WARNING) << "Bad log level: " << log_level;
+    }
+  }
+
+  base::FilePath log_path;
+  logging::LoggingSettings settings;
+
+  if (PathService::Get(base::DIR_MODULE, &log_path)) {
+    log_path = log_path.Append(log_filename);
+  } else {
+    log_path = log_filename;
+  }
+
+  const std::string process_type =
+      command_line.GetSwitchValueASCII(switches::kProcessType);
+
+  settings.logging_dest = log_mode;
+  settings.log_file = log_path.value().c_str();
+  settings.lock_log = logging::DONT_LOCK_LOG_FILE;
+  settings.delete_old = process_type.empty() ? logging::DELETE_OLD_LOG_FILE
+                                             : logging::APPEND_TO_OLD_LOG_FILE;
+  bool success = logging::InitLogging(settings);
+  DCHECK(success);
+}
+
 void HeadlessContentMainDelegate::PreSandboxStartup() {
+  InitLogging(*base::CommandLine::ForCurrentProcess());
   InitializeResourceBundle();
 }
 
@@ -104,29 +167,30 @@ HeadlessContentMainDelegate* HeadlessContentMainDelegate::GetInstance() {
 
 // static
 void HeadlessContentMainDelegate::InitializeResourceBundle() {
+  base::FilePath dir_module;
   base::FilePath pak_file;
-  bool result = PathService::Get(base::DIR_MODULE, &pak_file);
+  bool result = PathService::Get(base::DIR_MODULE, &dir_module);
   DCHECK(result);
-  pak_file = pak_file.Append(FILE_PATH_LITERAL("headless_lib.pak"));
-  ui::ResourceBundle::InitSharedInstanceWithPakPath(pak_file);
+
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  const std::string locale = command_line->GetSwitchValueASCII(switches::kLang);
+  ui::ResourceBundle::InitSharedInstanceWithLocale(
+      locale, nullptr, ui::ResourceBundle::DO_NOT_LOAD_COMMON_RESOURCES);
+
+  // Try loading the headless library pak file first. If it doesn't exist (i.e.,
+  // when we're running with the --headless switch), fall back to the browser's
+  // resource pak.
+  pak_file = dir_module.Append(FILE_PATH_LITERAL("headless_lib.pak"));
+  if (!base::PathExists(pak_file))
+    pak_file = dir_module.Append(FILE_PATH_LITERAL("resources.pak"));
+  ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+      pak_file, ui::SCALE_FACTOR_NONE);
 }
 
 content::ContentBrowserClient*
 HeadlessContentMainDelegate::CreateContentBrowserClient() {
   browser_client_.reset(new HeadlessContentBrowserClient(browser_.get()));
   return browser_client_.get();
-}
-
-content::ContentRendererClient*
-HeadlessContentMainDelegate::CreateContentRendererClient() {
-  renderer_client_.reset(new HeadlessContentRendererClient);
-  return renderer_client_.get();
-}
-
-content::ContentUtilityClient*
-HeadlessContentMainDelegate::CreateContentUtilityClient() {
-  utility_client_.reset(new HeadlessContentUtilityClient);
-  return utility_client_.get();
 }
 
 }  // namespace headless

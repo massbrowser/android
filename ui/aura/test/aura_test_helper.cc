@@ -11,6 +11,7 @@
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/input_state_lookup.h"
+#include "ui/aura/mus/capture_synchronizer.h"
 #include "ui/aura/mus/window_port_mus.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/test/env_test_helper.h"
@@ -38,6 +39,11 @@
 
 namespace aura {
 namespace test {
+namespace {
+
+AuraTestHelper* g_instance = nullptr;
+
+}  // namespace
 
 AuraTestHelper::AuraTestHelper(base::MessageLoopForUI* message_loop)
     : setup_called_(false), teardown_called_(false) {
@@ -58,6 +64,11 @@ AuraTestHelper::~AuraTestHelper() {
       << "AuraTestHelper::TearDown() never called.";
 }
 
+// static
+AuraTestHelper* AuraTestHelper::GetInstance() {
+  return g_instance;
+}
+
 void AuraTestHelper::EnableMusWithTestWindowTree(
     WindowTreeClientDelegate* window_tree_delegate,
     WindowManagerDelegate* window_manager_delegate) {
@@ -76,7 +87,8 @@ void AuraTestHelper::EnableMusWithWindowTreeClient(
   window_tree_client_ = window_tree_client;
 }
 
-void AuraTestHelper::SetUp(ui::ContextFactory* context_factory) {
+void AuraTestHelper::SetUp(ui::ContextFactory* context_factory,
+                           ui::ContextFactoryPrivate* context_factory_private) {
   setup_called_ = true;
 
   if (mode_ != Mode::MUS) {
@@ -98,8 +110,12 @@ void AuraTestHelper::SetUp(ui::ContextFactory* context_factory) {
   // above.
   env_helper.SetMode(env_mode);
   env_helper.SetWindowTreeClient(window_tree_client_);
+  // Tests assume they can set the mouse location on Env() and have it reflected
+  // in tests.
+  env_helper.SetAlwaysUseLastMouseLocation(true);
   Env::GetInstance()->SetActiveFocusClient(focus_client_.get(), nullptr);
   Env::GetInstance()->set_context_factory(context_factory);
+  Env::GetInstance()->set_context_factory_private(context_factory_private);
   // Unit tests generally don't want to query the system, rather use the state
   // from RootWindow.
   env_helper.SetInputStateLookup(nullptr);
@@ -122,13 +138,16 @@ void AuraTestHelper::SetUp(ui::ContextFactory* context_factory) {
 
   root_window()->Show();
   // Ensure width != height so tests won't confuse them.
-  host()->SetBounds(gfx::Rect(host_size));
+  host()->SetBoundsInPixels(gfx::Rect(host_size));
 
   if (mode_ == Mode::MUS_CREATE_WINDOW_TREE_CLIENT)
     window_tree()->AckAllChanges();
+
+  g_instance = this;
 }
 
 void AuraTestHelper::TearDown() {
+  g_instance = nullptr;
   teardown_called_ = true;
   parenting_client_.reset();
   client::SetFocusClient(root_window(), nullptr);
@@ -177,6 +196,8 @@ void AuraTestHelper::InitWindowTreeClient() {
   window_tree_client_setup_->InitForWindowManager(window_tree_delegate_,
                                                   window_manager_delegate_);
   window_tree_client_ = window_tree_client_setup_->window_tree_client();
+  window_tree_client_->capture_synchronizer()->AttachToCaptureClient(
+      capture_client_.get());
 }
 
 }  // namespace test

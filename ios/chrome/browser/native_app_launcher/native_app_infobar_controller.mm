@@ -5,12 +5,13 @@
 #import "ios/chrome/browser/native_app_launcher/native_app_infobar_controller.h"
 
 #include "base/logging.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/native_app_launcher/native_app_infobar_delegate.h"
+#import "ios/chrome/browser/ui/infobars/infobar_view.h"
+#include "ios/chrome/browser/ui/infobars/infobar_view.h"
 #include "ios/chrome/grit/ios_strings.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/native_app_launcher/native_app_types.h"
-#include "ios/public/provider/chrome/browser/ui/infobar_view_protocol.h"
 #include "ui/base/l10n/l10n_util.h"
 
 @interface NativeAppInfoBarController ()
@@ -33,14 +34,13 @@
 
 #pragma mark - InfoBarController
 
-- (base::scoped_nsobject<UIView<InfoBarViewProtocol>>)
-viewForDelegate:(infobars::InfoBarDelegate*)delegate
-          frame:(CGRect)frame {
-  base::scoped_nsobject<UIView<InfoBarViewProtocol>> infoBarView;
+- (InfoBarView*)viewForDelegate:(infobars::InfoBarDelegate*)delegate
+                          frame:(CGRect)frame {
+  base::scoped_nsobject<InfoBarView> infoBarView;
   nativeAppInfoBarDelegate_ = static_cast<NativeAppInfoBarDelegate*>(delegate);
   DCHECK(nativeAppInfoBarDelegate_);
   infoBarView.reset(
-      ios::GetChromeBrowserProvider()->CreateInfoBarView(frame, self.delegate));
+      [[InfoBarView alloc] initWithFrame:frame delegate:self.delegate]);
 
   // Lays out widgets common to all NativeAppInfobars.
   [infoBarView
@@ -96,7 +96,7 @@ viewForDelegate:(infobars::InfoBarDelegate*)delegate
       break;
     }
   }
-  return infoBarView;
+  return [[infoBarView retain] autorelease];
 }
 
 - (void)infoBarButtonDidPress:(UIButton*)button {

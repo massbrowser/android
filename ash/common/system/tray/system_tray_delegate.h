@@ -51,25 +51,6 @@ struct ASH_EXPORT BluetoothDeviceInfo {
 
 using BluetoothDeviceList = std::vector<BluetoothDeviceInfo>;
 
-struct ASH_EXPORT UpdateInfo {
-  enum UpdateSeverity {
-    UPDATE_NONE,
-    UPDATE_LOW,
-    UPDATE_ELEVATED,
-    UPDATE_HIGH,
-    UPDATE_SEVERE,
-    UPDATE_CRITICAL,
-  };
-
-  UpdateInfo();
-  ~UpdateInfo();
-
-  UpdateSeverity severity;
-  bool update_required;
-  bool factory_reset_required;
-};
-
-class CastConfigDelegate;
 class NetworkingConfigDelegate;
 
 // SystemTrayDelegate is intended for delegating tasks in the System Tray to the
@@ -123,9 +104,6 @@ class ASH_EXPORT SystemTrayDelegate {
   // TODO(merkulova): remove on FakeUserManager componentization.
   // crbug.com/443119
   virtual bool IsUserChild() const;
-
-  // Fills |info| structure (which must not be null) with current update info.
-  virtual void GetSystemUpdateInfo(UpdateInfo* info) const;
 
   // Returns true if settings menu item should appear.
   virtual bool ShouldShowSettings() const;
@@ -183,9 +161,6 @@ class ASH_EXPORT SystemTrayDelegate {
 
   // Returns whether the delegate has initiated a bluetooth discovery session.
   virtual bool GetBluetoothDiscovering();
-
-  // Returns CastConfigDelegate. May return nullptr.
-  virtual CastConfigDelegate* GetCastConfigDelegate();
 
   // Returns NetworkingConfigDelegate. May return nullptr.
   virtual NetworkingConfigDelegate* GetNetworkingConfigDelegate() const;

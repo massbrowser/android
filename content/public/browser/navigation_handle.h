@@ -10,7 +10,9 @@
 
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_throttle.h"
+#include "content/public/browser/reload_type.h"
 #include "content/public/common/referrer.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_info.h"
 #include "ui/base/page_transition_types.h"
@@ -73,9 +75,6 @@ class CONTENT_EXPORT NavigationHandle {
   //  * using window.history.pushState
   virtual bool IsRendererInitiated() = 0;
 
-  // Whether the navigation is for an iframe with srcdoc attribute.
-  virtual bool IsSrcdoc() = 0;
-
   // Returns the FrameTreeNode ID for the frame in which the navigation is
   // performed. This ID is browser-global and uniquely identifies a frame that
   // hosts content. The identifier is fixed at the creation of the frame and
@@ -100,6 +99,11 @@ class CONTENT_EXPORT NavigationHandle {
   // searchable form request.
   virtual const GURL& GetSearchableFormURL() = 0;
   virtual const std::string& GetSearchableFormEncoding() = 0;
+
+  // Returns the reload type for this navigation. Note that renderer-initiated
+  // reloads (via location.reload()) won't count as a reload and do return
+  // ReloadType::NONE.
+  virtual ReloadType GetReloadType() = 0;
 
   // Parameters available at network request start time ------------------------
   //
@@ -157,6 +161,11 @@ class CONTENT_EXPORT NavigationHandle {
   // Whether the navigation has encountered a server redirect or not.
   virtual bool WasServerRedirect() = 0;
 
+  // Lists the redirects that occurred on the way to the current page. The
+  // current page is the last one in the list (so even when there's no redirect,
+  // there will be one entry in the list).
+  virtual const std::vector<GURL>& GetRedirectChain() = 0;
+
   // Whether the navigation has committed. This returns true for either
   // successful commits or error pages that replace the previous page
   // (distinguished by |IsErrorPage|), and false for errors that leave the user
@@ -167,6 +176,9 @@ class CONTENT_EXPORT NavigationHandle {
   // Note that if an error page reloads, this will return true even though
   // GetNetErrorCode will be net::OK.
   virtual bool IsErrorPage() = 0;
+
+  // Returns the remote address of the socket which fetched this resource.
+  virtual net::HostPortPair GetSocketAddress() = 0;
 
   // Returns the response headers for the request, or nullptr if there aren't
   // any response headers or they have not been received yet. The response
@@ -210,7 +222,8 @@ class CONTENT_EXPORT NavigationHandle {
       const GURL& url,
       RenderFrameHost* render_frame_host,
       bool committed = false,
-      net::Error error = net::OK);
+      net::Error error = net::OK,
+      bool is_same_page = false);
 
   // Registers a NavigationThrottle for tests. The throttle can
   // modify the request, pause the request or cancel the request. This will

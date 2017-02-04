@@ -32,12 +32,17 @@ class WindowAndroidCompositor;
 class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
     : public cc::SurfaceFactoryClient {
  public:
-  using ReturnResourcesCallback =
-      base::Callback<void(const cc::ReturnedResourceArray&)>;
+  class Client {
+   public:
+    virtual void SetBeginFrameSource(
+        cc::BeginFrameSource* begin_frame_source) = 0;
+    virtual void ReturnResources(const cc::ReturnedResourceArray&) = 0;
+  };
 
   DelegatedFrameHostAndroid(ViewAndroid* view,
                             SkColor background_color,
-                            ReturnResourcesCallback return_resources_callback);
+                            Client* client,
+                            const cc::FrameSinkId& frame_sink_id);
 
   ~DelegatedFrameHostAndroid() override;
 
@@ -81,7 +86,7 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
   cc::SurfaceManager* surface_manager_;
   std::unique_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
   cc::FrameSinkId registered_parent_frame_sink_id_;
-  ReturnResourcesCallback return_resources_callback_;
+  Client* client_;
 
   std::unique_ptr<cc::SurfaceFactory> surface_factory_;
 
@@ -89,7 +94,7 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
     FrameData();
     ~FrameData();
 
-    cc::LocalFrameId local_frame_id;
+    cc::LocalSurfaceId local_surface_id;
     gfx::Size surface_size;
     float top_controls_height;
     float top_controls_shown_ratio;

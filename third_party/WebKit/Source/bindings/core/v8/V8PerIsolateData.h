@@ -43,11 +43,12 @@
 
 namespace blink {
 
-class ActiveScriptWrappable;
+class ActiveScriptWrappableBase;
 class DOMDataStore;
 class StringCache;
 class ThreadDebugger;
 class V8PrivateProperty;
+class WebTaskRunner;
 struct WrapperTypeInfo;
 
 typedef WTF::Vector<DOMDataStore*> DOMDataStoreList;
@@ -89,7 +90,7 @@ class CORE_EXPORT V8PerIsolateData {
     const bool m_originalUseCounterDisabled;
   };
 
-  static v8::Isolate* initialize();
+  static v8::Isolate* initialize(WebTaskRunner*);
 
   static V8PerIsolateData* from(v8::Isolate* isolate) {
     ASSERT(isolate);
@@ -160,11 +161,38 @@ class CORE_EXPORT V8PerIsolateData {
   ThreadDebugger* threadDebugger();
 
   using ActiveScriptWrappableSet =
-      HeapHashSet<WeakMember<ActiveScriptWrappable>>;
-  void addActiveScriptWrappable(ActiveScriptWrappable*);
+      HeapHashSet<WeakMember<ActiveScriptWrappableBase>>;
+  void addActiveScriptWrappable(ActiveScriptWrappableBase*);
   const ActiveScriptWrappableSet* activeScriptWrappables() const {
     return m_activeScriptWrappables.get();
   }
+
+  class TemporaryScriptWrappableVisitorScope {
+    WTF_MAKE_NONCOPYABLE(TemporaryScriptWrappableVisitorScope);
+    STACK_ALLOCATED();
+
+   public:
+    TemporaryScriptWrappableVisitorScope(
+        v8::Isolate* isolate,
+        std::unique_ptr<ScriptWrappableVisitor> visitor)
+        : m_isolate(isolate), m_savedVisitor(std::move(visitor)) {
+      swapWithV8PerIsolateDataVisitor(m_savedVisitor);
+    }
+    ~TemporaryScriptWrappableVisitorScope() {
+      swapWithV8PerIsolateDataVisitor(m_savedVisitor);
+    }
+
+    inline ScriptWrappableVisitor* currentVisitor() {
+      return V8PerIsolateData::from(m_isolate)->scriptWrappableVisitor();
+    }
+
+   private:
+    void swapWithV8PerIsolateDataVisitor(
+        std::unique_ptr<ScriptWrappableVisitor>&);
+
+    v8::Isolate* m_isolate;
+    std::unique_ptr<ScriptWrappableVisitor> m_savedVisitor;
+  };
 
   void setScriptWrappableVisitor(
       std::unique_ptr<ScriptWrappableVisitor> visitor) {
@@ -175,7 +203,7 @@ class CORE_EXPORT V8PerIsolateData {
   }
 
  private:
-  V8PerIsolateData();
+  explicit V8PerIsolateData(WebTaskRunner*);
   ~V8PerIsolateData();
 
   static void useCounterCallback(v8::Isolate*, v8::Isolate::UseCounterFeature);

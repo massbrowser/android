@@ -15,11 +15,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "components/pref_registry/pref_registry_syncable.h"
-#include "components/pref_registry/testing_pref_service_syncable.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url_data.h"
 #include "components/search_engines/template_url_data_util.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -29,8 +29,8 @@ namespace {
 const char kDefaultSearchProviderData[] =
     "default_search_provider_data.template_url_data";
 
-// Checks that the two TemplateURLs are similar. Does not check the id, the
-// date_created or the last_modified time.  Neither pointer should be NULL.
+// Checks that the two TemplateURLs are similar. Does not check the id or
+// any time-related fields.  Neither pointer should be null.
 void ExpectSimilar(const TemplateURLData* expected,
                    const TemplateURLData* actual) {
   ASSERT_TRUE(expected != NULL);
@@ -49,7 +49,8 @@ void ExpectSimilar(const TemplateURLData* expected,
 }
 
 // TODO(caitkp): TemplateURLData-ify this.
-void SetOverrides(user_prefs::TestingPrefServiceSyncable* prefs, bool update) {
+void SetOverrides(sync_preferences::TestingPrefServiceSyncable* prefs,
+                  bool update) {
   prefs->SetUserPref(prefs::kSearchProviderOverridesVersion,
                      new base::FundamentalValue(1));
   base::ListValue* overrides = new base::ListValue;
@@ -83,7 +84,7 @@ void SetOverrides(user_prefs::TestingPrefServiceSyncable* prefs, bool update) {
   prefs->SetUserPref(prefs::kSearchProviderOverrides, overrides);
 }
 
-void SetPolicy(user_prefs::TestingPrefServiceSyncable* prefs,
+void SetPolicy(sync_preferences::TestingPrefServiceSyncable* prefs,
                bool enabled,
                TemplateURLData* data) {
   if (enabled) {
@@ -111,6 +112,7 @@ std::unique_ptr<TemplateURLData> GenerateDummyTemplateURLData(
       "UTF-8;UTF-16", ";", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   data->date_created = base::Time();
   data->last_modified = base::Time();
+  data->last_visited = base::Time();
   return data;
 }
 
@@ -121,17 +123,17 @@ class DefaultSearchManagerTest : public testing::Test {
   DefaultSearchManagerTest() {};
 
   void SetUp() override {
-    pref_service_.reset(new user_prefs::TestingPrefServiceSyncable);
+    pref_service_.reset(new sync_preferences::TestingPrefServiceSyncable);
     DefaultSearchManager::RegisterProfilePrefs(pref_service_->registry());
     TemplateURLPrepopulateData::RegisterProfilePrefs(pref_service_->registry());
   }
 
-  user_prefs::TestingPrefServiceSyncable* pref_service() {
+  sync_preferences::TestingPrefServiceSyncable* pref_service() {
     return pref_service_.get();
   }
 
  private:
-  std::unique_ptr<user_prefs::TestingPrefServiceSyncable> pref_service_;
+  std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> pref_service_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultSearchManagerTest);
 };
@@ -151,6 +153,7 @@ TEST_F(DefaultSearchManagerTest, ReadAndWritePref) {
   data.input_encodings = base::SplitString(
       "UTF-8;UTF-16", ";", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   data.date_created = base::Time();
+  data.last_modified = base::Time();
   data.last_modified = base::Time();
 
   manager.SetUserSelectedDefaultSearchEngine(data);

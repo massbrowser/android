@@ -25,7 +25,6 @@ class BookmarkSuggestionsProvider : public ContentSuggestionsProvider,
                                     public bookmarks::BookmarkModelObserver {
  public:
   BookmarkSuggestionsProvider(ContentSuggestionsProvider::Observer* observer,
-                              CategoryFactory* category_factory,
                               bookmarks::BookmarkModel* bookmark_model,
                               PrefService* pref_service);
   ~BookmarkSuggestionsProvider() override;
@@ -87,7 +86,7 @@ class BookmarkSuggestionsProvider : public ContentSuggestionsProvider,
       bookmarks::BookmarkModel* model,
       const std::set<GURL>& removed_urls) override {}
 
-  void ConvertBookmark(const bookmarks::BookmarkNode* bookmark,
+  void ConvertBookmark(const bookmarks::BookmarkNode& bookmark,
                        std::vector<ContentSuggestion>* suggestions);
 
   // The actual method to fetch bookmarks - follows each call to FetchBookmarks

@@ -41,6 +41,7 @@ import org.chromium.chrome.browser.init.adblocktask.DownloadWhiteListTask;
 import org.chromium.chrome.browser.init.tasks.GetCurrencyTask;
 import org.chromium.chrome.browser.init.tasks.GetUsersCountTask;
 import org.chromium.chrome.browser.init.tasks.SendInfoTask;
+import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.services.GoogleServicesManager;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModelImpl;
 import org.chromium.chrome.browser.webapps.ActivityAssigner;
@@ -180,6 +181,7 @@ public class ChromeBrowserInitializer {
                     ContextUtils.getAppSharedPreferences();
                     DocumentTabModelImpl.warmUpSharedPrefs(mApplication);
                     ActivityAssigner.warmUpSharedPrefs(mApplication);
+                    DownloadManagerService.warmUpSharedPrefs(mApplication);
                     return null;
                 }
             }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
@@ -187,6 +189,7 @@ public class ChromeBrowserInitializer {
             ContextUtils.getAppSharedPreferences();
             DocumentTabModelImpl.warmUpSharedPrefs(mApplication);
             ActivityAssigner.warmUpSharedPrefs(mApplication);
+            DownloadManagerService.warmUpSharedPrefs(mApplication);
         }
     }
 
@@ -380,7 +383,7 @@ public class ChromeBrowserInitializer {
             BrowserStartupController.StartupCallback callback) throws ProcessInitException {
         try {
             TraceEvent.begin("ChromeBrowserInitializer.startChromeBrowserProcessesAsync");
-            BrowserStartupController.get(mApplication, LibraryProcessType.PROCESS_BROWSER)
+            BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
                     .startBrowserProcessesAsync(startGpuProcess, callback);
         } finally {
             TraceEvent.end("ChromeBrowserInitializer.startChromeBrowserProcessesAsync");
@@ -397,7 +400,7 @@ public class ChromeBrowserInitializer {
             libraryLoader.ensureInitialized();
             StrictMode.setThreadPolicy(oldPolicy);
             libraryLoader.asyncPrefetchLibrariesToMemory();
-            BrowserStartupController.get(mApplication, LibraryProcessType.PROCESS_BROWSER)
+            BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
                     .startBrowserProcessesSync(false);
             GoogleServicesManager.get(mApplication);
         } finally {

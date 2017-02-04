@@ -11,17 +11,19 @@
 #include "ash/common/shelf/wm_shelf_util.h"
 #include "ash/common/system/chromeos/palette/palette_tool_manager.h"
 #include "ash/common/system/chromeos/palette/palette_utils.h"
+#include "ash/common/system/tray/system_menu_button.h"
 #include "ash/common/system/tray/system_tray_controller.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/tray_bubble_wrapper.h"
 #include "ash/common/system/tray/tray_constants.h"
 #include "ash/common/system/tray/tray_popup_header_button.h"
+#include "ash/common/system/tray/tray_popup_item_style.h"
 #include "ash/common/wm_lookup.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/resources/vector_icons/vector_icons.h"
+#include "ash/root_window_controller.h"
 #include "base/metrics/histogram_macros.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
@@ -43,31 +45,21 @@ namespace {
 
 // Predefined padding for the icon used in this tray. These are to be set to the
 // border of the icon, depending on the current |shelf_alignment()|.
-const int kHorizontalShelfHorizontalPadding = 8;
-const int kHorizontalShelfVerticalPadding = 4;
-const int kVerticalShelfHorizontalPadding = 2;
-const int kVerticalShelfVerticalPadding = 5;
+constexpr int kHorizontalShelfHorizontalPadding = 8;
+constexpr int kHorizontalShelfVerticalPadding = 4;
+constexpr int kVerticalShelfHorizontalPadding = 2;
+constexpr int kVerticalShelfVerticalPadding = 5;
 
 // Width of the palette itself (dp).
-const int kPaletteWidth = 332;
+constexpr int kPaletteWidth = 332;
 
 // Padding at the top/bottom of the palette (dp).
-const int kPalettePaddingOnTop = 4;
-const int kPalettePaddingOnBottom = 4;
-
-// Size of icon in the shelf (dp).
-const int kShelfIconSize = 18;
-
-// Vertical margin around the title view elements so that the title view height
-// matches kMenuButtonSize.
-const int kVerticalMarginAroundTitleView = 1;
+constexpr int kPalettePaddingOnTop = 4;
+constexpr int kPalettePaddingOnBottom = 2;
 
 // Margins between the title view and the edges around it (dp).
-const int kPaddingBetweenTitleAndLeftEdge = 12;
-const int kPaddingBetweenTitleAndSeparator = 3;
-
-// The distance between the title, help, and settings button in the title (dp).
-const int kHorizontalPaddingBetweenTitleEntries = 2;
+constexpr int kPaddingBetweenTitleAndLeftEdge = 12;
+constexpr int kPaddingBetweenTitleAndSeparator = 3;
 
 // Color of the separator.
 const SkColor kPaletteSeparatorColor = SkColorSetARGB(0x1E, 0x00, 0x00, 0x00);
@@ -83,43 +75,49 @@ bool IsInUserSession() {
              LoginStatus::KIOSK_APP;
 }
 
-// Returns the font used by the title view.
-const gfx::FontList& GetTitleFont() {
-  // TODO(tdanderson|jdufault): Use TrayPopupItemStyle instead.
-  return ui::ResourceBundle::GetSharedInstance().GetFontListWithDelta(
-      2, gfx::Font::FontStyle::NORMAL, gfx::Font::Weight::MEDIUM);
-}
-
 class TitleView : public views::View, public views::ButtonListener {
  public:
   explicit TitleView(PaletteTray* palette_tray) : palette_tray_(palette_tray) {
-    auto* box_layout = new views::BoxLayout(
-        views::BoxLayout::kHorizontal, 0, kVerticalMarginAroundTitleView,
-        kHorizontalPaddingBetweenTitleEntries);
+    // TODO(tdanderson|jdufault): Use TriView to handle the layout of the title.
+    // See crbug.com/614453.
+    auto* box_layout =
+        new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0);
     SetLayoutManager(box_layout);
 
-    views::Label* text_label =
+    auto title_label =
         new views::Label(l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
-    text_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    text_label->SetFontList(GetTitleFont());
-    AddChildView(text_label);
-    box_layout->SetFlexForView(text_label, 1);
+    title_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    AddChildView(title_label);
+    TrayPopupItemStyle style(TrayPopupItemStyle::FontStyle::TITLE);
+    style.SetupLabel(title_label);
+    box_layout->SetFlexForView(title_label, 1);
+    if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
+      help_button_ =
+          new SystemMenuButton(this, TrayPopupInkDropStyle::HOST_CENTERED,
+                               kSystemMenuHelpIcon, IDS_ASH_STATUS_TRAY_HELP);
+      settings_button_ = new SystemMenuButton(
+          this, TrayPopupInkDropStyle::HOST_CENTERED, kSystemMenuSettingsIcon,
+          IDS_ASH_STATUS_TRAY_SETTINGS);
+    } else {
+      gfx::ImageSkia help_icon =
+          gfx::CreateVectorIcon(kSystemMenuHelpIcon, kMenuIconColor);
+      gfx::ImageSkia settings_icon =
+          gfx::CreateVectorIcon(kSystemMenuSettingsIcon, kMenuIconColor);
 
-    gfx::ImageSkia settings_icon =
-        gfx::CreateVectorIcon(kSystemMenuSettingsIcon, kMenuIconColor);
-    gfx::ImageSkia help_icon =
-        gfx::CreateVectorIcon(kSystemMenuHelpIcon, kMenuIconColor);
+      auto* help_button = new ash::TrayPopupHeaderButton(
+          this, help_icon, IDS_ASH_STATUS_TRAY_HELP);
+      help_button->SetTooltipText(
+          l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_HELP));
+      help_button_ = help_button;
 
-    help_button_ = new ash::TrayPopupHeaderButton(this, help_icon,
-                                                  IDS_ASH_STATUS_TRAY_HELP);
-    help_button_->SetTooltipText(
-        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_HELP));
+      auto* settings_button = new ash::TrayPopupHeaderButton(
+          this, settings_icon, IDS_ASH_STATUS_TRAY_SETTINGS);
+      settings_button->SetTooltipText(
+          l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SETTINGS));
+      settings_button_ = settings_button;
+    }
+
     AddChildView(help_button_);
-
-    settings_button_ = new ash::TrayPopupHeaderButton(
-        this, settings_icon, IDS_ASH_STATUS_TRAY_SETTINGS);
-    settings_button_->SetTooltipText(
-        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SETTINGS));
     AddChildView(settings_button_);
   }
 
@@ -145,8 +143,8 @@ class TitleView : public views::View, public views::ButtonListener {
 
   // Unowned pointers to button views so we can determine which button was
   // clicked.
-  ash::TrayPopupHeaderButton* settings_button_;
-  ash::TrayPopupHeaderButton* help_button_;
+  views::View* settings_button_;
+  views::View* help_button_;
   PaletteTray* palette_tray_;
 
   DISALLOW_COPY_AND_ASSIGN(TitleView);
@@ -184,13 +182,6 @@ PaletteTray::PaletteTray(WmShelf* wm_shelf)
         base::Bind(&PaletteTray::OnStylusStateChanged,
                    weak_factory_.GetWeakPtr()));
   }
-
-  // OnPaletteEnabledPrefChanged will get called with the initial pref value,
-  // which will take care of showing the palette.
-  palette_enabled_subscription_ =
-      WmShell::Get()->palette_delegate()->AddPaletteEnableListener(
-          base::Bind(&PaletteTray::OnPaletteEnabledPrefChanged,
-                     weak_factory_.GetWeakPtr()));
 }
 
 PaletteTray::~PaletteTray() {
@@ -393,6 +384,15 @@ void PaletteTray::AnchorUpdated() {
     bubble_->bubble_view()->UpdateBubble();
 }
 
+void PaletteTray::Initialize() {
+  // OnPaletteEnabledPrefChanged will get called with the initial pref value,
+  // which will take care of showing the palette.
+  palette_enabled_subscription_ =
+      WmShell::Get()->palette_delegate()->AddPaletteEnableListener(
+          base::Bind(&PaletteTray::OnPaletteEnabledPrefChanged,
+                     weak_factory_.GetWeakPtr()));
+}
+
 void PaletteTray::SetIconBorderForShelfAlignment() {
   // TODO(tdanderson): Ensure PaletteTray follows material design specs. See
   // crbug.com/630464.
@@ -409,7 +409,7 @@ void PaletteTray::UpdateTrayIcon() {
   icon_->SetImage(CreateVectorIcon(
       palette_tool_manager_->GetActiveTrayIcon(
           palette_tool_manager_->GetActiveTool(ash::PaletteGroup::MODE)),
-      kShelfIconSize, kShelfIconColor));
+      kTrayIconSize, kShelfIconColor));
 }
 
 void PaletteTray::OnStylusStateChanged(ui::StylusState stylus_state) {
@@ -436,6 +436,8 @@ void PaletteTray::OnStylusStateChanged(ui::StylusState stylus_state) {
 }
 
 void PaletteTray::OnPaletteEnabledPrefChanged(bool enabled) {
+  is_palette_enabled_ = enabled;
+
   if (!enabled) {
     SetVisible(false);
     palette_tool_manager_->DisableActiveTool(PaletteGroup::MODE);
@@ -445,7 +447,7 @@ void PaletteTray::OnPaletteEnabledPrefChanged(bool enabled) {
 }
 
 void PaletteTray::UpdateIconVisibility() {
-  SetVisible(IsInUserSession());
+  SetVisible(is_palette_enabled_ && IsInUserSession());
 }
 
 }  // namespace ash

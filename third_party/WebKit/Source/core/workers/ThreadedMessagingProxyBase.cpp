@@ -6,6 +6,7 @@
 
 #include "bindings/core/v8/SourceLocation.h"
 #include "core/dom/Document.h"
+#include "core/dom/ExecutionContextTask.h"
 #include "core/frame/Deprecation.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/workers/ParentFrameTaskRunners.h"
@@ -62,7 +63,7 @@ void ThreadedMessagingProxyBase::initializeWorkerThread(
 
 void ThreadedMessagingProxyBase::postTaskToWorkerGlobalScope(
     const WebTraceLocation& location,
-    std::unique_ptr<ExecutionContextTask> task) {
+    std::unique_ptr<WTF::CrossThreadClosure> task) {
   if (m_askedToTerminate)
     return;
 
@@ -74,9 +75,12 @@ void ThreadedMessagingProxyBase::postTaskToLoader(
     const WebTraceLocation& location,
     std::unique_ptr<ExecutionContextTask> task) {
   DCHECK(getExecutionContext()->isDocument());
-  // TODO(hiroshige,yuryu): Make this not use ExecutionContextTask and use
-  // m_parentFrameTaskRunners->get(TaskType::Networking) instead.
-  getExecutionContext()->postTask(location, std::move(task));
+  m_parentFrameTaskRunners->get(TaskType::Networking)
+      ->postTask(BLINK_FROM_HERE,
+                 crossThreadBind(
+                     &ExecutionContextTask::performTaskIfContextIsValid,
+                     WTF::passed(std::move(task)),
+                     wrapCrossThreadWeakPersistent(getExecutionContext())));
 }
 
 void ThreadedMessagingProxyBase::countFeature(UseCounter::Feature feature) {
@@ -111,11 +115,11 @@ void ThreadedMessagingProxyBase::workerThreadCreated() {
 void ThreadedMessagingProxyBase::parentObjectDestroyed() {
   DCHECK(isParentContextThread());
 
-  m_parentFrameTaskRunners->get(TaskType::Internal)
+  m_parentFrameTaskRunners->get(TaskType::UnspecedTimer)
       ->postTask(
           BLINK_FROM_HERE,
           WTF::bind(&ThreadedMessagingProxyBase::parentObjectDestroyedInternal,
-                    unretained(this)));
+                    WTF::unretained(this)));
 }
 
 void ThreadedMessagingProxyBase::parentObjectDestroyedInternal() {

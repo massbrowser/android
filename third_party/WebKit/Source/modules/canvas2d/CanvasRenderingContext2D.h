@@ -139,7 +139,7 @@ class MODULES_EXPORT CanvasRenderingContext2D final
   void loseContext(LostContextMode) override;
   void didSetSurfaceSize() override;
 
-  void restoreCanvasMatrixClipStack(SkCanvas*) const override;
+  void restoreCanvasMatrixClipStack(PaintCanvas*) const override;
 
   // TaskObserver implementation
   void didProcessTask() override;
@@ -174,8 +174,8 @@ class MODULES_EXPORT CanvasRenderingContext2D final
 
   bool parseColorOrCurrentColor(Color&, const String& colorString) const final;
 
-  SkCanvas* drawingCanvas() const final;
-  SkCanvas* existingDrawingCanvas() const final;
+  PaintCanvas* drawingCanvas() const final;
+  PaintCanvas* existingDrawingCanvas() const final;
   void disableDeferral(DisableDeferralReason) final;
 
   AffineTransform baseTransform() const final;
@@ -196,6 +196,10 @@ class MODULES_EXPORT CanvasRenderingContext2D final
   void incrementFrameCount() { m_usageCounters.numFramesSinceReset++; }
 
   bool isPaintable() const final { return hasImageBuffer(); }
+
+  ColorBehavior drawImageColorBehavior() const final;
+
+  void willDrawImage(CanvasImageSource*) const final;
 
  private:
   friend class CanvasRenderingContext2DAutoRestoreSkCanvas;

@@ -28,6 +28,7 @@
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/ScriptLoader.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
@@ -37,10 +38,7 @@ namespace blink {
 
 ScriptRunner::ScriptRunner(Document* document)
     : m_document(document),
-      m_taskRunner(Platform::current()
-                       ->currentThread()
-                       ->scheduler()
-                       ->loadingTaskRunner()),
+      m_taskRunner(TaskRunnerHelper::get(TaskType::Networking, document)),
       m_numberOfInOrderScriptsWithPendingNotification(0),
       m_isSuspended(false) {
   DCHECK(document);
@@ -55,7 +53,7 @@ void ScriptRunner::queueScriptForExecution(ScriptLoader* scriptLoader,
   m_document->incrementLoadEventDelayCount();
   switch (executionType) {
     case Async:
-      m_pendingAsyncScripts.add(scriptLoader);
+      m_pendingAsyncScripts.insert(scriptLoader);
       break;
 
     case InOrder:

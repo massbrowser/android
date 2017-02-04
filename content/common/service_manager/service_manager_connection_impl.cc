@@ -15,6 +15,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/common/service_manager/embedded_service_runner.h"
 #include "content/public/common/connection_filter.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
@@ -212,6 +213,9 @@ class ServiceManagerConnectionImpl::IOThreadContext
   void RemoveConnectionFilterOnIOThread(int filter_id) {
     base::AutoLock lock(lock_);
     auto it = connection_filters_.find(filter_id);
+    // TODO(crbug.com/687247): This DCHECK is hit when the browser is shut down
+    // by the service manager (e.g. in response to an ash crash under mash).
+    // Figure out why.
     DCHECK(it != connection_filters_.end());
     connection_filters_.erase(it);
   }

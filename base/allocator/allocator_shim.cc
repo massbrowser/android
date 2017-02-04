@@ -39,18 +39,6 @@ bool g_call_new_handler_on_malloc_failure = false;
 subtle::Atomic32 g_new_handler_lock = 0;
 #endif
 
-// In theory this should be just base::ThreadChecker. But we can't afford
-// the luxury of a LazyInstance<ThreadChecker> here as it would cause a new().
-bool CalledOnValidThread() {
-  using subtle::Atomic32;
-  const Atomic32 kInvalidTID = static_cast<Atomic32>(kInvalidThreadId);
-  static Atomic32 g_tid = kInvalidTID;
-  Atomic32 cur_tid = static_cast<Atomic32>(PlatformThread::CurrentId());
-  Atomic32 prev_tid =
-      subtle::NoBarrier_CompareAndSwap(&g_tid, kInvalidTID, cur_tid);
-  return prev_tid == kInvalidTID || prev_tid == cur_tid;
-}
-
 inline size_t GetCachedPageSize() {
   static size_t pagesize = 0;
   if (!pagesize)
@@ -112,25 +100,35 @@ void* UncheckedAlloc(size_t size) {
 }
 
 void InsertAllocatorDispatch(AllocatorDispatch* dispatch) {
-  // Ensure this is always called on the same thread.
-  DCHECK(CalledOnValidThread());
+  // Loop in case of (an unlikely) race on setting the list head.
+  size_t kMaxRetries = 7;
+  for (size_t i = 0; i < kMaxRetries; ++i) {
+    const AllocatorDispatch* chain_head = GetChainHead();
+    dispatch->next = chain_head;
 
-  dispatch->next = GetChainHead();
+    // This function guarantees to be thread-safe w.r.t. concurrent
+    // insertions. It also has to guarantee that all the threads always
+    // see a consistent chain, hence the MemoryBarrier() below.
+    // InsertAllocatorDispatch() is NOT a fastpath, as opposite to malloc(), so
+    // we don't really want this to be a release-store with a corresponding
+    // acquire-load during malloc().
+    subtle::MemoryBarrier();
+    subtle::AtomicWord old_value =
+        reinterpret_cast<subtle::AtomicWord>(chain_head);
+    // Set the chain head to the new dispatch atomically. If we lose the race,
+    // the comparison will fail, and the new head of chain will be returned.
+    if (subtle::NoBarrier_CompareAndSwap(
+            &g_chain_head, old_value,
+            reinterpret_cast<subtle::AtomicWord>(dispatch)) == old_value) {
+      // Success.
+      return;
+    }
+  }
 
-  // This function does not guarantee to be thread-safe w.r.t. concurrent
-  // insertions, but still has to guarantee that all the threads always
-  // see a consistent chain, hence the MemoryBarrier() below.
-  // InsertAllocatorDispatch() is NOT a fastpath, as opposite to malloc(), so
-  // we don't really want this to be a release-store with a corresponding
-  // acquire-load during malloc().
-  subtle::MemoryBarrier();
-
-  subtle::NoBarrier_Store(&g_chain_head,
-                          reinterpret_cast<subtle::AtomicWord>(dispatch));
+  CHECK(false);  // Too many retries, this shouldn't happen.
 }
 
 void RemoveAllocatorDispatchForTesting(AllocatorDispatch* dispatch) {
-  DCHECK(CalledOnValidThread());
   DCHECK_EQ(GetChainHead(), dispatch);
   subtle::NoBarrier_Store(&g_chain_head,
                           reinterpret_cast<subtle::AtomicWord>(dispatch->next));
@@ -243,12 +241,35 @@ void ShimFree(void* address) {
   return chain_head->free_function(chain_head, address);
 }
 
+size_t ShimGetSizeEstimate(const void* address) {
+  const allocator::AllocatorDispatch* const chain_head = GetChainHead();
+  return chain_head->get_size_estimate_function(chain_head,
+                                                const_cast<void*>(address));
+}
+
+unsigned ShimBatchMalloc(size_t size, void** results, unsigned num_requested) {
+  const allocator::AllocatorDispatch* const chain_head = GetChainHead();
+  return chain_head->batch_malloc_function(chain_head, size, results,
+                                           num_requested);
+}
+
+void ShimBatchFree(void** to_be_freed, unsigned num_to_be_freed) {
+  const allocator::AllocatorDispatch* const chain_head = GetChainHead();
+  return chain_head->batch_free_function(chain_head, to_be_freed,
+                                         num_to_be_freed);
+}
+
+void ShimFreeDefiniteSize(void* ptr, size_t size) {
+  const allocator::AllocatorDispatch* const chain_head = GetChainHead();
+  return chain_head->free_definite_size_function(chain_head, ptr, size);
+}
+
 }  // extern "C"
 
-#if !defined(OS_WIN)
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
 // Cpp symbols (new / delete) should always be routed through the shim layer
-// except on Windows where the malloc intercept is deep enough that it also
-// catches the cpp calls.
+// except on Windows and macOS where the malloc intercept is deep enough that it
+// also catches the cpp calls.
 #include "base/allocator/allocator_shim_override_cpp_symbols.h"
 #endif
 
@@ -259,6 +280,9 @@ void ShimFree(void* address) {
 #elif defined(OS_WIN)
 // On Windows we use plain link-time overriding of the CRT symbols.
 #include "base/allocator/allocator_shim_override_ucrt_symbols_win.h"
+#elif defined(OS_MACOSX)
+#include "base/allocator/allocator_shim_default_dispatch_to_mac_zoned_malloc.h"
+#include "base/allocator/allocator_shim_override_mac_symbols.h"
 #else
 #include "base/allocator/allocator_shim_override_libc_symbols.h"
 #endif
@@ -268,6 +292,22 @@ void ShimFree(void* address) {
 // accidentally performed on the glibc heap instead of the tcmalloc one.
 #if defined(USE_TCMALLOC)
 #include "base/allocator/allocator_shim_override_glibc_weak_symbols.h"
+#endif
+
+#if defined(OS_MACOSX)
+namespace base {
+namespace allocator {
+void InitializeAllocatorShim() {
+  // Prepares the default dispatch. After the intercepted malloc calls have
+  // traversed the shim this will route them to the default malloc zone.
+  InitializeDefaultDispatchToMacAllocator();
+
+  // This replaces the default malloc zone, causing calls to malloc & friends
+  // from the codebase to be routed to ShimMalloc() above.
+  OverrideMacSymbols();
+}
+}  // namespace allocator
+}  // namespace base
 #endif
 
 // Cross-checks.

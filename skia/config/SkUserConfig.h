@@ -124,9 +124,6 @@
 #define SK_REF_CNT_MIXIN_INCLUDE "sk_ref_cnt_ext_release.h"
 #endif
 
-#define SK_SCALAR_IS_FLOAT
-#undef SK_SCALAR_IS_FIXED
-
 #define SK_MSCALAR_IS_FLOAT
 #undef SK_MSCALAR_IS_DOUBLE
 
@@ -193,17 +190,6 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 //
 // Remove these as we update our sites.
 //
-#ifndef    SK_SUPPORT_LEGACY_GETTOPDEVICE
-#   define SK_SUPPORT_LEGACY_GETTOPDEVICE
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_GETDEVICE
-#   define SK_SUPPORT_LEGACY_GETDEVICE
-#endif
-
-#ifndef SK_SUPPORT_LEGACY_CLIP_REGIONOPS
-#define SK_SUPPORT_LEGACY_CLIP_REGIONOPS
-#endif
 
 // Workaround for poor anisotropic mipmap quality,
 // pending Skia ripmap support.
@@ -220,16 +206,22 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_IGNORE_GPU_DITHER
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_EVAL_CUBIC
-#   define SK_SUPPORT_LEGACY_EVAL_CUBIC
+#ifndef    SK_DISABLE_COLOR_XFORM_PIPELINE
+#   define SK_DISABLE_COLOR_XFORM_PIPELINE
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_IMAGE_ENCODER_CLASS
-#   define SK_SUPPORT_LEGACY_IMAGE_ENCODER_CLASS
+#ifndef    SK_SUPPORT_LEGACY_BITMAP_SETPIXELREF
+#   define SK_SUPPORT_LEGACY_BITMAP_SETPIXELREF
 #endif
 
-#ifndef    SK_ANALYTIC_AA
-#   define SK_ANALYTIC_AA
+// Remove this after we fixed all the issues related to the new SDF algorithm
+// (https://codereview.chromium.org/1643143002)
+#ifndef    SK_USE_LEGACY_DISTANCE_FIELDS
+#   define SK_USE_LEGACY_DISTANCE_FIELDS
+#endif
+
+#ifndef    SK_SUPPORT_LEGACY_CLIPOP_EXOTIC_NAMES
+#   define SK_SUPPORT_LEGACY_CLIPOP_EXOTIC_NAMES
 #endif
 
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi
@@ -264,6 +256,10 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 
 // Enabling the screenspace AA tessellating path renderer needs rebaselines.
 #define SK_DISABLE_SCREENSPACE_TESS_AA_PATH_RENDERER
+
+#ifndef    SK_SUPPORT_LEGACY_AAA
+#   define SK_SUPPORT_LEGACY_AAA
+#endif
 
 // ===== End Chrome-specific definitions =====
 

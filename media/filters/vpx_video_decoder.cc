@@ -20,11 +20,13 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
 #include "base/sys_info.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -230,13 +232,9 @@ class VpxVideoDecoder::MemoryPool
 };
 
 VpxVideoDecoder::MemoryPool::MemoryPool() {
-  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-      this, "VpxVideoDecoder", base::ThreadTaskRunnerHandle::Get());
 }
 
 VpxVideoDecoder::MemoryPool::~MemoryPool() {
-  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
-      this);
 }
 
 VpxVideoDecoder::MemoryPool::VP9FrameBuffer*
@@ -397,8 +395,16 @@ void VpxVideoDecoder::DecodeBuffer(const scoped_refptr<DecoderBuffer>& buffer,
     return;
   }
 
+  bool decode_okay;
   scoped_refptr<VideoFrame> video_frame;
-  if (!VpxDecode(buffer, &video_frame)) {
+  if (config_.codec() == kCodecVP9) {
+    SCOPED_UMA_HISTOGRAM_TIMER("Media.VpxVideoDecoder.Vp9DecodeTime");
+    decode_okay = VpxDecode(buffer, &video_frame);
+  } else {
+    decode_okay = VpxDecode(buffer, &video_frame);
+  }
+
+  if (!decode_okay) {
     state_ = kError;
     bound_decode_cb.Run(DecodeStatus::DECODE_ERROR);
     return;
@@ -482,7 +488,12 @@ bool VpxVideoDecoder::ConfigureDecoder(const VideoDecoderConfig& config) {
           g_vpx_offload_thread.Pointer()->RequestOffloadThread();
     }
 
+    DCHECK(!memory_pool_);
     memory_pool_ = new MemoryPool();
+    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+        memory_pool_.get(), "VpxVideoDecoder",
+        base::ThreadTaskRunnerHandle::Get());
+
     if (vpx_codec_set_frame_buffer_functions(vpx_codec_,
                                              &MemoryPool::GetVP9FrameBuffer,
                                              &MemoryPool::ReleaseVP9FrameBuffer,
@@ -511,6 +522,8 @@ void VpxVideoDecoder::CloseDecoder() {
     vpx_codec_destroy(vpx_codec_);
     delete vpx_codec_;
     vpx_codec_ = nullptr;
+    base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+        memory_pool_.get());
     memory_pool_ = nullptr;
   }
   if (vpx_codec_alpha_) {

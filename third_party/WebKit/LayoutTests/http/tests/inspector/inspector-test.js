@@ -1,7 +1,8 @@
 if (window.GCController)
     GCController.collectAll();
-var initialize_InspectorTest = function() {
 
+var initialize_InspectorTest = function() {
+Protocol.InspectorBackend.Options.suppressRequestErrors = true;
 var results = [];
 
 function consoleOutputHook(messageType)
@@ -24,8 +25,8 @@ console.assert = function(condition, object)
 
 InspectorTest.startDumpingProtocolMessages = function()
 {
-    InspectorBackendClass.Connection.prototype._dumpProtocolMessage = testRunner.logToStderr.bind(testRunner);
-    InspectorBackendClass.Options.dumpInspectorProtocolMessages = 1;
+    Protocol.InspectorBackend.Connection.prototype._dumpProtocolMessage = testRunner.logToStderr.bind(testRunner);
+    Protocol.InspectorBackend.Options.dumpInspectorProtocolMessages = 1;
 }
 
 InspectorTest.completeTest = function()
@@ -319,10 +320,8 @@ InspectorTest.dumpObjectPropertyTreeElement = function(treeElement)
     }
 }
 
-InspectorTest.expandAndDumpEventListeners = function(eventListenersView, callback)
+InspectorTest.expandAndDumpEventListeners = function(eventListenersView, callback, force)
 {
-    InspectorTest.addSniffer(Components.EventListenersView.prototype, "_eventListenersArrivedForTest", listenersArrived);
-
     function listenersArrived()
     {
         var listenerTypes = eventListenersView._treeOutline.rootElement().children();
@@ -352,19 +351,28 @@ InspectorTest.expandAndDumpEventListeners = function(eventListenersView, callbac
         }
         callback();
     }
+
+    if (force)
+        listenersArrived();
+    else
+        InspectorTest.addSniffer(Components.EventListenersView.prototype, "_eventListenersArrivedForTest", listenersArrived);
 }
 
-InspectorTest.dumpNavigatorView = function(navigatorView)
+InspectorTest.dumpNavigatorView = function(navigatorView, dumpIcons)
 {
     dumpNavigatorTreeOutline(navigatorView._scriptsTree);
 
     function dumpNavigatorTreeElement(prefix, treeElement)
     {
-        var titleText;
-        if (treeElement.title instanceof Element)
-            titleText = treeElement.title.firstChild.textContent + " [mapped]";
-        else
-            titleText = treeElement.title;
+        var titleText = '';
+        if (treeElement._leadingIconsElement && dumpIcons) {
+            var icons = treeElement._leadingIconsElement.querySelectorAll('[is=ui-icon]');
+            icons = Array.prototype.slice.call(icons);
+            var iconTypes = icons.map(icon => icon._iconType);
+            if (iconTypes.length)
+                titleText = titleText + "[" + iconTypes.join(", ") + "] ";
+        }
+        titleText += treeElement.title;
         if (treeElement._nodeType === Sources.NavigatorView.Types.FileSystem || treeElement._nodeType === Sources.NavigatorView.Types.FileSystemFolder) {
             var hasMappedFiles = treeElement.listItemElement.classList.contains("has-mapped-files");
             if (!hasMappedFiles)
@@ -399,6 +407,51 @@ InspectorTest.dumpNavigatorViewInMode = function(view, mode)
     view._resetForTest();
     InspectorTest.addResult("-------- Setting mode: [" + mode + "]");
     InspectorTest.dumpNavigatorView(view);
+}
+
+InspectorTest.waitForUISourceCode = function(callback, url, projectType)
+{
+    function matches(uiSourceCode)
+    {
+        if (projectType && uiSourceCode.project().type() !== projectType)
+            return false;
+        if (!projectType && uiSourceCode.project().type() === Workspace.projectTypes.Service)
+            return false;
+        if (url && !uiSourceCode.url().endsWith(url))
+            return false;
+        return true;
+    }
+
+    for (var uiSourceCode of Workspace.workspace.uiSourceCodes()) {
+        if (url && matches(uiSourceCode)) {
+            callback(uiSourceCode);
+            return;
+        }
+    }
+
+    Workspace.workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCodeAdded);
+    function uiSourceCodeAdded(event)
+    {
+        if (!matches(event.data))
+            return;
+        Workspace.workspace.removeEventListener(Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCodeAdded);
+        callback(event.data);
+    }
+}
+
+InspectorTest.waitForUISourceCodeRemoved = function(callback)
+{
+    Workspace.workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeRemoved, uiSourceCodeRemoved);
+    function uiSourceCodeRemoved(event)
+    {
+        Workspace.workspace.removeEventListener(Workspace.Workspace.Events.UISourceCodeRemoved, uiSourceCodeRemoved);
+        callback(event.data);
+    }
+}
+
+InspectorTest.createMockTarget = function(name, capabilities, dontAttachToMain)
+{
+    return SDK.targetManager.createTarget(name, capabilities || SDK.Target.Capability.AllForTests, params => new SDK.StubConnection(params), dontAttachToMain ? null : InspectorTest.mainTarget);
 }
 
 InspectorTest.assertGreaterOrEqual = function(a, b, message)
@@ -1068,7 +1121,7 @@ function runTest(pixelTest, enableWatchDogWhileDebugging)
             "editor": "sources",
             "layers": "layers",
             "network": "network",
-            "profiler": "profiles",
+            "profiler": "heap_profiler",
             "resource-tree": "resources",
             "search": "sources",
             "security": "security",
@@ -1107,7 +1160,7 @@ function runTest(pixelTest, enableWatchDogWhileDebugging)
     testRunner.evaluateInWebInspector(initializeCallId, toEvaluate);
 
     if (window.debugTest)
-        test = "function() { window.test = " + test.toString() + "; InspectorTest.addResult = window._originalConsoleLog; InspectorTest.completeTest = function() {}; }";
+        test = "function() { Protocol.InspectorBackend.Options.suppressRequestErrors = false; window.test = " + test.toString() + "; InspectorTest.addResult = window._originalConsoleLog; InspectorTest.completeTest = function() {}; }";
     toEvaluate = "(" + runTestInFrontend + ")(" + test + ");";
     testRunner.evaluateInWebInspector(runTestCallId, toEvaluate);
 

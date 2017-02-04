@@ -15,7 +15,7 @@
 #include "base/rand_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner.h"
-#include "base/task_runner_util.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -57,7 +57,7 @@
 #include "ppapi/features/features.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 #include "chrome/browser/android/download/chrome_duplicate_download_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #endif
@@ -176,7 +176,7 @@ void CheckDownloadUrlDone(
 
 #endif  // FULL_SAFE_BROWSING
 
-// Called on the blocking pool to determine the MIME type for |path|.
+// Called asynchronously to determine the MIME type for |path|.
 std::string GetMimeType(const base::FilePath& path) {
   std::string mime_type;
   net::GetMimeTypeFromFile(path, &mime_type);
@@ -617,7 +617,7 @@ void ChromeDownloadManagerDelegate::PromptUserForDownloadPath(
     const base::FilePath& suggested_path,
     const DownloadTargetDeterminerDelegate::FileSelectedCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   content::WebContents* web_contents = download->GetWebContents();
   if (!web_contents) {
     callback.Run(base::FilePath());
@@ -662,7 +662,7 @@ void ChromeDownloadManagerDelegate::CheckDownloadUrl(
         service->IsSupportedDownload(*download, suggested_path);
     DVLOG(2) << __func__ << "() Start SB URL check for download = "
              << download->DebugString(false);
-    service->CheckDownloadUrl(*download,
+    service->CheckDownloadUrl(download,
                               base::Bind(&CheckDownloadUrlDone,
                                          callback,
                                          is_content_check_supported));
@@ -676,10 +676,9 @@ void ChromeDownloadManagerDelegate::GetFileMimeType(
     const base::FilePath& path,
     const GetFileMimeTypeCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskAndReplyWithResult(BrowserThread::GetBlockingPool(),
-                                   FROM_HERE,
-                                   base::Bind(&GetMimeType, path),
-                                   callback);
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, base::TaskTraits().MayBlock(), base::Bind(&GetMimeType, path),
+      callback);
 }
 
 #if defined(FULL_SAFE_BROWSING)

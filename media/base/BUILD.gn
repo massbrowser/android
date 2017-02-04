@@ -113,6 +113,8 @@ target(link_target_type, "base") {
     "channel_mixing_matrix.h",
     "container_names.cc",
     "container_names.h",
+    "content_decryption_module.cc",
+    "content_decryption_module.h",
     "data_buffer.cc",
     "data_buffer.h",
     "data_source.cc",
@@ -133,8 +135,6 @@ target(link_target_type, "base") {
     "demuxer.h",
     "demuxer_stream.cc",
     "demuxer_stream.h",
-    "demuxer_stream_provider.cc",
-    "demuxer_stream_provider.h",
     "djb2.cc",
     "djb2.h",
     "eme_constants.h",
@@ -149,6 +149,8 @@ target(link_target_type, "base") {
     "key_system_properties.h",
     "key_systems.cc",
     "key_systems.h",
+    "localized_strings.cc",
+    "localized_strings.h",
     "loopback_audio_converter.cc",
     "loopback_audio_converter.h",
     "media.cc",
@@ -157,8 +159,6 @@ target(link_target_type, "base") {
     "media_client.h",
     "media_content_type.cc",
     "media_content_type.h",
-    "media_keys.cc",
-    "media_keys.h",
     "media_log.cc",
     "media_log.h",
     "media_log_event.h",
@@ -166,8 +166,8 @@ target(link_target_type, "base") {
     "media_observer.h",
     "media_permission.cc",
     "media_permission.h",
-    "media_resources.cc",
-    "media_resources.h",
+    "media_resource.cc",
+    "media_resource.h",
     "media_switches.cc",
     "media_switches.h",
     "media_track.cc",
@@ -273,6 +273,7 @@ target(link_target_type, "base") {
   defines = []
   public_deps = [
     "//ppapi/features",
+    "//ui/gfx:color_space",
   ]
   deps = [
     "//base/third_party/dynamic_annotations:dynamic_annotations",
@@ -363,8 +364,8 @@ static_library("test_support") {
     "fake_audio_renderer_sink.h",
     "fake_demuxer_stream.cc",
     "fake_demuxer_stream.h",
-    "fake_media_resources.cc",
-    "fake_media_resources.h",
+    "fake_localized_strings.cc",
+    "fake_localized_strings.h",
     "fake_single_thread_task_runner.cc",
     "fake_single_thread_task_runner.h",
     "fake_text_track_stream.cc",
@@ -449,7 +450,6 @@ source_set("unit_tests") {
     "text_ranges_unittest.cc",
     "text_renderer_unittest.cc",
     "time_delta_interpolator_unittest.cc",
-    "user_input_monitor_unittest.cc",
     "vector_math_unittest.cc",
     "video_codecs_unittest.cc",
     "video_decoder_config_unittest.cc",
@@ -493,6 +493,9 @@ source_set("unit_tests") {
 
   if (current_cpu == "x86" || current_cpu == "x64") {
     sources += [ "simd/convert_rgb_to_yuv_unittest.cc" ]
+  }
+  if (is_linux || is_win) {
+    sources += [ "keyboard_event_counter_unittest.cc" ]
   }
 }
 

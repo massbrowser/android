@@ -31,7 +31,6 @@
 
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/Node.h"
@@ -59,7 +58,7 @@ static Node* selectionShadowAncestor(LocalFrame* frame) {
 }
 
 DOMSelection::DOMSelection(const TreeScope* treeScope)
-    : DOMWindowProperty(treeScope->rootNode().document().frame()),
+    : ContextClient(treeScope->rootNode().document().frame()),
       m_treeScope(treeScope) {}
 
 void DOMSelection::clearTreeScope() {
@@ -272,8 +271,17 @@ void DOMSelection::setBaseAndExtent(Node* baseNode,
     return;
   }
 
-  if (!baseNode || !extentNode)
+  // TODO(editing-dev): Behavior on where base or extent is null is still
+  // under discussion: https://github.com/w3c/selection-api/issues/72
+  if (!baseNode) {
     UseCounter::count(frame(), UseCounter::SelectionSetBaseAndExtentNull);
+    frame()->selection().clear();
+    return;
+  }
+  if (!extentNode) {
+    UseCounter::count(frame(), UseCounter::SelectionSetBaseAndExtentNull);
+    extentOffset = 0;
+  }
 
   if (!isValidForPosition(baseNode) || !isValidForPosition(extentNode))
     return;
@@ -488,6 +496,7 @@ void DOMSelection::addRange(Range* newRange) {
   // really do the same, since we don't support discontiguous selection. Further
   // discussions at
   // <https://code.google.com/p/chromium/issues/detail?id=353069>.
+  UseCounter::count(frame(), UseCounter::SelectionAddRangeIntersect);
 
   Range* start = originalRange->compareBoundaryPoints(
                      Range::kStartToStart, newRange, ASSERT_NO_EXCEPTION) < 0
@@ -558,7 +567,7 @@ bool DOMSelection::containsNode(const Node* n, bool allowPartial) const {
   const Position startPosition =
       selectedRange.startPosition().toOffsetInAnchor();
   const Position endPosition = selectedRange.endPosition().toOffsetInAnchor();
-  TrackExceptionState exceptionState;
+  DummyExceptionStateForTesting exceptionState;
   bool nodeFullySelected =
       Range::compareBoundaryPoints(
           parentNode, nodeIndex, startPosition.computeContainerNode(),
@@ -609,7 +618,9 @@ String DOMSelection::toString() {
 
   const EphemeralRange range =
       frame()->selection().selection().toNormalizedEphemeralRange();
-  return plainText(range, TextIteratorForSelectionToString);
+  return plainText(
+      range,
+      TextIteratorBehavior::Builder().setForSelectionToString(true).build());
 }
 
 Node* DOMSelection::shadowAdjustedNode(const Position& position) const {
@@ -660,7 +671,7 @@ void DOMSelection::addConsoleError(const String& message) {
 
 DEFINE_TRACE(DOMSelection) {
   visitor->trace(m_treeScope);
-  DOMWindowProperty::trace(visitor);
+  ContextClient::trace(visitor);
 }
 
 }  // namespace blink

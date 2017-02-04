@@ -5,19 +5,19 @@
 package org.chromium.chrome.browser.physicalweb;
 
 import android.app.Instrumentation.ActivityMonitor;
+import android.bluetooth.BluetoothDevice;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
+import android.support.test.filters.SmallTest;
 import android.test.InstrumentationTestCase;
-import android.test.suitebuilder.annotation.SmallTest;
 import android.view.View;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
-import org.chromium.chrome.test.util.browser.notifications.MockNotificationManagerProxy;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TestTouchUtils;
@@ -50,7 +50,7 @@ public class ListUrlsActivityTest extends InstrumentationTestCase {
             super.startActivity(intent);
         }
 
-        public void waitForStartActivity(long timeout) throws InterruptedException {
+        public void waitForStartActivity(long timeout) {
             CriteriaHelper.pollInstrumentationThread(new Criteria() {
                 @Override
                 public boolean isSatisfied() {
@@ -70,7 +70,6 @@ public class ListUrlsActivityTest extends InstrumentationTestCase {
         urlManager.clearAllUrls();
         mMockPwsClient = new MockPwsClient();
         urlManager.overridePwsClientForTesting(mMockPwsClient);
-        urlManager.overrideNotificationManagerForTesting(new MockNotificationManagerProxy());
     }
 
     @SmallTest
@@ -82,7 +81,8 @@ public class ListUrlsActivityTest extends InstrumentationTestCase {
         assertTrue(prefsManager.isPhysicalWebEnabled());
 
         // Add URLs.
-        addUrl(URL, TITLE, DESC);
+        String deviceAddress = "00:11:22:33:AA:BB";
+        addUrl(new UrlInfo(URL).setDeviceAddress(deviceAddress), TITLE, DESC);
 
         // Launch the Activity.
         ListUrlsActivity listActivity = launchActivity();
@@ -101,7 +101,11 @@ public class ListUrlsActivityTest extends InstrumentationTestCase {
 
         // Test the fired intent.
         assertEquals(1, testContextWrapper.startedIntents.size());
-        assertEquals(URL, testContextWrapper.startedIntents.get(0).getDataString());
+        Intent intent = testContextWrapper.startedIntents.get(0);
+        assertEquals(URL, intent.getDataString());
+        assertTrue(intent.hasExtra(BluetoothDevice.EXTRA_DEVICE));
+        BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+        assertEquals(deviceAddress, device.getAddress());
     }
 
     @SmallTest
@@ -239,12 +243,16 @@ public class ListUrlsActivityTest extends InstrumentationTestCase {
         assertEquals(0, entries.size());
     }
 
-    public void addUrl(String url, String title, String desc) {
+    private void addUrl(String url, String title, String desc) {
+        addUrl(new UrlInfo(url), title, desc);
+    }
+
+    private void addUrl(UrlInfo urlInfo, String title, String desc) {
         ArrayList<PwsResult> results = new ArrayList<>();
-        results.add(new PwsResult(url, url, null, title, desc, null));
+        results.add(new PwsResult(urlInfo.getUrl(), urlInfo.getUrl(), null, title, desc, null));
         mMockPwsClient.addPwsResults(results);
         mMockPwsClient.addPwsResults(results);
-        UrlManager.getInstance().addUrl(new UrlInfo(url));
+        UrlManager.getInstance().addUrl(urlInfo);
         getInstrumentation().waitForIdleSync();
     }
 

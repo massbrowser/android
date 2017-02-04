@@ -36,6 +36,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "ash/shell.h"
+#include "chrome/browser/media/public_session_media_access_handler.h"
+#include "chrome/browser/media/webrtc/public_session_tab_capture_access_handler.h"
 #endif  // defined(OS_CHROMEOS)
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -84,9 +86,19 @@ MediaCaptureDevicesDispatcher::MediaCaptureDevicesDispatcher()
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
+#if defined(OS_CHROMEOS)
+  // Wrapper around ExtensionMediaAccessHandler used in Public Sessions.
+  media_access_handlers_.push_back(new PublicSessionMediaAccessHandler());
+#else
   media_access_handlers_.push_back(new ExtensionMediaAccessHandler());
+#endif
   media_access_handlers_.push_back(new DesktopCaptureAccessHandler());
+#if defined(OS_CHROMEOS)
+  // Wrapper around TabCaptureAccessHandler used in Public Sessions.
+  media_access_handlers_.push_back(new PublicSessionTabCaptureAccessHandler());
+#else
   media_access_handlers_.push_back(new TabCaptureAccessHandler());
+#endif
 #endif
   media_access_handlers_.push_back(new PermissionBubbleMediaAccessHandler());
 }
@@ -220,6 +232,19 @@ void MediaCaptureDevicesDispatcher::GetDefaultDevicesForProfile(
     if (device)
       devices->push_back(*device);
   }
+}
+
+std::string MediaCaptureDevicesDispatcher::GetDefaultDeviceIDForProfile(
+    Profile* profile,
+    content::MediaStreamType type) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  PrefService* prefs = profile->GetPrefs();
+  if (type == content::MEDIA_DEVICE_AUDIO_CAPTURE)
+    return prefs->GetString(prefs::kDefaultAudioCaptureDevice);
+  else if (type == content::MEDIA_DEVICE_VIDEO_CAPTURE)
+    return prefs->GetString(prefs::kDefaultVideoCaptureDevice);
+  else
+    return std::string();
 }
 
 const content::MediaStreamDevice*

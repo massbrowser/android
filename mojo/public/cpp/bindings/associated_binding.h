@@ -17,7 +17,6 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/cpp/bindings/associated_group.h"
-#include "mojo/public/cpp/bindings/associated_group_controller.h"
 #include "mojo/public/cpp/bindings/associated_interface_request.h"
 #include "mojo/public/cpp/bindings/connection_error_callback.h"
 #include "mojo/public/cpp/bindings/interface_endpoint_client.h"
@@ -109,11 +108,6 @@ class AssociatedBinding {
         std::move(handle), &stub_,
         base::WrapUnique(new typename Interface::RequestValidator_()),
         Interface::HasSyncMethods_, std::move(runner), Interface::Version_));
-
-    if (Interface::PassesAssociatedKinds_) {
-      stub_.serialization_context()->group_controller =
-          endpoint_client_->group_controller();
-    }
   }
 
   // Adds a message filter to be notified of each incoming message before
@@ -127,15 +121,13 @@ class AssociatedBinding {
   // Closes the associated interface. Puts this object into a state where it can
   // be rebound.
   void Close() {
-    DCHECK(endpoint_client_);
     endpoint_client_.reset();
   }
 
   // Similar to the method above, but also specifies a disconnect reason.
   void CloseWithReason(uint32_t custom_reason, const std::string& description) {
-    DCHECK(endpoint_client_);
-    endpoint_client_->control_message_proxy()->SendDisconnectReason(
-        custom_reason, description);
+    if (endpoint_client_)
+      endpoint_client_->CloseWithReason(custom_reason, description);
     Close();
   }
 

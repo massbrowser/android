@@ -6,7 +6,7 @@ package org.chromium.android_webview.test;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 import android.view.View;
 
 import org.chromium.android_webview.AwContents;
@@ -464,8 +464,8 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
         // Make sure we can't hit these values simply as a result of scrolling.
         assert (maxScrollXPix % dragStepSize) != 0;
         assert (maxScrollYPix % dragStepSize) != 0;
-        final int maxScrollXCss = (int) Math.round(maxScrollXPix / deviceDIPScale);
-        final int maxScrollYCss = (int) Math.round(maxScrollYPix / deviceDIPScale);
+        final int maxScrollXCss = (int) Math.floor(maxScrollXPix / deviceDIPScale);
+        final int maxScrollYCss = (int) Math.floor(maxScrollYPix / deviceDIPScale);
 
         setMaxScrollOnMainSync(testContainerView, maxScrollXPix, maxScrollYPix);
 

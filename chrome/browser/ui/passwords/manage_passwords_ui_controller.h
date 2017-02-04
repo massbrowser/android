@@ -94,7 +94,7 @@ class ManagePasswordsUIController
       const override;
   void OnBubbleShown() override;
   void OnBubbleHidden() override;
-  void OnNoInteractionOnUpdate() override;
+  void OnNoInteraction() override;
   void OnNopeUpdateClicked() override;
   void NeverSavePassword() override;
   void SavePassword() override;
@@ -102,7 +102,6 @@ class ManagePasswordsUIController
   void ChooseCredential(
       const autofill::PasswordForm& form,
       password_manager::CredentialType credential_type) override;
-  void NavigateToExternalPasswordManager() override;
   void NavigateToSmartLockHelpPage() override;
   void NavigateToPasswordManagerSettingsPage() override;
   void NavigateToChromeSignIn() override;
@@ -141,9 +140,8 @@ class ManagePasswordsUIController
   }
 
   // content::WebContentsObserver:
-  void DidNavigateMainFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
   void WasHidden() override;
 
  private:

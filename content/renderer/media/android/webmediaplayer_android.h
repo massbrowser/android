@@ -37,7 +37,6 @@ class SingleThreadTaskRunner;
 }
 
 namespace blink {
-class WebContentDecryptionModule;
 class WebFrame;
 class WebMediaPlayerClient;
 class WebMediaPlayerEncryptedMediaClient;
@@ -83,7 +82,7 @@ class WebMediaPlayerAndroid
       blink::WebFrame* frame,
       blink::WebMediaPlayerClient* client,
       blink::WebMediaPlayerEncryptedMediaClient* encrypted_client,
-      base::WeakPtr<media::WebMediaPlayerDelegate> delegate,
+      media::WebMediaPlayerDelegate* delegate,
       RendererMediaPlayerManager* player_manager,
       scoped_refptr<StreamTextureFactory> factory,
       int frame_id,
@@ -126,12 +125,10 @@ class WebMediaPlayerAndroid
   // https://code.google.com/p/skia/issues/detail?id=1189
   void paint(blink::WebCanvas* canvas,
              const blink::WebRect& rect,
-             SkPaint&) override;
+             cc::PaintFlags&) override;
 
   bool copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface* gl,
                                          unsigned int texture,
-                                         unsigned int internal_format,
-                                         unsigned int type,
                                          bool premultiply_alpha,
                                          bool flip_y) override;
 
@@ -215,9 +212,10 @@ class WebMediaPlayerAndroid
   void SuspendAndReleaseResources() override;
 
   // WebMediaPlayerDelegate::Observer implementation.
-  void OnHidden() override;
-  void OnShown() override;
-  bool OnSuspendRequested(bool must_suspend) override;
+  void OnFrameHidden() override;
+  void OnFrameClosed() override;
+  void OnFrameShown() override;
+  void OnIdleTimeout() override;
   void OnPlay() override;
   void OnPause() override;
   void OnVolumeMultiplierUpdate(double multiplier) override;
@@ -279,7 +277,13 @@ class WebMediaPlayerAndroid
   // |delegate_id_|; an id provided after registering with the delegate.  The
   // WebMediaPlayer may also receive directives (play, pause) from the delegate
   // via the WebMediaPlayerDelegate::Observer interface after registration.
-  base::WeakPtr<media::WebMediaPlayerDelegate> delegate_;
+  //
+  // NOTE: HTMLMediaElement is a Blink::SuspendableObject, and will receive a
+  // call to contextDestroyed() when Blink::Document::shutdown() is called.
+  // Document::shutdown() is called before the frame detaches (and before the
+  // frame is destroyed). RenderFrameImpl owns |delegate_| and is guaranteed
+  // to outlive |this|; thus it is safe to store |delegate_| as a raw pointer.
+  media::WebMediaPlayerDelegate* delegate_;
   int delegate_id_;
 
   // Callback responsible for determining if loading of media should be deferred

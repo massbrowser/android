@@ -33,7 +33,7 @@
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/process_type.h"
+#include "content/public/common/previews_state.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -96,7 +96,6 @@ class RecordingResourceMessageFilter : public ResourceMessageFilter {
                                  net::URLRequestContext* request_context)
       : ResourceMessageFilter(
             0,
-            PROCESS_TYPE_RENDERER,
             nullptr,
             nullptr,
             nullptr,
@@ -105,6 +104,7 @@ class RecordingResourceMessageFilter : public ResourceMessageFilter {
                        base::Unretained(this))),
         resource_context_(resource_context),
         request_context_(request_context) {
+    InitializeForTest();
     set_peer_process_for_testing(base::Process::Current());
   }
 
@@ -165,8 +165,7 @@ class AsyncResourceHandlerTest : public ::testing::Test,
     filter_ =
         new RecordingResourceMessageFilter(resource_context_.get(), &context_);
     ResourceRequestInfoImpl* info = new ResourceRequestInfoImpl(
-        PROCESS_TYPE_RENDERER,                 // process_type
-        0,                                     // child_id
+        filter_->requester_info_for_test(),
         0,                                     // route_id
         -1,                                    // frame_tree_node_id
         0,                                     // origin_pid
@@ -187,10 +186,9 @@ class AsyncResourceHandlerTest : public ::testing::Test,
         blink::WebReferrerPolicyDefault,       // referrer_policy
         blink::WebPageVisibilityStateVisible,  // visibility_state
         resource_context_.get(),               // context
-        filter_->GetWeakPtr(),                 // filter
         false,                                 // report_raw_headers
         true,                                  // is_async
-        false,                                 // is_using_lofi
+        PREVIEWS_OFF,                          // previews_state
         std::string(),                         // original_headers
         nullptr,                               // body
         false);                                // initiated_in_secure_context
@@ -262,8 +260,6 @@ TEST_F(AsyncResourceHandlerTest, OneChunkLengths) {
 
   int encoded_data_length = std::get<3>(params);
   EXPECT_EQ(kDataSize, encoded_data_length);
-  int encoded_body_length = std::get<4>(params);
-  EXPECT_EQ(kDataSize, encoded_body_length);
 
   ASSERT_EQ(ResourceMsg_RequestComplete::ID, messages[3]->type());
   ResourceMsg_RequestComplete::Param completion_params;
@@ -294,8 +290,6 @@ TEST_F(AsyncResourceHandlerTest, InlinedChunkLengths) {
 
   int encoded_data_length = std::get<2>(params);
   EXPECT_EQ(kDataSize, encoded_data_length);
-  int encoded_body_length = std::get<3>(params);
-  EXPECT_EQ(kDataSize, encoded_body_length);
 
   ASSERT_EQ(ResourceMsg_RequestComplete::ID, messages[2]->type());
   ResourceMsg_RequestComplete::Param completion_params;
@@ -320,16 +314,12 @@ TEST_F(AsyncResourceHandlerTest, TwoChunksLengths) {
 
   int encoded_data_length = std::get<3>(params);
   EXPECT_EQ(32768, encoded_data_length);
-  int encoded_body_length = std::get<4>(params);
-  EXPECT_EQ(32768, encoded_body_length);
 
   ASSERT_EQ(ResourceMsg_DataReceived::ID, messages[3]->type());
   ResourceMsg_DataReceived::Read(messages[3].get(), &params);
 
   encoded_data_length = std::get<3>(params);
   EXPECT_EQ(32768, encoded_data_length);
-  encoded_body_length = std::get<4>(params);
-  EXPECT_EQ(32768, encoded_body_length);
 
   ASSERT_EQ(ResourceMsg_RequestComplete::ID, messages[4]->type());
   ResourceMsg_RequestComplete::Param completion_params;

@@ -4,6 +4,9 @@
 
 Components.JavaScriptAutocomplete = {};
 
+/** @typedef {{title:(string|undefined), items:Array<string>}} */
+Components.JavaScriptAutocomplete.CompletionGroup;
+
 /**
  * @param {string} text
  * @param {string} query
@@ -11,14 +14,30 @@ Components.JavaScriptAutocomplete = {};
  * @return {!Promise<!UI.SuggestBox.Suggestions>}
  */
 Components.JavaScriptAutocomplete.completionsForTextInCurrentContext = function(text, query, force) {
+  var clippedExpression = Components.JavaScriptAutocomplete._clipExpression(text, true);
+  var mapCompletionsPromise = Components.JavaScriptAutocomplete._mapCompletions(text, query);
+  return Components.JavaScriptAutocomplete.completionsForExpression(clippedExpression, query, force)
+      .then(completions => mapCompletionsPromise.then(mapCompletions => mapCompletions.concat(completions)));
+};
+
+/**
+ * @param {string} text
+ * @param {boolean=} allowEndingBracket
+ * @return {string}
+ */
+Components.JavaScriptAutocomplete._clipExpression = function(text, allowEndingBracket) {
   var index;
-  var stopChars = new Set(' =:({;,!+-*/&|^<>`'.split(''));
+  var stopChars = new Set('=:({;,!+-*/&|^<>`'.split(''));
+  var whiteSpaceChars = new Set(' \r\n\t'.split(''));
+  var continueChars = new Set('[. \r\n\t'.split(''));
+
   for (index = text.length - 1; index >= 0; index--) {
-    // Pass less stop characters to rangeOfWord so the range will be a more complete expression.
     if (stopChars.has(text.charAt(index)))
       break;
+    if (whiteSpaceChars.has(text.charAt(index)) && !continueChars.has(text.charAt(index - 1)))
+      break;
   }
-  var clippedExpression = text.substring(index + 1);
+  var clippedExpression = text.substring(index + 1).trim();
   var bracketCount = 0;
 
   index = clippedExpression.length - 1;
@@ -27,25 +46,120 @@ Components.JavaScriptAutocomplete.completionsForTextInCurrentContext = function(
     if (character === ']')
       bracketCount++;
     // Allow an open bracket at the end for property completion.
-    if (character === '[' && index < clippedExpression.length - 1) {
+    if (character === '[' && (index < clippedExpression.length - 1 || !allowEndingBracket)) {
       bracketCount--;
       if (bracketCount < 0)
         break;
     }
     index--;
   }
-  clippedExpression = clippedExpression.substring(index + 1);
-
-  return Components.JavaScriptAutocomplete.completionsForExpression(clippedExpression, query, force);
+  return clippedExpression.substring(index + 1).trim();
 };
 
+/**
+ * @param {string} text
+ * @param {string} query
+ * @return {!Promise<!UI.SuggestBox.Suggestions>}
+ */
+Components.JavaScriptAutocomplete._mapCompletions = function(text, query) {
+  var mapMatch = text.match(/\.\s*(get|set|delete)\s*\(\s*$/);
+  var executionContext = UI.context.flavor(SDK.ExecutionContext);
+  if (!executionContext || !mapMatch)
+    return Promise.resolve([]);
+
+  var clippedExpression = Components.JavaScriptAutocomplete._clipExpression(text.substring(0, mapMatch.index));
+  var fulfill;
+  var promise = new Promise(x => fulfill = x);
+  executionContext.evaluate(clippedExpression, 'completion', true, true, false, false, false, evaluated);
+  return promise;
+
+  /**
+   * @param {?SDK.RemoteObject} result
+   * @param {!Protocol.Runtime.ExceptionDetails=} exceptionDetails
+   */
+  function evaluated(result, exceptionDetails) {
+    if (!result || !!exceptionDetails || result.subtype !== 'map') {
+      fulfill([]);
+      return;
+    }
+    result.getOwnPropertiesPromise(false).then(extractEntriesProperty);
+  }
+
+  /**
+   * @param {!{properties: ?Array<!SDK.RemoteObjectProperty>, internalProperties: ?Array<!SDK.RemoteObjectProperty>}} properties
+   */
+  function extractEntriesProperty(properties) {
+    var internalProperties = properties.internalProperties || [];
+    var entriesProperty = internalProperties.find(property => property.name === '[[Entries]]');
+    if (!entriesProperty) {
+      fulfill([]);
+      return;
+    }
+    entriesProperty.value.callFunctionJSONPromise(getEntries).then(keysObj => gotKeys(Object.keys(keysObj)));
+  }
+
+  /**
+   * @suppressReceiverCheck
+   * @this {!Array<{key:?, value:?}>}
+   * @return {!Object}
+   */
+  function getEntries() {
+    var result = {__proto__: null};
+    for (var i = 0; i < this.length; i++) {
+      if (typeof this[i].key === 'string')
+        result[this[i].key] = true;
+    }
+    return result;
+  }
+
+  /**
+   * @param {!Array<string>} rawKeys
+   */
+  function gotKeys(rawKeys) {
+    var caseSensitivePrefix = [];
+    var caseInsensitivePrefix = [];
+    var caseSensitiveAnywhere = [];
+    var caseInsensitiveAnywhere = [];
+    var quoteChar = '"';
+    if (query.startsWith('\''))
+      quoteChar = '\'';
+    var endChar = ')';
+    if (mapMatch[0].indexOf('set') !== -1)
+      endChar = ', ';
+
+    var sorter = rawKeys.length < 1000 ? String.naturalOrderComparator : undefined;
+    var keys = rawKeys.sort(sorter).map(key => quoteChar + key + quoteChar + endChar);
+
+    for (var key of keys) {
+      if (key.length < query.length)
+        continue;
+      if (query.length && key.toLowerCase().indexOf(query.toLowerCase()) === -1)
+        continue;
+      // Substitute actual newlines with newline characters. @see crbug.com/498421
+      var title = key.split('\n').join('\\n');
+
+      if (key.startsWith(query))
+        caseSensitivePrefix.push({title: title, priority: 4});
+      else if (key.toLowerCase().startsWith(query.toLowerCase()))
+        caseInsensitivePrefix.push({title: title, priority: 3});
+      else if (key.indexOf(query) !== -1)
+        caseSensitiveAnywhere.push({title: title, priority: 2});
+      else
+        caseInsensitiveAnywhere.push({title: title, priority: 1});
+    }
+    var suggestions = caseSensitivePrefix.concat(caseInsensitivePrefix, caseSensitiveAnywhere, caseInsensitiveAnywhere);
+    if (suggestions.length)
+      suggestions[0].subtitle = Common.UIString('Keys');
+    fulfill(suggestions);
+  }
+};
 
 /**
-   * @param {string} expressionString
-   * @param {string} query
-   * @param {boolean=} force
-   * @return {!Promise<!UI.SuggestBox.Suggestions>}
-   */
+ * @param {string} expressionString
+ * @param {string} query
+ * @param {boolean=} force
+ * @return {!Promise<!UI.SuggestBox.Suggestions>}
+ */
 Components.JavaScriptAutocomplete.completionsForExpression = function(expressionString, query, force) {
   var executionContext = UI.context.flavor(SDK.ExecutionContext);
   if (!executionContext)
@@ -54,7 +168,7 @@ Components.JavaScriptAutocomplete.completionsForExpression = function(expression
   var lastIndex = expressionString.length - 1;
 
   var dotNotation = (expressionString[lastIndex] === '.');
-  var bracketNotation = (expressionString[lastIndex] === '[');
+  var bracketNotation = (expressionString.length > 1 && expressionString[lastIndex] === '[');
 
   if (dotNotation || bracketNotation)
     expressionString = expressionString.substr(0, lastIndex);
@@ -65,13 +179,15 @@ Components.JavaScriptAutocomplete.completionsForExpression = function(expression
   if ((expressionString && !isNaN(expressionString)) || (!expressionString && query && !isNaN(query)))
     return Promise.resolve([]);
 
+
   if (!query && !expressionString && !force)
     return Promise.resolve([]);
 
-  var fufill;
-  var promise = new Promise(x => fufill = x);
-  if (!expressionString && executionContext.debuggerModel.selectedCallFrame())
-    executionContext.debuggerModel.selectedCallFrame().variableNames(receivedPropertyNames);
+  var fulfill;
+  var promise = new Promise(x => fulfill = x);
+  var selectedFrame = executionContext.debuggerModel.selectedCallFrame();
+  if (!expressionString && selectedFrame)
+    variableNamesInScopes(selectedFrame, receivedPropertyNames);
   else
     executionContext.evaluate(expressionString, 'completion', true, true, false, false, false, evaluated);
 
@@ -82,7 +198,7 @@ Components.JavaScriptAutocomplete.completionsForExpression = function(expression
    */
   function evaluated(result, exceptionDetails) {
     if (!result || !!exceptionDetails) {
-      fufill([]);
+      fulfill([]);
       return;
     }
 
@@ -95,7 +211,9 @@ Components.JavaScriptAutocomplete.completionsForExpression = function(expression
         return Promise.resolve(/** @type {?SDK.RemoteObject} */ (null));
       if (object.type !== 'object' || object.subtype !== 'proxy')
         return Promise.resolve(/** @type {?SDK.RemoteObject} */ (object));
-      return object.getOwnPropertiesPromise().then(extractTargetFromProperties).then(extractTarget);
+      return object.getOwnPropertiesPromise(false /* generatePreview */)
+          .then(extractTargetFromProperties)
+          .then(extractTarget);
     }
 
     /**
@@ -125,23 +243,32 @@ Components.JavaScriptAutocomplete.completionsForExpression = function(expression
       else
         object = this;
 
-      var resultSet = {__proto__: null};
+      var result = [];
       try {
         for (var o = object; o; o = Object.getPrototypeOf(o)) {
           if ((type === 'array' || type === 'typedarray') && o === object && ArrayBuffer.isView(o) && o.length > 9999)
             continue;
+
+          var group = {items: [], __proto__: null};
+          try {
+            if (typeof o === 'object' && o.constructor && o.constructor.name)
+              group.title = o.constructor.name;
+          } catch (ee) {
+            // we could break upon cross origin check.
+          }
+          result[result.length] = group;
           var names = Object.getOwnPropertyNames(o);
           var isArray = Array.isArray(o);
           for (var i = 0; i < names.length; ++i) {
             // Skip array elements indexes.
             if (isArray && /^[0-9]/.test(names[i]))
               continue;
-            resultSet[names[i]] = true;
+            group.items[group.items.length] = names[i];
           }
         }
       } catch (e) {
       }
-      return resultSet;
+      return result;
     }
 
     /**
@@ -164,6 +291,37 @@ Components.JavaScriptAutocomplete.completionsForExpression = function(expression
   }
 
   /**
+   * @param {!SDK.DebuggerModel.CallFrame} callFrame
+   * @param {function(!Array<!Components.JavaScriptAutocomplete.CompletionGroup>)} callback
+   */
+  function variableNamesInScopes(callFrame, callback) {
+    var result = [{items: ['this']}];
+
+    /**
+     * @param {string} name
+     * @param {?Array<!SDK.RemoteObjectProperty>} properties
+     */
+    function propertiesCollected(name, properties) {
+      var group = {title: name, items: []};
+      result.push(group);
+      for (var i = 0; properties && i < properties.length; ++i)
+        group.items.push(properties[i].name);
+      if (--pendingRequests === 0)
+        callback(result);
+    }
+
+    var scopeChain = callFrame.scopeChain();
+    var pendingRequests = scopeChain.length;
+    for (var i = 0; i < scopeChain.length; ++i) {
+      var scope = scopeChain[i];
+      var object = scope.object();
+      object.getAllProperties(
+          false /* accessorPropertiesOnly */, false /* generatePreview */,
+          propertiesCollected.bind(null, scope.typeName()));
+    }
+  }
+
+  /**
    * @param {?SDK.RemoteObject} result
    * @param {!Protocol.Runtime.ExceptionDetails=} exceptionDetails
    */
@@ -172,18 +330,19 @@ Components.JavaScriptAutocomplete.completionsForExpression = function(expression
     if (result && !exceptionDetails)
       receivedPropertyNames(/** @type {!Object} */ (result.value));
     else
-      fufill([]);
+      fulfill([]);
   }
 
   /**
-   * @param {?Object} propertyNames
+   * @param {?Object} object
    */
-  function receivedPropertyNames(propertyNames) {
+  function receivedPropertyNames(object) {
     executionContext.target().runtimeAgent().releaseObjectGroup('completion');
-    if (!propertyNames) {
-      fufill([]);
+    if (!object) {
+      fulfill([]);
       return;
     }
+    var propertyGroups = /** @type {!Array<!Components.JavaScriptAutocomplete.CompletionGroup>} */ (object);
     var includeCommandLineAPI = (!dotNotation && !bracketNotation);
     if (includeCommandLineAPI) {
       const commandLineAPI = [
@@ -208,11 +367,10 @@ Components.JavaScriptAutocomplete.completionsForExpression = function(expression
         '$$',
         '$x'
       ];
-      for (var i = 0; i < commandLineAPI.length; ++i)
-        propertyNames[commandLineAPI[i]] = true;
+      propertyGroups.push({items: commandLineAPI});
     }
-    fufill(Components.JavaScriptAutocomplete._completionsForQuery(
-        dotNotation, bracketNotation, expressionString, query, Object.keys(propertyNames)));
+    fulfill(Components.JavaScriptAutocomplete._completionsForQuery(
+        dotNotation, bracketNotation, expressionString, query, propertyGroups));
   }
 };
 
@@ -221,11 +379,11 @@ Components.JavaScriptAutocomplete.completionsForExpression = function(expression
    * @param {boolean} bracketNotation
    * @param {string} expressionString
    * @param {string} query
-   * @param {!Array.<string>} properties
+   * @param {!Array<!Components.JavaScriptAutocomplete.CompletionGroup>} propertyGroups
    * @return {!UI.SuggestBox.Suggestions}
    */
 Components.JavaScriptAutocomplete._completionsForQuery = function(
-    dotNotation, bracketNotation, expressionString, query, properties) {
+    dotNotation, bracketNotation, expressionString, query, propertyGroups) {
   if (bracketNotation) {
     if (query.length && query[0] === '\'')
       var quoteUsed = '\'';
@@ -239,46 +397,68 @@ Components.JavaScriptAutocomplete._completionsForQuery = function(
       'for',   'function', 'if',     'in',       'instanceof', 'new',    'return', 'switch', 'this',
       'throw', 'try',      'typeof', 'var',      'void',       'while',  'with'
     ];
-    properties = properties.concat(keywords);
+    propertyGroups.push({title: Common.UIString('keywords'), items: keywords});
   }
 
-  properties.sort();
+  var result = [];
+  var lastGroupTitle;
+  for (var group of propertyGroups) {
+    group.items.sort(itemComparator.bind(null, group.items.length > 1000));
+    var caseSensitivePrefix = [];
+    var caseInsensitivePrefix = [];
+    var caseSensitiveAnywhere = [];
+    var caseInsensitiveAnywhere = [];
 
-  var caseSensitivePrefix = [];
-  var caseInsensitivePrefix = [];
-  var caseSensitiveAnywhere = [];
-  var caseInsensitiveAnywhere = [];
-  for (var i = 0; i < properties.length; ++i) {
-    var property = properties[i];
+    for (var property of group.items) {
+      // Assume that all non-ASCII characters are letters and thus can be used as part of identifier.
+      if (!bracketNotation && !/^[a-zA-Z_$\u008F-\uFFFF][a-zA-Z0-9_$\u008F-\uFFFF]*$/.test(property))
+        continue;
 
-    // Assume that all non-ASCII characters are letters and thus can be used as part of identifier.
-    if (dotNotation && !/^[a-zA-Z_$\u008F-\uFFFF][a-zA-Z0-9_$\u008F-\uFFFF]*$/.test(property))
-      continue;
+      if (bracketNotation) {
+        if (!/^[0-9]+$/.test(property))
+          property = quoteUsed + property.escapeCharacters(quoteUsed + '\\') + quoteUsed;
+        property += ']';
+      }
 
-    if (bracketNotation) {
-      if (!/^[0-9]+$/.test(property))
-        property = quoteUsed + property.escapeCharacters(quoteUsed + '\\') + quoteUsed;
-      property += ']';
+      if (property.length < query.length)
+        continue;
+      if (query.length && property.toLowerCase().indexOf(query.toLowerCase()) === -1)
+        continue;
+      // Substitute actual newlines with newline characters. @see crbug.com/498421
+      var prop = property.split('\n').join('\\n');
+
+      if (property.startsWith(query))
+        caseSensitivePrefix.push({title: prop, priority: 4});
+      else if (property.toLowerCase().startsWith(query.toLowerCase()))
+        caseInsensitivePrefix.push({title: prop, priority: 3});
+      else if (property.indexOf(query) !== -1)
+        caseSensitiveAnywhere.push({title: prop, priority: 2});
+      else
+        caseInsensitiveAnywhere.push({title: prop, priority: 1});
     }
-
-    if (property.length < query.length)
-      continue;
-    if (query.length && property.toLowerCase().indexOf(query.toLowerCase()) === -1)
-      continue;
-    // Substitute actual newlines with newline characters. @see crbug.com/498421
-    var prop = property.split('\n').join('\\n');
-
-    if (property.startsWith(query))
-      caseSensitivePrefix.push(prop);
-    else if (property.toLowerCase().startsWith(query.toLowerCase()))
-      caseInsensitivePrefix.push(prop);
-    else if (property.indexOf(query) !== -1)
-      caseSensitiveAnywhere.push(prop);
-    else
-      caseInsensitiveAnywhere.push(prop);
+    var structuredGroup =
+        caseSensitivePrefix.concat(caseInsensitivePrefix, caseSensitiveAnywhere, caseInsensitiveAnywhere);
+    if (structuredGroup.length && group.title !== lastGroupTitle) {
+      structuredGroup[0].subtitle = group.title;
+      lastGroupTitle = group.title;
+    }
+    result = result.concat(structuredGroup);
   }
-  return caseSensitivePrefix.concat(caseInsensitivePrefix)
-      .concat(caseSensitiveAnywhere)
-      .concat(caseInsensitiveAnywhere)
-      .map(completion => ({title: completion}));
+  return result;
+
+  /**
+   * @param {boolean} naturalOrder
+   * @param {string} a
+   * @param {string} b
+   * @return {number}
+   */
+  function itemComparator(naturalOrder, a, b) {
+    var aStartsWithUnderscore = a.startsWith('_');
+    var bStartsWithUnderscore = b.startsWith('_');
+    if (aStartsWithUnderscore && !bStartsWithUnderscore)
+      return 1;
+    if (bStartsWithUnderscore && !aStartsWithUnderscore)
+      return -1;
+    return naturalOrder ? String.naturalOrderComparator(a, b) : a.localeCompare(b);
+  }
 };

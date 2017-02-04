@@ -215,7 +215,7 @@ void InspectorDOMDebuggerAgent::eventListenersInfoForTarget(
       if (handler.IsEmpty())
         continue;
       bool useCapture = listeners->at(k).capture();
-      eventInformation.append(V8EventListenerInfo(
+      eventInformation.push_back(V8EventListenerInfo(
           type, useCapture, listeners->at(k).passive(), listeners->at(k).once(),
           handler,
           createRemoveFunction(context, value, handler, type, useCapture)));
@@ -367,16 +367,16 @@ void InspectorDOMDebuggerAgent::didInsertDOMNode(Node* node) {
 void InspectorDOMDebuggerAgent::didRemoveDOMNode(Node* node) {
   if (m_domBreakpoints.size()) {
     // Remove subtree breakpoints.
-    m_domBreakpoints.remove(node);
+    m_domBreakpoints.erase(node);
     HeapVector<Member<Node>> stack(1, InspectorDOMAgent::innerFirstChild(node));
     do {
       Node* node = stack.back();
       stack.pop_back();
       if (!node)
         continue;
-      m_domBreakpoints.remove(node);
-      stack.append(InspectorDOMAgent::innerFirstChild(node));
-      stack.append(InspectorDOMAgent::innerNextSibling(node));
+      m_domBreakpoints.erase(node);
+      stack.push_back(InspectorDOMAgent::innerFirstChild(node));
+      stack.push_back(InspectorDOMAgent::innerNextSibling(node));
     } while (!stack.isEmpty());
   }
 }
@@ -452,7 +452,7 @@ Response InspectorDOMDebuggerAgent::removeDOMBreakpoint(
   if (mask)
     m_domBreakpoints.set(node, mask);
   else
-    m_domBreakpoints.remove(node);
+    m_domBreakpoints.erase(node);
 
   if ((rootBit & inheritableDOMBreakpointTypesMask) &&
       !(mask & (rootBit << domBreakpointDerivedTypeShift))) {
@@ -631,7 +631,7 @@ void InspectorDOMDebuggerAgent::updateSubtreeBreakpoints(Node* node,
   if (newMask)
     m_domBreakpoints.set(node, newMask);
   else
-    m_domBreakpoints.remove(node);
+    m_domBreakpoints.erase(node);
 
   uint32_t newRootMask = rootMask & ~newMask;
   if (!newRootMask)

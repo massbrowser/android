@@ -13,15 +13,9 @@
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/PassRefPtr.h"
 
-class SkCanvas;
-class SkPaint;
-
 namespace blink {
 
-class FloatPoint;
 class FloatRect;
-class FloatSize;
-class GraphicsContext;
 class ImageObserver;
 
 // A generated placeholder image that shows a translucent gray rectangle.
@@ -36,14 +30,15 @@ class PLATFORM_EXPORT PlaceholderImage final : public Image {
 
   IntSize size() const override { return m_size; }
 
-  sk_sp<SkImage> imageForCurrentFrame() override;
+  sk_sp<SkImage> imageForCurrentFrame(const ColorBehavior&) override;
 
-  void draw(SkCanvas*,
-            const SkPaint&,
+  void draw(PaintCanvas*,
+            const PaintFlags&,
             const FloatRect& destRect,
             const FloatRect& srcRect,
             RespectImageOrientationEnum,
-            ImageClampingMode) override;
+            ImageClampingMode,
+            const ColorBehavior&) override;
 
   void destroyDecodedData() override;
 

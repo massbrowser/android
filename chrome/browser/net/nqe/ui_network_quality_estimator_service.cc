@@ -39,10 +39,24 @@ std::string GetStringValueForVariationParamWithDefaultValue(
                                                       : it->second;
 }
 
-// Returns true if persistent caching has been enabled in the field trial.
-bool persistent_caching_enabled() {
+// Returns true if writing to the persistent cache has been enabled via field
+// trial.
+bool persistent_cache_writing_enabled() {
   return GetStringValueForVariationParamWithDefaultValue(
-             "persistent_caching_enabled", "false") == "true";
+             "persistent_cache_writing_enabled", "true") == "true";
+}
+
+// Returns true if reading from the persistent cache has been enabled via field
+// trial.
+bool persistent_cache_reading_enabled() {
+  if (GetStringValueForVariationParamWithDefaultValue(
+          "persistent_cache_reading_enabled", "false") != "true") {
+    return false;
+  }
+  // If reading from prefs is enabled, then writing to prefs must be enabled
+  // too.
+  DCHECK(persistent_cache_writing_enabled());
+  return true;
 }
 
 // PrefDelegateImpl writes the provided dictionary value to the network quality
@@ -59,17 +73,19 @@ class PrefDelegateImpl
 
   void SetDictionaryValue(const base::DictionaryValue& value) override {
     DCHECK(thread_checker_.CalledOnValidThread());
-    if (!persistent_caching_enabled())
+    if (!persistent_cache_writing_enabled())
       return;
 
     pref_service_->Set(path_, value);
-    UMA_HISTOGRAM_COUNTS_1000("NQE.Prefs.WriteCount", 1);
+    UMA_HISTOGRAM_EXACT_LINEAR("NQE.Prefs.WriteCount", 1, 2);
   }
 
-  const base::DictionaryValue& GetDictionaryValue() override {
+  std::unique_ptr<base::DictionaryValue> GetDictionaryValue() override {
     DCHECK(thread_checker_.CalledOnValidThread());
-    UMA_HISTOGRAM_COUNTS_1000("NQE.Prefs.ReadCount", 1);
-    return *pref_service_->GetDictionary(path_);
+    if (!persistent_cache_reading_enabled())
+      return base::WrapUnique(new base::DictionaryValue());
+    UMA_HISTOGRAM_EXACT_LINEAR("NQE.Prefs.ReadCount", 1, 2);
+    return pref_service_->GetDictionary(path_)->CreateDeepCopy();
   }
 
  private:

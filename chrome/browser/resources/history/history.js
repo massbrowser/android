@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-<include src="../uber/uber_utils.js">
-<include src="history_focus_manager.js">
+// <include src="../uber/uber_utils.js">
+// <include src="history_focus_manager.js">
 
 ///////////////////////////////////////////////////////////////////////////////
 // Globals:
@@ -631,8 +631,7 @@ HistoryModel.prototype.addResults = function(info, results) {
   $('loading-spinner').hidden = true;
   this.inFlight_ = false;
   this.isQueryFinished_ = info.finished;
-  this.queryStartTime = info.queryStartTime;
-  this.queryEndTime = info.queryEndTime;
+  this.queryInterval = info.queryInterval;
 
   var lastVisit = this.visits_.slice(-1)[0];
   var lastDay = lastVisit ? lastVisit.dateRelativeDay : null;
@@ -1579,10 +1578,8 @@ HistoryView.prototype.addTimeframeInterval_ = function(resultsFragment) {
       createElementWithClassName('h2', 'timeframe'));
   // TODO(sergiu): Figure the best way to show this for the first day of
   // the month.
-  timeFrame.appendChild(document.createTextNode(loadTimeData.getStringF(
-      'historyInterval',
-      this.model_.queryStartTime,
-      this.model_.queryEndTime)));
+  timeFrame.appendChild(
+      document.createTextNode(this.model_.queryInterval));
 };
 
 /**
@@ -1987,7 +1984,7 @@ function load() {
     window.addEventListener(
         'resize', historyView.updateClearBrowsingDataButton_);
 
-<if expr="is_ios">
+// <if expr="is_ios">
     // Trigger window resize event when search field is focused to force update
     // of the clear browsing button, which should disappear when search field
     // is active. The window is not resized when the virtual keyboard is shown
@@ -1995,7 +1992,7 @@ function load() {
     searchField.addEventListener('focus', function() {
       cr.dispatchSimpleEvent(window, 'resize');
     });
-</if>  /* is_ios */
+// </if>  /* is_ios */
 
     // When the search field loses focus, add a delay before updating the
     // visibility, otherwise the button will flash on the screen before the
@@ -2015,7 +2012,7 @@ function load() {
     searchField.focus();
   }
 
-<if expr="is_ios">
+// <if expr="is_ios">
   function checkKeyboardVisibility() {
     // Figure out the real height based on the orientation, becauase
     // screen.width and screen.height don't update after rotation.
@@ -2029,7 +2026,7 @@ function load() {
   }
   window.addEventListener('orientationchange', checkKeyboardVisibility);
   window.addEventListener('resize', checkKeyboardVisibility);
-</if> /* is_ios */
+// </if> /* is_ios */
 }
 
 /**

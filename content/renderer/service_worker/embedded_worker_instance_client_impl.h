@@ -28,6 +28,9 @@ class EmbeddedWorkerInstanceClientImpl
 
   // Called from ServiceWorkerContextClient.
   void StopWorkerCompleted();
+  EmbeddedWorkerDevToolsAgent* devtools_agent() {
+    return wrapper_->devtools_agent();
+  };
 
  private:
   EmbeddedWorkerInstanceClientImpl(
@@ -39,6 +42,9 @@ class EmbeddedWorkerInstanceClientImpl
       const EmbeddedWorkerStartParams& params,
       mojom::ServiceWorkerEventDispatcherRequest dispatcher_request) override;
   void StopWorker(const StopWorkerCallback& callback) override;
+  void ResumeAfterDownload() override;
+  void AddMessageToConsole(blink::WebConsoleMessage::Level level,
+                           const std::string& message) override;
 
   // Handler of connection error bound to |binding_|
   void OnError();

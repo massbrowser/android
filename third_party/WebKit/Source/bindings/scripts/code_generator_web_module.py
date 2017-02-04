@@ -22,62 +22,112 @@ DOM classes to the Web Modules layer.
 import os
 import posixpath
 
-from code_generator import CodeGeneratorBase
+from code_generator import CodeGeneratorBase, render_template
 # TODO(dglazkov): Move TypedefResolver to code_generator.py
 from code_generator_v8 import TypedefResolver
 
 MODULE_PYNAME = os.path.splitext(os.path.basename(__file__))[0] + '.py'
 
 WEB_MODULE_IDL_ATTRIBUTE = 'WebModuleAPI'
-
-
-def includes_for_type(idl_type):
-    # TODO(dglazkov): Make this actually work.
-    name = idl_type.preprocessed_type.base_type
-    return set([name])
-
+STRING_INCLUDE_PATH = 'wtf/text/WTFString.h'
 
 def interface_context(idl_interface):
-    attributes = []
-    methods = []
-    includes = set()
+    builder = InterfaceContextBuilder(MODULE_PYNAME, TypeResolver())
+    builder.set_class_name(idl_interface.name)
+    builder.set_inheritance(idl_interface.parent)
+
     for idl_attribute in idl_interface.attributes:
-        attributes.append(Attribute.create(idl_attribute))
-        includes.update(includes_for_type(idl_attribute.idl_type))
+        builder.add_attribute(idl_attribute)
+
     for idl_operation in idl_interface.operations:
-        if idl_operation.name:
-            methods.append(Method.create(idl_operation))
-    return {
-        'code_generator': MODULE_PYNAME,
-        'class_name': idl_interface.name,
-        'cpp_includes': includes,
-        'attributes': attributes,
-        'methods': methods,
-    }
+        builder.add_operation(idl_operation)
+
+    return builder.build()
 
 
-class Attribute(object):
-    def __init__(self, name, return_type):
-        self.name = name
-        self.return_type = return_type
+class TypeResolver(object):
+    """Resolves Web IDL types into corresponding C++ types and include paths
+       to the generated and existing files."""
 
-    @staticmethod
-    def create(idl_attribute):
-        name = idl_attribute.name
-        return_type = idl_attribute.idl_type.preprocessed_type.base_type
-        return Attribute(name, return_type)
+    def includes_from_interface(self, base_type):
+        # TODO(dglazkov): Are there any exceptional conditions here?
+        return set([base_type])
+
+    def _includes_from_type(self, idl_type):
+        if idl_type.is_void:
+            return set()
+        if idl_type.is_primitive_type:
+            return set()
+        if idl_type.is_string_type:
+            return set([STRING_INCLUDE_PATH])
+
+        # TODO(dglazkov): Handle complex/weird types.
+        # TODO(dglazkov): Make these proper paths to generated and non-generated
+        # files.
+        return set([idl_type.base_type])
+
+    def includes_from_definition(self, idl_definition):
+        return self._includes_from_type(idl_definition.idl_type)
+
+    def type_from_definition(self, idl_definition):
+        # TODO(dglazkov): The output of this method must be a reasonable C++
+        # type that can be used directly in the jinja2 template.
+        return idl_definition.idl_type.base_type
 
 
-class Method(object):
-    def __init__(self, name, return_type):
-        self.name = name
-        self.return_type = return_type
+class InterfaceContextBuilder(object):
+    def __init__(self, code_generator, type_resolver):
+        self.result = {'code_generator': code_generator}
+        self.type_resolver = type_resolver
 
-    @staticmethod
-    def create(idl_operation):
+    def set_class_name(self, class_name):
+        self.result['class_name'] = class_name
+
+    def set_inheritance(self, base_interface):
+        if base_interface is None:
+            return
+        self.result['inherits_expression'] = ' : public %s' % base_interface
+        self._ensure_set('cpp_includes').update(
+            self.type_resolver.includes_from_interface(base_interface))
+
+    def _ensure_set(self, name):
+        return self.result.setdefault(name, set())
+
+    def _ensure_list(self, name):
+        return self.result.setdefault(name, [])
+
+    def add_attribute(self, idl_attribute):
+        self._ensure_list('attributes').append(
+            self.create_attribute(idl_attribute))
+        self._ensure_set('cpp_includes').update(
+            self.type_resolver.includes_from_definition(idl_attribute))
+
+    def add_operation(self, idl_operation):
+        if not idl_operation.name:
+            return
+        self._ensure_list('methods').append(
+            self.create_method(idl_operation))
+        self._ensure_set('cpp_includes').update(
+            self.type_resolver.includes_from_definition(idl_operation))
+
+    def create_method(self, idl_operation):
         name = idl_operation.name
-        return_type = idl_operation.idl_type.preprocessed_type.base_type
-        return Method(name, return_type)
+        return_type = self.type_resolver.type_from_definition(idl_operation)
+        return {
+            'name': name,
+            'return_type': return_type
+        }
+
+    def create_attribute(self, idl_attribute):
+        name = idl_attribute.name
+        return_type = self.type_resolver.type_from_definition(idl_attribute)
+        return {
+            'name': name,
+            'return_type': return_type
+        }
+
+    def build(self):
+        return self.result
 
 
 class CodeGeneratorWebModule(CodeGeneratorBase):
@@ -102,14 +152,14 @@ class CodeGeneratorWebModule(CodeGeneratorBase):
         # TODO(dglazkov): Implement callback interfaces.
         # TODO(dglazkov): Make sure partial interfaces are handled.
         if interface.is_callback or interface.is_partial:
-            raise ValueError("Partial or callback interfaces are not supported")
+            raise ValueError('Partial or callback interfaces are not supported')
 
         template_context = interface_context(interface)
 
         cpp_template = self.get_template('cpp')
         header_template = self.get_template('h')
-        cpp_text = cpp_template.render(template_context)
-        header_text = header_template.render(template_context)
+        cpp_text = render_template(cpp_template, template_context)
+        header_text = render_template(header_template, template_context)
         header_path, cpp_path = self.output_paths(interface.name)
 
         return (

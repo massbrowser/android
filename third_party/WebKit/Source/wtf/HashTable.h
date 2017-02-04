@@ -86,6 +86,19 @@
 
 namespace WTF {
 
+// This is for tracing inside collections that have special support for weak
+// pointers. The trait has a trace method which returns true if there are weak
+// pointers to things that have not (yet) been marked live. Returning true
+// indicates that the entry in the collection may yet be removed by weak
+// handling. Default implementation for non-weak types is to use the regular
+// non-weak TraceTrait. Default implementation for types with weakness is to
+// call traceInCollection on the type's trait.
+template <WeakHandlingFlag weakHandlingFlag,
+          ShouldWeakPointersBeMarkedStrongly strongify,
+          typename T,
+          typename Traits>
+struct TraceInCollectionTrait;
+
 #if DUMP_HASHTABLE_STATS
 struct WTF_EXPORT HashTableStats {
   HashTableStats()
@@ -129,14 +142,14 @@ class HashTableStatsPtr<Allocator, false> final {
 
  public:
   static std::unique_ptr<HashTableStats> create() {
-    return wrapUnique(new HashTableStats);
+    return WTF::wrapUnique(new HashTableStats);
   }
 
   static std::unique_ptr<HashTableStats> copy(
       const std::unique_ptr<HashTableStats>& other) {
     if (!other)
       return nullptr;
-    return wrapUnique(new HashTableStats(*other));
+    return WTF::wrapUnique(new HashTableStats(*other));
   }
 
   static void swap(std::unique_ptr<HashTableStats>& stats,
@@ -252,6 +265,7 @@ class HashTableConstIterator final {
                                  Allocator>
       const_iterator;
   typedef Value ValueType;
+  using value_type = ValueType;
   typedef typename Traits::IteratorConstGetType GetType;
   typedef const ValueType* PointerType;
 
@@ -281,7 +295,7 @@ class HashTableConstIterator final {
                          const HashTableType* container)
       : m_position(position),
         m_endPosition(endPosition)
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
         ,
         m_container(container),
         m_containerModifications(container->modifications())
@@ -296,22 +310,26 @@ class HashTableConstIterator final {
                          HashItemKnownGoodTag)
       : m_position(position),
         m_endPosition(endPosition)
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
         ,
         m_container(container),
         m_containerModifications(container->modifications())
 #endif
   {
-    ASSERT(m_containerModifications == m_container->modifications());
+#if DCHECK_IS_ON()
+    DCHECK_EQ(m_containerModifications, m_container->modifications());
+#endif
   }
 
   void checkModifications() const {
+#if DCHECK_IS_ON()
     // HashTable and collections that build on it do not support
     // modifications while there is an iterator in use. The exception is
     // ListHashSet, which has its own iterators that tolerate modification
     // of the underlying set.
-    ASSERT(m_containerModifications == m_container->modifications());
-    ASSERT(!m_container->accessForbidden());
+    DCHECK_EQ(m_containerModifications, m_container->modifications());
+    DCHECK(!m_container->accessForbidden());
+#endif
   }
 
  public:
@@ -327,7 +345,7 @@ class HashTableConstIterator final {
   GetType operator->() const { return get(); }
 
   const_iterator& operator++() {
-    ASSERT(m_position != m_endPosition);
+    DCHECK_NE(m_position, m_endPosition);
     checkModifications();
     ++m_position;
     skipEmptyBuckets();
@@ -361,7 +379,7 @@ class HashTableConstIterator final {
  private:
   PointerType m_position;
   PointerType m_endPosition;
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   const HashTableType* m_container;
   int64_t m_containerModifications;
 #endif
@@ -667,17 +685,12 @@ class HashTable final
 
   HashTable();
   void finalize() {
-    ASSERT(!Allocator::isGarbageCollected);
+    DCHECK(!Allocator::isGarbageCollected);
     if (LIKELY(!m_table))
       return;
-    ASSERT(!m_accessForbidden);
-#if ENABLE(ASSERT)
-    m_accessForbidden = true;
-#endif
+    enterAccessForbiddenScope();
     deleteAllBucketsAndDeallocate(m_table, m_tableSize);
-#if ENABLE(ASSERT)
-    m_accessForbidden = false;
-#endif
+    leaveAccessForbiddenScope();
     m_table = nullptr;
   }
 
@@ -701,15 +714,15 @@ class HashTable final
   }
 
   unsigned size() const {
-    ASSERT(!m_accessForbidden);
+    DCHECK(!accessForbidden());
     return m_keyCount;
   }
   unsigned capacity() const {
-    ASSERT(!m_accessForbidden);
+    DCHECK(!accessForbidden());
     return m_tableSize;
   }
   bool isEmpty() const {
-    ASSERT(!m_accessForbidden);
+    DCHECK(!accessForbidden());
     return !m_keyCount;
   }
 
@@ -771,7 +784,12 @@ class HashTable final
   template <typename VisitorDispatcher>
   void trace(VisitorDispatcher);
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
+  void enterAccessForbiddenScope() {
+    DCHECK(!m_accessForbidden);
+    m_accessForbidden = true;
+  }
+  void leaveAccessForbiddenScope() { m_accessForbidden = false; }
   bool accessForbidden() const { return m_accessForbidden; }
   int64_t modifications() const { return m_modifications; }
   void registerModification() { m_modifications++; }
@@ -779,9 +797,12 @@ class HashTable final
   // while there is an iterator in use. The exception is ListHashSet, which
   // has its own iterators that tolerate modification of the underlying set.
   void checkModifications(int64_t mods) const {
-    ASSERT(mods == m_modifications);
+    DCHECK_EQ(mods, m_modifications);
   }
 #else
+  void enterAccessForbiddenScope() {}
+  void leaveAccessForbiddenScope() {}
+  bool accessForbidden() const { return false; }
   int64_t modifications() const { return 0; }
   void registerModification() {}
   void checkModifications(int64_t mods) const {}
@@ -857,7 +878,7 @@ class HashTable final
 
   unsigned tableSizeMask() const {
     size_t mask = m_tableSize - 1;
-    ASSERT((mask & m_tableSize) == 0);
+    DCHECK_EQ((mask & m_tableSize), 0u);
     return mask;
   }
 
@@ -868,7 +889,7 @@ class HashTable final
   ValueType* m_table;
   unsigned m_tableSize;
   unsigned m_keyCount;
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   unsigned m_deletedCount : 30;
   unsigned m_queueFlag : 1;
   unsigned m_accessForbidden : 1;
@@ -918,7 +939,7 @@ inline HashTable<Key,
       m_keyCount(0),
       m_deletedCount(0),
       m_queueFlag(false)
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
       ,
       m_accessForbidden(false),
       m_modifications(0)
@@ -1002,8 +1023,8 @@ template <typename HashTranslator, typename T>
 inline const Value*
 HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     lookup(const T& key) const {
-  ASSERT(!m_accessForbidden);
-  ASSERT((HashTableKeyChecker<
+  DCHECK(!accessForbidden());
+  DCHECK((HashTableKeyChecker<
           HashTranslator, KeyTraits,
           HashFunctions::safeToCompareToEmptyOrDeleted>::checkKey(key)));
   const ValueType* table = m_table;
@@ -1058,8 +1079,8 @@ inline typename HashTable<Key,
                           Allocator>::LookupType
 HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     lookupForWriting(const T& key) {
-  ASSERT(!m_accessForbidden);
-  ASSERT(m_table);
+  DCHECK(!accessForbidden());
+  DCHECK(m_table);
   registerModification();
 
   ValueType* table = m_table;
@@ -1114,8 +1135,8 @@ inline typename HashTable<Key,
                           Allocator>::FullLookupType
 HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     fullLookupForWriting(const T& key) {
-  ASSERT(!m_accessForbidden);
-  ASSERT(m_table);
+  DCHECK(!accessForbidden());
+  DCHECK(m_table);
   registerModification();
 
   ValueType* table = m_table;
@@ -1209,12 +1230,12 @@ typename HashTable<Key,
                    Allocator>::AddResult
 HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     add(T&& key, Extra&& extra) {
-  ASSERT(!m_accessForbidden);
-  ASSERT(Allocator::isAllocationAllowed());
+  DCHECK(!accessForbidden());
+  DCHECK(Allocator::isAllocationAllowed());
   if (!m_table)
     expand();
 
-  ASSERT(m_table);
+  DCHECK(m_table);
 
   ValueType* table = m_table;
   size_t k = 0;
@@ -1262,7 +1283,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
 
   HashTranslator::translate(*entry, std::forward<T>(key),
                             std::forward<Extra>(extra));
-  ASSERT(!isEmptyOrDeletedBucket(*entry));
+  DCHECK(!isEmptyOrDeletedBucket(*entry));
 
   ++m_keyCount;
 
@@ -1305,8 +1326,8 @@ typename HashTable<Key,
                    Allocator>::AddResult
 HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     addPassingHashCode(T&& key, Extra&& extra) {
-  ASSERT(!m_accessForbidden);
-  ASSERT(Allocator::isAllocationAllowed());
+  DCHECK(!accessForbidden());
+  DCHECK(Allocator::isAllocationAllowed());
   if (!m_table)
     expand();
 
@@ -1328,7 +1349,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
 
   HashTranslator::translate(*entry, std::forward<T>(key),
                             std::forward<Extra>(extra), h);
-  ASSERT(!isEmptyOrDeletedBucket(*entry));
+  DCHECK(!isEmptyOrDeletedBucket(*entry));
 
   ++m_keyCount;
   if (shouldExpand())
@@ -1347,10 +1368,10 @@ template <typename Key,
 Value*
 HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     reinsert(ValueType&& entry) {
-  ASSERT(m_table);
+  DCHECK(m_table);
   registerModification();
-  ASSERT(!lookupForWriting(Extractor::extract(entry)).second);
-  ASSERT(
+  DCHECK(!lookupForWriting(Extractor::extract(entry)).second);
+  DCHECK(
       !isDeletedBucket(*(lookupForWriting(Extractor::extract(entry)).first)));
 #if DUMP_HASHTABLE_STATS
   atomicIncrement(&HashTableStats::instance().numReinserts);
@@ -1454,14 +1475,9 @@ void HashTable<Key,
   ++m_stats->numRemoves;
 #endif
 
-  ASSERT(!m_accessForbidden);
-#if ENABLE(ASSERT)
-  m_accessForbidden = true;
-#endif
+  enterAccessForbiddenScope();
   deleteBucket(*pos);
-#if ENABLE(ASSERT)
-  m_accessForbidden = false;
-#endif
+  leaveAccessForbiddenScope();
   ++m_deletedCount;
   --m_keyCount;
 
@@ -1624,7 +1640,7 @@ Value*
 HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     expandBuffer(unsigned newTableSize, Value* entry, bool& success) {
   success = false;
-  ASSERT(m_tableSize < newTableSize);
+  DCHECK_LT(m_tableSize, newTableSize);
   if (!Allocator::expandHashTableBacking(m_table,
                                          newTableSize * sizeof(ValueType)))
     return nullptr;
@@ -1640,7 +1656,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     if (&m_table[i] == entry)
       newEntry = &temporaryTable[i];
     if (isEmptyOrDeletedBucket(m_table[i])) {
-      ASSERT(&m_table[i] != entry);
+      DCHECK_NE(&m_table[i], entry);
       if (Traits::emptyValueIsZero) {
         memset(&temporaryTable[i], 0, sizeof(ValueType));
       } else {
@@ -1662,14 +1678,9 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
   }
   newEntry = rehashTo(originalTable, newTableSize, newEntry);
 
-  ASSERT(!m_accessForbidden);
-#if ENABLE(ASSERT)
-  m_accessForbidden = true;
-#endif
+  enterAccessForbiddenScope();
   deleteAllBucketsAndDeallocate(temporaryTable, oldTableSize);
-#if ENABLE(ASSERT)
-  m_accessForbidden = false;
-#endif
+  leaveAccessForbiddenScope();
 
   return newEntry;
 }
@@ -1703,12 +1714,12 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
   Value* newEntry = nullptr;
   for (unsigned i = 0; i != oldTableSize; ++i) {
     if (isEmptyOrDeletedBucket(oldTable[i])) {
-      ASSERT(&oldTable[i] != entry);
+      DCHECK_NE(&oldTable[i], entry);
       continue;
     }
     Value* reinsertedEntry = reinsert(std::move(oldTable[i]));
     if (&oldTable[i] == entry) {
-      ASSERT(!newEntry);
+      DCHECK(!newEntry);
       newEntry = reinsertedEntry;
     }
   }
@@ -1759,14 +1770,9 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
   ValueType* newTable = allocateTable(newTableSize);
   Value* newEntry = rehashTo(newTable, newTableSize, entry);
 
-  ASSERT(!m_accessForbidden);
-#if ENABLE(ASSERT)
-  m_accessForbidden = true;
-#endif
+  enterAccessForbiddenScope();
   deleteAllBucketsAndDeallocate(oldTable, oldTableSize);
-#if ENABLE(ASSERT)
-  m_accessForbidden = false;
-#endif
+  leaveAccessForbiddenScope();
 
   return newEntry;
 }
@@ -1789,14 +1795,9 @@ void HashTable<Key,
   if (!m_table)
     return;
 
-  ASSERT(!m_accessForbidden);
-#if ENABLE(ASSERT)
-  m_accessForbidden = true;
-#endif
+  enterAccessForbiddenScope();
   deleteAllBucketsAndDeallocate(m_table, m_tableSize);
-#if ENABLE(ASSERT)
-  m_accessForbidden = false;
-#endif
+  leaveAccessForbiddenScope();
   m_table = nullptr;
   m_tableSize = 0;
   m_keyCount = 0;
@@ -1816,7 +1817,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
       m_keyCount(0),
       m_deletedCount(0),
       m_queueFlag(false)
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
       ,
       m_accessForbidden(false),
       m_modifications(0)
@@ -1848,7 +1849,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
       m_keyCount(0),
       m_deletedCount(0),
       m_queueFlag(false)
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
       ,
       m_accessForbidden(false),
       m_modifications(0)
@@ -1875,7 +1876,7 @@ void HashTable<Key,
                Traits,
                KeyTraits,
                Allocator>::swap(HashTable& other) {
-  ASSERT(!m_accessForbidden);
+  DCHECK(!accessForbidden());
   std::swap(m_table, other.m_table);
   std::swap(m_tableSize, other.m_tableSize);
   std::swap(m_keyCount, other.m_keyCount);
@@ -1883,10 +1884,10 @@ void HashTable<Key,
   unsigned deleted = m_deletedCount;
   m_deletedCount = other.m_deletedCount;
   other.m_deletedCount = deleted;
-  ASSERT(!m_queueFlag);
-  ASSERT(!other.m_queueFlag);
+  DCHECK(!m_queueFlag);
+  DCHECK(!other.m_queueFlag);
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   std::swap(m_modifications, other.m_modifications);
 #endif
 
@@ -2018,7 +2019,7 @@ struct WeakProcessingHashTableHelper<WeakHandlingInCollections,
   static void ephemeronIteration(typename Allocator::Visitor* visitor,
                                  void* closure) {
     HashTableType* table = reinterpret_cast<HashTableType*>(closure);
-    ASSERT(table->m_table);
+    DCHECK(table->m_table);
     // Check the hash table for elements that we now know will not be
     // removed by weak processing. Those elements need to have their strong
     // pointers traced.
@@ -2036,7 +2037,9 @@ struct WeakProcessingHashTableHelper<WeakHandlingInCollections,
   static void ephemeronIterationDone(typename Allocator::Visitor* visitor,
                                      void* closure) {
     HashTableType* table = reinterpret_cast<HashTableType*>(closure);
-    ASSERT(Allocator::weakTableRegistered(visitor, table));
+#if DCHECK_IS_ON()
+    DCHECK(Allocator::weakTableRegistered(visitor, table));
+#endif
     table->clearEnqueued();
   }
 };
@@ -2092,6 +2095,11 @@ void HashTable<Key,
                                       Extractor, HashFunctions, Traits,
                                       KeyTraits, Allocator>::process);
   }
+  // If the backing store will be moved by sweep compaction, register the
+  // table reference pointing to the backing store object, so that the
+  // reference is updated upon object relocation. A no-op if not enabled
+  // by the visitor.
+  Allocator::registerBackingStoreReference(visitor, &m_table);
   if (!IsTraceableInCollectionTrait<Traits>::value)
     return;
   if (Traits::weakHandlingFlag == WeakHandlingInCollections) {
@@ -2100,7 +2108,9 @@ void HashTable<Key,
     // Ephemerons:
     // http://dl.acm.org/citation.cfm?doid=263698.263733 - see also
     // http://www.jucs.org/jucs_14_21/eliminating_cycles_in_weak
-    ASSERT(!enqueued() || Allocator::weakTableRegistered(visitor, this));
+#if DCHECK_IS_ON()
+    DCHECK(!enqueued() || Allocator::weakTableRegistered(visitor, this));
+#endif
     if (!enqueued()) {
       Allocator::registerWeakTable(
           visitor, this,

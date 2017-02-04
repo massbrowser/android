@@ -43,7 +43,7 @@ Polymer({
     // https://codereview.chromium.org/2412343004) or a Polymer PR (ex:
     // https://github.com/PolymerElements/paper-menu/pull/107).
     if (this.advancedOpened)
-      this.$.advancedPage.open();
+      this.$.advancedSubmenu.open();
   },
 
   /**
@@ -85,6 +85,6 @@ Polymer({
    * @private
    * */
   arrowState_: function(opened) {
-    return opened ? 'settings:arrow-drop-up' : 'cr:arrow-drop-down';
+    return opened ? 'cr:arrow-drop-up' : 'cr:arrow-drop-down';
   },
 });

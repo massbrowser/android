@@ -4,7 +4,10 @@
 
 import re
 
+from benchmarks import page_cycler_v2
+
 from core import perf_benchmark
+
 from telemetry import benchmark
 from telemetry.timeline import chrome_trace_category_filter
 from telemetry.timeline import chrome_trace_config
@@ -37,6 +40,7 @@ class _CommonSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
     options.config.enable_battor_trace = True
     options.config.enable_chrome_trace = True
     options.SetTimelineBasedMetrics(['clockSyncLatencyMetric', 'powerMetric'])
+    page_cycler_v2.AugmentOptionsForLoadingMetrics(options)
     return options
 
   def CreateStorySet(self, options):
@@ -139,6 +143,15 @@ class MobileMemorySystemHealth(_MemorySystemHealthBenchmark):
       return True
 
     return possible_browser.platform.GetDeviceTypeName() == 'Desktop'
+
+  def SetExtraBrowserOptions(self, options):
+    # Just before we measure memory we flush the system caches
+    # unfortunately this doesn't immediately take effect, instead
+    # the next story run is effected. Due to this the first story run
+    # has anomalous results. This option causes us to flush caches
+    # each time before Chrome starts so we effect even the first story
+    # - avoiding the bug.
+    options.clear_sytem_cache_for_browser_and_profile_on_start = True
 
 
 @benchmark.Enabled('android-webview')

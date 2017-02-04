@@ -168,13 +168,11 @@ DateView::DateView(SystemTrayItem* owner)
     // TODO(tdanderson): Tweak spacing and layout for material design.
     views::BoxLayout* box_layout =
         new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0);
-    box_layout->set_inside_border_insets(gfx::Insets(0, 12, 0, 8));
+    box_layout->set_inside_border_insets(gfx::Insets(0, 12, 0, 0));
     box_layout->set_main_axis_alignment(
         views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
     box_layout->set_cross_axis_alignment(
         views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
-    box_layout->set_minimum_cross_axis_size(
-        GetTrayConstant(TRAY_POPUP_ITEM_MIN_HEIGHT));
     SetLayoutManager(box_layout);
   } else {
     SetLayoutManager(
@@ -185,6 +183,8 @@ DateView::DateView(SystemTrayItem* owner)
   if (!UseMd())
     date_label_->SetEnabledColor(kHeaderTextColorNormal);
   UpdateTextInternal(base::Time::Now());
+  TrayPopupItemStyle style(TrayPopupItemStyle::FontStyle::SYSTEM_INFO);
+  style.SetupLabel(date_label_);
   AddChildView(date_label_);
 }
 
@@ -230,12 +230,6 @@ void DateView::SetActive(bool active) {
   SchedulePaint();
 }
 
-void DateView::UpdateStyle() {
-  TrayPopupItemStyle style(GetNativeTheme(),
-                           TrayPopupItemStyle::FontStyle::SYSTEM_INFO);
-  style.SetupLabel(date_label_);
-}
-
 void DateView::UpdateTextInternal(const base::Time& now) {
   BaseDateTimeView::UpdateTextInternal(now);
   date_label_->SetText(l10n_util::GetStringFUTF16(
@@ -275,10 +269,6 @@ void DateView::OnGestureEvent(ui::GestureEvent* event) {
     SetActive(false);
   }
   BaseDateTimeView::OnGestureEvent(event);
-}
-
-void DateView::OnNativeThemeChanged(const ui::NativeTheme* theme) {
-  UpdateStyle();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

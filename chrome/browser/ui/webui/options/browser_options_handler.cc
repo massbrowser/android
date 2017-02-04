@@ -124,6 +124,7 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_utils.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/net/wake_on_wifi_manager.h"
@@ -140,7 +141,7 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
-#include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_util.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "ui/gfx/image/image_skia.h"
@@ -184,6 +185,8 @@ std::string GetSyncErrorAction(sync_ui_util::ActionType action_type) {
   switch (action_type) {
     case sync_ui_util::REAUTHENTICATE:
       return "reauthenticate";
+    case sync_ui_util::SIGNOUT_AND_SIGNIN:
+      return "signOutAndSignIn";
     case sync_ui_util::UPGRADE_CLIENT:
       return "upgradeClient";
     case sync_ui_util::ENTER_PASSPHRASE:
@@ -514,13 +517,26 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
       IDS_SETTINGS_PEOPLE_CONFIGURE_PIN_CONTINUE_BUTTON },
     { "configurePinMismatched", IDS_SETTINGS_PEOPLE_CONFIGURE_PIN_MISMATCHED },
     { "configurePinTooShort", IDS_SETTINGS_PEOPLE_CONFIGURE_PIN_TOO_SHORT} ,
+    { "configurePinTooLong", IDS_SETTINGS_PEOPLE_CONFIGURE_PIN_TOO_LONG} ,
     { "configurePinWeakPin", IDS_SETTINGS_PEOPLE_CONFIGURE_PIN_WEAK_PIN },
+    { "lockScreenAddFingerprint",
+      IDS_SETTINGS_PEOPLE_LOCK_SCREEN_ADD_FINGERPRINT_BUTTON},
+    { "lockScreenCannotAddFingerprint",
+      IDS_SETTINGS_PEOPLE_LOCK_SCREEN_CANNOT_ADD_NEW_FINGERPRINT},
     { "lockScreenChangePinButton",
       IDS_SETTINGS_PEOPLE_LOCK_SCREEN_CHANGE_PIN_BUTTON},
+    { "lockScreenFingerprintEnable",
+      IDS_SETTINGS_PEOPLE_LOCK_SCREEN_ENABLE_FINGERPRINT_CHECKBOX_LABEL},
+    { "lockScreenFingerprintNewName",
+      IDS_SETTINGS_PEOPLE_LOCK_SCREEN_NEW_FINGERPRINT_DEFAULT_NAME},
+    { "lockScreenFingerprintWarning",
+      IDS_SETTINGS_PEOPLE_LOCK_SCREEN_FINGERPRINT_LESS_SECURE},
     { "lockScreenNone", IDS_SETTINGS_PEOPLE_LOCK_SCREEN_NONE },
     { "lockScreenPasswordOnly", IDS_SETTINGS_PEOPLE_LOCK_SCREEN_PASSWORD_ONLY },
     { "lockScreenPinOrPassword",
       IDS_SETTINGS_PEOPLE_LOCK_SCREEN_PIN_OR_PASSWORD },
+    { "lockScreenRegisteredFingerprints",
+      IDS_SETTINGS_PEOPLE_LOCK_SCREEN_REGISTERED_FINGERPRINTS_LABEL},
     { "lockScreenSetupPinButton",
       IDS_SETTINGS_PEOPLE_LOCK_SCREEN_SETUP_PIN_BUTTON },
     { "lockScreenTitle", IDS_SETTINGS_PEOPLE_LOCK_SCREEN_TITLE },
@@ -766,6 +782,8 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
 
   values->SetBoolean("showQuickUnlockSettings",
                      chromeos::IsPinUnlockEnabled(profile->GetPrefs()));
+  values->SetBoolean("fingerprintUnlockEnabled",
+                     chromeos::IsFingerprintUnlockEnabled());
   if (chromeos::IsPinUnlockEnabled(profile->GetPrefs())) {
     values->SetString(
         "enableScreenlock",
@@ -940,22 +958,23 @@ void BrowserOptionsHandler::Uninitialize() {
       Profile::FromWebUI(web_ui()));
   if (arc_prefs)
     arc_prefs->RemoveObserver(this);
+  user_manager::UserManager::Get()->RemoveObserver(this);
 #endif
 }
 
-void BrowserOptionsHandler::OnStateChanged() {
+void BrowserOptionsHandler::OnStateChanged(syncer::SyncService* sync) {
   UpdateSyncState();
 }
 
 void BrowserOptionsHandler::GoogleSigninSucceeded(const std::string& account_id,
                                                   const std::string& username,
                                                   const std::string& password) {
-  OnStateChanged();
+  UpdateSyncState();
 }
 
 void BrowserOptionsHandler::GoogleSignedOut(const std::string& account_id,
                                             const std::string& username) {
-  OnStateChanged();
+  UpdateSyncState();
 }
 
 void BrowserOptionsHandler::PageLoadStarted() {
@@ -1009,8 +1028,7 @@ void BrowserOptionsHandler::InitializeHandler() {
 #endif
 
 #if defined(OS_CHROMEOS)
-  registrar_.Add(this, chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
-                 content::NotificationService::AllSources());
+  user_manager::UserManager::Get()->AddObserver(this);
 #endif
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
@@ -1119,7 +1137,7 @@ void BrowserOptionsHandler::InitializePage() {
   OnTemplateURLServiceChanged();
 
   ObserveThemeChanged();
-  OnStateChanged();
+  UpdateSyncState();
 #if !defined(OS_CHROMEOS)
   UpdateDefaultBrowserState();
 #endif
@@ -1163,8 +1181,8 @@ void BrowserOptionsHandler::InitializePage() {
       chromeos::WallpaperManager::Get()->IsPolicyControlled(
           user->GetAccountId()));
 
-  if (arc::ArcSessionManager::IsAllowedForProfile(profile) &&
-      !arc::ArcSessionManager::IsOptInVerificationDisabled()) {
+  if (arc::IsArcAllowedForProfile(profile) &&
+      !arc::IsArcOptInVerificationDisabled()) {
     base::FundamentalValue is_arc_enabled(
         arc::ArcSessionManager::Get()->IsArcEnabled());
     web_ui()->CallJavascriptFunctionUnsafe(
@@ -1369,14 +1387,9 @@ void BrowserOptionsHandler::Observe(
     case chrome::NOTIFICATION_BROWSER_THEME_CHANGED:
       ObserveThemeChanged();
       break;
-#if defined(OS_CHROMEOS)
-    case chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED:
-      UpdateAccountPicture();
-      break;
-#endif
     case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
       // Update our sync/signin status display.
-      OnStateChanged();
+      UpdateSyncState();
       break;
     default:
       NOTREACHED();
@@ -1993,6 +2006,10 @@ void BrowserOptionsHandler::OnAppReadyChanged(
   }
 }
 
+void BrowserOptionsHandler::OnUserImageChanged(const user_manager::User& user) {
+  UpdateAccountPicture();
+}
+
 void BrowserOptionsHandler::UpdateAndroidSettingsAppState(bool visible) {
   base::FundamentalValue is_visible(visible);
   web_ui()->CallJavascriptFunctionUnsafe(
@@ -2003,19 +2020,26 @@ void BrowserOptionsHandler::ShowAndroidAppsSettings(
     const base::ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   // Settings in secondary profile cannot access ARC.
-  if (!arc::ArcSessionManager::IsAllowedForProfile(profile)) {
+  if (!arc::IsArcAllowedForProfile(profile)) {
     LOG(ERROR) << "Settings can't be invoked for non-primary profile";
     return;
   }
 
-  arc::LaunchAndroidSettingsApp(profile);
+  // We only care whether the event came from a keyboard or non-keyboard
+  // (mouse/touch). Set the default flags in such a way that it would appear
+  // that it came from a mouse by default.
+  bool activated_from_keyboard = false;
+  args->GetBoolean(0, &activated_from_keyboard);
+  int flags = activated_from_keyboard ? ui::EF_NONE : ui::EF_LEFT_MOUSE_BUTTON;
+
+  arc::LaunchAndroidSettingsApp(profile, flags);
 }
 
 void BrowserOptionsHandler::ShowAccessibilityTalkBackSettings(
     const base::ListValue *args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   // Settings in secondary profile cannot access ARC.
-  if (!arc::ArcSessionManager::IsAllowedForProfile(profile)) {
+  if (!arc::IsArcAllowedForProfile(profile)) {
     LOG(WARNING) << "Settings can't be invoked for non-primary profile";
     return;
   }
@@ -2274,8 +2298,9 @@ void BrowserOptionsHandler::HandleSafeBrowsingExtendedReporting(
     const base::ListValue* args) {
   bool checked;
   if (args->GetBoolean(0, &checked)) {
-    safe_browsing::SetExtendedReportingPref(
-        Profile::FromWebUI(web_ui())->GetPrefs(), checked);
+    safe_browsing::SetExtendedReportingPrefAndMetric(
+        Profile::FromWebUI(web_ui())->GetPrefs(), checked,
+        safe_browsing::SBER_OPTIN_SITE_CHROME_SETTINGS);
   }
 }
 

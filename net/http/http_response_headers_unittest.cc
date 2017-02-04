@@ -10,6 +10,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <unordered_set>
 
 #include "base/pickle.h"
 #include "base/time/time.h"
@@ -780,9 +781,12 @@ TEST_P(RequiresValidationTest, RequiresValidation) {
   const RequiresValidationTestData test = GetParam();
 
   base::Time request_time, response_time, current_time;
-  base::Time::FromString("Wed, 28 Nov 2007 00:40:09 GMT", &request_time);
-  base::Time::FromString("Wed, 28 Nov 2007 00:40:12 GMT", &response_time);
-  base::Time::FromString("Wed, 28 Nov 2007 00:45:20 GMT", &current_time);
+  ASSERT_TRUE(
+      base::Time::FromString("Wed, 28 Nov 2007 00:40:09 GMT", &request_time));
+  ASSERT_TRUE(
+      base::Time::FromString("Wed, 28 Nov 2007 00:40:12 GMT", &response_time));
+  ASSERT_TRUE(
+      base::Time::FromString("Wed, 28 Nov 2007 00:45:20 GMT", &current_time));
 
   std::string headers(test.headers);
   HeadersToRaw(&headers);
@@ -1338,7 +1342,7 @@ class ContentRangeTest
       public ::testing::WithParamInterface<ContentRangeTestData> {
 };
 
-TEST_P(ContentRangeTest, GetContentRange) {
+TEST_P(ContentRangeTest, GetContentRangeFor206) {
   const ContentRangeTestData test = GetParam();
 
   std::string headers(test.headers);
@@ -1348,9 +1352,8 @@ TEST_P(ContentRangeTest, GetContentRange) {
   int64_t first_byte_position;
   int64_t last_byte_position;
   int64_t instance_size;
-  bool return_value = parsed->GetContentRange(&first_byte_position,
-                                              &last_byte_position,
-                                              &instance_size);
+  bool return_value = parsed->GetContentRangeFor206(
+      &first_byte_position, &last_byte_position, &instance_size);
   EXPECT_EQ(test.expected_return_value, return_value);
   EXPECT_EQ(test.expected_first_byte_position, first_byte_position);
   EXPECT_EQ(test.expected_last_byte_position, last_byte_position);
@@ -1363,99 +1366,16 @@ const ContentRangeTestData content_range_tests[] = {
      "Content-Range:",
      false, -1, -1, -1},
     {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: megabytes 0-10/50",
-     false, -1, -1, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: 0-10/50",
-     false, -1, -1, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: Bytes 0-50/51",
-     true, 0, 50, 51},
-    {"HTTP/1.1 206 Partial Content\n"
      "Content-Range: bytes 0-50/51",
      true, 0, 50, 51},
     {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes\t0-50/51",
-     false, -1, -1, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range:     bytes 0-50/51",
-     true, 0, 50, 51},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range:     bytes    0    -   50  \t / \t51",
-     true, 0, 50, 51},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0\t-\t50\t/\t51\t",
-     true, 0, 50, 51},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range:   \tbytes\t\t\t 0\t-\t50\t/\t51\t",
-     true, 0, 50, 51},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: \t   bytes \t  0    -   50   /   5   1",
-     false, 0, 50, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: \t   bytes \t  0    -   5 0   /   51",
-     false, -1, -1, -1},
-    {"HTTP/1.1 206 Partial Content\n"
      "Content-Range: bytes 50-0/51",
-     false, 50, 0, -1},
-    {"HTTP/1.1 416 Requested range not satisfiable\n"
-     "Content-Range: bytes * /*",
      false, -1, -1, -1},
     {"HTTP/1.1 416 Requested range not satisfiable\n"
-     "Content-Range: bytes *   /    *   ",
+     "Content-Range: bytes */*",
      false, -1, -1, -1},
     {"HTTP/1.1 206 Partial Content\n"
      "Content-Range: bytes 0-50/*",
-     false, 0, 50, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0-50  /    * ",
-     false, 0, 50, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0-10000000000/10000000001",
-     true, 0, 10000000000ll, 10000000001ll},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0-10000000000/10000000000",
-     false, 0, 10000000000ll, 10000000000ll},
-    // 64 bit wraparound.
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0 - 9223372036854775807 / 100",
-     false, 0, std::numeric_limits<int64_t>::max(), 100},
-    // 64 bit wraparound.
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0 - 100 / -9223372036854775808",
-     false, 0, 100, std::numeric_limits<int64_t>::min()},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes */50",
-     false, -1, -1, 50},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0-50/10",
-     false, 0, 50, 10},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 40-50/45",
-     false, 40, 50, 45},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0-50/-10",
-     false, 0, 50, -10},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0-0/1",
-     true, 0, 0, 1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0-40000000000000000000/40000000000000000001",
-     false, -1, -1, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 1-/100",
-     false, -1, -1, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes -/100",
-     false, -1, -1, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes -1/100",
-     false, -1, -1, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes 0-1233/*",
-     false, 0, 1233, -1},
-    {"HTTP/1.1 206 Partial Content\n"
-     "Content-Range: bytes -123 - -1/100",
      false, -1, -1, -1},
 };
 
@@ -1847,6 +1767,70 @@ INSTANTIATE_TEST_CASE_P(HttpResponseHeaders,
                         RemoveHeaderTest,
                         testing::ValuesIn(remove_header_tests));
 
+struct RemoveHeadersTestData {
+  const char* orig_headers;
+  const char* to_remove[2];
+  const char* expected_headers;
+};
+
+class RemoveHeadersTest
+    : public HttpResponseHeadersTest,
+      public ::testing::WithParamInterface<RemoveHeadersTestData> {};
+
+TEST_P(RemoveHeadersTest, RemoveHeaders) {
+  const RemoveHeadersTestData test = GetParam();
+
+  std::string orig_headers(test.orig_headers);
+  HeadersToRaw(&orig_headers);
+  scoped_refptr<HttpResponseHeaders> parsed(
+      new HttpResponseHeaders(orig_headers));
+
+  std::unordered_set<std::string> to_remove;
+  for (const auto& header : test.to_remove) {
+    if (header)
+      to_remove.insert(header);
+  }
+  parsed->RemoveHeaders(to_remove);
+
+  std::string resulting_headers;
+  parsed->GetNormalizedHeaders(&resulting_headers);
+  EXPECT_EQ(std::string(test.expected_headers), resulting_headers);
+}
+
+const RemoveHeadersTestData remove_headers_tests[] = {
+    {"HTTP/1.1 200 OK\n"
+     "connection: keep-alive\n"
+     "Cache-control: max-age=10000\n"
+     "Content-Length: 450\n",
+
+     {"Content-Length", "CACHE-control"},
+
+     "HTTP/1.1 200 OK\n"
+     "connection: keep-alive\n"},
+
+    {"HTTP/1.1 200 OK\n"
+     "connection: keep-alive\n"
+     "Content-Length: 450\n",
+
+     {"foo", "bar"},
+
+     "HTTP/1.1 200 OK\n"
+     "connection: keep-alive\n"
+     "Content-Length: 450\n"},
+
+    {"HTTP/1.1 404 Kinda not OK\n"
+     "connection: keep-alive  \n",
+
+     {},
+
+     "HTTP/1.1 404 Kinda not OK\n"
+     "connection: keep-alive\n"},
+};
+
+INSTANTIATE_TEST_CASE_P(HttpResponseHeaders,
+                        RemoveHeadersTest,
+                        testing::ValuesIn(remove_headers_tests));
+
 struct RemoveIndividualHeaderTestData {
   const char* orig_headers;
   const char* to_remove_name;
@@ -2218,6 +2202,69 @@ TEST_F(HttpResponseHeadersCacheControlTest,
       "stale-while-revalidate=1,stale-while-revalidate=7200");
   EXPECT_EQ(TimeDelta::FromSeconds(1), GetStaleWhileRevalidateValue());
 }
+
+struct GetCurrentAgeTestData {
+  const char* headers;
+  const char* request_time;
+  const char* response_time;
+  const char* current_time;
+  const int expected_age;
+};
+
+class GetCurrentAgeTest
+    : public HttpResponseHeadersTest,
+      public ::testing::WithParamInterface<GetCurrentAgeTestData> {
+};
+
+TEST_P(GetCurrentAgeTest, GetCurrentAge) {
+  const GetCurrentAgeTestData test = GetParam();
+
+  base::Time request_time, response_time, current_time;
+  ASSERT_TRUE(base::Time::FromString(test.request_time, &request_time));
+  ASSERT_TRUE(base::Time::FromString(test.response_time, &response_time));
+  ASSERT_TRUE(base::Time::FromString(test.current_time, &current_time));
+
+  std::string headers(test.headers);
+  HeadersToRaw(&headers);
+  scoped_refptr<HttpResponseHeaders> parsed(new HttpResponseHeaders(headers));
+
+  base::TimeDelta age =
+      parsed->GetCurrentAge(request_time, response_time, current_time);
+  EXPECT_EQ(test.expected_age, age.InSeconds());
+}
+
+const struct GetCurrentAgeTestData get_current_age_tests[] = {
+    // Without Date header.
+    {"HTTP/1.1 200 OK\n"
+     "Age: 2",
+     "Fri, 20 Jan 2011 10:40:08 GMT", "Fri, 20 Jan 2011 10:40:12 GMT",
+     "Fri, 20 Jan 2011 10:40:14 GMT", 8},
+    // Without Age header.
+    {"HTTP/1.1 200 OK\n"
+     "Date: Fri, 20 Jan 2011 10:40:10 GMT\n",
+     "Fri, 20 Jan 2011 10:40:08 GMT", "Fri, 20 Jan 2011 10:40:12 GMT",
+     "Fri, 20 Jan 2011 10:40:14 GMT", 6},
+    // date_value > response_time with Age header.
+    {"HTTP/1.1 200 OK\n"
+     "Date: Fri, 20 Jan 2011 10:40:14 GMT\n"
+     "Age: 2\n",
+     "Fri, 20 Jan 2011 10:40:08 GMT", "Fri, 20 Jan 2011 10:40:12 GMT",
+     "Fri, 20 Jan 2011 10:40:14 GMT", 8},
+     // date_value > response_time without Age header.
+     {"HTTP/1.1 200 OK\n"
+     "Date: Fri, 20 Jan 2011 10:40:14 GMT\n",
+     "Fri, 20 Jan 2011 10:40:08 GMT", "Fri, 20 Jan 2011 10:40:12 GMT",
+     "Fri, 20 Jan 2011 10:40:14 GMT", 6},
+    // apparent_age > corrected_age_value
+    {"HTTP/1.1 200 OK\n"
+     "Date: Fri, 20 Jan 2011 10:40:07 GMT\n"
+     "Age: 0\n",
+     "Fri, 20 Jan 2011 10:40:08 GMT", "Fri, 20 Jan 2011 10:40:12 GMT",
+     "Fri, 20 Jan 2011 10:40:14 GMT", 7}};
+
+INSTANTIATE_TEST_CASE_P(HttpResponseHeaders,
+                        GetCurrentAgeTest,
+                        testing::ValuesIn(get_current_age_tests));
 
 }  // namespace
 

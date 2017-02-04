@@ -20,6 +20,7 @@
 #include "android_webview/renderer/print_render_frame_observer.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -74,13 +75,6 @@ void AwContentRendererClient::RenderThreadStarted() {
   visited_link_slave_.reset(new visitedlink::VisitedLinkSlave);
   thread->GetInterfaceRegistry()->AddInterface(
       visited_link_slave_->GetBindCallback());
-
-  blink::WebString content_scheme(base::ASCIIToUTF16(url::kContentScheme));
-  blink::WebSecurityPolicy::registerURLSchemeAsLocal(content_scheme);
-
-  blink::WebString aw_scheme(
-      base::ASCIIToUTF16(android_webview::kAndroidWebViewVideoPosterScheme));
-  blink::WebSecurityPolicy::registerURLSchemeAsSecure(aw_scheme);
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   if (!spellcheck_) {
@@ -142,7 +136,7 @@ bool AwContentRendererClient::HandleNavigation(
   }
 
   bool ignore_navigation = false;
-  base::string16 url = request.url().string();
+  base::string16 url = request.url().string().utf16();
   bool has_user_gesture = request.hasUserGesture();
 
   int render_frame_id = render_frame->GetRoutingID();
@@ -201,8 +195,8 @@ void AwContentRendererClient::GetNavigationErrorStrings(
   if (error_html) {
     GURL gurl(failed_request.url());
     std::string url = net::EscapeForHTML(gurl.possibly_invalid_spec());
-    std::string err =
-        base::UTF16ToUTF8(base::StringPiece16(error.localizedDescription));
+    std::string err = error.localizedDescription.utf8(
+        blink::WebString::UTF8ConversionMode::kStrictReplacingErrorsWithFFFD);
 
     std::vector<std::string> replacements;
     replacements.push_back(
@@ -230,7 +224,8 @@ void AwContentRendererClient::GetNavigationErrorStrings(
       render_frame->GetRemoteInterfaces()->GetInterface(
           &web_restrictions_service_);
       web_restrictions::mojom::ClientResultPtr result;
-      if (web_restrictions_service_->GetResult(mojo::String(url), &result)) {
+      if (web_restrictions_service_->GetResult(gurl.possibly_invalid_spec(),
+                                               &result)) {
         std::string detailed_error_html =
             supervised_user_error_page::BuildHtmlFromWebRestrictionsResult(
                 result, RenderThread::Get()->GetLocale());
@@ -246,7 +241,7 @@ void AwContentRendererClient::GetNavigationErrorStrings(
     if (error.localizedDescription.isEmpty())
       *error_description = base::ASCIIToUTF16(net::ErrorToString(error.reason));
     else
-      *error_description = error.localizedDescription;
+      *error_description = error.localizedDescription.utf16();
   }
 }
 

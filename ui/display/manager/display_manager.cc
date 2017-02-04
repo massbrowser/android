@@ -18,13 +18,14 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/display/display.h"
 #include "ui/display/display_observer.h"
 #include "ui/display/display_switches.h"
@@ -35,9 +36,11 @@
 #include "ui/gfx/font_render_params.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size_conversions.h"
+#include "ui/strings/grit/ui_strings.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/sys_info.h"
+#include "chromeos/system/devicemode.h"
 #endif
 
 #if defined(OS_WIN)
@@ -134,7 +137,8 @@ DisplayManager::DisplayManager(std::unique_ptr<Screen> screen)
       layout_store_(new DisplayLayoutStore),
       weak_ptr_factory_(this) {
 #if defined(OS_CHROMEOS)
-  change_display_upon_host_resize_ = !base::SysInfo::IsRunningOnChromeOS();
+  configure_displays_ = chromeos::IsRunningAsSystemCompositor();
+  change_display_upon_host_resize_ = !configure_displays_;
   unified_desktop_enabled_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
       ::switches::kEnableUnifiedDesktop);
 #endif
@@ -204,6 +208,11 @@ const DisplayLayout& DisplayManager::GetCurrentDisplayLayout() const {
   return layout;
 }
 
+const DisplayLayout& DisplayManager::GetCurrentResolvedDisplayLayout() const {
+  return current_resolved_layout_ ? *current_resolved_layout_
+                                  : GetCurrentDisplayLayout();
+}
+
 DisplayIdList DisplayManager::GetCurrentDisplayIdList() const {
   if (IsInUnifiedMode()) {
     return CreateDisplayIdList(software_mirroring_display_list_);
@@ -242,7 +251,8 @@ void DisplayManager::SetLayoutForCurrentDisplays(
 
   // TODO(oshima): Call UpdateDisplays instead.
   std::vector<int64_t> updated_ids;
-  ApplyDisplayLayout(GetCurrentDisplayLayout(), &active_display_list_,
+  current_resolved_layout_ = GetCurrentDisplayLayout().Copy();
+  ApplyDisplayLayout(current_resolved_layout_.get(), &active_display_list_,
                      &updated_ids);
   for (int64_t id : updated_ids) {
     NotifyMetricsChanged(GetDisplayForId(id),
@@ -378,7 +388,7 @@ bool DisplayManager::SetDisplayMode(
   if (resolution_changed && IsInUnifiedMode()) {
     ReconfigureDisplays();
 #if defined(OS_CHROMEOS)
-  } else if (resolution_changed && base::SysInfo::IsRunningOnChromeOS()) {
+  } else if (resolution_changed && configure_displays_) {
     delegate_->display_configurator()->OnConfigurationChanged();
 #endif
   }
@@ -392,7 +402,8 @@ void DisplayManager::RegisterDisplayProperty(
     const gfx::Insets* overscan_insets,
     const gfx::Size& resolution_in_pixels,
     float device_scale_factor,
-    ui::ColorCalibrationProfile color_profile) {
+    ColorCalibrationProfile color_profile,
+    const TouchCalibrationData* touch_calibration_data) {
   if (display_info_.find(display_id) == display_info_.end())
     display_info_[display_id] =
         ManagedDisplayInfo(display_id, std::string(), false);
@@ -413,6 +424,8 @@ void DisplayManager::RegisterDisplayProperty(
     display_info_[display_id].set_configured_ui_scale(ui_scale);
   if (overscan_insets)
     display_info_[display_id].SetOverscanInsets(*overscan_insets);
+  if (touch_calibration_data)
+    display_info_[display_id].SetTouchCalibrationData(*touch_calibration_data);
   if (!resolution_in_pixels.IsEmpty()) {
     DCHECK(!Display::IsInternalDisplayId(display_id));
     // Default refresh rate, until OnNativeDisplaysChanged() updates us with the
@@ -481,7 +494,7 @@ gfx::Insets DisplayManager::GetOverscanInsets(int64_t display_id) const {
 
 void DisplayManager::SetColorCalibrationProfile(
     int64_t display_id,
-    ui::ColorCalibrationProfile profile) {
+    ColorCalibrationProfile profile) {
 #if defined(OS_CHROMEOS)
   if (!display_info_[display_id].IsColorProfileAvailable(profile))
     return;
@@ -489,12 +502,12 @@ void DisplayManager::SetColorCalibrationProfile(
   if (delegate_)
     delegate_->PreDisplayConfigurationChange(false);
   // Just sets color profile if it's not running on ChromeOS (like tests).
-  if (!base::SysInfo::IsRunningOnChromeOS() ||
+  if (!configure_displays_ ||
       delegate_->display_configurator()->SetColorCalibrationProfile(display_id,
                                                                     profile)) {
     display_info_[display_id].SetColorProfile(profile);
     UMA_HISTOGRAM_ENUMERATION("ChromeOS.Display.ColorProfile", profile,
-                              ui::NUM_COLOR_PROFILES);
+                              NUM_COLOR_PROFILES);
   }
   if (delegate_)
     delegate_->PostDisplayConfigurationChange(false);
@@ -582,7 +595,7 @@ void DisplayManager::OnNativeDisplaysChanged(
       // in docked mode.
       ManagedDisplayInfo internal_display_info(
           Display::InternalDisplayId(),
-          delegate_->GetInternalDisplayNameString(),
+          l10n_util::GetStringUTF8(IDS_DISPLAY_NAME_INTERNAL),
           false /*Internal display must not have overscan */);
       internal_display_info.SetBounds(gfx::Rect(0, 0, 800, 600));
       display_info_[Display::InternalDisplayId()] = internal_display_info;
@@ -599,8 +612,7 @@ void DisplayManager::OnNativeDisplaysChanged(
   }
 
 #if defined(OS_CHROMEOS)
-  if (!base::SysInfo::IsRunningOnChromeOS() &&
-      new_display_info_list.size() > 1) {
+  if (!configure_displays_ && new_display_info_list.size() > 1) {
     DisplayIdList list = GenerateDisplayIdList(
         new_display_info_list.begin(), new_display_info_list.end(),
         [](const ManagedDisplayInfo& info) { return info.id(); });
@@ -630,7 +642,7 @@ void DisplayManager::UpdateDisplaysWith(
 #if defined(OS_WIN)
   DCHECK_EQ(1u, updated_display_info_list.size())
       << ": Multiple display test does not work on Windows bots. Please "
-         "skip (don't disable) the test using SupportsMultipleDisplays()";
+         "skip (don't disable) the test.";
 #endif
 
   DisplayInfoList new_display_info_list = updated_display_info_list;
@@ -900,7 +912,7 @@ const Display DisplayManager::GetMirroringDisplayById(
 
 std::string DisplayManager::GetDisplayNameForId(int64_t id) {
   if (id == kInvalidDisplayId)
-    return delegate_->GetInternalDisplayNameString();
+    return l10n_util::GetStringUTF8(IDS_DISPLAY_NAME_UNKNOWN);
 
   std::map<int64_t, ManagedDisplayInfo>::const_iterator iter =
       display_info_.find(id);
@@ -922,10 +934,10 @@ void DisplayManager::SetMirrorMode(bool mirror) {
     return;
 
 #if defined(OS_CHROMEOS)
-  if (base::SysInfo::IsRunningOnChromeOS()) {
-    ui::MultipleDisplayState new_state =
-        mirror ? ui::MULTIPLE_DISPLAY_STATE_DUAL_MIRROR
-               : ui::MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED;
+  if (configure_displays_) {
+    MultipleDisplayState new_state = mirror
+                                         ? MULTIPLE_DISPLAY_STATE_DUAL_MIRROR
+                                         : MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED;
     delegate_->display_configurator()->SetDisplayMode(new_state);
     return;
   }
@@ -981,6 +993,44 @@ void DisplayManager::SetSoftwareMirroring(bool enabled) {
 
 bool DisplayManager::SoftwareMirroringEnabled() const {
   return software_mirroring_enabled();
+}
+
+void DisplayManager::SetTouchCalibrationData(
+    int64_t display_id,
+    const TouchCalibrationData::CalibrationPointPairQuad& point_pair_quad,
+    const gfx::Size& display_bounds) {
+  bool update = false;
+  TouchCalibrationData calibration_data(point_pair_quad, display_bounds);
+  DisplayInfoList display_info_list;
+  for (const auto& display : active_display_list_) {
+    ManagedDisplayInfo info = GetDisplayInfo(display.id());
+    if (info.id() == display_id) {
+      info.SetTouchCalibrationData(calibration_data);
+      update = true;
+    }
+    display_info_list.push_back(info);
+  }
+  if (update)
+    UpdateDisplaysWith(display_info_list);
+  else
+    display_info_[display_id].SetTouchCalibrationData(calibration_data);
+}
+
+void DisplayManager::ClearTouchCalibrationData(int64_t display_id) {
+  bool update = false;
+  DisplayInfoList display_info_list;
+  for (const auto& display : active_display_list_) {
+    ManagedDisplayInfo info = GetDisplayInfo(display.id());
+    if (info.id() == display_id) {
+      info.clear_touch_calibration_data();
+      update = true;
+    }
+    display_info_list.push_back(info);
+  }
+  if (update)
+    UpdateDisplaysWith(display_info_list);
+  else
+    display_info_[display_id].clear_touch_calibration_data();
 }
 #endif
 
@@ -1277,8 +1327,8 @@ void DisplayManager::InsertAndUpdateDisplayInfo(
 void DisplayManager::OnDisplayInfoUpdated(
     const ManagedDisplayInfo& display_info) {
 #if defined(OS_CHROMEOS)
-  ui::ColorCalibrationProfile color_profile = display_info.color_profile();
-  if (color_profile != ui::COLOR_PROFILE_STANDARD) {
+  ColorCalibrationProfile color_profile = display_info.color_profile();
+  if (color_profile != COLOR_PROFILE_STANDARD) {
     delegate_->display_configurator()->SetColorCalibrationProfile(
         display_info.id(), color_profile);
   }
@@ -1336,7 +1386,8 @@ void DisplayManager::UpdateNonPrimaryDisplayBoundsForLayout(
 
   // display_list does not have translation set, so ApplyDisplayLayout cannot
   // provide accurate change information. We'll find the changes after the call.
-  ApplyDisplayLayout(layout, display_list, nullptr);
+  current_resolved_layout_ = layout.Copy();
+  ApplyDisplayLayout(current_resolved_layout_.get(), display_list, nullptr);
   size_t num_displays = display_list->size();
   for (size_t index = 0; index < num_displays; ++index) {
     const Display& display = (*display_list)[index];
@@ -1356,11 +1407,17 @@ void DisplayManager::CreateMirrorWindowIfAny() {
   delegate_->CreateOrUpdateMirroringDisplay(list);
 }
 
-void DisplayManager::ApplyDisplayLayout(const DisplayLayout& layout,
+void DisplayManager::ApplyDisplayLayout(DisplayLayout* layout,
                                         Displays* display_list,
                                         std::vector<int64_t>* updated_ids) {
-  layout.ApplyToDisplayList(display_list, updated_ids,
-                            kMinimumOverlapForInvalidOffset);
+  if (multi_display_mode_ == UNIFIED) {
+    // Applying the layout in unified mode doesn't make sense, since there's no
+    // layout.
+    return;
+  }
+
+  layout->ApplyToDisplayList(display_list, updated_ids,
+                             kMinimumOverlapForInvalidOffset);
 }
 
 void DisplayManager::RunPendingTasksForTest() {

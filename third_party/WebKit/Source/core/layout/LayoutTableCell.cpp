@@ -27,6 +27,7 @@
 
 #include "core/HTMLNames.h"
 #include "core/css/StylePropertySet.h"
+#include "core/editing/EditingUtilities.h"
 #include "core/html/HTMLTableCellElement.h"
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutTableCol.h"
@@ -68,12 +69,12 @@ LayoutTableCell::LayoutTableCell(Element* element)
 }
 
 LayoutTableCell::CollapsedBorderValues::CollapsedBorderValues(
-    const LayoutTable& layoutTable,
+    const LayoutTableCell& layoutTableCell,
     const CollapsedBorderValue& startBorder,
     const CollapsedBorderValue& endBorder,
     const CollapsedBorderValue& beforeBorder,
     const CollapsedBorderValue& afterBorder)
-    : m_layoutTable(layoutTable),
+    : m_layoutTableCell(layoutTableCell),
       m_startBorder(startBorder),
       m_endBorder(endBorder),
       m_beforeBorder(beforeBorder),
@@ -92,7 +93,7 @@ String LayoutTableCell::CollapsedBorderValues::debugName() const {
 }
 
 LayoutRect LayoutTableCell::CollapsedBorderValues::visualRect() const {
-  return m_layoutTable.visualRect();
+  return m_layoutTableCell.table()->visualRect();
 }
 
 void LayoutTableCell::willBeRemovedFromTree() {
@@ -122,6 +123,8 @@ void LayoutTableCell::willBeRemovedFromTree() {
 
 unsigned LayoutTableCell::parseColSpanFromDOM() const {
   ASSERT(node());
+  // TODO(dgrogan): HTMLTableCellElement::colSpan() already clamps to something
+  // smaller than maxColumnIndex; can we just DCHECK here?
   if (isHTMLTableCellElement(*node()))
     return std::min<unsigned>(toHTMLTableCellElement(*node()).colSpan(),
                               maxColumnIndex);
@@ -246,28 +249,28 @@ void LayoutTableCell::computeIntrinsicPadding(int rowHeight,
 
   int intrinsicPaddingBefore = 0;
   switch (verticalAlign) {
-    case VerticalAlignSub:
-    case VerticalAlignSuper:
-    case VerticalAlignTextTop:
-    case VerticalAlignTextBottom:
-    case VerticalAlignLength:
-    case VerticalAlignBaseline: {
+    case EVerticalAlign::kSub:
+    case EVerticalAlign::kSuper:
+    case EVerticalAlign::kTextTop:
+    case EVerticalAlign::kTextBottom:
+    case EVerticalAlign::kLength:
+    case EVerticalAlign::kBaseline: {
       int baseline = cellBaselinePosition();
       if (baseline > borderBefore() + paddingBefore())
         intrinsicPaddingBefore = section()->rowBaseline(rowIndex()) -
                                  (baseline - oldIntrinsicPaddingBefore);
       break;
     }
-    case VerticalAlignTop:
+    case EVerticalAlign::kTop:
       break;
-    case VerticalAlignMiddle:
+    case EVerticalAlign::kMiddle:
       intrinsicPaddingBefore =
           (rowHeight - logicalHeightWithoutIntrinsicPadding) / 2;
       break;
-    case VerticalAlignBottom:
+    case EVerticalAlign::kBottom:
       intrinsicPaddingBefore = rowHeight - logicalHeightWithoutIntrinsicPadding;
       break;
-    case VerticalAlignBaselineMiddle:
+    case EVerticalAlign::kBaselineMiddle:
       break;
   }
 
@@ -333,7 +336,7 @@ void LayoutTableCell::layout() {
 LayoutUnit LayoutTableCell::paddingTop() const {
   LayoutUnit result = computedCSSPaddingTop();
   if (isHorizontalWritingMode())
-    result += (style()->getWritingMode() == TopToBottomWritingMode
+    result += (blink::isHorizontalWritingMode(style()->getWritingMode())
                    ? intrinsicPaddingBefore()
                    : intrinsicPaddingAfter());
   // TODO(leviw): The floor call should be removed when Table is sub-pixel
@@ -344,7 +347,7 @@ LayoutUnit LayoutTableCell::paddingTop() const {
 LayoutUnit LayoutTableCell::paddingBottom() const {
   LayoutUnit result = computedCSSPaddingBottom();
   if (isHorizontalWritingMode())
-    result += (style()->getWritingMode() == TopToBottomWritingMode
+    result += (blink::isHorizontalWritingMode(style()->getWritingMode())
                    ? intrinsicPaddingAfter()
                    : intrinsicPaddingBefore());
   // TODO(leviw): The floor call should be removed when Table is sub-pixel
@@ -355,7 +358,7 @@ LayoutUnit LayoutTableCell::paddingBottom() const {
 LayoutUnit LayoutTableCell::paddingLeft() const {
   LayoutUnit result = computedCSSPaddingLeft();
   if (!isHorizontalWritingMode())
-    result += (style()->getWritingMode() == LeftToRightWritingMode
+    result += (isFlippedLinesWritingMode(style()->getWritingMode())
                    ? intrinsicPaddingBefore()
                    : intrinsicPaddingAfter());
   // TODO(leviw): The floor call should be removed when Table is sub-pixel
@@ -366,7 +369,7 @@ LayoutUnit LayoutTableCell::paddingLeft() const {
 LayoutUnit LayoutTableCell::paddingRight() const {
   LayoutUnit result = computedCSSPaddingRight();
   if (!isHorizontalWritingMode())
-    result += (style()->getWritingMode() == LeftToRightWritingMode
+    result += (isFlippedLinesWritingMode(style()->getWritingMode())
                    ? intrinsicPaddingAfter()
                    : intrinsicPaddingBefore());
   // TODO(leviw): The floor call should be removed when Table is sub-pixel
@@ -469,8 +472,8 @@ void LayoutTableCell::ensureIsReadyForPaintInvalidation() {
   if (!usesCompositedCellDisplayItemClients())
     return;
   if (!m_rowBackgroundDisplayItemClient) {
-    m_rowBackgroundDisplayItemClient =
-        wrapUnique(new LayoutTableCell::RowBackgroundDisplayItemClient(*this));
+    m_rowBackgroundDisplayItemClient = WTF::wrapUnique(
+        new LayoutTableCell::RowBackgroundDisplayItemClient(*this));
   }
 }
 
@@ -1312,13 +1315,13 @@ static void addBorderStyle(LayoutTable::CollapsedBorderValues& borderValues,
     if (borderValues[i].isSameIgnoringColor(borderValue))
       return;
   }
-  borderValues.append(borderValue);
+  borderValues.push_back(borderValue);
 }
 
 void LayoutTableCell::collectBorderValues(
     LayoutTable::CollapsedBorderValues& borderValues) {
   CollapsedBorderValues newValues(
-      *table(), computeCollapsedStartBorder(), computeCollapsedEndBorder(),
+      *this, computeCollapsedStartBorder(), computeCollapsedEndBorder(),
       computeCollapsedBeforeBorder(), computeCollapsedAfterBorder());
 
   bool changed = false;
@@ -1330,8 +1333,8 @@ void LayoutTableCell::collectBorderValues(
     m_collapsedBorderValues = nullptr;
   } else if (!m_collapsedBorderValues) {
     changed = true;
-    m_collapsedBorderValues = wrapUnique(new CollapsedBorderValues(
-        *table(), newValues.startBorder(), newValues.endBorder(),
+    m_collapsedBorderValues = WTF::wrapUnique(new CollapsedBorderValues(
+        *this, newValues.startBorder(), newValues.endBorder(),
         newValues.beforeBorder(), newValues.afterBorder()));
   } else {
     // We check visuallyEquals so that the table cell is invalidated only if a
@@ -1352,10 +1355,11 @@ void LayoutTableCell::collectBorderValues(
   // the table's backing.
   // TODO(crbug.com/451090#c5): Need a way to invalidate/repaint the borders
   // only.
-  if (changed)
+  if (changed) {
     ObjectPaintInvalidator(*table())
         .slowSetPaintingLayerNeedsRepaintAndInvalidateDisplayItemClient(
             *this, PaintInvalidationStyleChange);
+  }
 
   addBorderStyle(borderValues, newValues.startBorder());
   addBorderStyle(borderValues, newValues.endBorder());
@@ -1400,7 +1404,7 @@ void LayoutTableCell::scrollbarsChanged(bool horizontalScrollbarChanged,
 
   // Shrink our intrinsic padding as much as possible to accommodate the
   // scrollbar.
-  if (style()->verticalAlign() == VerticalAlignMiddle) {
+  if (style()->verticalAlign() == EVerticalAlign::kMiddle) {
     LayoutUnit totalHeight = logicalHeight();
     LayoutUnit heightWithoutIntrinsicPadding =
         totalHeight - intrinsicPaddingBefore() - intrinsicPaddingAfter();
@@ -1429,7 +1433,7 @@ LayoutTableCell* LayoutTableCell::createAnonymousWithParent(
   RefPtr<ComputedStyle> newStyle =
       ComputedStyle::createAnonymousStyleWithDisplay(parent->styleRef(),
                                                      EDisplay::TableCell);
-  newCell->setStyle(newStyle.release());
+  newCell->setStyle(std::move(newStyle));
   return newCell;
 }
 
@@ -1485,6 +1489,13 @@ LayoutRect LayoutTableCell::debugRect() const {
 
 void LayoutTableCell::adjustChildDebugRect(LayoutRect& r) const {
   r.move(0, -intrinsicPaddingBefore());
+}
+
+bool LayoutTableCell::hasLineIfEmpty() const {
+  if (node() && hasEditableStyle(*node()))
+    return true;
+
+  return LayoutBlock::hasLineIfEmpty();
 }
 
 }  // namespace blink

@@ -7,10 +7,28 @@
 #include "base/sys_info.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/graphics/ImageDecodingStore.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 #include "wtf/allocator/Partitions.h"
 
 namespace blink {
+
+// static
+bool MemoryCoordinator::s_isLowEndDevice = false;
+
+// static
+bool MemoryCoordinator::isLowEndDevice() {
+  return s_isLowEndDevice;
+}
+
+// static
+void MemoryCoordinator::initialize() {
+  s_isLowEndDevice = ::base::SysInfo::IsLowEndDevice();
+}
+
+// static
+void MemoryCoordinator::setIsLowEndDeviceForTesting(bool isLowEndDevice) {
+  s_isLowEndDevice = isLowEndDevice;
+}
 
 // static
 MemoryCoordinator& MemoryCoordinator::instance() {
@@ -20,10 +38,6 @@ MemoryCoordinator& MemoryCoordinator::instance() {
   return *external.get();
 }
 
-// static
-bool MemoryCoordinator::isLowEndDevice() {
-  return base::SysInfo::IsLowEndDevice();
-}
 
 MemoryCoordinator::MemoryCoordinator() {}
 
@@ -31,7 +45,7 @@ void MemoryCoordinator::registerClient(MemoryCoordinatorClient* client) {
   DCHECK(isMainThread());
   DCHECK(client);
   DCHECK(!m_clients.contains(client));
-  m_clients.add(client);
+  m_clients.insert(client);
 }
 
 void MemoryCoordinator::unregisterClient(MemoryCoordinatorClient* client) {

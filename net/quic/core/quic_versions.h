@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_VERSIONS_H_
-#define NET_QUIC_QUIC_VERSIONS_H_
+#ifndef NET_QUIC_CORE_QUIC_VERSIONS_H_
+#define NET_QUIC_CORE_QUIC_VERSIONS_H_
 
 #include <string>
 #include <vector>
 
 #include "net/quic/core/quic_tag.h"
 #include "net/quic/core/quic_types.h"
+#include "net/quic/platform/api/quic_export.h"
 
 namespace net {
 
@@ -27,8 +28,11 @@ enum QuicVersion {
                          // header, uses new ack and stop waiting wire format.
   QUIC_VERSION_35 = 35,  // Allows endpoints to independently set stream limit.
   QUIC_VERSION_36 = 36,  // Add support to force HOL blocking.
+  QUIC_VERSION_37 = 37,  // Add perspective into null encryption.
+  QUIC_VERSION_38 = 38,  // Experimental support for HTTP stream pairs
+                         // and HPACK HoL avoidance.
 
-  // IMPORTANT: if you are adding to this std::list, follow the instructions at
+  // IMPORTANT: if you are adding to this list, follow the instructions at
   // http://sites/quic/adding-and-removing-versions
 };
 
@@ -40,46 +44,47 @@ enum QuicVersion {
 // IMPORTANT: if you are adding to this list, follow the instructions at
 // http://sites/quic/adding-and-removing-versions
 static const QuicVersion kSupportedQuicVersions[] = {
-    QUIC_VERSION_36, QUIC_VERSION_35, QUIC_VERSION_34};
+    QUIC_VERSION_38, QUIC_VERSION_37, QUIC_VERSION_36, QUIC_VERSION_35,
+    QUIC_VERSION_34};
 
 typedef std::vector<QuicVersion> QuicVersionVector;
 
 // Returns a vector of QUIC versions in kSupportedQuicVersions.
-NET_EXPORT_PRIVATE QuicVersionVector AllSupportedVersions();
+QUIC_EXPORT_PRIVATE QuicVersionVector AllSupportedVersions();
 
 // Returns a vector of QUIC versions from kSupportedQuicVersions which exclude
 // any versions which are disabled by flags.
-NET_EXPORT_PRIVATE QuicVersionVector CurrentSupportedVersions();
+QUIC_EXPORT_PRIVATE QuicVersionVector CurrentSupportedVersions();
 
 // Returns a vector of QUIC versions from |versions| which exclude any versions
 // which are disabled by flags.
-NET_EXPORT_PRIVATE QuicVersionVector
+QUIC_EXPORT_PRIVATE QuicVersionVector
 FilterSupportedVersions(QuicVersionVector versions);
 
 // Returns QUIC version of |index| in result of |versions|. Returns
 // QUIC_VERSION_UNSUPPORTED if |index| is out of bounds.
-NET_EXPORT_PRIVATE QuicVersionVector
+QUIC_EXPORT_PRIVATE QuicVersionVector
 VersionOfIndex(const QuicVersionVector& versions, int index);
 
 // QuicTag is written to and read from the wire, but we prefer to use
 // the more readable QuicVersion at other levels.
 // Helper function which translates from a QuicVersion to a QuicTag. Returns 0
 // if QuicVersion is unsupported.
-NET_EXPORT_PRIVATE QuicTag QuicVersionToQuicTag(const QuicVersion version);
+QUIC_EXPORT_PRIVATE QuicTag QuicVersionToQuicTag(const QuicVersion version);
 
 // Returns appropriate QuicVersion from a QuicTag.
 // Returns QUIC_VERSION_UNSUPPORTED if version_tag cannot be understood.
-NET_EXPORT_PRIVATE QuicVersion QuicTagToQuicVersion(const QuicTag version_tag);
+QUIC_EXPORT_PRIVATE QuicVersion QuicTagToQuicVersion(const QuicTag version_tag);
 
 // Helper function which translates from a QuicVersion to a string.
 // Returns strings corresponding to enum names (e.g. QUIC_VERSION_6).
-NET_EXPORT_PRIVATE std::string QuicVersionToString(const QuicVersion version);
+QUIC_EXPORT_PRIVATE std::string QuicVersionToString(const QuicVersion version);
 
 // Returns comma separated list of string representations of QuicVersion enum
 // values in the supplied |versions| vector.
-NET_EXPORT_PRIVATE std::string QuicVersionVectorToString(
+QUIC_EXPORT_PRIVATE std::string QuicVersionVectorToString(
     const QuicVersionVector& versions);
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_VERSIONS_H_
+#endif  // NET_QUIC_CORE_QUIC_VERSIONS_H_

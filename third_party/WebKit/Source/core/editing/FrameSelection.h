@@ -29,11 +29,11 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/Range.h"
-#include "core/editing/EditingStyle.h"
+#include "core/dom/SynchronousMutationObserver.h"
 #include "core/editing/EphemeralRange.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleSelection.h"
-#include "core/editing/iterators/TextIteratorFlags.h"
+#include "core/editing/iterators/TextIteratorBehavior.h"
 #include "core/layout/ScrollAlignment.h"
 #include "platform/Timer.h"
 #include "platform/geometry/IntRect.h"
@@ -45,6 +45,7 @@
 namespace blink {
 
 class CharacterData;
+class DisplayItemClient;
 class LayoutBlock;
 class LocalFrame;
 class FrameCaret;
@@ -54,6 +55,7 @@ class HTMLFormElement;
 class SelectionEditor;
 class PendingSelection;
 class Text;
+class TextIteratorBehavior;
 
 enum class CursorAlignOnScroll { IfNeeded, Always };
 
@@ -65,12 +67,16 @@ enum class SelectionDirectionalMode { NonDirectional, Directional };
 
 enum class CaretVisibility;
 
+enum class HandleVisibility { NotVisible, Visible };
+
 class CORE_EXPORT FrameSelection final
-    : public GarbageCollectedFinalized<FrameSelection> {
+    : public GarbageCollectedFinalized<FrameSelection>,
+      public SynchronousMutationObserver {
   WTF_MAKE_NONCOPYABLE(FrameSelection);
+  USING_GARBAGE_COLLECTED_MIXIN(FrameSelection);
 
  public:
-  static FrameSelection* create(LocalFrame* frame) {
+  static FrameSelection* create(LocalFrame& frame) {
     return new FrameSelection(frame);
   }
   ~FrameSelection();
@@ -84,6 +90,7 @@ class CORE_EXPORT FrameSelection final
     DoNotUpdateAppearance = 1 << 4,
     DoNotClearStrategy = 1 << 5,
     DoNotAdjustInFlatTree = 1 << 6,
+    HandleVisible = 1 << 7,
   };
   // Union of values in SetSelectionOption and EUserTriggered
   typedef unsigned SetSelectionOptions;
@@ -92,7 +99,7 @@ class CORE_EXPORT FrameSelection final
     return static_cast<EUserTriggered>(options & UserTriggered);
   }
 
-  bool isAvailable() const { return m_document; }
+  bool isAvailable() const { return lifecycleContext(); }
   // You should not call |document()| when |!isAvailable()|.
   const Document& document() const;
   Document& document();
@@ -182,9 +189,9 @@ class CORE_EXPORT FrameSelection final
   Position start() const { return selection().start(); }
   Position end() const { return selection().end(); }
 
-  // Return the layoutObject that is responsible for painting the caret (in the
-  // selection start node)
-  LayoutBlock* caretLayoutObject() const;
+  // Returns true if specified layout block has caret. This function is
+  // called during InRecalStyle and InPaint.
+  bool hasCaretIn(const LayoutBlock&) const;
 
   // Bounds of (possibly transformed) caret in absolute coords
   IntRect absoluteCaretBounds();
@@ -203,22 +210,12 @@ class CORE_EXPORT FrameSelection final
   Range* firstRange() const;
 
   void documentAttached(Document*);
-  void documentDetached(const Document&);
-  void nodeChildrenWillBeRemoved(ContainerNode&);
-  void nodeWillBeRemoved(Node&);
   void dataWillChange(const CharacterData& node);
-  void didUpdateCharacterData(CharacterData*,
-                              unsigned offset,
-                              unsigned oldLength,
-                              unsigned newLength);
-  void didMergeTextNodes(const Text& oldNode, unsigned offset);
-  void didSplitTextNode(const Text& oldNode);
 
+  void didLayout();
   bool isAppearanceDirty() const;
   void commitAppearanceIfNeeded(LayoutView&);
-  void updateAppearance();
   void setCaretVisible(bool caretIsVisible);
-  bool isCaretBoundsDirty() const;
   void setCaretRectNeedsUpdate();
   void scheduleVisualUpdate() const;
   void invalidateCaretRect(bool forceInvalidation = false);
@@ -235,6 +232,11 @@ class CORE_EXPORT FrameSelection final
   void pageActivationChanged();
 
   void setUseSecureKeyboardEntryWhenActive(bool);
+
+  bool isHandleVisible() const {
+    return m_handleVisibility == HandleVisibility::Visible;
+  }
+
   void updateSecureKeyboardEntryIfActive();
 
   // Returns true if a word is selected.
@@ -247,12 +249,9 @@ class CORE_EXPORT FrameSelection final
   void setFocusedNodeIfNeeded();
   void notifyLayoutObjectOfSelectionChange(EUserTriggered);
 
-  EditingStyle* typingStyle() const;
-  void setTypingStyle(EditingStyle*);
-  void clearTypingStyle();
-
   String selectedHTMLForClipboard() const;
-  String selectedText(TextIteratorBehavior = TextIteratorDefaultBehavior) const;
+  String selectedText(const TextIteratorBehavior&) const;
+  String selectedText() const;
   String selectedTextForClipboard() const;
 
   // The bounds are clipped to the viewport as this is what callers expect.
@@ -268,6 +267,7 @@ class CORE_EXPORT FrameSelection final
       RevealExtentOption = DoNotRevealExtent);
   void setSelectionFromNone();
 
+  void updateAppearance();
   bool shouldShowBlockCursor() const;
   void setShouldShowBlockCursor(bool);
 
@@ -286,7 +286,10 @@ class CORE_EXPORT FrameSelection final
   FRIEND_TEST_ALL_PREFIXES(PaintControllerPaintTestForSlimmingPaintV1AndV2,
                            FullDocumentPaintingWithCaret);
 
-  explicit FrameSelection(LocalFrame*);
+  explicit FrameSelection(LocalFrame&);
+
+  // For |PaintControllerPaintTestForSlimmingPaintV1AndV2|.
+  const DisplayItemClient& caretDisplayItemClientForTesting() const;
 
   // Note: We have |selectionInFlatTree()| for unit tests, we should
   // use |visibleSelection<EditingInFlatTreeStrategy>()|.
@@ -319,11 +322,23 @@ class CORE_EXPORT FrameSelection final
 
   GranularityStrategy* granularityStrategy();
 
+  // Implementation of |SynchronousMutationObserver| member functions.
+  void contextDestroyed(Document*) final;
+  void nodeChildrenWillBeRemoved(ContainerNode&) final;
+  void nodeWillBeRemoved(Node&) final;
+  void didUpdateCharacterData(CharacterData*,
+                              unsigned offset,
+                              unsigned oldLength,
+                              unsigned newLength) final;
+  void didMergeTextNodes(const Text& mergedNode,
+                         const NodeWithIndex& nodeToBeRemovedWithIndex,
+                         unsigned oldLength) final;
+  void didSplitTextNode(const Text& oldNode) final;
+
   // For unittests
   bool shouldPaintCaretForTesting() const;
   bool isPreviousCaretDirtyForTesting() const;
 
-  Member<Document> m_document;
   Member<LocalFrame> m_frame;
   const Member<PendingSelection> m_pendingSelection;
   const Member<SelectionEditor> m_selectionEditor;
@@ -331,9 +346,9 @@ class CORE_EXPORT FrameSelection final
   TextGranularity m_granularity;
   LayoutUnit m_xPosForVerticalArrowNavigation;
 
-  Member<EditingStyle> m_typingStyle;
-
   bool m_focused : 1;
+
+  HandleVisibility m_handleVisibility = HandleVisibility::NotVisible;
 
   // Controls text granularity used to adjust the selection's extent in
   // moveRangeSelectionExtent.
@@ -343,17 +358,6 @@ class CORE_EXPORT FrameSelection final
   bool m_useSecureKeyboardEntryWhenActive = false;
 };
 
-inline EditingStyle* FrameSelection::typingStyle() const {
-  return m_typingStyle.get();
-}
-
-inline void FrameSelection::clearTypingStyle() {
-  m_typingStyle.clear();
-}
-
-inline void FrameSelection::setTypingStyle(EditingStyle* style) {
-  m_typingStyle = style;
-}
 }  // namespace blink
 
 #ifndef NDEBUG

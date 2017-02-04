@@ -36,8 +36,10 @@ const int kTrayLabelItemHorizontalPaddingBottomAlignment = 7;
 // Vertical padding between status tray items when the shelf is vertical.
 const int kTrayLabelItemVerticalPaddingVerticalAlignment = 4;
 
-const int kTrayMenuBottomRowPadding = 5;
+const int kTrayMenuBottomRowPadding = 3;
 const int kTrayMenuBottomRowPaddingBetweenItems = -1;
+const int kTrayMenuMinimumWidth = 300;
+const int kTrayMenuMinimumWidthMd = 352;
 
 const int kTrayPopupAutoCloseDelayInSeconds = 2;
 const int kTrayPopupAutoCloseDelayForTextInSeconds = 5;
@@ -104,6 +106,8 @@ const float kTrayPopupInkDropRippleOpacity = 0.06f;
 const float kTrayPopupInkDropHighlightOpacity = 0.08f;
 const int kTrayPopupInkDropInset = 4;
 const int kTrayPopupInkDropCornerRadius = 2;
+
+const int kTrayPopupSystemInfoRowHeight = 40;
 
 int GetTrayConstant(TrayConstant constant) {
   const int kTrayItemHeightLegacy[] = {38, kTrayItemSize, kTrayItemSize};

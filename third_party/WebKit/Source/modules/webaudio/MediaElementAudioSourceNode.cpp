@@ -26,6 +26,7 @@
 #include "modules/webaudio/MediaElementAudioSourceNode.h"
 
 #include "core/dom/ExecutionContextTask.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/webaudio/AudioNodeOutput.h"
@@ -101,7 +102,7 @@ void MediaElementAudioSourceHandler::setFormat(size_t numberOfChannels,
     if (sourceSampleRate != sampleRate()) {
       double scaleFactor = sourceSampleRate / sampleRate();
       m_multiChannelResampler =
-          makeUnique<MultiChannelResampler>(scaleFactor, numberOfChannels);
+          WTF::makeUnique<MultiChannelResampler>(scaleFactor, numberOfChannels);
     } else {
       // Bypass resampling.
       m_multiChannelResampler.reset();
@@ -192,7 +193,7 @@ void MediaElementAudioSourceHandler::process(size_t numberOfFrames) {
         m_maybePrintCORSMessage = false;
         if (context()->getExecutionContext()) {
           context()->getExecutionContext()->postTask(
-              BLINK_FROM_HERE,
+              TaskType::MediaElementEvent, BLINK_FROM_HERE,
               createCrossThreadTask(
                   &MediaElementAudioSourceHandler::printCORSMessage,
                   PassRefPtr<MediaElementAudioSourceHandler>(this),
@@ -220,7 +221,7 @@ void MediaElementAudioSourceHandler::unlock() {
 MediaElementAudioSourceNode::MediaElementAudioSourceNode(
     BaseAudioContext& context,
     HTMLMediaElement& mediaElement)
-    : AudioSourceNode(context) {
+    : AudioNode(context) {
   setHandler(MediaElementAudioSourceHandler::create(*this, mediaElement));
 }
 
@@ -271,7 +272,7 @@ MediaElementAudioSourceNode* MediaElementAudioSourceNode::create(
 
 DEFINE_TRACE(MediaElementAudioSourceNode) {
   AudioSourceProviderClient::trace(visitor);
-  AudioSourceNode::trace(visitor);
+  AudioNode::trace(visitor);
 }
 
 MediaElementAudioSourceHandler&

@@ -253,7 +253,7 @@ ScoredHistoryMatches URLIndexPrivateData::HistoryItemsForTerms(
     for (SearchTermCacheMap::iterator cache_iter = search_term_cache_.begin();
          cache_iter != search_term_cache_.end(); ) {
       if (!cache_iter->second.used_)
-        search_term_cache_.erase(cache_iter++);
+        cache_iter = search_term_cache_.erase(cache_iter);
       else
         ++cache_iter;
     }
@@ -497,6 +497,7 @@ URLIndexPrivateData::~URLIndexPrivateData() {}
 
 HistoryIDSet URLIndexPrivateData::HistoryIDSetFromWords(
     const String16Vector& unsorted_words) {
+  SCOPED_UMA_HISTOGRAM_TIMER("Omnibox.HistoryQuickHistoryIDSetFromWords");
   // Break the terms down into individual terms (words), get the candidate
   // set for each term, and intersect each to get a final candidate list.
   // Note that a single 'term' from the user's perspective might be
@@ -605,7 +606,7 @@ HistoryIDSet URLIndexPrivateData::HistoryIDsForTerm(
     for (WordIDSet::iterator word_set_iter = word_id_set.begin();
          word_set_iter != word_id_set.end(); ) {
       if (word_list_[*word_set_iter].find(term) == base::string16::npos)
-        word_id_set.erase(word_set_iter++);
+        word_set_iter = word_id_set.erase(word_set_iter);
       else
         ++word_set_iter;
     }
@@ -714,13 +715,11 @@ void URLIndexPrivateData::HistoryIdSetToScoredMatches(
   }
 
   // Score the matches.
+  const size_t num_matches = history_id_set.size();
   const base::Time now = base::Time::Now();
   std::transform(
       history_id_set.begin(), history_id_set.end(),
-      std::back_inserter(*scored_items),
-      [this, &lower_raw_string, &lower_raw_terms,
-       &lower_terms_to_word_starts_offsets, &bookmark_model,
-       &now](const HistoryID history_id) {
+      std::back_inserter(*scored_items), [&](const HistoryID history_id) {
         auto hist_pos = history_info_map_.find(history_id);
         const history::URLRow& hist_item = hist_pos->second.url_row;
         auto starts_pos = word_starts_map_.find(history_id);
@@ -730,7 +729,7 @@ void URLIndexPrivateData::HistoryIdSetToScoredMatches(
             lower_raw_terms, lower_terms_to_word_starts_offsets,
             starts_pos->second,
             bookmark_model && bookmark_model->IsBookmarked(hist_item.url()),
-            now);
+            num_matches, now);
       });
 
   // Filter all matches that ended up scoring 0.  (These are usually matches

@@ -32,7 +32,7 @@ void BoxPaintInvalidator::boxWillBeDestroyed(const LayoutBox& box) {
   DCHECK(box.hasPreviousBoxGeometries() ==
          previousBoxGeometriesMap().contains(&box));
   if (box.hasPreviousBoxGeometries())
-    previousBoxGeometriesMap().remove(&box);
+    previousBoxGeometriesMap().erase(&box);
 }
 
 static LayoutRect computeRightDelta(const LayoutPoint& location,
@@ -117,7 +117,7 @@ PaintInvalidationReason BoxPaintInvalidator::computePaintInvalidationReason() {
 
   if ((style.backgroundLayers().thisOrNextLayersUseContentBox() ||
        style.maskLayers().thisOrNextLayersUseContentBox() ||
-       style.boxSizing() == BoxSizingBorderBox) &&
+       style.boxSizing() == EBoxSizing::kBorderBox) &&
       previousContentBoxRect() != m_box.contentBoxRect())
     return PaintInvalidationContentBoxChange;
 
@@ -156,6 +156,14 @@ PaintInvalidationReason BoxPaintInvalidator::computePaintInvalidationReason() {
     return PaintInvalidationBorderBoxChange;
   if (oldBorderBoxSize.height() != newBorderBoxSize.height() &&
       m_box.mustInvalidateBackgroundOrBorderPaintOnHeightChange())
+    return PaintInvalidationBorderBoxChange;
+
+  // Needs to repaint frame boundaries.
+  if (m_box.isFrameSet())
+    return PaintInvalidationBorderBoxChange;
+
+  // Needs to repaint column rules.
+  if (m_box.isLayoutMultiColumnSet())
     return PaintInvalidationBorderBoxChange;
 
   return PaintInvalidationIncremental;
@@ -314,7 +322,7 @@ bool BoxPaintInvalidator::needsToSavePreviousBoxGeometries() {
 
   // If we use border-box sizing we need to track changes in the size of the
   // content box.
-  if (style.boxSizing() == BoxSizingBorderBox)
+  if (style.boxSizing() == EBoxSizing::kBorderBox)
     return true;
 
   // No need to save old border box size if we can use size of the old paint
@@ -338,7 +346,7 @@ void BoxPaintInvalidator::savePreviousBoxGeometriesIfNeeded() {
          previousBoxGeometriesMap().contains(&m_box));
   if (!needsToSavePreviousBoxGeometries()) {
     if (m_box.hasPreviousBoxGeometries()) {
-      previousBoxGeometriesMap().remove(&m_box);
+      previousBoxGeometriesMap().erase(&m_box);
       m_box.getMutableForPainting().setHasPreviousBoxGeometries(false);
     }
     return;

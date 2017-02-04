@@ -17,6 +17,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -50,7 +51,7 @@
 #include "third_party/icu/source/common/unicode/uscript.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(ENABLE_THEMES)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #endif
@@ -490,7 +491,7 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
                                                       profile_,
                                                       web_contents_);
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(ENABLE_THEMES)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
@@ -604,7 +605,7 @@ void PrefsTabHelper::GetServiceInstance() {
 void PrefsTabHelper::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(ENABLE_THEMES)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
   if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     UpdateRendererPreferences();
     return;

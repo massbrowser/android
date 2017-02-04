@@ -5,18 +5,17 @@
 #include "modules/webgl/WebGL2RenderingContextBase.h"
 
 #include "bindings/modules/v8/WebGLAny.h"
-#include "core/dom/DOMException.h"
 #include "core/frame/ImageBitmap.h"
 #include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLVideoElement.h"
 #include "core/html/ImageData.h"
-#include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "modules/webgl/WebGLActiveInfo.h"
 #include "modules/webgl/WebGLBuffer.h"
 #include "modules/webgl/WebGLFenceSync.h"
 #include "modules/webgl/WebGLFramebuffer.h"
+#include "modules/webgl/WebGLGetBufferSubDataAsync.h"
 #include "modules/webgl/WebGLProgram.h"
 #include "modules/webgl/WebGLQuery.h"
 #include "modules/webgl/WebGLRenderbuffer.h"
@@ -141,87 +140,6 @@ const GLenum kSupportedInternalFormatsStorage[] = {
     GL_DEPTH32F_STENCIL8,
 };
 
-class WebGLGetBufferSubDataAsyncCallback
-    : public GarbageCollected<WebGLGetBufferSubDataAsyncCallback> {
- public:
-  WebGLGetBufferSubDataAsyncCallback(
-      WebGL2RenderingContextBase* context,
-      ScriptPromiseResolver* promiseResolver,
-      void* shmReadbackResultData,
-      GLuint commandsIssuedQueryID,
-      DOMArrayBufferView* destinationArrayBufferView,
-      void* destinationDataPtr,
-      long long destinationByteLength)
-      : m_context(context),
-        m_promiseResolver(promiseResolver),
-        m_shmReadbackResultData(shmReadbackResultData),
-        m_commandsIssuedQueryID(commandsIssuedQueryID),
-        m_destinationArrayBufferView(destinationArrayBufferView),
-        m_destinationDataPtr(destinationDataPtr),
-        m_destinationByteLength(destinationByteLength) {
-    DCHECK(shmReadbackResultData);
-    DCHECK(destinationDataPtr);
-  }
-
-  void destroy() {
-    DCHECK(m_shmReadbackResultData);
-    m_context->contextGL()->FreeSharedMemory(m_shmReadbackResultData);
-    m_shmReadbackResultData = nullptr;
-    DOMException* exception =
-        DOMException::create(InvalidStateError, "Context lost or destroyed");
-    m_promiseResolver->reject(exception);
-  }
-
-  void resolve() {
-    if (!m_context || !m_shmReadbackResultData) {
-      DOMException* exception =
-          DOMException::create(InvalidStateError, "Context lost or destroyed");
-      m_promiseResolver->reject(exception);
-      return;
-    }
-    if (m_destinationArrayBufferView->buffer()->isNeutered()) {
-      DOMException* exception = DOMException::create(
-          InvalidStateError, "ArrayBufferView became invalid asynchronously");
-      m_promiseResolver->reject(exception);
-      return;
-    }
-    memcpy(m_destinationDataPtr, m_shmReadbackResultData,
-           m_destinationByteLength);
-    // TODO(kainino): What would happen if the DOM was suspended when the
-    // promise became resolved? Could another JS task happen between the memcpy
-    // and the promise resolution task, which would see the wrong data?
-    m_promiseResolver->resolve(m_destinationArrayBufferView);
-
-    m_context->contextGL()->DeleteQueriesEXT(1, &m_commandsIssuedQueryID);
-    this->destroy();
-    m_context->unregisterGetBufferSubDataAsyncCallback(this);
-  }
-
-  DECLARE_TRACE();
-
- private:
-  WeakMember<WebGL2RenderingContextBase> m_context;
-  Member<ScriptPromiseResolver> m_promiseResolver;
-
-  // Pointer to shared memory where the gpu readback result is stored.
-  void* m_shmReadbackResultData;
-  // ID of the GL query used to call this callback.
-  GLuint m_commandsIssuedQueryID;
-
-  // ArrayBufferView returned from the promise.
-  Member<DOMArrayBufferView> m_destinationArrayBufferView;
-  // Pointer into the offset into destinationArrayBufferView.
-  void* m_destinationDataPtr;
-  // Size in bytes of the copy operation being performed.
-  long long m_destinationByteLength;
-};
-
-DEFINE_TRACE(WebGLGetBufferSubDataAsyncCallback) {
-  visitor->trace(m_context);
-  visitor->trace(m_promiseResolver);
-  visitor->trace(m_destinationArrayBufferView);
-}
-
 WebGL2RenderingContextBase::WebGL2RenderingContextBase(
     HTMLCanvasElement* passedCanvas,
     std::unique_ptr<WebGraphicsContext3DProvider> contextProvider,
@@ -270,21 +188,6 @@ WebGL2RenderingContextBase::WebGL2RenderingContextBase(
       kSupportedInternalFormatsStorage,
       kSupportedInternalFormatsStorage +
           WTF_ARRAY_LENGTH(kSupportedInternalFormatsStorage));
-}
-
-WebGL2RenderingContextBase::~WebGL2RenderingContextBase() {
-  m_readFramebufferBinding = nullptr;
-
-  m_boundCopyReadBuffer = nullptr;
-  m_boundCopyWriteBuffer = nullptr;
-  m_boundPixelPackBuffer = nullptr;
-  m_boundPixelUnpackBuffer = nullptr;
-  m_boundTransformFeedbackBuffer = nullptr;
-  m_boundUniformBuffer = nullptr;
-
-  m_currentBooleanOcclusionQuery = nullptr;
-  m_currentTransformFeedbackPrimitivesWrittenQuery = nullptr;
-  m_currentElapsedQuery = nullptr;
 }
 
 void WebGL2RenderingContextBase::destroyContext() {
@@ -496,74 +399,9 @@ void WebGL2RenderingContextBase::getBufferSubData(GLenum target,
   contextGL()->UnmapBuffer(target);
 }
 
-ScriptPromise WebGL2RenderingContextBase::getBufferSubDataAsync(
-    ScriptState* scriptState,
-    GLenum target,
-    GLintptr srcByteOffset,
-    DOMArrayBufferView* dstData,
-    GLuint dstOffset,
-    GLuint length) {
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  ScriptPromise promise = resolver->promise();
-
-  WebGLBuffer* sourceBuffer = nullptr;
-  void* destinationDataPtr = nullptr;
-  long long destinationByteLength = 0;
-  const char* message = validateGetBufferSubData(
-      __FUNCTION__, target, srcByteOffset, dstData, dstOffset, length,
-      &sourceBuffer, &destinationDataPtr, &destinationByteLength);
-  if (message) {
-    // If there was a GL error, it was already synthesized in
-    // validateGetBufferSubData, so it's not done here.
-    DOMException* exception = DOMException::create(InvalidStateError, message);
-    resolver->reject(exception);
-    return promise;
-  }
-
-  message = validateGetBufferSubDataBounds(
-      __FUNCTION__, sourceBuffer, srcByteOffset, destinationByteLength);
-  if (message) {
-    // If there was a GL error, it was already synthesized in
-    // validateGetBufferSubDataBounds, so it's not done here.
-    DOMException* exception = DOMException::create(InvalidStateError, message);
-    resolver->reject(exception);
-    return promise;
-  }
-
-  // If the length of the copy is zero, this is a no-op.
-  if (!destinationByteLength) {
-    resolver->resolve(dstData);
-    return promise;
-  }
-
-  GLuint queryID;
-  contextGL()->GenQueriesEXT(1, &queryID);
-  contextGL()->BeginQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM, queryID);
-  void* mappedData = contextGL()->GetBufferSubDataAsyncCHROMIUM(
-      target, srcByteOffset, destinationByteLength);
-  contextGL()->EndQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM);
-  if (!mappedData) {
-    DOMException* exception =
-        DOMException::create(InvalidStateError, "Out of memory");
-    resolver->reject(exception);
-    return promise;
-  }
-
-  auto callbackObject = new WebGLGetBufferSubDataAsyncCallback(
-      this, resolver, mappedData, queryID, dstData, destinationDataPtr,
-      destinationByteLength);
-  registerGetBufferSubDataAsyncCallback(callbackObject);
-  auto callback = WTF::bind(&WebGLGetBufferSubDataAsyncCallback::resolve,
-                            wrapPersistent(callbackObject));
-  drawingBuffer()->contextProvider()->signalQuery(
-      queryID, convertToBaseCallback(std::move(callback)));
-
-  return promise;
-}
-
 void WebGL2RenderingContextBase::registerGetBufferSubDataAsyncCallback(
     WebGLGetBufferSubDataAsyncCallback* callback) {
-  m_getBufferSubDataAsyncCallbacks.add(callback);
+  m_getBufferSubDataAsyncCallbacks.insert(callback);
 }
 
 void WebGL2RenderingContextBase::unregisterGetBufferSubDataAsyncCallback(
@@ -2013,6 +1851,21 @@ void WebGL2RenderingContextBase::compressedTexImage2D(
       static_cast<uint8_t*>(data->baseAddress()) + srcOffset);
 }
 
+void WebGL2RenderingContextBase::compressedTexImage2D(GLenum target,
+                                                      GLint level,
+                                                      GLenum internalformat,
+                                                      GLsizei width,
+                                                      GLsizei height,
+                                                      GLint border,
+                                                      GLsizei imageSize,
+                                                      GLintptr offset) {
+  if (isContextLost())
+    return;
+  contextGL()->CompressedTexImage2D(target, level, internalformat, width,
+                                    height, border, imageSize,
+                                    reinterpret_cast<uint8_t*>(offset));
+}
+
 void WebGL2RenderingContextBase::compressedTexSubImage2D(
     GLenum target,
     GLint level,
@@ -2060,6 +1913,22 @@ void WebGL2RenderingContextBase::compressedTexSubImage2D(
       static_cast<uint8_t*>(data->baseAddress()) + srcOffset);
 }
 
+void WebGL2RenderingContextBase::compressedTexSubImage2D(GLenum target,
+                                                         GLint level,
+                                                         GLint xoffset,
+                                                         GLint yoffset,
+                                                         GLsizei width,
+                                                         GLsizei height,
+                                                         GLenum format,
+                                                         GLsizei imageSize,
+                                                         GLintptr offset) {
+  if (isContextLost())
+    return;
+  contextGL()->CompressedTexSubImage2D(target, level, xoffset, yoffset, width,
+                                       height, format, imageSize,
+                                       reinterpret_cast<uint8_t*>(offset));
+}
+
 void WebGL2RenderingContextBase::compressedTexImage3D(
     GLenum target,
     GLint level,
@@ -2093,6 +1962,22 @@ void WebGL2RenderingContextBase::compressedTexImage3D(
       target, level, internalformat, width, height, depth, border,
       srcLengthOverride,
       static_cast<uint8_t*>(data->baseAddress()) + srcOffset);
+}
+
+void WebGL2RenderingContextBase::compressedTexImage3D(GLenum target,
+                                                      GLint level,
+                                                      GLenum internalformat,
+                                                      GLsizei width,
+                                                      GLsizei height,
+                                                      GLsizei depth,
+                                                      GLint border,
+                                                      GLsizei imageSize,
+                                                      GLintptr offset) {
+  if (isContextLost())
+    return;
+  contextGL()->CompressedTexImage3D(target, level, internalformat, width,
+                                    height, depth, border, imageSize,
+                                    reinterpret_cast<uint8_t*>(offset));
 }
 
 void WebGL2RenderingContextBase::compressedTexSubImage3D(
@@ -2130,6 +2015,24 @@ void WebGL2RenderingContextBase::compressedTexSubImage3D(
       target, level, xoffset, yoffset, zoffset, width, height, depth, format,
       srcLengthOverride,
       static_cast<uint8_t*>(data->baseAddress()) + srcOffset);
+}
+
+void WebGL2RenderingContextBase::compressedTexSubImage3D(GLenum target,
+                                                         GLint level,
+                                                         GLint xoffset,
+                                                         GLint yoffset,
+                                                         GLint zoffset,
+                                                         GLsizei width,
+                                                         GLsizei height,
+                                                         GLsizei depth,
+                                                         GLenum format,
+                                                         GLsizei imageSize,
+                                                         GLintptr offset) {
+  if (isContextLost())
+    return;
+  contextGL()->CompressedTexSubImage3D(target, level, xoffset, yoffset, zoffset,
+                                       width, height, depth, format, imageSize,
+                                       reinterpret_cast<uint8_t*>(offset));
 }
 
 GLint WebGL2RenderingContextBase::getFragDataLocation(WebGLProgram* program,
@@ -2536,9 +2439,9 @@ void WebGL2RenderingContextBase::vertexAttribIPointer(GLuint index,
   }
   if (!validateValueFitNonNegInt32("vertexAttribIPointer", "offset", offset))
     return;
-  if (!m_boundArrayBuffer) {
+  if (!m_boundArrayBuffer && offset != 0) {
     synthesizeGLError(GL_INVALID_OPERATION, "vertexAttribIPointer",
-                      "no bound ARRAY_BUFFER");
+                      "no ARRAY_BUFFER is bound and offset is non-zero");
     return;
   }
 
@@ -2576,7 +2479,7 @@ void WebGL2RenderingContextBase::drawArraysInstanced(GLenum mode,
     return;
   }
 
-  ScopedRGBEmulationColorMask emulationColorMask(contextGL(), m_colorMask,
+  ScopedRGBEmulationColorMask emulationColorMask(this, m_colorMask,
                                                  m_drawingBuffer.get());
   clearIfComposited();
   contextGL()->DrawArraysInstancedANGLE(mode, first, count, instanceCount);
@@ -2597,7 +2500,7 @@ void WebGL2RenderingContextBase::drawElementsInstanced(GLenum mode,
     return;
   }
 
-  ScopedRGBEmulationColorMask emulationColorMask(contextGL(), m_colorMask,
+  ScopedRGBEmulationColorMask emulationColorMask(this, m_colorMask,
                                                  m_drawingBuffer.get());
   clearIfComposited();
   contextGL()->DrawElementsInstancedANGLE(
@@ -2621,7 +2524,7 @@ void WebGL2RenderingContextBase::drawRangeElements(GLenum mode,
     return;
   }
 
-  ScopedRGBEmulationColorMask emulationColorMask(contextGL(), m_colorMask,
+  ScopedRGBEmulationColorMask emulationColorMask(this, m_colorMask,
                                                  m_drawingBuffer.get());
   clearIfComposited();
   contextGL()->DrawRangeElements(
@@ -2634,7 +2537,7 @@ void WebGL2RenderingContextBase::drawBuffers(const Vector<GLenum>& buffers) {
   if (isContextLost())
     return;
 
-  ScopedRGBEmulationColorMask emulationColorMask(contextGL(), m_colorMask,
+  ScopedRGBEmulationColorMask emulationColorMask(this, m_colorMask,
                                                  m_drawingBuffer.get());
   GLsizei n = buffers.size();
   const GLenum* bufs = buffers.data();
@@ -2792,9 +2695,7 @@ void WebGL2RenderingContextBase::clearBufferfi(GLenum buffer,
 WebGLQuery* WebGL2RenderingContextBase::createQuery() {
   if (isContextLost())
     return nullptr;
-  WebGLQuery* o = WebGLQuery::create(this);
-  addSharedObject(o);
-  return o;
+  return WebGLQuery::create(this);
 }
 
 void WebGL2RenderingContextBase::deleteQuery(WebGLQuery* query) {
@@ -3032,9 +2933,7 @@ ScriptValue WebGL2RenderingContextBase::getQueryParameter(
 WebGLSampler* WebGL2RenderingContextBase::createSampler() {
   if (isContextLost())
     return nullptr;
-  WebGLSampler* o = WebGLSampler::create(this);
-  addSharedObject(o);
-  return o;
+  return WebGLSampler::create(this);
 }
 
 void WebGL2RenderingContextBase::deleteSampler(WebGLSampler* sampler) {
@@ -3226,9 +3125,7 @@ WebGLSync* WebGL2RenderingContextBase::fenceSync(GLenum condition,
   if (isContextLost())
     return nullptr;
 
-  WebGLSync* o = WebGLFenceSync::create(this, condition, flags);
-  addSharedObject(o);
-  return o;
+  return WebGLFenceSync::create(this, condition, flags);
 }
 
 GLboolean WebGL2RenderingContextBase::isSync(WebGLSync* sync) {
@@ -3303,9 +3200,7 @@ ScriptValue WebGL2RenderingContextBase::getSyncParameter(
 WebGLTransformFeedback* WebGL2RenderingContextBase::createTransformFeedback() {
   if (isContextLost())
     return nullptr;
-  WebGLTransformFeedback* o = WebGLTransformFeedback::create(this);
-  addSharedObject(o);
-  return o;
+  return WebGLTransformFeedback::create(this);
 }
 
 void WebGL2RenderingContextBase::deleteTransformFeedback(
@@ -3408,8 +3303,8 @@ void WebGL2RenderingContextBase::transformFeedbackVaryings(
       keepAlive;  // Must keep these instances alive while looking at their data
   Vector<const char*> varyingStrings;
   for (size_t i = 0; i < varyings.size(); ++i) {
-    keepAlive.append(varyings[i].ascii());
-    varyingStrings.append(keepAlive.back().data());
+    keepAlive.push_back(varyings[i].ascii());
+    varyingStrings.push_back(keepAlive.back().data());
   }
 
   contextGL()->TransformFeedbackVaryings(objectOrZero(program), varyings.size(),
@@ -3593,8 +3488,8 @@ Vector<GLuint> WebGL2RenderingContextBase::getUniformIndices(
       keepAlive;  // Must keep these instances alive while looking at their data
   Vector<const char*> uniformStrings;
   for (size_t i = 0; i < uniformNames.size(); ++i) {
-    keepAlive.append(uniformNames[i].ascii());
-    uniformStrings.append(keepAlive.back().data());
+    keepAlive.push_back(uniformNames[i].ascii());
+    uniformStrings.push_back(keepAlive.back().data());
   }
 
   result.resize(uniformNames.size());
@@ -3813,10 +3708,8 @@ WebGLVertexArrayObject* WebGL2RenderingContextBase::createVertexArray() {
   if (isContextLost())
     return nullptr;
 
-  WebGLVertexArrayObject* o = WebGLVertexArrayObject::create(
+  return WebGLVertexArrayObject::create(
       this, WebGLVertexArrayObjectBase::VaoTypeUser);
-  addContextObject(o);
-  return o;
 }
 
 void WebGL2RenderingContextBase::deleteVertexArray(
@@ -4657,10 +4550,6 @@ DEFINE_TRACE(WebGL2RenderingContextBase) {
 }
 
 DEFINE_TRACE_WRAPPERS(WebGL2RenderingContextBase) {
-  if (isContextLost()) {
-    return;
-  }
-
   visitor->traceWrappers(m_transformFeedbackBinding);
   visitor->traceWrappers(m_readFramebufferBinding);
   visitor->traceWrappers(m_boundCopyReadBuffer);

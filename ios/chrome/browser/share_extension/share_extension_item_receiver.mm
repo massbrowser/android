@@ -10,7 +10,7 @@
 #include "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -98,13 +98,9 @@ void LogHistogramReceivedItem(ShareExtensionItemReceived type) {
   DCHECK(!_readingListModel);
   DCHECK(!_bookmarkModel);
 
-#if TARGET_IPHONE_SIMULATOR
   if (![self presentedItemURL]) {
     return;
   }
-#else
-  DCHECK([self presentedItemURL]);
-#endif
 
   _readingListModel = readingListModel;
   _bookmarkModel = bookmarkModel;
@@ -193,7 +189,8 @@ void LogHistogramReceivedItem(ShareExtensionItemReceived type) {
   NSNumber* entryType = base::mac::ObjCCast<NSNumber>(
       [entry objectForKey:app_group::kShareItemType]);
 
-  if (!entryURL.is_valid() || !entryDate || !entryType) {
+  if (!entryURL.is_valid() || !entryDate || !entryType ||
+      !entryURL.SchemeIsHTTPOrHTTPS()) {
     if (completion) {
       completion();
     }
@@ -217,14 +214,15 @@ void LogHistogramReceivedItem(ShareExtensionItemReceived type) {
                                      [entryType integerValue]);
                              if (type == app_group::READING_LIST_ITEM) {
                                LogHistogramReceivedItem(READINGLIST_ENTRY);
-                               _readingListModel->AddEntry(entryURL,
-                                                           entryTitle);
+                               _readingListModel->AddEntry(
+                                   entryURL, entryTitle,
+                                   reading_list::ADDED_VIA_EXTENSION);
                              }
                              if (type == app_group::BOOKMARK_ITEM) {
                                LogHistogramReceivedItem(BOOKMARK_ENTRY);
                                _bookmarkModel->AddURL(
                                    _bookmarkModel->mobile_node(), 0,
-                                   base::ASCIIToUTF16(entryTitle), entryURL);
+                                   base::UTF8ToUTF16(entryTitle), entryURL);
                              }
                              if (completion) {
                                web::WebThread::PostTask(web::WebThread::FILE,

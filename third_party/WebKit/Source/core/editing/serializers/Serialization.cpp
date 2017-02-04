@@ -107,7 +107,7 @@ static void completeURLs(DocumentFragment& fragment, const String& baseURL) {
     // AttributeCollection::iterator end = attributes.end();
     for (const auto& attribute : attributes) {
       if (element.isURLAttribute(attribute) && !attribute.value().isEmpty())
-        changes.append(AttributeChange(
+        changes.push_back(AttributeChange(
             &element, attribute.name(),
             KURL(parsedBaseURL, attribute.value()).getString()));
     }
@@ -261,18 +261,18 @@ String CreateMarkupAlgorithm<Strategy>::createMarkup(
     EAbsoluteURLs shouldResolveURLs,
     Node* constrainingAncestor) {
   if (startPosition.isNull() || endPosition.isNull())
-    return emptyString();
+    return emptyString;
 
   RELEASE_ASSERT(startPosition.compareTo(endPosition) <= 0);
 
   bool collapsed = startPosition == endPosition;
   if (collapsed)
-    return emptyString();
+    return emptyString;
   Node* commonAncestor =
       Strategy::commonAncestor(*startPosition.computeContainerNode(),
                                *endPosition.computeContainerNode());
   if (!commonAncestor)
-    return emptyString();
+    return emptyString;
 
   Document* document = startPosition.document();
 
@@ -710,13 +710,6 @@ void replaceChildrenWithFragment(ContainerNode* container,
 
   if (!fragment->firstChild()) {
     containerNode->removeChildren();
-    return;
-  }
-
-  // FIXME: This is wrong if containerNode->firstChild() has more than one ref!
-  if (containerNode->hasOneTextChild() && fragment->hasOneTextChild()) {
-    toText(containerNode->firstChild())
-        ->setData(toText(fragment->firstChild())->data());
     return;
   }
 

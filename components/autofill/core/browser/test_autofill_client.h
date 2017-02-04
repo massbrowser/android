@@ -33,7 +33,7 @@ class TestAutofillClient : public AutofillClient {
   PrefService* GetPrefs() override;
   syncer::SyncService* GetSyncService() override;
   IdentityProvider* GetIdentityProvider() override;
-  rappor::RapporService* GetRapporService() override;
+  rappor::RapporServiceImpl* GetRapporServiceImpl() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(const CreditCard& card,
                         UnmaskCardReason reason,
@@ -70,12 +70,13 @@ class TestAutofillClient : public AutofillClient {
   bool IsContextSecure(const GURL& form_origin) override;
   bool ShouldShowSigninPromo() override;
   void StartSigninFlow() override;
+  void ShowHttpNotSecureExplanation() override;
 
   void SetPrefs(std::unique_ptr<PrefService> prefs) {
     prefs_ = std::move(prefs);
   }
 
-  rappor::TestRapporService* test_rappor_service() {
+  rappor::TestRapporServiceImpl* test_rappor_service() {
     return rappor_service_.get();
   }
 
@@ -84,7 +85,7 @@ class TestAutofillClient : public AutofillClient {
   std::unique_ptr<PrefService> prefs_;
   std::unique_ptr<FakeOAuth2TokenService> token_service_;
   std::unique_ptr<FakeIdentityProvider> identity_provider_;
-  std::unique_ptr<rappor::TestRapporService> rappor_service_;
+  std::unique_ptr<rappor::TestRapporServiceImpl> rappor_service_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillClient);
 };

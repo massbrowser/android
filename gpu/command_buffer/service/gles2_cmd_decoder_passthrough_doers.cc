@@ -288,15 +288,17 @@ error::Error GLES2DecoderPassthroughImpl::DoBindTexture(GLenum target,
   DCHECK(bound_textures_[target].size() > active_texture_unit_);
   bound_textures_[target][active_texture_unit_] = texture;
 
-  // Create a new texture object to track this texture
-  auto texture_object_iter = resources_->texture_object_map.find(texture);
-  if (texture_object_iter == resources_->texture_object_map.end()) {
-    resources_->texture_object_map.insert(
-        std::make_pair(texture, new TexturePassthrough(service_id, target)));
-  } else {
-    // Shouldn't be possible to get here if this texture has a different
-    // target than the one it was just bound to
-    DCHECK(texture_object_iter->second->target() == target);
+  if (service_id != 0) {
+    // Create a new texture object to track this texture
+    auto texture_object_iter = resources_->texture_object_map.find(texture);
+    if (texture_object_iter == resources_->texture_object_map.end()) {
+      resources_->texture_object_map.insert(
+          std::make_pair(texture, new TexturePassthrough(service_id, target)));
+    } else {
+      // Shouldn't be possible to get here if this texture has a different
+      // target than the one it was just bound to
+      DCHECK(texture_object_iter->second->target() == target);
+    }
   }
 
   return error::kNoError;
@@ -838,18 +840,49 @@ error::Error GLES2DecoderPassthroughImpl::DoGetActiveAttrib(GLuint program,
                                                             GLuint index,
                                                             GLint* size,
                                                             GLenum* type,
-                                                            std::string* name) {
-  NOTIMPLEMENTED();
+                                                            std::string* name,
+                                                            int32_t* success) {
+  FlushErrors();
+
+  GLuint service_id = GetProgramServiceID(program, resources_);
+  GLint active_attribute_max_length = 0;
+  glGetProgramiv(service_id, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH,
+                 &active_attribute_max_length);
+  if (FlushErrors()) {
+    *success = 0;
+    return error::kNoError;
+  }
+
+  std::vector<char> name_buffer(active_attribute_max_length, 0);
+  glGetActiveAttrib(service_id, index, name_buffer.size(), nullptr, size, type,
+                    name_buffer.data());
+  *name = std::string(name_buffer.data());
+  *success = FlushErrors() ? 0 : 1;
   return error::kNoError;
 }
 
-error::Error GLES2DecoderPassthroughImpl::DoGetActiveUniform(
-    GLuint program,
-    GLuint index,
-    GLint* size,
-    GLenum* type,
-    std::string* name) {
-  NOTIMPLEMENTED();
+error::Error GLES2DecoderPassthroughImpl::DoGetActiveUniform(GLuint program,
+                                                             GLuint index,
+                                                             GLint* size,
+                                                             GLenum* type,
+                                                             std::string* name,
+                                                             int32_t* success) {
+  FlushErrors();
+
+  GLuint service_id = GetProgramServiceID(program, resources_);
+  GLint active_uniform_max_length = 0;
+  glGetProgramiv(service_id, GL_ACTIVE_UNIFORM_MAX_LENGTH,
+                 &active_uniform_max_length);
+  if (FlushErrors()) {
+    *success = 0;
+    return error::kNoError;
+  }
+
+  std::vector<char> name_buffer(active_uniform_max_length, 0);
+  glGetActiveUniform(service_id, index, name_buffer.size(), nullptr, size, type,
+                     name_buffer.data());
+  *name = std::string(name_buffer.data());
+  *success = FlushErrors() ? 0 : 1;
   return error::kNoError;
 }
 
@@ -1118,8 +1151,11 @@ error::Error GLES2DecoderPassthroughImpl::DoGetShaderPrecisionFormat(
     GLenum shadertype,
     GLenum precisiontype,
     GLint* range,
-    GLint* precision) {
+    GLint* precision,
+    int32_t* success) {
+  FlushErrors();
   glGetShaderPrecisionFormat(shadertype, precisiontype, range, precision);
+  *success = FlushErrors() ? 0 : 1;
   return error::kNoError;
 }
 
@@ -1146,7 +1182,7 @@ error::Error GLES2DecoderPassthroughImpl::DoGetString(GLenum name,
       *result = GetServiceVendorString(feature_info_.get());
       break;
     case GL_EXTENSIONS:
-      *result = extension_string_.c_str();
+      *result = feature_info_->extensions().c_str();
       break;
     default:
       *result = reinterpret_cast<const char*>(glGetString(name));
@@ -1189,8 +1225,24 @@ error::Error GLES2DecoderPassthroughImpl::DoGetTransformFeedbackVarying(
     GLuint index,
     GLsizei* size,
     GLenum* type,
-    std::string* name) {
-  NOTIMPLEMENTED();
+    std::string* name,
+    int32_t* success) {
+  FlushErrors();
+
+  GLuint service_id = GetProgramServiceID(program, resources_);
+  GLint transform_feedback_varying_max_length = 0;
+  glGetProgramiv(service_id, GL_TRANSFORM_FEEDBACK_VARYING_MAX_LENGTH,
+                 &transform_feedback_varying_max_length);
+  if (FlushErrors()) {
+    *success = 0;
+    return error::kNoError;
+  }
+
+  std::vector<char> name_buffer(transform_feedback_varying_max_length, 0);
+  glGetTransformFeedbackVarying(service_id, index, name_buffer.size(), nullptr,
+                                size, type, name_buffer.data());
+  *name = std::string(name_buffer.data());
+  *success = FlushErrors() ? 0 : 1;
   return error::kNoError;
 }
 
@@ -1451,9 +1503,12 @@ error::Error GLES2DecoderPassthroughImpl::DoReadPixels(GLint x,
                                                        GLenum type,
                                                        GLsizei bufsize,
                                                        GLsizei* length,
-                                                       void* pixels) {
+                                                       void* pixels,
+                                                       int32_t* success) {
+  FlushErrors();
   glReadPixelsRobustANGLE(x, y, width, height, format, type, bufsize, length,
                           pixels);
+  *success = FlushErrors() ? 0 : 1;
   return error::kNoError;
 }
 
@@ -2594,7 +2649,21 @@ error::Error GLES2DecoderPassthroughImpl::DoGetUniformsES3CHROMIUM(
 error::Error GLES2DecoderPassthroughImpl::DoGetTranslatedShaderSourceANGLE(
     GLuint shader,
     std::string* source) {
-  NOTIMPLEMENTED();
+  FlushErrors();
+  GLuint service_id = GetShaderServiceID(shader, resources_);
+  GLint translated_source_length = 0;
+  glGetShaderiv(service_id, GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE,
+                &translated_source_length);
+  if (FlushErrors()) {
+    return error::kNoError;
+  }
+
+  if (translated_source_length > 0) {
+    std::vector<char> buffer(translated_source_length, 0);
+    glGetTranslatedShaderSourceANGLE(service_id, translated_source_length,
+                                     nullptr, buffer.data());
+    *source = std::string(buffer.data());
+  }
   return error::kNoError;
 }
 
@@ -2621,7 +2690,10 @@ error::Error GLES2DecoderPassthroughImpl::DoPostSubBufferCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::DoCopyTextureCHROMIUM(
     GLenum source_id,
+    GLint source_level,
+    GLenum dest_target,
     GLenum dest_id,
+    GLint dest_level,
     GLint internalformat,
     GLenum dest_type,
     GLboolean unpack_flip_y,
@@ -2636,7 +2708,10 @@ error::Error GLES2DecoderPassthroughImpl::DoCopyTextureCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::DoCopySubTextureCHROMIUM(
     GLenum source_id,
+    GLint source_level,
+    GLenum dest_target,
     GLenum dest_id,
+    GLint dest_level,
     GLint xoffset,
     GLint yoffset,
     GLint x,
@@ -3236,6 +3311,15 @@ GLES2DecoderPassthroughImpl::DoUniformMatrix4fvStreamTextureMatrixCHROMIUM(
     GLint location,
     GLboolean transpose,
     const volatile GLfloat* defaultValue) {
+  NOTIMPLEMENTED();
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderPassthroughImpl::DoOverlayPromotionHintCHROMIUM(
+    GLuint texture,
+    GLboolean promotion_hint,
+    GLint display_x,
+    GLint display_y) {
   NOTIMPLEMENTED();
   return error::kNoError;
 }

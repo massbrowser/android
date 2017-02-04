@@ -13,7 +13,9 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "media/base/media_switches.h"
 #include "media/base/test_data_util.h"
+#include "media/media_features.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 namespace content {
@@ -26,6 +28,7 @@ const char MediaBrowserTest::kFailed[] = "FAILED";
 void MediaBrowserTest::SetUpCommandLine(base::CommandLine* command_line) {
   command_line->AppendSwitch(
       switches::kDisableGestureRequirementForMediaPlayback);
+  command_line->AppendSwitch(switches::kEnableVp9InMp4);
 }
 
 void MediaBrowserTest::RunMediaTestPage(const std::string& html_page,
@@ -139,8 +142,8 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoBear12DepthVP9) {
 }
 #endif
 
-#if defined(USE_PROPRIETARY_CODECS)
-// Crashes on Mac only.  http://crbug.com/621857
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+// Crashes on Mac http://crbug.com/621857
 #if defined(OS_MACOSX)
 #define MAYBE_VideoBearMp4 DISABLED_VideoBearMp4
 #else
@@ -148,6 +151,10 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoBear12DepthVP9) {
 #endif
 IN_PROC_BROWSER_TEST_P(MediaTest, MAYBE_VideoBearMp4) {
   PlayVideo("bear.mp4", GetParam());
+}
+
+IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearMp4Vp9) {
+  PlayVideo("bear-320x240-v_frag-vp9.mp4", GetParam());
 }
 
 // Android devices usually only support baseline, main and high.
@@ -193,10 +200,10 @@ IN_PROC_BROWSER_TEST_F(MediaTest, VideoBearRotated180) {
 IN_PROC_BROWSER_TEST_F(MediaTest, VideoBearRotated270) {
   RunVideoSizeTest("bear_rotate_270.mp4", 720, 1280);
 }
-#endif  // defined(USE_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 #if defined(OS_CHROMEOS)
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearAviMp3Mpeg4) {
   PlayVideo("bear_mpeg4_mp3.avi", GetParam());
 }
@@ -220,7 +227,7 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoBear3gpAmrnbMpeg4) {
 IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearWavGsmms) {
   PlayAudio("bear_gsm_ms.wav", GetParam());
 }
-#endif  // defined(USE_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 #endif  // defined(OS_CHROMEOS)
 
 IN_PROC_BROWSER_TEST_P(MediaTest, AudioBearFlac) {

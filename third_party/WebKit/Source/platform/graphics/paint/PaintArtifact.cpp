@@ -7,7 +7,7 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/DrawingDisplayItem.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 #include "public/platform/WebDisplayItemList.h"
 #include "third_party/skia/include/core/SkRegion.h"
 
@@ -25,7 +25,7 @@ void computeChunkBoundsAndOpaqueness(const DisplayItemList& displayItems,
       if (!item.isDrawing())
         continue;
       const auto& drawing = static_cast<const DrawingDisplayItem&>(item);
-      if (const SkPicture* picture = drawing.picture()) {
+      if (const PaintRecord* picture = drawing.picture()) {
         if (drawing.knownToBeOpaque()) {
           // TODO(pdr): It may be too conservative to round in to the
           // enclosedIntRect.

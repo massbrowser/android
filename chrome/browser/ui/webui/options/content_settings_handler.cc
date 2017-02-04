@@ -156,10 +156,6 @@ const ExceptionsInfoMap& GetExceptionsInfoMap() {
             UserMetricsAction(
                 "Options_DefaultProtectedMediaIdentifierSettingChanged"))));
 #endif
-    exceptions_info_map.insert(std::make_pair(
-        CONTENT_SETTINGS_TYPE_KEYGEN,
-        ContentSettingWithExceptions(
-            true, UserMetricsAction("Options_DefaultKeygenSettingChanged"))));
 
     // Without OTR exceptions.
     exceptions_info_map.insert(std::make_pair(
@@ -484,11 +480,6 @@ void ContentSettingsHandler::GetLocalizedValues(
     // Zoom levels.
     {"zoomlevelsHeader", IDS_ZOOMLEVELS_HEADER_AND_TAB_LABEL},
     {"zoomLevelsManage", IDS_ZOOMLEVELS_MANAGE_BUTTON},
-    // Keygen filter.
-    {"keygenTabLabel", IDS_KEYGEN_TAB_LABEL},
-    {"keygenHeader", IDS_KEYGEN_HEADER},
-    {"keygenAllow", IDS_KEYGEN_ALLOW_RADIO},
-    {"keygenBlock", IDS_KEYGEN_DONOTALLOW_RADIO},
     // PDF Plugin filter.
     {"pdfTabLabel", IDS_PDF_TAB_LABEL},
     {"pdfEnable", IDS_PDF_ENABLE_CHECKBOX},
@@ -561,7 +552,6 @@ void ContentSettingsHandler::GetLocalizedValues(
                 IDS_BACKGROUND_SYNC_HEADER);
   RegisterTitle(localized_strings, "zoomlevels",
                 IDS_ZOOMLEVELS_HEADER_AND_TAB_LABEL);
-  RegisterTitle(localized_strings, "keygen", IDS_KEYGEN_TAB_LABEL);
 
   localized_strings->SetString("exceptionsLearnMoreUrl",
                                kExceptionsLearnMoreUrl);
@@ -943,10 +933,12 @@ void ContentSettingsHandler::CompareMediaExceptionsWithFlash(
   MediaSettingsInfo::ForOneType& settings = media_settings_->forType(type);
   HostContentSettingsMap* settings_map =
       HostContentSettingsMapFactory::GetForProfile(GetProfile());
-
+  const auto* extension_registry =
+      extensions::ExtensionRegistry::Get(GetProfile());
   base::ListValue exceptions;
-  site_settings::GetExceptionsFromHostContentSettingsMap(settings_map, type,
-      web_ui(), /*incognito=*/false, /*filter=*/nullptr, &exceptions);
+  site_settings::GetExceptionsFromHostContentSettingsMap(
+      settings_map, type, extension_registry, web_ui(), /*incognito=*/false,
+      /*filter=*/nullptr, &exceptions);
 
   settings.exceptions.clear();
   for (base::ListValue::const_iterator entry = exceptions.begin();
@@ -1090,8 +1082,11 @@ void ContentSettingsHandler::UpdateExceptionsViewFromHostContentSettingsMap(
   base::ListValue exceptions;
   HostContentSettingsMap* settings_map =
       HostContentSettingsMapFactory::GetForProfile(GetProfile());
-  site_settings::GetExceptionsFromHostContentSettingsMap(settings_map, type,
-      web_ui(), /*incognito=*/false, /*filter=*/nullptr, &exceptions);
+  const auto* extension_registry =
+      extensions::ExtensionRegistry::Get(GetProfile());
+  site_settings::GetExceptionsFromHostContentSettingsMap(
+      settings_map, type, extension_registry, web_ui(), /*incognito=*/false,
+      /*filter=*/nullptr, &exceptions);
   base::StringValue type_string(
       site_settings::ContentSettingsTypeToGroupName(type));
   web_ui()->CallJavascriptFunctionUnsafe("ContentSettings.setExceptions",
@@ -1116,9 +1111,12 @@ void ContentSettingsHandler::UpdateExceptionsViewFromOTRHostContentSettingsMap(
       HostContentSettingsMapFactory::GetForProfile(GetOTRProfile());
   if (!otr_settings_map)
     return;
+  const auto* extension_registry =
+      extensions::ExtensionRegistry::Get(GetOTRProfile());
   base::ListValue exceptions;
-  site_settings::GetExceptionsFromHostContentSettingsMap(otr_settings_map, type,
-      web_ui(), /*incognito=*/true, /*filter=*/nullptr, &exceptions);
+  site_settings::GetExceptionsFromHostContentSettingsMap(
+      otr_settings_map, type, extension_registry, web_ui(), /*incognito=*/true,
+      /*filter=*/nullptr, &exceptions);
   base::StringValue type_string(
       site_settings::ContentSettingsTypeToGroupName(type));
   web_ui()->CallJavascriptFunctionUnsafe("ContentSettings.setOTRExceptions",

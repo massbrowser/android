@@ -232,13 +232,15 @@ void Range::collapse(bool toStart) {
 bool Range::isNodeFullyContained(Node& node) const {
   ContainerNode* parentNode = node.parentNode();
   int nodeIndex = node.nodeIndex();
-  return isPointInRange(parentNode, nodeIndex,
-                        IGNORE_EXCEPTION)  // starts in the middle of this
-                                           // range, or on the boundary points.
-         && isPointInRange(parentNode, nodeIndex + 1,
-                           IGNORE_EXCEPTION);  // ends in the middle of this
-                                               // range, or on the boundary
-                                               // points.
+  return isPointInRange(
+             parentNode, nodeIndex,
+             IGNORE_EXCEPTION_FOR_TESTING)  // starts in the middle of this
+                                            // range, or on the boundary points.
+         && isPointInRange(
+                parentNode, nodeIndex + 1,
+                IGNORE_EXCEPTION_FOR_TESTING);  // ends in the middle of this
+                                                // range, or on the boundary
+                                                // points.
 }
 
 bool Range::hasSameRoot(const Node& node) const {
@@ -388,7 +390,7 @@ short Range::compareBoundaryPoints(const RangeBoundaryPoint& boundaryA,
 }
 
 bool Range::boundaryPointsValid() const {
-  TrackExceptionState exceptionState;
+  DummyExceptionStateForTesting exceptionState;
   return compareBoundaryPoints(m_start, m_end, exceptionState) <= 0 &&
          !exceptionState.hadException();
 }
@@ -590,7 +592,7 @@ DocumentFragment* Range::processContents(ActionType action,
   if (processStart) {
     NodeVector nodes;
     for (Node* n = processStart; n && n != processEnd; n = n->nextSibling())
-      nodes.append(n);
+      nodes.push_back(n);
     processNodes(action, nodes, commonRoot, fragment, exceptionState);
   }
 
@@ -662,7 +664,7 @@ Node* Range::processContentsBetweenOffsets(ActionType action,
         n = n->nextSibling();
       for (unsigned i = startOffset; n && i < endOffset;
            i++, n = n->nextSibling())
-        nodes.append(n);
+        nodes.push_back(n);
 
       processNodes(action, nodes, container, result, exceptionState);
       break;
@@ -705,7 +707,7 @@ Node* Range::processAncestorsAndTheirSiblings(
   for (Node& runner : NodeTraversal::ancestorsOf(*container)) {
     if (runner == commonRoot)
       break;
-    ancestors.append(runner);
+    ancestors.push_back(runner);
   }
 
   Node* firstChildInAncestorToProcess = direction == ProcessContentsForward
@@ -731,7 +733,7 @@ Node* Range::processAncestorsAndTheirSiblings(
          child = (direction == ProcessContentsForward)
                      ? child->nextSibling()
                      : child->previousSibling())
-      nodes.append(child);
+      nodes.push_back(child);
 
     for (const auto& node : nodes) {
       Node* child = node.get();
@@ -774,6 +776,7 @@ DocumentFragment* Range::extractContents(ExceptionState& exceptionState) {
   if (exceptionState.hadException())
     return nullptr;
 
+  EventQueueScope scope;
   return processContents(EXTRACT_CONTENTS, exceptionState);
 }
 
@@ -954,7 +957,9 @@ String Range::toString() const {
 String Range::text() const {
   DCHECK(!m_ownerDocument->needsLayoutTreeUpdate());
   return plainText(EphemeralRange(this),
-                   TextIteratorEmitsObjectReplacementCharacter);
+                   TextIteratorBehavior::Builder()
+                       .setEmitsObjectReplacementCharacter(true)
+                       .build());
 }
 
 DocumentFragment* Range::createContextualFragment(
@@ -1638,7 +1643,7 @@ void Range::getBorderAndTextQuads(Vector<FloatQuad>& quads) const {
   for (Node* node = firstNode(); node != stopNode;
        node = NodeTraversal::next(*node)) {
     if (node->isElementNode())
-      nodeSet.add(node);
+      nodeSet.insert(node);
   }
 
   for (Node* node = firstNode(); node != stopNode;
@@ -1686,7 +1691,7 @@ FloatRect Range::boundingRect() const {
 
   // If all rects are empty, return the first rect.
   if (result.isEmpty() && !quads.isEmpty())
-    return quads.first().boundingBox();
+    return quads.front().boundingBox();
 
   return result;
 }

@@ -4,6 +4,7 @@
 
 #include "ui/aura/mus/window_tree_host_mus.h"
 
+#include "base/memory/ptr_util.h"
 #include "ui/aura/test/aura_mus_test_base.h"
 #include "ui/aura/test/mus/test_window_tree.h"
 
@@ -16,7 +17,7 @@ TEST_F(WindowTreeHostMusTest, UpdateClientArea) {
       base::MakeUnique<WindowTreeHostMus>(window_tree_client_impl());
 
   gfx::Insets new_insets(10, 11, 12, 13);
-  window_tree_host_mus->SetClientArea(new_insets);
+  window_tree_host_mus->SetClientArea(new_insets, std::vector<gfx::Rect>());
   EXPECT_EQ(new_insets, window_tree()->last_client_area());
 }
 

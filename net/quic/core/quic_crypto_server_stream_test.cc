@@ -8,7 +8,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "net/quic/core/crypto/aes_128_gcm_12_encrypter.h"
 #include "net/quic/core/crypto/crypto_framer.h"
 #include "net/quic/core/crypto/crypto_handshake.h"
@@ -20,10 +19,13 @@
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/quic_crypto_client_stream.h"
 #include "net/quic/core/quic_flags.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_session.h"
+#include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
+#include "net/quic/test_tools/failing_proof_source.h"
 #include "net/quic/test_tools/quic_crypto_server_config_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -67,7 +69,7 @@ class QuicCryptoServerStreamTest : public ::testing::TestWithParam<bool> {
             QuicCompressedCertsCache::kQuicCompressedCertsCacheSize),
         server_id_(kServerHostname, kServerPort, PRIVACY_MODE_DISABLED),
         client_crypto_config_(CryptoTestUtils::ProofVerifierForTesting()) {
-    FLAGS_enable_quic_stateless_reject_support = false;
+    FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support = false;
   }
 
   void Initialize() { InitializeServer(); }
@@ -85,8 +87,8 @@ class QuicCryptoServerStreamTest : public ::testing::TestWithParam<bool> {
   // called multiple times.
   void InitializeServer() {
     TestQuicSpdyServerSession* server_session = nullptr;
-    helpers_.push_back(base::MakeUnique<MockQuicConnectionHelper>());
-    alarm_factories_.push_back(base::MakeUnique<MockAlarmFactory>());
+    helpers_.push_back(QuicMakeUnique<MockQuicConnectionHelper>());
+    alarm_factories_.push_back(QuicMakeUnique<MockAlarmFactory>());
     CreateServerSessionForTest(
         server_id_, QuicTime::Delta::FromSeconds(100000), supported_versions_,
         helpers_.back().get(), alarm_factories_.back().get(),
@@ -113,8 +115,8 @@ class QuicCryptoServerStreamTest : public ::testing::TestWithParam<bool> {
   // testing.  May be called multiple times.
   void InitializeFakeClient(bool supports_stateless_rejects) {
     TestQuicSpdyClientSession* client_session = nullptr;
-    helpers_.push_back(base::MakeUnique<MockQuicConnectionHelper>());
-    alarm_factories_.push_back(base::MakeUnique<MockAlarmFactory>());
+    helpers_.push_back(QuicMakeUnique<MockQuicConnectionHelper>());
+    alarm_factories_.push_back(QuicMakeUnique<MockAlarmFactory>());
     CreateClientSessionForTest(
         server_id_, supports_stateless_rejects,
         QuicTime::Delta::FromSeconds(100000), supported_versions_,
@@ -225,8 +227,7 @@ TEST_P(QuicCryptoServerStreamTest, ForwardSecureAfterCHLO) {
 }
 
 TEST_P(QuicCryptoServerStreamTest, StatelessRejectAfterCHLO) {
-  FLAGS_enable_quic_stateless_reject_support = true;
-
+  FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support = true;
   Initialize();
 
   EXPECT_CALL(*server_connection_,
@@ -259,8 +260,7 @@ TEST_P(QuicCryptoServerStreamTest, StatelessRejectAfterCHLO) {
 }
 
 TEST_P(QuicCryptoServerStreamTest, ConnectedAfterStatelessHandshake) {
-  FLAGS_enable_quic_stateless_reject_support = true;
-
+  FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support = true;
   Initialize();
 
   InitializeFakeClient(/* supports_stateless_rejects= */ true);
@@ -303,8 +303,7 @@ TEST_P(QuicCryptoServerStreamTest, ConnectedAfterStatelessHandshake) {
 }
 
 TEST_P(QuicCryptoServerStreamTest, NoStatelessRejectIfNoClientSupport) {
-  FLAGS_enable_quic_stateless_reject_support = true;
-
+  FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support = true;
   Initialize();
 
   // The server is configured to use stateless rejects, but the client does not
@@ -334,7 +333,7 @@ TEST_P(QuicCryptoServerStreamTest, ZeroRTT) {
   AdvanceHandshakeWithFakeClient();
 
   // Now do another handshake, hopefully in 0-RTT.
-  DVLOG(1) << "Resetting for 0-RTT handshake attempt";
+  QUIC_LOG(INFO) << "Resetting for 0-RTT handshake attempt";
   InitializeFakeClient(/* supports_stateless_rejects= */ false);
   InitializeServer();
 
@@ -416,6 +415,12 @@ TEST_P(QuicCryptoServerStreamTest, OnlySendSCUPAfterHandshakeComplete) {
 }
 
 TEST_P(QuicCryptoServerStreamTest, SendSCUPAfterHandshakeComplete) {
+  // Do not send MAX_HEADER_LIST_SIZE SETTING frame.
+  // TODO(fayang): This SETTING frame cannot be decrypted and
+  // CryptoTestUtils::MovePackets stops processing parsing following packets.
+  // Actually, crypto stream test should use QuicSession instead of
+  // QuicSpdySession (b/32366134).
+  FLAGS_quic_reloadable_flag_quic_send_max_header_list_size = false;
   Initialize();
 
   InitializeFakeClient(/* supports_stateless_rejects= */ false);
@@ -477,30 +482,6 @@ TEST_P(QuicCryptoServerStreamTest, NoTokenBindingWithoutClientSupport) {
   EXPECT_TRUE(server_stream()->handshake_confirmed());
 }
 
-class FailingProofSource : public ProofSource {
- public:
-  bool GetProof(const QuicIpAddress& server_ip,
-                const string& hostname,
-                const string& server_config,
-                QuicVersion quic_version,
-                StringPiece chlo_hash,
-                const QuicTagVector& connection_options,
-                scoped_refptr<ProofSource::Chain>* out_chain,
-                QuicCryptoProof* out_proof) override {
-    return false;
-  }
-
-  void GetProof(const QuicIpAddress& server_ip,
-                const string& hostname,
-                const string& server_config,
-                QuicVersion quic_version,
-                StringPiece chlo_hash,
-                const QuicTagVector& connection_options,
-                std::unique_ptr<Callback> callback) override {
-    callback->Run(false, nullptr, QuicCryptoProof(), nullptr);
-  }
-};
-
 class QuicCryptoServerStreamTestWithFailingProofSource
     : public QuicCryptoServerStreamTest {
  public:
@@ -524,6 +505,5 @@ TEST_P(QuicCryptoServerStreamTestWithFailingProofSource, Test) {
 }
 
 }  // namespace
-
 }  // namespace test
 }  // namespace net

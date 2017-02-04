@@ -33,6 +33,7 @@
 #include "net/socket/stream_socket.h"
 #include "net/spdy/buffered_spdy_framer.h"
 #include "net/spdy/http2_priority_dependencies.h"
+#include "net/spdy/multiplexed_session.h"
 #include "net/spdy/server_push_delegate.h"
 #include "net/spdy/spdy_alt_svc_wire_format.h"
 #include "net/spdy/spdy_buffer.h"
@@ -68,12 +69,6 @@ const int32_t kDefaultInitialWindowSize = 65535;
 // sends a SETTINGS frame with a different value.
 const size_t kInitialMaxConcurrentStreams = 100;
 
-// Specifies the maximum HPACK dynamic table size the server is allowed to set.
-const int kMaxHeaderTableSize = 64 * 1024;
-
-// Specifies the maximum concurrent streams server could send (via push).
-const int kMaxConcurrentPushedStreams = 1000;
-
 // If more than this many bytes have been read or more than that many
 // milliseconds have passed, return ERR_IO_PENDING from ReadLoop.
 const int kYieldAfterBytesRead = 32 * 1024;
@@ -95,7 +90,7 @@ class TransportSecurityState;
 // NOTE: There's an enum of the same name (also with numeric suffixes)
 // in histograms.xml. Be sure to add new values there also.
 enum SpdyProtocolErrorDetails {
-  // SpdyFramer::SpdyError mappings.
+  // SpdyFramer::SpdyFramerError mappings.
   SPDY_ERROR_NO_ERROR = 0,
   SPDY_ERROR_INVALID_STREAM_ID = 38,
   SPDY_ERROR_INVALID_CONTROL_FRAME = 1,
@@ -116,20 +111,22 @@ enum SpdyProtocolErrorDetails {
   // SpdyRstStreamStatus mappings.
   STATUS_CODE_NO_ERROR = 41,
   STATUS_CODE_PROTOCOL_ERROR = 11,
-  STATUS_CODE_INVALID_STREAM = 12,
-  STATUS_CODE_REFUSED_STREAM = 13,
-  STATUS_CODE_UNSUPPORTED_VERSION = 14,
-  STATUS_CODE_CANCEL = 15,
   STATUS_CODE_INTERNAL_ERROR = 16,
   STATUS_CODE_FLOW_CONTROL_ERROR = 17,
-  STATUS_CODE_STREAM_IN_USE = 18,
-  STATUS_CODE_STREAM_ALREADY_CLOSED = 19,
-  STATUS_CODE_FRAME_SIZE_ERROR = 21,
   STATUS_CODE_SETTINGS_TIMEOUT = 32,
+  STATUS_CODE_STREAM_CLOSED = 12,
+  STATUS_CODE_FRAME_SIZE_ERROR = 21,
+  STATUS_CODE_REFUSED_STREAM = 13,
+  STATUS_CODE_CANCEL = 15,
+  STATUS_CODE_COMPRESSION_ERROR = 42,
   STATUS_CODE_CONNECT_ERROR = 33,
   STATUS_CODE_ENHANCE_YOUR_CALM = 34,
   STATUS_CODE_INADEQUATE_SECURITY = 35,
   STATUS_CODE_HTTP_1_1_REQUIRED = 36,
+  // Deprecated SpdyRstStrreamStatus mappings.
+  STATUS_CODE_UNSUPPORTED_VERSION = 14,
+  STATUS_CODE_STREAM_IN_USE = 18,
+  STATUS_CODE_STREAM_ALREADY_CLOSED = 19,
 
   // SpdySession errors
   PROTOCOL_ERROR_UNEXPECTED_PING = 22,
@@ -141,11 +138,12 @@ enum SpdyProtocolErrorDetails {
   PROTOCOL_ERROR_RECEIVE_WINDOW_VIOLATION = 28,
 
   // Next free value.
-  NUM_SPDY_PROTOCOL_ERROR_DETAILS = 42,
+  NUM_SPDY_PROTOCOL_ERROR_DETAILS = 43,
 };
 SpdyProtocolErrorDetails NET_EXPORT_PRIVATE
-    MapFramerErrorToProtocolError(SpdyFramer::SpdyError error);
-Error NET_EXPORT_PRIVATE MapFramerErrorToNetError(SpdyFramer::SpdyError error);
+MapFramerErrorToProtocolError(SpdyFramer::SpdyFramerError error);
+Error NET_EXPORT_PRIVATE
+MapFramerErrorToNetError(SpdyFramer::SpdyFramerError error);
 SpdyProtocolErrorDetails NET_EXPORT_PRIVATE
     MapRstStreamStatusToProtocolError(SpdyRstStreamStatus status);
 SpdyGoAwayStatus NET_EXPORT_PRIVATE MapNetErrorToGoAwayStatus(Error err);
@@ -154,7 +152,7 @@ SpdyGoAwayStatus NET_EXPORT_PRIVATE MapNetErrorToGoAwayStatus(Error err);
 // to be updated with new values, as do the mapping functions above.
 static_assert(17 == SpdyFramer::LAST_ERROR,
               "SpdyProtocolErrorDetails / Spdy Errors mismatch");
-static_assert(17 == RST_STREAM_NUM_STATUS_CODES,
+static_assert(14 == RST_STREAM_NUM_STATUS_CODES,
               "SpdyProtocolErrorDetails / RstStreamStatus mismatch");
 
 // A helper class used to manage a request to create a stream.
@@ -228,6 +226,7 @@ class NET_EXPORT_PRIVATE SpdyStreamRequest {
 
 class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
                                public SpdyFramerDebugVisitorInterface,
+                               public MultiplexedSession,
                                public HigherLayeredPool {
  public:
   // TODO(akalin): Use base::TickClock when it becomes available.
@@ -299,8 +298,9 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
               bool enable_sending_initial_data,
               bool enable_ping_based_connection_checking,
               size_t session_max_recv_window_size,
-              size_t stream_max_recv_window_size,
+              const SettingsMap& initial_settings,
               TimeFunc time_func,
+              ServerPushDelegate* push_delegate,
               ProxyDelegate* proxy_delegate,
               NetLog* net_log);
 
@@ -323,13 +323,13 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // okay to create a new stream (in which case |spdy_stream| is
   // reset).  Returns an error (not ERR_IO_PENDING) otherwise, and
   // resets |spdy_stream|.
+  //
+  // If a stream was found and the stream is still open, the priority
+  // of that stream is updated to match |priority|.
   int GetPushStream(const GURL& url,
-                    base::WeakPtr<SpdyStream>* spdy_stream,
+                    RequestPriority priority,
+                    SpdyStream** spdy_stream,
                     const NetLogWithSource& stream_net_log);
-
-  void set_push_delegate(ServerPushDelegate* push_delegate) {
-    push_delegate_ = push_delegate;
-  }
 
   // Called when the pushed stream should be cancelled. If the pushed stream is
   // not claimed and active, sends RST to the server to cancel the stream.
@@ -409,22 +409,18 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // Returns server infomation in the form of (scheme/host/port).
   url::SchemeHostPort GetServer();
 
-  // Fills SSL info in |ssl_info| and returns true when SSL is in use.
-  bool GetSSLInfo(SSLInfo* ssl_info) const;
+  // MultiplexedSession methods:
+  bool GetRemoteEndpoint(IPEndPoint* endpoint) override;
+  bool GetSSLInfo(SSLInfo* ssl_info) const override;
+  Error GetTokenBindingSignature(crypto::ECPrivateKey* key,
+                                 TokenBindingType tb_type,
+                                 std::vector<uint8_t>* out) override;
 
   // Returns true if ALPN was negotiated for the underlying socket.
-  // TODO(bnc): Rename to WasAlpnNegotiated().
-  bool WasNpnNegotiated() const;
+  bool WasAlpnNegotiated() const;
 
   // Returns the protocol negotiated via ALPN for the underlying socket.
   NextProto GetNegotiatedProtocol() const;
-
-  // Generates the signature used in Token Binding using |*key| and for a Token
-  // Binding of type |tb_type|, putting the signature in |*out|. Returns a net
-  // error code of OK or ERR_FAILED.
-  Error GetTokenBindingSignature(crypto::ECPrivateKey* key,
-                                 TokenBindingType tb_type,
-                                 std::vector<uint8_t>* out);
 
   // Send a WINDOW_UPDATE frame for a stream. Called by a stream
   // whenever receive window size is increased.
@@ -565,6 +561,13 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // HigherLayeredPool implementation:
   bool CloseOneIdleConnection() override;
 
+  // Dumps memory allocation stats to |stats|. Sets |*is_session_active| to
+  // indicate whether session is active.
+  // |stats| can be assumed as being default initialized upon entry.
+  // Implementation overrides fields in |stats|.
+  void DumpMemoryStats(StreamSocket::SocketMemoryStats* stats,
+                       bool* is_session_active) const;
+
  private:
   friend class test::SpdyStreamTest;
   friend class base::RefCounted<SpdySession>;
@@ -614,19 +617,9 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest,
                            ServerPushValidCrossOriginWithOpenSession);
 
-  typedef std::deque<base::WeakPtr<SpdyStreamRequest> >
+  typedef std::deque<base::WeakPtr<SpdyStreamRequest>>
       PendingStreamRequestQueue;
-
-  struct ActiveStreamInfo {
-    ActiveStreamInfo();
-    explicit ActiveStreamInfo(SpdyStream* stream);
-    ~ActiveStreamInfo();
-
-    SpdyStream* stream;
-    bool waiting_for_reply_headers_frame;
-  };
-  typedef std::map<SpdyStreamId, ActiveStreamInfo> ActiveStreamMap;
-
+  typedef std::map<SpdyStreamId, SpdyStream*> ActiveStreamMap;
   typedef std::set<SpdyStream*> CreatedStreamSet;
 
   enum AvailabilityState {
@@ -682,9 +675,8 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // possible.
   void ProcessPendingStreamRequests();
 
-  bool TryCreatePushStream(SpdyStreamId stream_id,
+  void TryCreatePushStream(SpdyStreamId stream_id,
                            SpdyStreamId associated_stream_id,
-                           SpdyPriority priority,
                            SpdyHeaderBlock headers);
 
   // Close the stream pointed to by the given iterator. Note that that
@@ -704,12 +696,16 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // Send a RST_STREAM frame with the given parameters. There should
   // either be no active stream with the given ID, or that active
   // stream should be closed shortly after this function is called.
-  //
-  // TODO(akalin): Rename this to EnqueueResetStreamFrame().
   void EnqueueResetStreamFrame(SpdyStreamId stream_id,
                                RequestPriority priority,
                                SpdyRstStreamStatus status,
                                const std::string& description);
+
+  // Send a PRIORITY frame with the given parameters.
+  void EnqueuePriorityFrame(SpdyStreamId stream_id,
+                            SpdyStreamId dependency_id,
+                            int weight,
+                            bool exclusive);
 
   // Calls DoReadLoop. Use this function instead of DoReadLoop when
   // posting a task to pump the read loop.
@@ -823,15 +819,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // Check if we have a pending pushed-stream for this url
   // Returns the stream if found (and returns it from the pending
   // list). Returns NULL otherwise.
-  base::WeakPtr<SpdyStream> GetActivePushStream(const GURL& url);
-
-  // Delegates to |stream->OnInitialResponseHeadersReceived()|. If an
-  // error is returned, the last reference to |this| may have been
-  // released.
-  int OnInitialResponseHeadersReceived(const SpdyHeaderBlock& response_headers,
-                                       base::Time response_time,
-                                       base::TimeTicks recv_first_byte_time,
-                                       SpdyStream* stream);
+  SpdyStream* GetActivePushStream(const GURL& url);
 
   void RecordPingRTTHistogram(base::TimeDelta duration);
   void RecordHistograms();
@@ -869,7 +857,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   void DeleteExpiredPushedStreams();
 
   // BufferedSpdyFramerVisitorInterface:
-  void OnError(SpdyFramer::SpdyError error_code) override;
+  void OnError(SpdyFramer::SpdyFramerError spdy_framer_error) override;
   void OnStreamError(SpdyStreamId stream_id,
                      const std::string& description) override;
   void OnPing(SpdyPingId unique_id, bool is_ack) override;
@@ -886,7 +874,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   void OnStreamEnd(SpdyStreamId stream_id) override;
   void OnStreamPadding(SpdyStreamId stream_id, size_t len) override;
   void OnSettings() override;
-  void OnSetting(SpdySettingsIds id, uint8_t flags, uint32_t value) override;
+  void OnSetting(SpdySettingsIds id, uint32_t value) override;
   void OnWindowUpdate(SpdyStreamId stream_id, int delta_window_size) override;
   void OnPushPromise(SpdyStreamId stream_id,
                      SpdyStreamId promised_stream_id,
@@ -902,7 +890,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
                 base::StringPiece origin,
                 const SpdyAltSvcWireFormat::AlternativeServiceVector&
                     altsvc_vector) override;
-  bool OnUnknownFrame(SpdyStreamId stream_id, int frame_type) override;
+  bool OnUnknownFrame(SpdyStreamId stream_id, uint8_t frame_type) override;
 
   // SpdyFramerDebugVisitorInterface
   void OnSendCompressedFrame(SpdyStreamId stream_id,
@@ -1106,6 +1094,12 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // Initialized to OK.
   Error error_on_close_;
 
+  // Settings that are sent in the initial SETTINGS frame
+  // (if |enable_sending_initial_data_| is true),
+  // and also control SpdySession parameters like initial receive window size
+  // and maximum HPACK dynamic table size.
+  const SettingsMap initial_settings_;
+
   // Limits
   size_t max_concurrent_streams_;
   size_t max_concurrent_pushed_streams_;
@@ -1162,6 +1156,9 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // changed by an arriving SETTINGS frame. Newly created streams use
   // this value for the initial send window size.
   int32_t stream_initial_send_window_size_;
+
+  // The maximum HPACK dynamic table size the server is allowed to set.
+  uint32_t max_header_table_size_;
 
   // Initial receive window size for this session's streams. There are
   // plans to add a command line switch that would cause a SETTINGS

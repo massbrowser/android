@@ -63,13 +63,15 @@ public class ContextualSearchBarControl
 
     /**
      * The opacity of the Bar's Search Context.
+     * This text control may not be initialized until the opacity is set beyond 0.
      */
-    private float mSearchBarContextOpacity = 1.f;
+    private float mSearchBarContextOpacity;
 
     /**
      * The opacity of the Bar's Search Term.
+     * This text control may not be initialized until the opacity is set beyond 0.
      */
-    private float mSearchBarTermOpacity = 1.f;
+    private float mSearchBarTermOpacity;
 
     // Dimensions used for laying out the search bar.
     private final float mTextLayerMinHeight;
@@ -182,6 +184,7 @@ public class ContextualSearchBarControl
         mContextControl.destroy();
         mSearchTermControl.destroy();
         mCaptionControl.destroy();
+        mQuickActionControl.destroy();
     }
 
     /**

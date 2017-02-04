@@ -38,6 +38,13 @@ void UpdateShelfItemForWindow(ShelfItem* item, WmWindow* window) {
   item->image = window->GetAppIcon();
   if (item->image.isNull())
     item->image = window->GetWindowIcon();
+
+  item->title = window->GetTitle();
+
+  // Do not show tooltips for visible attached app panel windows.
+  item->shows_tooltip =
+      item->type != TYPE_APP_PANEL || !window->IsVisible() ||
+      !window->GetBoolProperty(WmWindowProperty::PANEL_ATTACHED);
 }
 
 }  // namespace
@@ -80,6 +87,7 @@ void ShelfWindowWatcher::UserWindowObserver::OnWindowPropertyChanged(
   if (property == WmWindowProperty::APP_ICON ||
       property == WmWindowProperty::APP_ID ||
       property == WmWindowProperty::DRAW_ATTENTION ||
+      property == WmWindowProperty::PANEL_ATTACHED ||
       property == WmWindowProperty::SHELF_ITEM_TYPE ||
       property == WmWindowProperty::WINDOW_ICON) {
     window_watcher_->OnUserWindowPropertyChanged(window);
@@ -91,6 +99,23 @@ void ShelfWindowWatcher::UserWindowObserver::OnWindowDestroying(
   window_watcher_->OnUserWindowDestroying(window);
 }
 
+void ShelfWindowWatcher::UserWindowObserver::OnWindowVisibilityChanged(
+    WmWindow* window,
+    bool visible) {
+  // OnWindowVisibilityChanged() is called for descendants too. We only care
+  // about changes to the visibility of windows we know about.
+  if (!window_watcher_->observed_user_windows_.IsObserving(window))
+    return;
+
+  // The tooltip behavior for panel windows depends on the panel visibility.
+  window_watcher_->OnUserWindowPropertyChanged(window);
+}
+
+void ShelfWindowWatcher::UserWindowObserver::OnWindowTitleChanged(
+    WmWindow* window) {
+  window_watcher_->OnUserWindowPropertyChanged(window);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 ShelfWindowWatcher::ShelfWindowWatcher(ShelfModel* model)
@@ -100,13 +125,8 @@ ShelfWindowWatcher::ShelfWindowWatcher(ShelfModel* model)
       observed_container_windows_(&container_window_observer_),
       observed_user_windows_(&user_window_observer_) {
   WmShell::Get()->AddActivationObserver(this);
-  for (WmWindow* root : WmShell::Get()->GetAllRootWindows()) {
-    observed_container_windows_.Add(
-        root->GetChildByShellWindowId(kShellWindowId_DefaultContainer));
-    observed_container_windows_.Add(
-        root->GetChildByShellWindowId(kShellWindowId_PanelContainer));
-  }
-
+  for (const auto& display : display::Screen::GetScreen()->GetAllDisplays())
+    OnDisplayAdded(display);
   display::Screen::GetScreen()->AddObserver(this);
 }
 
@@ -200,16 +220,22 @@ void ShelfWindowWatcher::OnWindowActivated(WmWindow* gained_active,
 void ShelfWindowWatcher::OnDisplayAdded(const display::Display& new_display) {
   WmWindow* root = WmShell::Get()->GetRootWindowForDisplayId(new_display.id());
 
-  // When the primary root window's display get removed, the existing root
-  // window is taken over by the new display and the observer is already set.
+  // When the primary root window's display is removed, the existing root window
+  // is taken over by the new display, and the observer is already set.
   WmWindow* default_container =
       root->GetChildByShellWindowId(kShellWindowId_DefaultContainer);
-  if (!observed_container_windows_.IsObserving(default_container))
+  if (!observed_container_windows_.IsObserving(default_container)) {
+    for (WmWindow* window : default_container->GetChildren())
+      OnUserWindowAdded(window);
     observed_container_windows_.Add(default_container);
+  }
   WmWindow* panel_container =
       root->GetChildByShellWindowId(kShellWindowId_PanelContainer);
-  if (!observed_container_windows_.IsObserving(panel_container))
+  if (!observed_container_windows_.IsObserving(panel_container)) {
+    for (WmWindow* window : panel_container->GetChildren())
+      OnUserWindowAdded(window);
     observed_container_windows_.Add(panel_container);
+  }
 }
 
 void ShelfWindowWatcher::OnDisplayRemoved(const display::Display& old_display) {

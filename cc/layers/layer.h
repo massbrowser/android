@@ -25,13 +25,12 @@
 #include "cc/layers/layer_position_constraint.h"
 #include "cc/layers/paint_properties.h"
 #include "cc/output/filter_operations.h"
+#include "cc/paint/paint_record.h"
 #include "cc/trees/element_id.h"
-#include "cc/trees/layer_tree.h"
 #include "cc/trees/mutator_host_client.h"
 #include "cc/trees/property_tree.h"
 #include "cc/trees/target_property.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/skia/include/core/SkPicture.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -54,11 +53,6 @@ class LayerTreeHostCommon;
 class LayerTreeImpl;
 class MutatorHost;
 class ScrollbarLayerInterface;
-
-namespace proto {
-class LayerNode;
-class LayerProperties;
-}  // namespace proto
 
 // Base class for composited layers. Special layer types are derived from
 // this class.
@@ -160,7 +154,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
     return inputs_.background_filters;
   }
 
-  virtual void SetContentsOpaque(bool opaque);
+  void SetContentsOpaque(bool opaque);
   bool contents_opaque() const { return inputs_.contents_opaque; }
 
   void SetPosition(const gfx::PointF& position);
@@ -330,35 +324,12 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
 
   virtual void PushPropertiesTo(LayerImpl* layer);
 
-  // Sets the type proto::LayerType that should be used for serialization
-  // of the current layer by calling LayerNode::set_type(proto::LayerType).
-  // TODO(nyquist): Start using a forward declared enum class when
-  // https://github.com/google/protobuf/issues/67 has been fixed and rolled in.
-  // This function would preferably instead return a proto::LayerType, but
-  // since that is an enum (the protobuf library does not generate enum
-  // classes), it can't be forward declared. We don't want to include
-  // //cc/proto/layer.pb.h in this header file, as it requires that all
-  // dependent targets would have to be given the config for how to include it.
-  virtual void SetTypeForProtoSerialization(proto::LayerNode* proto) const;
-
-  // Recursively iterate over this layer and all children and write the
-  // hierarchical structure to the given LayerNode proto. In addition to the
-  // structure itself, the Layer id and type is also written to facilitate
-  // construction of the correct layer on the client.
-  virtual void ToLayerNodeProto(proto::LayerNode* proto) const;
-
-  // This method is similar to PushPropertiesTo, but instead of pushing to
-  // a LayerImpl, it pushes the properties to proto::LayerProperties. It is
-  // called only on layers that have changed properties. The properties
-  // themselves are pushed to proto::LayerProperties.
-  virtual void ToLayerPropertiesProto(proto::LayerProperties* proto);
-
   LayerTreeHost* GetLayerTreeHostForTesting() const { return layer_tree_host_; }
-  LayerTree* GetLayerTree() const;
 
   virtual ScrollbarLayerInterface* ToScrollbarLayer();
 
-  virtual sk_sp<SkPicture> GetPicture() const;
+  // TODO(enne): rename this to PaintRecord
+  virtual sk_sp<PaintRecord> GetPicture() const;
 
   // Constructs a LayerImpl of the correct runtime type for this Layer type.
   virtual std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl);
@@ -440,7 +411,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   void SetMutableProperties(uint32_t properties);
   uint32_t mutable_properties() const { return inputs_.mutable_properties; }
 
-  bool HasActiveAnimationForTesting() const;
+  bool HasTickingAnimationForTesting() const;
 
   void SetHasWillChangeTransformHint(bool has_will_change);
   bool has_will_change_transform_hint() const {
@@ -465,21 +436,17 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
 
   ElementListType GetElementTypeForAnimation() const;
 
-  // Tests in remote mode need to explicitly set the layer id so it matches the
-  // layer id for the corresponding Layer on the engine.
-  void SetLayerIdForTesting(int id);
-
   void SetScrollbarsHiddenFromImplSide(bool hidden);
 
   const gfx::Rect& update_rect() const { return inputs_.update_rect; }
+
+  LayerTreeHost* layer_tree_host() const { return layer_tree_host_; }
 
  protected:
   friend class LayerImpl;
   friend class TreeSynchronizer;
   virtual ~Layer();
   Layer();
-
-  LayerTreeHost* layer_tree_host() { return layer_tree_host_; }
 
   // These SetNeeds functions are in order of severity of update:
   //
@@ -520,7 +487,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
  private:
   friend class base::RefCounted<Layer>;
   friend class LayerTreeHostCommon;
-  friend class LayerTree;
+  friend class LayerTreeHost;
   friend class LayerInternalsForTest;
 
   // Interactions with attached animations.
@@ -660,7 +627,6 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   // This pointer value is nil when a Layer is not in a tree and is
   // updated via SetLayerTreeHost() if a layer moves between trees.
   LayerTreeHost* layer_tree_host_;
-  LayerTree* layer_tree_;
 
   Inputs inputs_;
 

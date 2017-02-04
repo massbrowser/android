@@ -5,7 +5,7 @@
 #include "net/quic/platform/impl/quic_socket_address_impl.h"
 
 #include "net/base/sockaddr_storage.h"
-#include "net/quic/core/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_bug_tracker.h"
 
 using std::string;
 
@@ -55,12 +55,6 @@ string QuicSocketAddressImpl::ToString() const {
     return "Uninitialized address";
   }
   return socket_address_.ToString();
-}
-
-bool QuicSocketAddressImpl::FromString(string str) {
-  QUIC_BUG
-      << "QuicSocketAddressImpl::FromString(string str) is not implemented.";
-  return false;
 }
 
 int QuicSocketAddressImpl::FromSocket(int fd) {

@@ -32,7 +32,6 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
-#include "core/dom/ExecutionContextTask.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/origin_trials/OriginTrialContext.h"
 #include "core/workers/DedicatedWorkerThread.h"
@@ -96,16 +95,6 @@ void DedicatedWorkerGlobalScope::postMessage(
     return;
   workerObjectProxy().postMessageToWorkerObject(std::move(message),
                                                 std::move(channels));
-}
-
-void DedicatedWorkerGlobalScope::countFeature(
-    UseCounter::Feature feature) const {
-  workerObjectProxy().countFeature(feature);
-}
-
-void DedicatedWorkerGlobalScope::countDeprecation(
-    UseCounter::Feature feature) const {
-  workerObjectProxy().countDeprecation(feature);
 }
 
 InProcessWorkerObjectProxy& DedicatedWorkerGlobalScope::workerObjectProxy()

@@ -26,12 +26,11 @@
 #ifndef TextTrackLoader_h
 #define TextTrackLoader_h
 
-#include "core/fetch/RawResource.h"
-#include "core/fetch/ResourceOwner.h"
 #include "core/html/track/vtt/VTTParser.h"
 #include "platform/CrossOriginAttributeValue.h"
-#include "platform/Timer.h"
 #include "platform/heap/Handle.h"
+#include "platform/loader/fetch/RawResource.h"
+#include "platform/loader/fetch/ResourceOwner.h"
 
 namespace blink {
 
@@ -95,7 +94,7 @@ class TextTrackLoader final : public GarbageCollectedFinalized<TextTrackLoader>,
   Member<VTTParser> m_cueParser;
   // FIXME: Remove this pointer and get the Document from m_client.
   Member<Document> m_document;
-  Timer<TextTrackLoader> m_cueLoadTimer;
+  TaskRunnerTimer<TextTrackLoader> m_cueLoadTimer;
   State m_state;
   bool m_newCuesAvailable;
 };

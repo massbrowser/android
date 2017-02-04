@@ -15,12 +15,12 @@
 #import "base/mac/foundation_util.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
-#import "ios/web/history_state_util.h"
+#include "ios/web/history_state_util.h"
 #import "ios/web/navigation/crw_session_certificate_policy_manager.h"
 #import "ios/web/navigation/crw_session_controller+private_constructors.h"
 #import "ios/web/navigation/crw_session_entry.h"
-#include "ios/web/navigation/navigation_item_impl.h"
-#import "ios/web/navigation/navigation_manager_facade_delegate.h"
+#import "ios/web/navigation/navigation_item_impl.h"
+#include "ios/web/navigation/navigation_manager_facade_delegate.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #include "ios/web/navigation/time_smoother.h"
 #include "ios/web/public/browser_state.h"
@@ -31,19 +31,6 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-namespace {
-NSString* const kCertificatePolicyManagerKey = @"certificatePolicyManager";
-NSString* const kCurrentNavigationIndexKey = @"currentNavigationIndex";
-NSString* const kEntriesKey = @"entries";
-NSString* const kLastVisitedTimestampKey = @"lastVisitedTimestamp";
-NSString* const kOpenerIdKey = @"openerId";
-NSString* const kOpenedByDOMKey = @"openedByDOM";
-NSString* const kOpenerNavigationIndexKey = @"openerNavigationIndex";
-NSString* const kPreviousNavigationIndexKey = @"previousNavigationIndex";
-NSString* const kTabIdKey = @"tabId";
-NSString* const kWindowNameKey = @"windowName";
-}  // namespace
 
 @interface CRWSessionController () {
   // Weak pointer back to the owning NavigationManager. This is to facilitate
@@ -110,6 +97,14 @@ NSString* const kWindowNameKey = @"windowName";
 @property(nonatomic, readwrite, strong)
     CRWSessionCertificatePolicyManager* sessionCertificatePolicyManager;
 
+// Expose setters for serialization properties.  These are exposed in a category
+// in NavigationManagerStorageBuilder, and will be removed as ownership of
+// their backing ivars moves to NavigationManagerImpl.
+@property(nonatomic, readwrite, copy) NSString* openerId;
+@property(nonatomic, readwrite, getter=isOpenedByDOM) BOOL openedByDOM;
+@property(nonatomic, readwrite, assign) NSInteger openerNavigationIndex;
+@property(nonatomic, readwrite, assign) NSInteger previousNavigationIndex;
+
 - (NSString*)uniqueID;
 // Removes all entries after currentNavigationIndex_.
 - (void)clearForwardEntries;
@@ -164,7 +159,8 @@ NSString* const kWindowNameKey = @"windowName";
   return self;
 }
 
-- (id)initWithNavigationItems:(ScopedVector<web::NavigationItem>)scoped_items
+- (id)initWithNavigationItems:
+          (std::vector<std::unique_ptr<web::NavigationItem>>)items
                  currentIndex:(NSUInteger)currentIndex
                  browserState:(web::BrowserState*)browserState {
   self = [super init];
@@ -174,12 +170,9 @@ NSString* const kWindowNameKey = @"windowName";
     _browserState = browserState;
 
     // Create entries array from list of navigations.
-    _entries = [[NSMutableArray alloc] initWithCapacity:scoped_items.size()];
-    std::vector<web::NavigationItem*> items;
-    scoped_items.release(&items);
+    _entries = [[NSMutableArray alloc] initWithCapacity:items.size()];
 
-    for (size_t i = 0; i < items.size(); ++i) {
-      std::unique_ptr<web::NavigationItem> item(items[i]);
+    for (auto& item : items) {
       base::scoped_nsobject<CRWSessionEntry> entry(
           [[CRWSessionEntry alloc] initWithNavigationItem:std::move(item)]);
       [_entries addObject:entry];
@@ -198,59 +191,6 @@ NSString* const kWindowNameKey = @"windowName";
         [[CRWSessionCertificatePolicyManager alloc] init];
   }
   return self;
-}
-
-- (id)initWithCoder:(NSCoder*)aDecoder {
-  self = [super init];
-  if (self) {
-    NSString* uuid = [aDecoder decodeObjectForKey:kTabIdKey];
-    if (!uuid)
-      uuid = [self uniqueID];
-
-    self.windowName = [aDecoder decodeObjectForKey:kWindowNameKey];
-    _tabId = [uuid copy];
-    _openerId = [[aDecoder decodeObjectForKey:kOpenerIdKey] copy];
-    _openedByDOM = [aDecoder decodeBoolForKey:kOpenedByDOMKey];
-    _openerNavigationIndex =
-        [aDecoder decodeIntForKey:kOpenerNavigationIndexKey];
-    _currentNavigationIndex =
-        [aDecoder decodeIntForKey:kCurrentNavigationIndexKey];
-    _previousNavigationIndex =
-        [aDecoder decodeIntForKey:kPreviousNavigationIndexKey];
-    _pendingEntryIndex = -1;
-    _lastVisitedTimestamp =
-       [aDecoder decodeDoubleForKey:kLastVisitedTimestampKey];
-    NSMutableArray* temp =
-        [NSMutableArray arrayWithArray:
-            [aDecoder decodeObjectForKey:kEntriesKey]];
-    _entries = temp;
-    // Prior to M34, 0 was used as "no index" instead of -1; adjust for that.
-    if (![_entries count])
-      _currentNavigationIndex = -1;
-    _sessionCertificatePolicyManager =
-        [aDecoder decodeObjectForKey:kCertificatePolicyManagerKey];
-    if (!_sessionCertificatePolicyManager) {
-      _sessionCertificatePolicyManager =
-          [[CRWSessionCertificatePolicyManager alloc] init];
-    }
-  }
-  return self;
-}
-
-- (void)encodeWithCoder:(NSCoder*)aCoder {
-  [aCoder encodeObject:_tabId forKey:kTabIdKey];
-  [aCoder encodeObject:_openerId forKey:kOpenerIdKey];
-  [aCoder encodeBool:_openedByDOM forKey:kOpenedByDOMKey];
-  [aCoder encodeInt:_openerNavigationIndex forKey:kOpenerNavigationIndexKey];
-  [aCoder encodeObject:_windowName forKey:kWindowNameKey];
-  [aCoder encodeInt:_currentNavigationIndex forKey:kCurrentNavigationIndexKey];
-  [aCoder encodeInt:_previousNavigationIndex
-             forKey:kPreviousNavigationIndexKey];
-  [aCoder encodeDouble:_lastVisitedTimestamp forKey:kLastVisitedTimestampKey];
-  [aCoder encodeObject:_entries forKey:kEntriesKey];
-  [aCoder encodeObject:_sessionCertificatePolicyManager
-                forKey:kCertificatePolicyManagerKey];
-  // rendererInitiated is deliberately not preserved, as upstream.
 }
 
 - (id)copyWithZone:(NSZone*)zone {
@@ -373,7 +313,7 @@ NSString* const kWindowNameKey = @"windowName";
   // between new navigations and history stack navigation, hence the inclusion
   // of specific transiton type logic here, in order to make it reliable with
   // real-world observed behavior.
-  // TODO(stuartmorgan): Fix the way changes are detected/reported elsewhere
+  // TODO(crbug.com/676129): Fix the way changes are detected/reported elsewhere
   // in the web layer so that this hack can be removed.
   // Remove the workaround code from -presentSafeBrowsingWarningForResource:.
   CRWSessionEntry* currentEntry = self.currentEntry;
@@ -546,6 +486,7 @@ NSString* const kWindowNameKey = @"windowName";
   currentItem->SetURL(url);
   currentItem->SetSerializedStateObject(stateObject);
   currentItem->SetHasStateBeenReplaced(true);
+  currentItem->SetPostData(nil);
   currentEntry.navigationItem->SetURL(url);
   // If the change is to a committed entry, notify interested parties.
   if (currentEntry != self.pendingEntry && _navigationManager)
@@ -655,36 +596,6 @@ NSString* const kWindowNameKey = @"windowName";
   return entries;
 }
 
-- (std::vector<GURL>)currentRedirectedUrls {
-  std::vector<GURL> results;
-  if (_pendingEntry) {
-    web::NavigationItem* item = [_pendingEntry navigationItem];
-    results.push_back(item->GetURL());
-
-    if (!ui::PageTransitionIsRedirect(item->GetTransitionType()))
-      return results;
-  }
-
-  if (![_entries count])
-    return results;
-
-  NSInteger index = _currentNavigationIndex;
-  // Add urls in the redirected entries.
-  while (index >= 0) {
-    web::NavigationItem* item = [[_entries objectAtIndex:index] navigationItem];
-    if (!ui::PageTransitionIsRedirect(item->GetTransitionType()))
-      break;
-    results.push_back(item->GetURL());
-    --index;
-  }
-  // Add the last non-redirected entry.
-  if (index >= 0) {
-    web::NavigationItem* item = [[_entries objectAtIndex:index] navigationItem];
-    results.push_back(item->GetURL());
-  }
-  return results;
-}
-
 - (BOOL)isSameDocumentNavigationBetweenEntry:(CRWSessionEntry*)firstEntry
                                     andEntry:(CRWSessionEntry*)secondEntry {
   if (!firstEntry || !secondEntry || firstEntry == secondEntry)
@@ -765,6 +676,7 @@ NSString* const kWindowNameKey = @"windowName";
         &loaded_url, _browserState);
   }
   std::unique_ptr<web::NavigationItemImpl> item(new web::NavigationItemImpl());
+  item->SetOriginalRequestURL(loaded_url);
   item->SetURL(loaded_url);
   item->SetReferrer(referrer);
   item->SetTransitionType(transition);

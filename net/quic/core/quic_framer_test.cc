@@ -4,32 +4,28 @@
 
 #include "net/quic/core/quic_framer.h"
 
-#include <string.h>
-
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "net/quic/core/crypto/null_decrypter.h"
+#include "net/quic/core/crypto/null_encrypter.h"
 #include "net/quic/core/crypto/quic_decrypter.h"
 #include "net/quic/core/crypto/quic_encrypter.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_flags.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/test_tools/quic_framer_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
-#include "net/test/gtest_util.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 using base::StringPiece;
-using std::make_pair;
-using std::map;
-using std::numeric_limits;
-using std::pair;
 using std::string;
-using std::vector;
 using testing::Return;
 using testing::Truly;
 using testing::_;
@@ -116,13 +112,15 @@ class TestEncrypter : public QuicEncrypter {
   ~TestEncrypter() override {}
   bool SetKey(StringPiece key) override { return true; }
   bool SetNoncePrefix(StringPiece nonce_prefix) override { return true; }
-  bool EncryptPacket(QuicPathId path_id,
+  bool EncryptPacket(QuicVersion version,
+                     QuicPathId path_id,
                      QuicPacketNumber packet_number,
                      StringPiece associated_data,
                      StringPiece plaintext,
                      char* output,
                      size_t* output_length,
                      size_t max_output_length) override {
+    version_ = version;
     path_id_ = path_id;
     packet_number_ = packet_number;
     associated_data_ = associated_data.as_string();
@@ -141,6 +139,9 @@ class TestEncrypter : public QuicEncrypter {
   }
   StringPiece GetKey() const override { return StringPiece(); }
   StringPiece GetNoncePrefix() const override { return StringPiece(); }
+
+  QuicVersion version_;
+  Perspective perspective_;
   QuicPathId path_id_;
   QuicPacketNumber packet_number_;
   string associated_data_;
@@ -159,13 +160,15 @@ class TestDecrypter : public QuicDecrypter {
   bool SetDiversificationNonce(const DiversificationNonce& key) override {
     return true;
   }
-  bool DecryptPacket(QuicPathId path_id,
+  bool DecryptPacket(QuicVersion version,
+                     QuicPathId path_id,
                      QuicPacketNumber packet_number,
                      StringPiece associated_data,
                      StringPiece ciphertext,
                      char* output,
                      size_t* output_length,
                      size_t max_output_length) override {
+    version_ = version;
     path_id_ = path_id;
     packet_number_ = packet_number;
     associated_data_ = associated_data.as_string();
@@ -179,6 +182,8 @@ class TestDecrypter : public QuicDecrypter {
   const char* cipher_name() const override { return "Test"; }
   // Use a distinct value starting with 0xFFFFFF, which is never used by TLS.
   uint32_t cipher_id() const override { return 0xFFFFFFF2; }
+  QuicVersion version_;
+  Perspective perspective_;
   QuicPathId path_id_;
   QuicPacketNumber packet_number_;
   string associated_data_;
@@ -199,8 +204,8 @@ class TestQuicVisitor : public QuicFramerVisitorInterface {
   ~TestQuicVisitor() override {}
 
   void OnError(QuicFramer* f) override {
-    DVLOG(1) << "QuicFramer Error: " << QuicErrorCodeToString(f->error())
-             << " (" << f->error() << ")";
+    QUIC_DLOG(INFO) << "QuicFramer Error: " << QuicErrorCodeToString(f->error())
+                    << " (" << f->error() << ")";
     ++error_count_;
   }
 
@@ -216,7 +221,7 @@ class TestQuicVisitor : public QuicFramerVisitorInterface {
   }
 
   bool OnProtocolVersionMismatch(QuicVersion version) override {
-    DVLOG(1) << "QuicFramer Version Mismatch, version: " << version;
+    QUIC_DLOG(INFO) << "QuicFramer Version Mismatch, version: " << version;
     ++version_mismatch_;
     return true;
   }
@@ -242,36 +247,33 @@ class TestQuicVisitor : public QuicFramerVisitorInterface {
   bool OnStreamFrame(const QuicStreamFrame& frame) override {
     ++frame_count_;
     // Save a copy of the data so it is valid after the packet is processed.
-    string* string_data = new string();
-    StringPiece(frame.data_buffer, frame.data_length)
-        .AppendToString(string_data);
-    stream_data_.push_back(base::WrapUnique(string_data));
-    stream_frames_.push_back(base::MakeUnique<QuicStreamFrame>(
+    string* string_data = new string(frame.data_buffer, frame.data_length);
+    stream_data_.push_back(QuicWrapUnique(string_data));
+    stream_frames_.push_back(QuicMakeUnique<QuicStreamFrame>(
         frame.stream_id, frame.fin, frame.offset, *string_data));
     return true;
   }
 
   bool OnAckFrame(const QuicAckFrame& frame) override {
     ++frame_count_;
-    ack_frames_.push_back(base::MakeUnique<QuicAckFrame>(frame));
+    ack_frames_.push_back(QuicMakeUnique<QuicAckFrame>(frame));
     return true;
   }
 
   bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) override {
     ++frame_count_;
-    stop_waiting_frames_.push_back(
-        base::MakeUnique<QuicStopWaitingFrame>(frame));
+    stop_waiting_frames_.push_back(QuicMakeUnique<QuicStopWaitingFrame>(frame));
     return true;
   }
 
   bool OnPaddingFrame(const QuicPaddingFrame& frame) override {
-    padding_frames_.push_back(base::MakeUnique<QuicPaddingFrame>(frame));
+    padding_frames_.push_back(QuicMakeUnique<QuicPaddingFrame>(frame));
     return true;
   }
 
   bool OnPingFrame(const QuicPingFrame& frame) override {
     ++frame_count_;
-    ping_frames_.push_back(base::MakeUnique<QuicPingFrame>(frame));
+    ping_frames_.push_back(QuicMakeUnique<QuicPingFrame>(frame));
     return true;
   }
 
@@ -363,22 +365,24 @@ class QuicFramerTest : public ::testing::TestWithParam<QuicVersion> {
   bool CheckEncryption(QuicPathId path_id,
                        QuicPacketNumber packet_number,
                        QuicPacket* packet) {
+    EXPECT_EQ(version_, encrypter_->version_);
     if (packet_number != encrypter_->packet_number_) {
-      LOG(ERROR) << "Encrypted incorrect packet number.  expected "
-                 << packet_number << " actual: " << encrypter_->packet_number_;
+      QUIC_LOG(ERROR) << "Encrypted incorrect packet number.  expected "
+                      << packet_number
+                      << " actual: " << encrypter_->packet_number_;
       return false;
     }
     if (packet->AssociatedData(framer_.version()) !=
         encrypter_->associated_data_) {
-      LOG(ERROR) << "Encrypted incorrect associated data.  expected "
-                 << packet->AssociatedData(framer_.version())
-                 << " actual: " << encrypter_->associated_data_;
+      QUIC_LOG(ERROR) << "Encrypted incorrect associated data.  expected "
+                      << packet->AssociatedData(framer_.version())
+                      << " actual: " << encrypter_->associated_data_;
       return false;
     }
     if (packet->Plaintext(framer_.version()) != encrypter_->plaintext_) {
-      LOG(ERROR) << "Encrypted incorrect plaintext data.  expected "
-                 << packet->Plaintext(framer_.version())
-                 << " actual: " << encrypter_->plaintext_;
+      QUIC_LOG(ERROR) << "Encrypted incorrect plaintext data.  expected "
+                      << packet->Plaintext(framer_.version())
+                      << " actual: " << encrypter_->plaintext_;
       return false;
     }
     return true;
@@ -388,23 +392,24 @@ class QuicFramerTest : public ::testing::TestWithParam<QuicVersion> {
                        bool includes_version,
                        bool includes_path_id,
                        bool includes_diversification_nonce) {
+    EXPECT_EQ(version_, decrypter_->version_);
     if (visitor_.header_->packet_number != decrypter_->packet_number_) {
-      LOG(ERROR) << "Decrypted incorrect packet number.  expected "
-                 << visitor_.header_->packet_number
-                 << " actual: " << decrypter_->packet_number_;
+      QUIC_LOG(ERROR) << "Decrypted incorrect packet number.  expected "
+                      << visitor_.header_->packet_number
+                      << " actual: " << decrypter_->packet_number_;
       return false;
     }
     if (QuicFramer::GetAssociatedDataFromEncryptedPacket(
             framer_.version(), encrypted, PACKET_8BYTE_CONNECTION_ID,
             includes_version, includes_path_id, includes_diversification_nonce,
             PACKET_6BYTE_PACKET_NUMBER) != decrypter_->associated_data_) {
-      LOG(ERROR) << "Decrypted incorrect associated data.  expected "
-                 << QuicFramer::GetAssociatedDataFromEncryptedPacket(
-                        framer_.version(), encrypted,
-                        PACKET_8BYTE_CONNECTION_ID, includes_version,
-                        includes_path_id, includes_diversification_nonce,
-                        PACKET_6BYTE_PACKET_NUMBER)
-                 << " actual: " << decrypter_->associated_data_;
+      QUIC_LOG(ERROR) << "Decrypted incorrect associated data.  expected "
+                      << QuicFramer::GetAssociatedDataFromEncryptedPacket(
+                             framer_.version(), encrypted,
+                             PACKET_8BYTE_CONNECTION_ID, includes_version,
+                             includes_path_id, includes_diversification_nonce,
+                             PACKET_6BYTE_PACKET_NUMBER)
+                      << " actual: " << decrypter_->associated_data_;
       return false;
     }
     StringPiece ciphertext(
@@ -413,8 +418,8 @@ class QuicFramerTest : public ::testing::TestWithParam<QuicVersion> {
             includes_path_id, includes_diversification_nonce,
             PACKET_6BYTE_PACKET_NUMBER)));
     if (ciphertext != decrypter_->ciphertext_) {
-      LOG(ERROR) << "Decrypted incorrect ciphertext data.  expected "
-                 << ciphertext << " actual: " << decrypter_->ciphertext_;
+      QUIC_LOG(ERROR) << "Decrypted incorrect ciphertext data.  expected "
+                      << ciphertext << " actual: " << decrypter_->ciphertext_;
       return false;
     }
     return true;
@@ -1115,9 +1120,7 @@ TEST_P(QuicFramerTest, PacketNumberDecreasesThenIncreases) {
   header.public_header.version_flag = false;
   header.packet_number = kPacketNumber - 2;
 
-  QuicPaddingFrame padding_frame;
-  QuicFrames frames;
-  frames.push_back(QuicFrame(padding_frame));
+  QuicFrames frames = {QuicFrame(QuicPaddingFrame())};
   std::unique_ptr<QuicPacket> data(BuildDataPacket(header, frames));
   ASSERT_TRUE(data != nullptr);
 
@@ -1192,7 +1195,7 @@ TEST_P(QuicFramerTest, PacketWithDiversificationNonce) {
   EXPECT_TRUE(framer_.ProcessPacket(encrypted));
   ASSERT_TRUE(visitor_.public_header_->nonce != nullptr);
   for (char i = 0; i < 32; ++i) {
-    EXPECT_EQ(i, (*visitor_.public_header_->nonce)[static_cast<int>(i)]);
+    EXPECT_EQ(i, (*visitor_.public_header_->nonce)[static_cast<size_t>(i)]);
   }
 };
 
@@ -1321,7 +1324,8 @@ TEST_P(QuicFramerTest, StreamFrame) {
 
 TEST_P(QuicFramerTest, MissingDiversificationNonce) {
   QuicFramerPeer::SetPerspective(&framer_, Perspective::IS_CLIENT);
-  framer_.SetDecrypter(ENCRYPTION_NONE, new NullDecrypter());
+  framer_.SetDecrypter(ENCRYPTION_NONE,
+                       new NullDecrypter(Perspective::IS_CLIENT));
   decrypter_ = new test::TestDecrypter();
   framer_.SetAlternativeDecrypter(ENCRYPTION_INITIAL, decrypter_, false);
 
@@ -1618,7 +1622,7 @@ TEST_P(QuicFramerTest, RejectPublicHeader) {
   ASSERT_FALSE(visitor_.header_.get());
 }
 
-TEST_P(QuicFramerTest, NewAckFrameOneAckBlock) {
+TEST_P(QuicFramerTest, AckFrameOneAckBlock) {
   // clang-format off
   unsigned char packet[] = {
       // public flags (8 byte connection_id)
@@ -1652,7 +1656,7 @@ TEST_P(QuicFramerTest, NewAckFrameOneAckBlock) {
 
   EXPECT_EQ(0u, visitor_.stream_frames_.size());
   ASSERT_EQ(1u, visitor_.ack_frames_.size());
-  const QuicAckFrame& frame = *visitor_.ack_frames_[0].get();
+  const QuicAckFrame& frame = *visitor_.ack_frames_[0];
   EXPECT_EQ(kSmallLargestObserved, frame.largest_observed);
   ASSERT_EQ(4660u, frame.packets.NumPacketsSlow());
 
@@ -1687,7 +1691,7 @@ TEST_P(QuicFramerTest, NewAckFrameOneAckBlock) {
   }
 }
 
-TEST_P(QuicFramerTest, NewAckFrameTwoTimeStampsMultipleAckBlocks) {
+TEST_P(QuicFramerTest, AckFrameTwoTimeStampsMultipleAckBlocks) {
   // clang-format off
   unsigned char packet[] = {
       // public flags (8 byte connection_id)
@@ -1747,7 +1751,7 @@ TEST_P(QuicFramerTest, NewAckFrameTwoTimeStampsMultipleAckBlocks) {
 
   EXPECT_EQ(0u, visitor_.stream_frames_.size());
   ASSERT_EQ(1u, visitor_.ack_frames_.size());
-  const QuicAckFrame& frame = *visitor_.ack_frames_[0].get();
+  const QuicAckFrame& frame = *visitor_.ack_frames_[0];
   EXPECT_EQ(kSmallLargestObserved, frame.largest_observed);
   ASSERT_EQ(4254u, frame.packets.NumPacketsSlow());
 
@@ -1862,7 +1866,7 @@ TEST_P(QuicFramerTest, NewStopWaitingFrame) {
 
   EXPECT_EQ(0u, visitor_.stream_frames_.size());
   ASSERT_EQ(1u, visitor_.stop_waiting_frames_.size());
-  const QuicStopWaitingFrame& frame = *visitor_.stop_waiting_frames_[0].get();
+  const QuicStopWaitingFrame& frame = *visitor_.stop_waiting_frames_[0];
   EXPECT_EQ(kLeastUnacked, frame.least_unacked);
 
   const size_t frame_size = 7;
@@ -2279,7 +2283,7 @@ TEST_P(QuicFramerTest, PublicResetPacketV33) {
   // Now test framing boundaries.
   for (size_t i = 0; i < arraysize(packet); ++i) {
     string expected_error;
-    DVLOG(1) << "iteration: " << i;
+    QUIC_DLOG(INFO) << "iteration: " << i;
     if (i < kConnectionIdOffset) {
       expected_error = "Unable to read public flags.";
       CheckProcessingFails(packet, i, expected_error,
@@ -2344,7 +2348,7 @@ TEST_P(QuicFramerTest, PublicResetPacket) {
   // Now test framing boundaries.
   for (size_t i = 0; i < arraysize(packet); ++i) {
     string expected_error;
-    DVLOG(1) << "iteration: " << i;
+    QUIC_DLOG(INFO) << "iteration: " << i;
     if (i < kConnectionIdOffset) {
       expected_error = "Unable to read public flags.";
       CheckProcessingFails(packet, i, expected_error,
@@ -2451,7 +2455,7 @@ TEST_P(QuicFramerTest, PublicResetPacketWithClientAddress) {
   // Now test framing boundaries.
   for (size_t i = 0; i < arraysize(packet); ++i) {
     string expected_error;
-    DVLOG(1) << "iteration: " << i;
+    QUIC_DLOG(INFO) << "iteration: " << i;
     if (i < kConnectionIdOffset) {
       expected_error = "Unable to read public flags.";
       CheckProcessingFails(packet, i, expected_error,
@@ -2551,10 +2555,7 @@ TEST_P(QuicFramerTest, BuildPaddingFramePacket) {
   header.public_header.version_flag = false;
   header.packet_number = kPacketNumber;
 
-  QuicPaddingFrame padding_frame;
-
-  QuicFrames frames;
-  frames.push_back(QuicFrame(padding_frame));
+  QuicFrames frames = {QuicFrame(QuicPaddingFrame())};
 
   // clang-format off
   unsigned char packet[kMaxPacketSize] = {
@@ -2595,10 +2596,7 @@ TEST_P(QuicFramerTest, Build4ByteSequenceNumberPaddingFramePacket) {
   header.public_header.packet_number_length = PACKET_4BYTE_PACKET_NUMBER;
   header.packet_number = kPacketNumber;
 
-  QuicPaddingFrame padding_frame;
-
-  QuicFrames frames;
-  frames.push_back(QuicFrame(padding_frame));
+  QuicFrames frames = {QuicFrame(QuicPaddingFrame())};
 
   // clang-format off
   unsigned char packet[kMaxPacketSize] = {
@@ -2638,10 +2636,7 @@ TEST_P(QuicFramerTest, Build2ByteSequenceNumberPaddingFramePacket) {
   header.public_header.packet_number_length = PACKET_2BYTE_PACKET_NUMBER;
   header.packet_number = kPacketNumber;
 
-  QuicPaddingFrame padding_frame;
-
-  QuicFrames frames;
-  frames.push_back(QuicFrame(padding_frame));
+  QuicFrames frames = {QuicFrame(QuicPaddingFrame())};
 
   // clang-format off
   unsigned char packet[kMaxPacketSize] = {
@@ -2681,10 +2676,7 @@ TEST_P(QuicFramerTest, Build1ByteSequenceNumberPaddingFramePacket) {
   header.public_header.packet_number_length = PACKET_1BYTE_PACKET_NUMBER;
   header.packet_number = kPacketNumber;
 
-  QuicPaddingFrame padding_frame;
-
-  QuicFrames frames;
-  frames.push_back(QuicFrame(padding_frame));
+  QuicFrames frames = {QuicFrame(QuicPaddingFrame())};
 
   // clang-format off
   unsigned char packet[kMaxPacketSize] = {
@@ -2726,8 +2718,7 @@ TEST_P(QuicFramerTest, BuildStreamFramePacket) {
   QuicStreamFrame stream_frame(kStreamId, true, kStreamOffset,
                                StringPiece("hello world!"));
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&stream_frame));
+  QuicFrames frames = {QuicFrame(&stream_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -2771,15 +2762,13 @@ TEST_P(QuicFramerTest, BuildStreamFramePacketWithVersionFlag) {
 
   QuicStreamFrame stream_frame(kStreamId, true, kStreamOffset,
                                StringPiece("hello world!"));
-
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&stream_frame));
+  QuicFrames frames = {QuicFrame(&stream_frame)};
 
   // clang-format off
   unsigned char packet[] = {
       // public flags (version, 8 byte connection_id)
       static_cast<unsigned char>(
-          FLAGS_quic_remove_v33_hacks2 ? 0x39 : 0x3D),
+          FLAGS_quic_reloadable_flag_quic_remove_v33_hacks2 ? 0x39 : 0x3D),
       // connection_id
       0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE,
       // version tag
@@ -2818,9 +2807,7 @@ TEST_P(QuicFramerTest, BuildStreamFramePacketWithMultipathFlag) {
 
   QuicStreamFrame stream_frame(kStreamId, true, kStreamOffset,
                                StringPiece("hello world!"));
-
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&stream_frame));
+  QuicFrames frames = {QuicFrame(&stream_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -2868,15 +2855,13 @@ TEST_P(QuicFramerTest, BuildStreamFramePacketWithBothVersionAndMultipathFlag) {
 
   QuicStreamFrame stream_frame(kStreamId, true, kStreamOffset,
                                StringPiece("hello world!"));
-
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&stream_frame));
+  QuicFrames frames = {QuicFrame(&stream_frame)};
 
   // clang-format off
   unsigned char packet[] = {
     // public flags (8 byte connection_id)
     static_cast<unsigned char>(
-        FLAGS_quic_remove_v33_hacks2 ? 0x79 : 0x7D),
+        FLAGS_quic_reloadable_flag_quic_remove_v33_hacks2 ? 0x79 : 0x7D),
     // connection_id
     0x10, 0x32, 0x54, 0x76,
     0x98, 0xBA, 0xDC, 0xFE,
@@ -2932,7 +2917,7 @@ TEST_P(QuicFramerTest, BuildVersionNegotiationPacket) {
                                       arraysize(packet));
 }
 
-TEST_P(QuicFramerTest, BuildNewAckFramePacketOneAckBlock) {
+TEST_P(QuicFramerTest, BuildAckFramePacketOneAckBlock) {
   QuicPacketHeader header;
   header.public_header.connection_id = kConnectionId;
   header.public_header.reset_flag = false;
@@ -2945,8 +2930,7 @@ TEST_P(QuicFramerTest, BuildNewAckFramePacketOneAckBlock) {
   ack_frame.ack_delay_time = QuicTime::Delta::Zero();
   ack_frame.packets.Add(1, kSmallLargestObserved + 1);
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&ack_frame));
+  QuicFrames frames = {QuicFrame(&ack_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -2979,7 +2963,7 @@ TEST_P(QuicFramerTest, BuildNewAckFramePacketOneAckBlock) {
                                       arraysize(packet));
 }
 
-TEST_P(QuicFramerTest, BuildNewAckFramePacketMultipleAckBlocks) {
+TEST_P(QuicFramerTest, BuildAckFramePacketMultipleAckBlocks) {
   QuicPacketHeader header;
   header.public_header.connection_id = kConnectionId;
   header.public_header.reset_flag = false;
@@ -2995,8 +2979,7 @@ TEST_P(QuicFramerTest, BuildNewAckFramePacketMultipleAckBlocks) {
   ack_frame.packets.Add(900, kSmallMissingPacket);
   ack_frame.packets.Add(kSmallMissingPacket + 1, kSmallLargestObserved + 1);
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&ack_frame));
+  QuicFrames frames = {QuicFrame(&ack_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -3047,7 +3030,7 @@ TEST_P(QuicFramerTest, BuildNewAckFramePacketMultipleAckBlocks) {
                                       arraysize(packet));
 }
 
-TEST_P(QuicFramerTest, BuildNewAckFramePacketMaxAckBlocks) {
+TEST_P(QuicFramerTest, BuildAckFramePacketMaxAckBlocks) {
   QuicPacketHeader header;
   header.public_header.connection_id = kConnectionId;
   header.public_header.reset_flag = false;
@@ -3064,8 +3047,7 @@ TEST_P(QuicFramerTest, BuildNewAckFramePacketMaxAckBlocks) {
   }
   ack_frame.packets.Add(600, kSmallLargestObserved + 1);
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&ack_frame));
+  QuicFrames frames = {QuicFrame(&ack_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -3179,8 +3161,7 @@ TEST_P(QuicFramerTest, BuildNewStopWaitingPacket) {
   QuicStopWaitingFrame stop_waiting_frame;
   stop_waiting_frame.least_unacked = kLeastUnacked;
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&stop_waiting_frame));
+  QuicFrames frames = {QuicFrame(&stop_waiting_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -3243,8 +3224,7 @@ TEST_P(QuicFramerTest, BuildRstFramePacketQuic) {
   };
   // clang-format on
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&rst_frame));
+  QuicFrames frames = {QuicFrame(&rst_frame)};
 
   std::unique_ptr<QuicPacket> data(BuildDataPacket(header, frames));
   ASSERT_TRUE(data != nullptr);
@@ -3265,8 +3245,7 @@ TEST_P(QuicFramerTest, BuildCloseFramePacket) {
   close_frame.error_code = static_cast<QuicErrorCode>(0x05060708);
   close_frame.error_details = "because I can";
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&close_frame));
+  QuicFrames frames = {QuicFrame(&close_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -3313,8 +3292,7 @@ TEST_P(QuicFramerTest, BuildGoAwayPacket) {
   goaway_frame.last_good_stream_id = kStreamId;
   goaway_frame.reason_phrase = "because I can";
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&goaway_frame));
+  QuicFrames frames = {QuicFrame(&goaway_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -3362,8 +3340,7 @@ TEST_P(QuicFramerTest, BuildWindowUpdatePacket) {
   window_update_frame.stream_id = kStreamId;
   window_update_frame.byte_offset = 0x1122334455667788;
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&window_update_frame));
+  QuicFrames frames = {QuicFrame(&window_update_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -3404,8 +3381,7 @@ TEST_P(QuicFramerTest, BuildBlockedPacket) {
   QuicBlockedFrame blocked_frame;
   blocked_frame.stream_id = kStreamId;
 
-  QuicFrames frames;
-  frames.push_back(QuicFrame(&blocked_frame));
+  QuicFrames frames = {QuicFrame(&blocked_frame)};
 
   // clang-format off
   unsigned char packet[] = {
@@ -3440,10 +3416,7 @@ TEST_P(QuicFramerTest, BuildPingPacket) {
   header.public_header.version_flag = false;
   header.packet_number = kPacketNumber;
 
-  QuicPingFrame ping_frame;
-
-  QuicFrames frames;
-  frames.push_back(QuicFrame(ping_frame));
+  QuicFrames frames = {QuicFrame(QuicPingFrame())};
 
   // clang-format off
   unsigned char packet[] = {
@@ -3517,10 +3490,7 @@ TEST_P(QuicFramerTest, BuildMtuDiscoveryPacket) {
   header.public_header.version_flag = false;
   header.packet_number = kPacketNumber;
 
-  QuicMtuDiscoveryFrame mtu_discovery_frame;
-
-  QuicFrames frames;
-  frames.push_back(QuicFrame(mtu_discovery_frame));
+  QuicFrames frames = {QuicFrame(QuicMtuDiscoveryFrame())};
 
   // clang-format off
   unsigned char packet[] = {
@@ -3547,7 +3517,7 @@ TEST_P(QuicFramerTest, BuildMtuDiscoveryPacket) {
 }
 
 TEST_P(QuicFramerTest, BuildPublicResetPacketOld) {
-  FLAGS_quic_use_old_public_reset_packets = true;
+  FLAGS_quic_reloadable_flag_quic_use_old_public_reset_packets = true;
   QuicPublicResetPacket reset_packet;
   reset_packet.public_header.connection_id = kConnectionId;
   reset_packet.public_header.reset_flag = true;
@@ -3604,7 +3574,7 @@ TEST_P(QuicFramerTest, BuildPublicResetPacketOld) {
   std::unique_ptr<QuicEncryptedPacket> data(
       framer_.BuildPublicResetPacket(reset_packet));
   ASSERT_TRUE(data != nullptr);
-  if (FLAGS_quic_remove_packet_number_from_public_reset) {
+  if (FLAGS_quic_reloadable_flag_quic_remove_packet_number_from_public_reset) {
     test::CompareCharArraysWithHexError(
         "constructed packet", data->data(), data->length(),
         AsChars(packet_no_rejected_packet_number),
@@ -3617,7 +3587,7 @@ TEST_P(QuicFramerTest, BuildPublicResetPacketOld) {
 }
 
 TEST_P(QuicFramerTest, BuildPublicResetPacket) {
-  FLAGS_quic_use_old_public_reset_packets = false;
+  FLAGS_quic_reloadable_flag_quic_use_old_public_reset_packets = false;
   QuicPublicResetPacket reset_packet;
   reset_packet.public_header.connection_id = kConnectionId;
   reset_packet.public_header.reset_flag = true;
@@ -3675,7 +3645,7 @@ TEST_P(QuicFramerTest, BuildPublicResetPacket) {
       framer_.BuildPublicResetPacket(reset_packet));
   ASSERT_TRUE(data != nullptr);
 
-  if (FLAGS_quic_remove_packet_number_from_public_reset) {
+  if (FLAGS_quic_reloadable_flag_quic_remove_packet_number_from_public_reset) {
     test::CompareCharArraysWithHexError(
         "constructed packet", data->data(), data->length(),
         AsChars(packet_no_rejected_packet_number),
@@ -3688,7 +3658,7 @@ TEST_P(QuicFramerTest, BuildPublicResetPacket) {
 }
 
 TEST_P(QuicFramerTest, BuildPublicResetPacketWithClientAddress) {
-  FLAGS_quic_use_old_public_reset_packets = false;
+  FLAGS_quic_reloadable_flag_quic_use_old_public_reset_packets = false;
   QuicPublicResetPacket reset_packet;
   reset_packet.public_header.connection_id = kConnectionId;
   reset_packet.public_header.reset_flag = true;
@@ -3764,7 +3734,7 @@ TEST_P(QuicFramerTest, BuildPublicResetPacketWithClientAddress) {
       framer_.BuildPublicResetPacket(reset_packet));
   ASSERT_TRUE(data != nullptr);
 
-  if (FLAGS_quic_remove_packet_number_from_public_reset) {
+  if (FLAGS_quic_reloadable_flag_quic_remove_packet_number_from_public_reset) {
     test::CompareCharArraysWithHexError(
         "constructed packet", data->data(), data->length(),
         AsChars(packet_no_rejected_packet_number),
@@ -3928,11 +3898,7 @@ TEST_P(QuicFramerTest, AckTruncationLargePacket) {
   QuicAckFrame ack_frame;
   // Create a packet with just the ack.
   ack_frame = MakeAckFrameWithAckBlocks(300, 0u);
-  QuicFrame frame;
-  frame.type = ACK_FRAME;
-  frame.ack_frame = &ack_frame;
-  QuicFrames frames;
-  frames.push_back(frame);
+  QuicFrames frames = {QuicFrame(&ack_frame)};
 
   // Build an ack packet with truncation due to limit in number of nack ranges.
   std::unique_ptr<QuicPacket> raw_ack_packet(BuildDataPacket(header, frames));
@@ -3946,7 +3912,7 @@ TEST_P(QuicFramerTest, AckTruncationLargePacket) {
   ASSERT_TRUE(framer_.ProcessPacket(
       QuicEncryptedPacket(buffer, encrypted_length, false)));
   ASSERT_EQ(1u, visitor_.ack_frames_.size());
-  QuicAckFrame& processed_ack_frame = *visitor_.ack_frames_[0].get();
+  QuicAckFrame& processed_ack_frame = *visitor_.ack_frames_[0];
   EXPECT_EQ(600u, processed_ack_frame.largest_observed);
   ASSERT_EQ(256u, processed_ack_frame.packets.NumPacketsSlow());
   EXPECT_EQ(90u, processed_ack_frame.packets.Min());
@@ -3963,11 +3929,7 @@ TEST_P(QuicFramerTest, AckTruncationSmallPacket) {
   // Create a packet with just the ack.
   QuicAckFrame ack_frame;
   ack_frame = MakeAckFrameWithAckBlocks(300, 0u);
-  QuicFrame frame;
-  frame.type = ACK_FRAME;
-  frame.ack_frame = &ack_frame;
-  QuicFrames frames;
-  frames.push_back(frame);
+  QuicFrames frames = {QuicFrame(&ack_frame)};
 
   // Build an ack packet with truncation due to limit in number of nack ranges.
   std::unique_ptr<QuicPacket> raw_ack_packet(
@@ -3982,7 +3944,7 @@ TEST_P(QuicFramerTest, AckTruncationSmallPacket) {
   ASSERT_TRUE(framer_.ProcessPacket(
       QuicEncryptedPacket(buffer, encrypted_length, false)));
   ASSERT_EQ(1u, visitor_.ack_frames_.size());
-  QuicAckFrame& processed_ack_frame = *visitor_.ack_frames_[0].get();
+  QuicAckFrame& processed_ack_frame = *visitor_.ack_frames_[0];
   EXPECT_EQ(600u, processed_ack_frame.largest_observed);
   ASSERT_EQ(239u, processed_ack_frame.packets.NumPacketsSlow());
   EXPECT_EQ(124u, processed_ack_frame.packets.Min());
@@ -4001,11 +3963,7 @@ TEST_P(QuicFramerTest, CleanTruncation) {
   ack_frame.packets.Add(1, ack_frame.largest_observed);
 
   // Create a packet with just the ack.
-  QuicFrame frame;
-  frame.type = ACK_FRAME;
-  frame.ack_frame = &ack_frame;
-  QuicFrames frames;
-  frames.push_back(frame);
+  QuicFrames frames = {QuicFrame(&ack_frame)};
 
   std::unique_ptr<QuicPacket> raw_ack_packet(BuildDataPacket(header, frames));
   ASSERT_TRUE(raw_ack_packet != nullptr);
@@ -4023,9 +3981,7 @@ TEST_P(QuicFramerTest, CleanTruncation) {
   // Test for clean truncation of the ack by comparing the length of the
   // original packets to the re-serialized packets.
   frames.clear();
-  frame.type = ACK_FRAME;
-  frame.ack_frame = visitor_.ack_frames_[0].get();
-  frames.push_back(frame);
+  frames.push_back(QuicFrame(visitor_.ack_frames_[0].get()));
 
   size_t original_raw_length = raw_ack_packet->length();
   raw_ack_packet.reset(BuildDataPacket(header, frames));
@@ -4107,8 +4063,10 @@ static bool ExpectedStreamFrame(const QuicStreamFrame& frame) {
 TEST_P(QuicFramerTest, ConstructEncryptedPacket) {
   // Since we are using ConstructEncryptedPacket, we have to set the framer's
   // crypto to be Null.
-  framer_.SetDecrypter(ENCRYPTION_NONE, QuicDecrypter::Create(kNULL));
-  framer_.SetEncrypter(ENCRYPTION_NONE, QuicEncrypter::Create(kNULL));
+  framer_.SetDecrypter(ENCRYPTION_NONE,
+                       new NullDecrypter(framer_.perspective()));
+  framer_.SetEncrypter(ENCRYPTION_NONE,
+                       new NullEncrypter(framer_.perspective()));
   QuicVersionVector versions;
   versions.push_back(framer_.version());
   std::unique_ptr<QuicEncryptedPacket> packet(ConstructEncryptedPacket(
@@ -4141,14 +4099,16 @@ TEST_P(QuicFramerTest, ConstructEncryptedPacket) {
 TEST_P(QuicFramerTest, ConstructMisFramedEncryptedPacket) {
   // Since we are using ConstructEncryptedPacket, we have to set the framer's
   // crypto to be Null.
-  framer_.SetDecrypter(ENCRYPTION_NONE, QuicDecrypter::Create(kNULL));
-  framer_.SetEncrypter(ENCRYPTION_NONE, QuicEncrypter::Create(kNULL));
+  framer_.SetDecrypter(ENCRYPTION_NONE,
+                       new NullDecrypter(framer_.perspective()));
+  framer_.SetEncrypter(ENCRYPTION_NONE,
+                       new NullEncrypter(framer_.perspective()));
   QuicVersionVector versions;
   versions.push_back(framer_.version());
   std::unique_ptr<QuicEncryptedPacket> packet(ConstructMisFramedEncryptedPacket(
       42, false, false, false, kDefaultPathId, kTestQuicStreamId, kTestString,
       PACKET_8BYTE_CONNECTION_ID, PACKET_6BYTE_PACKET_NUMBER, &versions,
-      Perspective::IS_SERVER));
+      Perspective::IS_CLIENT));
 
   MockFramerVisitor visitor;
   framer_.set_visitor(&visitor);

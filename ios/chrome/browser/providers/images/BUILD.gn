@@ -11,6 +11,7 @@ source_set("images") {
     "//base",
     "//ios/chrome/app/theme",
     "//ios/public/provider/chrome/browser",
+    "//ios/public/provider/chrome/browser/images",
     "//ui/base",
   ]
   configs += [ "//build/config/compiler:enable_arc" ]

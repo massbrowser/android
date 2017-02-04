@@ -11,8 +11,10 @@
 #include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/public/interfaces/constants.mojom.h"
+#include "ui/aura/env.h"
+#include "ui/aura/mus/window_tree_host_mus.h"
 #include "ui/aura/window.h"
-#include "ui/views/mus/native_widget_mus.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/views/mus/screen_mus_delegate.h"
 #include "ui/views/mus/window_manager_frame_values.h"
 
@@ -39,6 +41,7 @@ using Type = display::DisplayList::Type;
 
 ScreenMus::ScreenMus(ScreenMusDelegate* delegate)
     : delegate_(delegate), display_manager_observer_binding_(this) {
+  DCHECK(delegate);
   display::Screen::SetScreenInstance(this);
 }
 
@@ -48,7 +51,7 @@ ScreenMus::~ScreenMus() {
 }
 
 void ScreenMus::Init(service_manager::Connector* connector) {
-  connector->ConnectToInterface(ui::mojom::kServiceName, &display_manager_);
+  connector->BindInterface(ui::mojom::kServiceName, &display_manager_);
 
   display_manager_->AddObserver(
       display_manager_observer_binding_.CreateInterfacePtrAndBind());
@@ -71,15 +74,17 @@ void ScreenMus::Init(service_manager::Connector* connector) {
   }
 }
 
-gfx::Point ScreenMus::GetCursorScreenPoint() {
-  if (!delegate_) {
-    // TODO(erg): If we need the cursor point in the window manager, we'll need
-    // to make |delegate_| required. It only recently changed to be optional.
-    NOTIMPLEMENTED();
-    return gfx::Point();
-  }
+display::Display ScreenMus::GetDisplayNearestWindow(
+    aura::Window* window) const {
+  aura::WindowTreeHostMus* window_tree_host_mus =
+      aura::WindowTreeHostMus::ForWindow(window);
+  if (!window_tree_host_mus)
+    return GetPrimaryDisplay();
+  return window_tree_host_mus->GetDisplay();
+}
 
-  return delegate_->GetCursorScreenPoint();
+gfx::Point ScreenMus::GetCursorScreenPoint() {
+  return aura::Env::GetInstance()->last_mouse_location();
 }
 
 bool ScreenMus::IsWindowUnderCursor(gfx::NativeWindow window) {
@@ -132,8 +137,7 @@ void ScreenMus::OnDisplaysChanged(
           ws_displays[i]
               ->frame_decoration_values.To<WindowManagerFrameValues>();
       WindowManagerFrameValues::SetInstance(frame_values);
-      if (delegate_)
-        delegate_->OnWindowManagerFrameValuesChanged();
+      delegate_->OnWindowManagerFrameValuesChanged();
     }
   }
 }

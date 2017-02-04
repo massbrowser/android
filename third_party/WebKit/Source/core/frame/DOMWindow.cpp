@@ -34,9 +34,12 @@
 
 namespace blink {
 
-DOMWindow::DOMWindow() : m_windowIsClosing(false) {}
+DOMWindow::DOMWindow(Frame& frame) : m_frame(frame), m_windowIsClosing(false) {}
 
-DOMWindow::~DOMWindow() {}
+DOMWindow::~DOMWindow() {
+  // The frame must be disconnected before finalization.
+  DCHECK(!m_frame);
+}
 
 v8::Local<v8::Object> DOMWindow::wrap(v8::Isolate*,
                                       v8::Local<v8::Object> creationContext) {
@@ -78,8 +81,11 @@ unsigned DOMWindow::length() const {
   return frame() ? frame()->tree().scopedChildCount() : 0;
 }
 
-v8::Local<v8::Object> DOMWindow::self(ScriptState* scriptState) const {
-  return scriptState->context()->Global();
+DOMWindow* DOMWindow::self() const {
+  if (!frame())
+    return nullptr;
+
+  return frame()->domWindow();
 }
 
 DOMWindow* DOMWindow::opener() const {
@@ -106,9 +112,10 @@ DOMWindow* DOMWindow::top() const {
   return frame()->tree().top()->domWindow();
 }
 
-External* DOMWindow::external() const {
-  DEFINE_STATIC_LOCAL(Persistent<External>, external, (new External));
-  return external;
+External* DOMWindow::external() {
+  if (!m_external)
+    m_external = new External;
+  return m_external;
 }
 
 DOMWindow* DOMWindow::anonymousIndexedGetter(uint32_t index) const {
@@ -126,8 +133,8 @@ bool DOMWindow::isCurrentlyDisplayedInFrame() const {
 }
 
 bool DOMWindow::isInsecureScriptAccess(LocalDOMWindow& callingWindow,
-                                       const String& urlString) {
-  if (!protocolIsJavaScript(urlString))
+                                       const KURL& url) {
+  if (!url.protocolIsJavaScript())
     return false;
 
   // If this DOMWindow isn't currently active in the Frame, then there's no
@@ -152,9 +159,8 @@ bool DOMWindow::isInsecureScriptAccess(LocalDOMWindow& callingWindow,
 }
 
 void DOMWindow::resetLocation() {
-  // Location needs to be reset manually because it doesn't inherit from
-  // DOMWindowProperty.  DOMWindowProperty is local-only, and Location needs to
-  // support remote windows, too.
+  // Location needs to be reset manually so that it doesn't retain a stale
+  // Frame pointer.
   if (m_location) {
     m_location->reset();
     m_location = nullptr;
@@ -228,12 +234,19 @@ void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message,
           : KURL(KURL(),
                  frame()->securityContext()->getSecurityOrigin()->toString());
   if (MixedContentChecker::isMixedContent(sourceDocument->getSecurityOrigin(),
-                                          targetUrl))
+                                          targetUrl)) {
     UseCounter::count(frame(), UseCounter::PostMessageFromSecureToInsecure);
-  else if (MixedContentChecker::isMixedContent(
-               frame()->securityContext()->getSecurityOrigin(),
-               sourceDocument->url()))
+  } else if (MixedContentChecker::isMixedContent(
+                 frame()->securityContext()->getSecurityOrigin(),
+                 sourceDocument->url())) {
     UseCounter::count(frame(), UseCounter::PostMessageFromInsecureToSecure);
+    if (MixedContentChecker::isMixedContent(
+            frame()->tree().top()->securityContext()->getSecurityOrigin(),
+            sourceDocument->url())) {
+      UseCounter::count(frame(),
+                        UseCounter::PostMessageFromInsecureToSecureToplevel);
+    }
+  }
 
   MessageEvent* event =
       MessageEvent::create(std::move(channels), std::move(message),
@@ -377,7 +390,7 @@ void DOMWindow::close(ExecutionContext* context) {
 
   Settings* settings = frame()->settings();
   bool allowScriptsToCloseWindows =
-      settings && settings->allowScriptsToCloseWindows();
+      settings && settings->getAllowScriptsToCloseWindows();
 
   if (!page->openedByDOM() && frame()->client()->backForwardLength() > 1 &&
       !allowScriptsToCloseWindows) {
@@ -396,7 +409,7 @@ void DOMWindow::close(ExecutionContext* context) {
   InspectorInstrumentation::NativeBreakpoint nativeBreakpoint(context, "close",
                                                               true);
 
-  page->chromeClient().closeWindowSoon();
+  page->closeSoon();
 
   // So as to make window.closed return the expected result
   // after window.close(), separately record the to-be-closed
@@ -432,7 +445,9 @@ void DOMWindow::focus(ExecutionContext* context) {
 }
 
 DEFINE_TRACE(DOMWindow) {
+  visitor->trace(m_frame);
   visitor->trace(m_location);
+  visitor->trace(m_external);
   EventTargetWithInlineData::trace(visitor);
 }
 

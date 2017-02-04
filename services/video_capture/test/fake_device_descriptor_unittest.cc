@@ -16,10 +16,15 @@ class MockCreateDeviceProxyCallback {
   MOCK_METHOD1(Run, void(mojom::DeviceAccessResultCode result_code));
 };
 
+// This alias ensures test output is easily attributed to this service's tests.
+// TODO(rockot/chfremer): Consider just renaming the type.
+using FakeVideoCaptureDeviceDescriptorTest = FakeDeviceDescriptorTest;
+
 // Tests that when requesting a second proxy for a device without closing the
 // first one, the service revokes access to the first one by closing the
 // connection.
-TEST_F(FakeDeviceDescriptorTest, AccessIsRevokedOnSecondAccess) {
+TEST_F(FakeVideoCaptureDeviceDescriptorTest,
+       DISABLED_AccessIsRevokedOnSecondAccess) {
   mojom::DevicePtr device_proxy_1;
   bool device_access_1_revoked = false;
   MockCreateDeviceProxyCallback create_device_proxy_callback_1;
@@ -27,7 +32,7 @@ TEST_F(FakeDeviceDescriptorTest, AccessIsRevokedOnSecondAccess) {
               Run(mojom::DeviceAccessResultCode::SUCCESS))
       .Times(1);
   factory_->CreateDevice(
-      fake_device_descriptor_.device_id, mojo::GetProxy(&device_proxy_1),
+      fake_device_descriptor_.device_id, mojo::MakeRequest(&device_proxy_1),
       base::Bind(&MockCreateDeviceProxyCallback::Run,
                  base::Unretained(&create_device_proxy_callback_1)));
   device_proxy_1.set_connection_error_handler(
@@ -43,7 +48,7 @@ TEST_F(FakeDeviceDescriptorTest, AccessIsRevokedOnSecondAccess) {
       .Times(1)
       .WillOnce(InvokeWithoutArgs([&wait_loop]() { wait_loop.Quit(); }));
   factory_->CreateDevice(
-      fake_device_descriptor_.device_id, mojo::GetProxy(&device_proxy_2),
+      fake_device_descriptor_.device_id, mojo::MakeRequest(&device_proxy_2),
       base::Bind(&MockCreateDeviceProxyCallback::Run,
                  base::Unretained(&create_device_proxy_callback_2)));
   device_proxy_2.set_connection_error_handler(
@@ -55,16 +60,17 @@ TEST_F(FakeDeviceDescriptorTest, AccessIsRevokedOnSecondAccess) {
 }
 
 // Tests that a second proxy requested for a device can be used successfully.
-TEST_F(FakeDeviceDescriptorTest, CanUseSecondRequestedProxy) {
+TEST_F(FakeVideoCaptureDeviceDescriptorTest,
+       DISABLED_CanUseSecondRequestedProxy) {
   mojom::DevicePtr device_proxy_1;
   factory_->CreateDevice(
-      fake_device_descriptor_.device_id, mojo::GetProxy(&device_proxy_1),
+      fake_device_descriptor_.device_id, mojo::MakeRequest(&device_proxy_1),
       base::Bind([](mojom::DeviceAccessResultCode result_code) {}));
 
   base::RunLoop wait_loop;
   mojom::DevicePtr device_proxy_2;
   factory_->CreateDevice(
-      fake_device_descriptor_.device_id, mojo::GetProxy(&device_proxy_2),
+      fake_device_descriptor_.device_id, mojo::MakeRequest(&device_proxy_2),
       base::Bind(
           [](base::RunLoop* wait_loop,
              mojom::DeviceAccessResultCode result_code) { wait_loop->Quit(); },
@@ -81,7 +87,7 @@ TEST_F(FakeDeviceDescriptorTest, CanUseSecondRequestedProxy) {
 
   base::RunLoop wait_loop_2;
   mojom::ReceiverPtr receiver_proxy;
-  MockReceiver receiver(mojo::GetProxy(&receiver_proxy));
+  MockReceiver receiver(mojo::MakeRequest(&receiver_proxy));
   EXPECT_CALL(receiver, OnIncomingCapturedVideoFramePtr(_))
       .WillRepeatedly(
           InvokeWithoutArgs([&wait_loop_2]() { wait_loop_2.Quit(); }));

@@ -37,7 +37,7 @@ template <typename ValueArg,
           typename TraitsArg = HashTraits<ValueArg>,
           typename Allocator = PartitionAllocator>
 class HashSet {
-  WTF_USE_ALLOCATOR(HashSet, Allocator);
+  USE_ALLOCATOR(HashSet, Allocator);
 
  private:
   typedef HashArg HashFunctions;
@@ -46,6 +46,7 @@ class HashSet {
 
  public:
   typedef typename ValueTraits::TraitType ValueType;
+  using value_type = ValueType;
 
  private:
   typedef HashTable<ValueType,
@@ -63,7 +64,12 @@ class HashSet {
       const_iterator;
   typedef typename HashTableType::AddResult AddResult;
 
-  HashSet() = default;
+  HashSet() {
+    static_assert(Allocator::isGarbageCollected ||
+                      !IsPointerToGarbageCollectedType<ValueArg>::value,
+                  "Cannot put raw pointers to garbage-collected classes into "
+                  "an off-heap HashSet. Use HeapHashSet<Member<T>> instead.");
+  }
   HashSet(const HashSet&) = default;
   HashSet& operator=(const HashSet&) = default;
   HashSet(HashSet&&) = default;
@@ -100,6 +106,8 @@ class HashSet {
 
   // The return value is a pair of an iterator to the new value's location,
   // and a bool that is true if an new entry was added.
+  template <typename IncomingValueType>
+  AddResult insert(IncomingValueType&&);
   template <typename IncomingValueType>
   AddResult add(IncomingValueType&&);
 
@@ -168,7 +176,7 @@ HashSet<Value, HashFunctions, Traits, Allocator>::HashSet(
   if (elements.size())
     m_impl.reserveCapacityForSize(elements.size());
   for (const ValueType& element : elements)
-    add(element);
+    insert(element);
 }
 
 template <typename Value,
@@ -244,6 +252,15 @@ inline bool HashSet<Value, HashFunctions, Traits, Allocator>::contains(
       value);
 }
 
+template <typename T, typename U, typename V, typename W>
+template <typename IncomingValueType>
+inline typename HashSet<T, U, V, W>::AddResult HashSet<T, U, V, W>::insert(
+    IncomingValueType&& value) {
+  return m_impl.add(std::forward<IncomingValueType>(value));
+}
+
+// TODO(pilgrim) remove this method once all references and subclasses
+// have been migrated to insert() method
 template <typename T, typename U, typename V, typename W>
 template <typename IncomingValueType>
 inline typename HashSet<T, U, V, W>::AddResult HashSet<T, U, V, W>::add(

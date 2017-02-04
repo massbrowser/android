@@ -8,7 +8,6 @@
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/win/windows_version.h"
 #include "build/build_config.h"
 #include "chrome/browser/media/media_browsertest.h"
 #include "chrome/browser/media/test_license_server.h"
@@ -19,11 +18,17 @@
 #include "chrome/test/base/test_launcher_utils.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
+#include "media/base/media_switches.h"
+#include "media/media_features.h"
 #include "ppapi/features/features.h"
 #include "testing/gtest/include/gtest/gtest-spi.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/build_info.h"
+#endif
+
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
 #endif
 
 #if BUILDFLAG(ENABLE_PEPPER_CDMS)
@@ -55,6 +60,8 @@ const char kExternalClearKeyPlatformVerificationTestKeySystem[] =
     "org.chromium.externalclearkey.platformverificationtest";
 const char kExternalClearKeyCrashKeySystem[] =
     "org.chromium.externalclearkey.crash";
+const char kExternalClearKeyVerifyCdmHostTestKeySystem[] =
+    "org.chromium.externalclearkey.verifycdmhosttest";
 
 // Supported media types.
 const char kWebMVorbisAudioOnly[] = "audio/webm; codecs=\"vorbis\"";
@@ -63,10 +70,12 @@ const char kWebMVP8VideoOnly[] = "video/webm; codecs=\"vp8\"";
 const char kWebMVorbisAudioVP8Video[] = "video/webm; codecs=\"vorbis, vp8\"";
 const char kWebMOpusAudioVP9Video[] = "video/webm; codecs=\"opus, vp9\"";
 const char kWebMVP9VideoOnly[] = "video/webm; codecs=\"vp9\"";
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 const char kMP4AudioOnly[] = "audio/mp4; codecs=\"mp4a.40.2\"";
 const char kMP4VideoOnly[] = "video/mp4; codecs=\"avc1.4D000C\"";
-#endif  // defined(USE_PROPRIETARY_CODECS)
+const char kMP4VideoVp9Only[] =
+    "video/mp4; codecs=\"vp09.00.01.08.02.01.01.00\"";
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 // Sessions to load.
 const char kNoSessionToLoad[] = "";
@@ -242,6 +251,7 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(
         switches::kDisableGestureRequirementForMediaPlayback);
+    command_line->AppendSwitch(switches::kEnableVp9InMp4);
   }
 
 #if BUILDFLAG(ENABLE_PEPPER_CDMS)
@@ -266,6 +276,8 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
       RegisterPepperCdm(command_line, kClearKeyCdmBaseDirectory,
                         kClearKeyCdmAdapterFileName, kClearKeyCdmDisplayName,
                         kClearKeyCdmPepperMimeType);
+      // Need to tell CdmHostFile(s) to ignore missing CDM host files in tests.
+      command_line->AppendSwitch(switches::kIgnoreMissingCdmHostFile);
       command_line->AppendSwitchASCII(switches::kEnableFeatures,
                                       media::kExternalClearKeyForTesting.name);
     }
@@ -524,7 +536,7 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, FrameSizeChangeVideo) {
   TestFrameSizeChange();
 }
 
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 // Crashes on Mac only.  http://crbug.com/621857
 #if defined(OS_MACOSX)
 #define MAYBE_Playback_VideoOnly_MP4 DISABLED_Playback_VideoOnly_MP4
@@ -547,6 +559,15 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_MP4) {
     return;
   }
   TestSimplePlayback("bear-640x360-a_frag-cenc.mp4", kMP4AudioOnly);
+}
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_MP4_VP9) {
+  // MP4 without MSE is not support yet, http://crbug.com/170793.
+  if (CurrentSourceType() != MSE) {
+    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
+    return;
+  }
+  TestSimplePlayback("bear-320x240-v_frag-vp9-cenc.mp4", kMP4VideoVp9Only);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
@@ -593,7 +614,7 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
   TestDifferentContainers(EncryptedContainer::ENCRYPTED_WEBM,
                           EncryptedContainer::ENCRYPTED_MP4);
 }
-#endif  // defined(USE_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 #if defined(WIDEVINE_CDM_AVAILABLE)
 // The parent key system cannot be used when creating MediaKeys.
@@ -654,6 +675,11 @@ IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, LoadLoadableSession) {
 IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, LoadUnknownSession) {
   TestPlaybackCase(kExternalClearKeyKeySystem, kUnknownSession,
                    kEmeSessionNotFound);
+}
+
+IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, VerifyCdmHostTest) {
+  TestNonPlaybackCases(kExternalClearKeyVerifyCdmHostTestKeySystem,
+                       kUnitTestSuccess);
 }
 
 #endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)

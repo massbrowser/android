@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_STATELESS_REJECTOR_H_
-#define NET_QUIC_STATELESS_REJECTOR_H_
+#ifndef NET_TOOLS_QUIC_STATELESS_REJECTOR_H_
+#define NET_TOOLS_QUIC_STATELESS_REJECTOR_H_
 
 #include "base/strings/string_piece.h"
 #include "net/quic/core/crypto/crypto_framer.h"
 #include "net/quic/core/crypto/quic_crypto_server_config.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 
 namespace net {
 
@@ -79,7 +79,8 @@ class StatelessRejector {
   friend class ProcessClientHelloCallback;
 
   void ProcessClientHello(
-      scoped_refptr<ValidateClientHelloResultCallback::Result> result,
+      QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
+          result,
       std::unique_ptr<StatelessRejector> rejector,
       std::unique_ptr<StatelessRejector::ProcessDoneCallback> done_cb);
 
@@ -107,12 +108,12 @@ class StatelessRejector {
   CryptoHandshakeMessage chlo_;
   std::unique_ptr<CryptoHandshakeMessage> reply_;
   CryptoFramer crypto_framer_;
-  scoped_refptr<QuicSignedServerConfig> signed_config_;
-  scoped_refptr<QuicCryptoNegotiatedParameters> params_;
+  QuicReferenceCountedPointer<QuicSignedServerConfig> signed_config_;
+  QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params_;
 
   DISALLOW_COPY_AND_ASSIGN(StatelessRejector);
 };
 
 }  // namespace net
 
-#endif  // NET_QUIC_STATELESS_REJECTOR_H_
+#endif  // NET_TOOLS_QUIC_STATELESS_REJECTOR_H_

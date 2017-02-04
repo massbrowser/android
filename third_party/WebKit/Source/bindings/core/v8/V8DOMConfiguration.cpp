@@ -31,7 +31,7 @@
 #include "bindings/core/v8/GeneratedCodeHelper.h"  // just for DCHECK
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "bindings/core/v8/V8PerContextData.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 
 namespace blink {
 
@@ -43,11 +43,6 @@ void installAttributeInternal(
     v8::Local<v8::ObjectTemplate> prototypeTemplate,
     const V8DOMConfiguration::AttributeConfiguration& attribute,
     const DOMWrapperWorld& world) {
-  if (attribute.exposeConfiguration ==
-          V8DOMConfiguration::OnlyExposedToPrivateScript &&
-      !world.isPrivateScriptIsolatedWorld())
-    return;
-
   v8::Local<v8::Name> name = v8AtomicString(isolate, attribute.name);
   v8::AccessorNameGetterCallback getter = attribute.getter;
   v8::AccessorNameSetterCallback setter = attribute.setter;
@@ -61,18 +56,20 @@ void installAttributeInternal(
       v8::External::New(isolate, const_cast<WrapperTypeInfo*>(attribute.data));
 
   DCHECK(attribute.propertyLocationConfiguration);
-  if (attribute.propertyLocationConfiguration & V8DOMConfiguration::OnInstance)
+  if (attribute.propertyLocationConfiguration &
+      V8DOMConfiguration::OnInstance) {
     instanceTemplate->SetNativeDataProperty(
         name, getter, setter, data,
         static_cast<v8::PropertyAttribute>(attribute.attribute),
-        v8::Local<v8::AccessorSignature>(),
-        static_cast<v8::AccessControl>(attribute.settings));
-  if (attribute.propertyLocationConfiguration & V8DOMConfiguration::OnPrototype)
+        v8::Local<v8::AccessorSignature>(), v8::DEFAULT);
+  }
+  if (attribute.propertyLocationConfiguration &
+      V8DOMConfiguration::OnPrototype) {
     prototypeTemplate->SetNativeDataProperty(
         name, getter, setter, data,
         static_cast<v8::PropertyAttribute>(attribute.attribute),
-        v8::Local<v8::AccessorSignature>(),
-        static_cast<v8::AccessControl>(attribute.settings));
+        v8::Local<v8::AccessorSignature>(), v8::DEFAULT);
+  }
   if (attribute.propertyLocationConfiguration & V8DOMConfiguration::OnInterface)
     NOTREACHED();
 }
@@ -83,11 +80,6 @@ void installAttributeInternal(
     v8::Local<v8::Object> prototype,
     const V8DOMConfiguration::AttributeConfiguration& attribute,
     const DOMWrapperWorld& world) {
-  if (attribute.exposeConfiguration ==
-          V8DOMConfiguration::OnlyExposedToPrivateScript &&
-      !world.isPrivateScriptIsolatedWorld())
-    return;
-
   v8::Local<v8::Name> name = v8AtomicString(isolate, attribute.name);
 
   // This method is only being used for installing interfaces which are
@@ -125,11 +117,6 @@ void installLazyDataAttributeInternal(
     v8::Local<v8::ObjectTemplate> prototypeTemplate,
     const V8DOMConfiguration::AttributeConfiguration& attribute,
     const DOMWrapperWorld& world) {
-  if (attribute.exposeConfiguration ==
-          V8DOMConfiguration::OnlyExposedToPrivateScript &&
-      !world.isPrivateScriptIsolatedWorld())
-    return;
-
   v8::Local<v8::Name> name = v8AtomicString(isolate, attribute.name);
   v8::AccessorNameGetterCallback getter = attribute.getter;
   DCHECK(!attribute.setter);
@@ -137,7 +124,6 @@ void installLazyDataAttributeInternal(
   DCHECK(!attribute.setterForMainWorld);
   v8::Local<v8::Value> data =
       v8::External::New(isolate, const_cast<WrapperTypeInfo*>(attribute.data));
-  DCHECK(static_cast<v8::AccessControl>(attribute.settings) == v8::DEFAULT);
 
   DCHECK(attribute.propertyLocationConfiguration);
   if (attribute.propertyLocationConfiguration &
@@ -226,11 +212,6 @@ void installAccessorInternal(
     v8::Local<v8::Signature> signature,
     const V8DOMConfiguration::AccessorConfiguration& accessor,
     const DOMWrapperWorld& world) {
-  if (accessor.exposeConfiguration ==
-          V8DOMConfiguration::OnlyExposedToPrivateScript &&
-      !world.isPrivateScriptIsolatedWorld())
-    return;
-
   v8::Local<v8::Name> name = v8AtomicString(isolate, accessor.name);
   v8::FunctionCallback getterCallback = accessor.getter;
   v8::FunctionCallback setterCallback = accessor.setter;
@@ -261,17 +242,18 @@ void installAccessorInternal(
     v8::Local<FunctionOrTemplate> setter =
         createAccessorFunctionOrTemplate<FunctionOrTemplate>(
             isolate, setterCallback, nullptr, data, signature, 1);
-    if (accessor.propertyLocationConfiguration & V8DOMConfiguration::OnInstance)
+    if (accessor.propertyLocationConfiguration &
+        V8DOMConfiguration::OnInstance) {
       instanceOrTemplate->SetAccessorProperty(
           name, getter, setter,
-          static_cast<v8::PropertyAttribute>(accessor.attribute),
-          static_cast<v8::AccessControl>(accessor.settings));
+          static_cast<v8::PropertyAttribute>(accessor.attribute), v8::DEFAULT);
+    }
     if (accessor.propertyLocationConfiguration &
-        V8DOMConfiguration::OnPrototype)
+        V8DOMConfiguration::OnPrototype) {
       prototypeOrTemplate->SetAccessorProperty(
           name, getter, setter,
-          static_cast<v8::PropertyAttribute>(accessor.attribute),
-          static_cast<v8::AccessControl>(accessor.settings));
+          static_cast<v8::PropertyAttribute>(accessor.attribute), v8::DEFAULT);
+    }
   }
   if (accessor.propertyLocationConfiguration &
       V8DOMConfiguration::OnInterface) {
@@ -288,8 +270,7 @@ void installAccessorInternal(
             1);
     interfaceOrTemplate->SetAccessorProperty(
         name, getter, setter,
-        static_cast<v8::PropertyAttribute>(accessor.attribute),
-        static_cast<v8::AccessControl>(accessor.settings));
+        static_cast<v8::PropertyAttribute>(accessor.attribute), v8::DEFAULT);
   }
 }
 
@@ -351,11 +332,6 @@ void installMethodInternal(v8::Isolate* isolate,
                            v8::Local<v8::Signature> signature,
                            const Configuration& method,
                            const DOMWrapperWorld& world) {
-  if (method.exposeConfiguration ==
-          V8DOMConfiguration::OnlyExposedToPrivateScript &&
-      !world.isPrivateScriptIsolatedWorld())
-    return;
-
   v8::Local<v8::Name> name = method.methodName(isolate);
   v8::FunctionCallback callback = method.callbackForWorld(world);
   // Promise-returning functions need to return a reject promise when
@@ -404,11 +380,6 @@ void installMethodInternal(
     v8::Local<v8::Signature> signature,
     const V8DOMConfiguration::MethodConfiguration& method,
     const DOMWrapperWorld& world) {
-  if (method.exposeConfiguration ==
-          V8DOMConfiguration::OnlyExposedToPrivateScript &&
-      !world.isPrivateScriptIsolatedWorld())
-    return;
-
   v8::Local<v8::Name> name = method.methodName(isolate);
   v8::FunctionCallback callback = method.callbackForWorld(world);
   // Promise-returning functions need to return a reject promise when

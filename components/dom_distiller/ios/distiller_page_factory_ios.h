@@ -20,7 +20,8 @@ namespace dom_distiller {
 // instances.
 class DistillerPageFactoryIOS : public DistillerPageFactory {
  public:
-  DistillerPageFactoryIOS(web::BrowserState* browser_state);
+  explicit DistillerPageFactoryIOS(web::BrowserState* browser_state);
+  ~DistillerPageFactoryIOS() override;
 
   // Implementation of DistillerPageFactory:
   std::unique_ptr<DistillerPage> CreateDistillerPage(
@@ -30,6 +31,7 @@ class DistillerPageFactoryIOS : public DistillerPageFactory {
 
  private:
   web::BrowserState* browser_state_;
+  DISALLOW_COPY_AND_ASSIGN(DistillerPageFactoryIOS);
 };
 
 }  // namespace dom_distiller

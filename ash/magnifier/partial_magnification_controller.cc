@@ -13,6 +13,8 @@
 #include "ui/compositor/paint_recorder.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
+#include "ui/gfx/shadow_value.h"
+#include "ui/gfx/skia_paint_util.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/coordinate_conversion.h"
 
@@ -103,14 +105,15 @@ class PartialMagnificationController::ContentMask : public ui::LayerDelegate {
   void OnPaintLayer(const ui::PaintContext& context) override {
     ui::PaintRecorder recorder(context, layer()->size());
 
-    SkPaint paint;
+    cc::PaintFlags paint;
     paint.setAlpha(255);
     paint.setAntiAlias(true);
     // Stroke is used for clipping the border which consists of the rendered
     // border |kBorderSize| and the magnifier shadow |kShadowThickness| and
     // |kShadowOffset|.
     paint.setStrokeWidth(kBorderSize + kShadowThickness + kShadowOffset);
-    paint.setStyle(is_border_ ? SkPaint::kStroke_Style : SkPaint::kFill_Style);
+    paint.setStyle(is_border_ ? cc::PaintFlags::kStroke_Style
+                              : cc::PaintFlags::kFill_Style);
 
     // If we want to clip the magnifier zone use the magnifiers radius.
     // Otherwise we want to clip the border, shadow and shadow offset so we
@@ -156,7 +159,7 @@ class PartialMagnificationController::BorderRenderer
     ui::PaintRecorder recorder(context, magnifier_window_bounds_.size());
 
     // Draw the shadow.
-    SkPaint shadow_paint;
+    cc::PaintFlags shadow_paint;
     shadow_paint.setAntiAlias(true);
     shadow_paint.setColor(SK_ColorTRANSPARENT);
     shadow_paint.setLooper(
@@ -167,9 +170,9 @@ class PartialMagnificationController::BorderRenderer
         shadow_bounds.width() / 2 - kShadowThickness - kShadowOffset,
         shadow_paint);
 
-    SkPaint border_paint;
+    cc::PaintFlags border_paint;
     border_paint.setAntiAlias(true);
-    border_paint.setStyle(SkPaint::kStroke_Style);
+    border_paint.setStyle(cc::PaintFlags::kStroke_Style);
 
     // The radius of the magnifier and its border.
     const int magnifier_radius = kMagnifierRadius + kBorderSize;
@@ -233,10 +236,6 @@ void PartialMagnificationController::SwitchTargetRootWindowIfNeeded(
   }
 }
 
-void PartialMagnificationController::OnMouseEvent(ui::MouseEvent* event) {
-  OnLocatedEvent(event, event->pointer_details());
-}
-
 void PartialMagnificationController::OnTouchEvent(ui::TouchEvent* event) {
   OnLocatedEvent(event, event->pointer_details());
 }
@@ -283,12 +282,12 @@ void PartialMagnificationController::OnLocatedEvent(
   wm::ConvertPointToScreen(event_root, &screen_point);
 
   // If the stylus is pressed on the palette icon or widget, do not activate.
-  if (event->type() == ui::ET_MOUSE_PRESSED &&
+  if (event->type() == ui::ET_TOUCH_PRESSED &&
       !PaletteContainsPointInScreen(screen_point)) {
     SetActive(true);
   }
 
-  if (event->type() == ui::ET_MOUSE_RELEASED)
+  if (event->type() == ui::ET_TOUCH_RELEASED)
     SetActive(false);
 
   if (!is_active_)

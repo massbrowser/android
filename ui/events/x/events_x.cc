@@ -90,8 +90,8 @@ base::TimeTicks EventTimeFromNative(const base::NativeEvent& native_event) {
   return timestamp;
 }
 
-gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
-  return EventLocationFromXEvent(*native_event);
+gfx::PointF EventLocationFromNative(const base::NativeEvent& native_event) {
+  return gfx::PointF(EventLocationFromXEvent(*native_event));
 }
 
 gfx::Point EventSystemLocationFromNative(

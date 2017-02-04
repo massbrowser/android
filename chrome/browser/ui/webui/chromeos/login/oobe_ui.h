@@ -14,9 +14,9 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/settings/shutdown_policy_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/core_oobe_handler.h"
-#include "chrome/browser/ui/webui/chromeos/login/oobe_screen.h"
 #include "content/public/browser/web_ui_controller.h"
 
 namespace ash {
@@ -159,11 +159,15 @@ class OobeUI : public content::WebUIController,
     return network_state_informer_.get();
   }
 
+  // Does ReloadContent() if needed (for example, if material design mode has
+  // changed).
+  void UpdateLocalizedStringsIfNeeded();
+
  private:
-  void AddScreenHandler(BaseScreenHandler* handler);
+  void AddScreenHandler(std::unique_ptr<BaseScreenHandler> handler);
 
   // CoreOobeHandler::Delegate implementation:
-  void OnCurrentScreenChanged(const std::string& screen) override;
+  void OnCurrentScreenChanged(OobeScreen screen) override;
 
   // Type of UI.
   std::string display_type_;
@@ -234,6 +238,10 @@ class OobeUI : public content::WebUIController,
   // Flag that indicates whether JS part is fully loaded and ready to accept
   // calls.
   bool ready_ = false;
+
+  // This flag stores material-design mode (on/off) of currently displayed UI.
+  // If different version of UI is required, UI is updated.
+  bool oobe_ui_md_mode_ = false;
 
   // Callbacks to notify when JS part is fully loaded and ready to accept calls.
   std::vector<base::Closure> ready_callbacks_;

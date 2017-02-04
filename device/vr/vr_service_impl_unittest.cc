@@ -4,6 +4,7 @@
 
 #include "device/vr/vr_service_impl.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "device/vr/test/fake_vr_device.h"
@@ -15,7 +16,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace device {
-
 
 class VRServiceImplTest : public testing::Test {
  public:
@@ -31,7 +31,7 @@ class VRServiceImplTest : public testing::Test {
 
   std::unique_ptr<VRServiceImpl> BindService() {
     mojom::VRServiceClientPtr proxy;
-    FakeVRServiceClient client(mojo::GetProxy(&proxy));
+    FakeVRServiceClient client(mojo::MakeRequest(&proxy));
     auto service = base::WrapUnique(new VRServiceImpl());
     service->SetClient(std::move(proxy),
                        base::Bind(&VRServiceImplTest::onDisplaySynced,

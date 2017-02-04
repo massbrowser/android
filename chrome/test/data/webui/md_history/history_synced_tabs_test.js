@@ -225,94 +225,6 @@ suite('<history-synced-device-manager>', function() {
     });
   });
 
-  test('focus and keyboard nav', function() {
-    var sessionList = [
-      createSession('Nexus 5', [createWindow([
-                      'http://www.example.com', 'http://www.google.com'
-                    ])]),
-      createSession('Pixel C', [createWindow(['http://www.badssl.com'])]),
-      createSession('Potato', [createWindow(['http://www.wikipedia.org'])]),
-    ];
-
-    setForeignSessions(sessionList);
-
-    var lastFocused;
-    var cards;
-    var focused;
-    var onFocusHandler = element.focusGrid_.onFocus;
-    element.focusGrid_.onFocus = function(row, e) {
-      onFocusHandler.call(element.focusGrid_, row, e);
-      lastFocused = e.currentTarget;
-    };
-
-    return PolymerTest.flushTasks().then(function() {
-      cards = polymerSelectAll(element, 'history-synced-device-card');
-
-      focused = cards[0].$['menu-button'];
-      focused.focus();
-
-      // Go to the collapse button.
-      MockInteractions.pressAndReleaseKeyOn(focused, 39, [], 'ArrowRight');
-      focused = cards[0].$['collapse-button'];
-      assertEquals(focused, lastFocused);
-
-      // Go to the first url.
-      MockInteractions.pressAndReleaseKeyOn(focused, 40, [], 'ArrowDown');
-      focused = polymerSelectAll(cards[0], '.website-title')[0];
-      assertEquals(focused, lastFocused);
-
-      // Collapse the first card.
-      MockInteractions.pressAndReleaseKeyOn(focused, 38, [], 'ArrowUp');
-      focused = cards[0].$['collapse-button'];
-      assertEquals(focused, lastFocused);
-      MockInteractions.tap(focused);
-    }).then(function() {
-      // Pressing down goes to the next card.
-      MockInteractions.pressAndReleaseKeyOn(focused, 40, [], 'ArrowDown');
-      focused = cards[1].$['collapse-button'];
-      assertEquals(focused, lastFocused);
-
-      // Expand the first card.
-      MockInteractions.pressAndReleaseKeyOn(focused, 38, [], 'ArrowUp');
-      focused = cards[0].$['collapse-button'];
-      assertEquals(focused, lastFocused);
-      MockInteractions.tap(focused);
-    }).then(function() {
-      // First card's urls are focusable again.
-      MockInteractions.pressAndReleaseKeyOn(focused, 40, [], 'ArrowDown');
-      focused = polymerSelectAll(cards[0], '.website-title')[0];
-      assertEquals(focused, lastFocused);
-
-      // Remove the second URL from the first card.
-      sessionList[0].windows[0].tabs.splice(1, 1);
-      setForeignSessions(sessionList.slice());
-      return PolymerTest.flushTasks();
-    }).then(function() {
-      cards = polymerSelectAll(element, 'history-synced-device-card');
-
-      // Go to the next card's menu buttons.
-      MockInteractions.pressAndReleaseKeyOn(focused, 40, [], 'ArrowDown');
-      focused = cards[1].$['collapse-button'];
-      assertEquals(focused, lastFocused);
-
-      MockInteractions.pressAndReleaseKeyOn(focused, 38, [], 'ArrowUp');
-      focused = polymerSelectAll(cards[0], '.website-title')[0];
-      assertEquals(focused, lastFocused);
-
-      // Remove the second card.
-      sessionList.splice(1, 1);
-      setForeignSessions(sessionList.slice());
-      return PolymerTest.flushTasks();
-    }).then(function() {
-      cards = polymerSelectAll(element, 'history-synced-device-card');
-
-      // Pressing down goes to the next card.
-      MockInteractions.pressAndReleaseKeyOn(focused, 40, [], 'ArrowDown');
-      focused = cards[1].$['collapse-button'];
-      assertEquals(focused, lastFocused);
-    });
-  });
-
   test('click synced tab', function(done) {
     setForeignSessions(
         [createSession(
@@ -344,7 +256,7 @@ suite('<history-synced-device-manager>', function() {
     return PolymerTest.flushTasks().then(function() {
       var cards = getCards(element);
       MockInteractions.tap(cards[0].$['menu-button']);
-      assertTrue(element.$.menu.getIfExists().menuOpen);
+      assertTrue(element.$.menu.getIfExists().open);
     });
   });
 
@@ -418,50 +330,5 @@ suite('<history-synced-device-manager>', function() {
   teardown(function() {
     registerMessageCallback('openForeignSession', this, undefined);
     registerMessageCallback('deleteForeignSession', this, undefined);
-  });
-});
-
-suite('<history-synced-device-manager> integration', function() {
-  var element;
-
-  setup(function() {
-    var app = replaceApp();
-    // Not rendered until selected.
-    assertEquals(null, app.$$('#synced-devices'));
-
-    app.selectedPage_ = 'syncedTabs';
-    assertEquals('syncedTabs', app.$['content-side-bar'].$.menu.selected);
-    return PolymerTest.flushTasks().then(function() {
-      element = app.$$('#synced-devices');
-      assertTrue(!!element);
-    });
-  });
-
-  test('enable and disable tab sync', function() {
-    updateSignInState(true);
-    var sessionList = [
-      createSession(
-          'Nexus 5',
-          [createWindow(['http://www.google.com', 'http://example.com'])]
-      )
-    ];
-    // Open tabs sync is enabled.
-    setForeignSessions(sessionList, true);
-
-    return PolymerTest.flushTasks().then(function() {
-      var cards = getCards(element);
-      assertEquals(1, cards.length);
-      assertTrue(element.$['no-synced-tabs'].hidden);
-
-      // Open tabs sync is disabled.
-      setForeignSessions(sessionList, false);
-
-      return PolymerTest.flushTasks();
-    }).then(function() {
-      cards = getCards(element);
-      assertEquals(0, cards.length);
-      // If tab sync is disabled, show 'no synced tabs'.
-      assertNoSyncedTabsMessageShown(element, 'noSyncedResults');
-    });
   });
 });

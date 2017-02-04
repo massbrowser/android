@@ -13,7 +13,7 @@
 #include "ash/shell.h"
 #include "base/memory/ptr_util.h"
 #include "ui/aura/window.h"
-#include "ui/display/manager/display_layout.h"
+#include "ui/display/display_layout.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/display_manager_utilities.h"
 #include "ui/display/screen.h"
@@ -140,7 +140,7 @@ bool ExtendedMouseWarpController::WarpMouseCursor(ui::MouseEvent* event) {
     aura::Window* target_root = target->GetRootWindow();
     gfx::Point point_in_native = point_in_screen;
     ::wm::ConvertPointFromScreen(target_root, &point_in_native);
-    target_root->GetHost()->ConvertPointToNativeScreen(&point_in_native);
+    target_root->GetHost()->ConvertDIPToScreenInPixels(&point_in_native);
     return WarpMouseCursorInNativeCoords(point_in_native, point_in_screen,
                                          true);
   }
@@ -153,8 +153,8 @@ bool ExtendedMouseWarpController::WarpMouseCursor(ui::MouseEvent* event) {
   // has access to the logical display layout.
   // Native events in Ozone are in the native window coordinate system. We need
   // to translate them to get the global position.
-  point_in_native.Offset(target->GetHost()->GetBounds().x(),
-                         target->GetHost()->GetBounds().y());
+  point_in_native.Offset(target->GetHost()->GetBoundsInPixels().x(),
+                         target->GetHost()->GetBoundsInPixels().y());
 #endif
 
   return WarpMouseCursorInNativeCoords(point_in_native, point_in_screen, false);

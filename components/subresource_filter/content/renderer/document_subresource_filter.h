@@ -13,7 +13,9 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "components/subresource_filter/core/common/activation_state.h"
+#include "base/time/time.h"
+#include "components/subresource_filter/content/common/document_load_statistics.h"
+#include "components/subresource_filter/core/common/activation_level.h"
 #include "components/subresource_filter/core/common/indexed_ruleset.h"
 #include "third_party/WebKit/public/platform/WebDocumentSubresourceFilter.h"
 #include "url/gurl.h"
@@ -29,22 +31,9 @@ class DocumentSubresourceFilter
     : public blink::WebDocumentSubresourceFilter,
       public base::SupportsWeakPtr<DocumentSubresourceFilter> {
  public:
-  // TODO(pkalinnikov): Add total evaluation time metrics.
-  struct Statistics {
-    // The number of subresource loads that went through the allowLoad method.
-    size_t num_loads_total = 0;
-
-    // Statistics on the number of subresource loads that were evaluated, were
-    // matched by filtering rules, and were disallowed, respectively, during the
-    // lifetime of a DocumentSubresourceFilter.
-    size_t num_loads_evaluated = 0;
-    size_t num_loads_matching_rules = 0;
-    size_t num_loads_disallowed = 0;
-  };
-
   // Constructs a new filter that will:
-  //  -- Operate at the prescribed |activation_state|, which must be either
-  //     ActivationState::DRYRUN or ActivationState::ENABLED. In the former
+  //  -- Operate at the prescribed |activation_level|, which must be either
+  //     ActivationLevel::DRYRUN or ActivationLevel::ENABLED. In the former
   //     case filtering will be performed but no loads will be disallowed.
   //  -- Hold a reference to and use |ruleset| for its entire lifetime.
   //  -- Expect |ancestor_document_urls| to be the URLs of documents loaded into
@@ -53,20 +42,23 @@ class DocumentSubresourceFilter
   //  -- Invoke |first_disallowed_load_callback|, if it is non-null, on the
   //     first disallowed subresource load.
   DocumentSubresourceFilter(
-      ActivationState activation_state,
+      ActivationLevel activation_level,
+      bool measure_performance,
       const scoped_refptr<const MemoryMappedRuleset>& ruleset,
       const std::vector<GURL>& ancestor_document_urls,
       const base::Closure& first_disallowed_load_callback);
   ~DocumentSubresourceFilter() override;
 
-  const Statistics& statistics() const { return statistics_; }
+  const DocumentLoadStatistics& statistics() const { return statistics_; }
 
   // blink::WebDocumentSubresourceFilter:
   bool allowLoad(const blink::WebURL& resourceUrl,
                  blink::WebURLRequest::RequestContext) override;
 
  private:
-  ActivationState activation_state_;
+  const ActivationLevel activation_level_;
+  const bool measure_performance_;
+
   scoped_refptr<const MemoryMappedRuleset> ruleset_;
   IndexedRulesetMatcher ruleset_matcher_;
 
@@ -76,7 +68,7 @@ class DocumentSubresourceFilter
   base::Closure first_disallowed_load_callback_;
 
   // Even when subresource filtering is activated at the page level by the
-  // |activation_state| passed into the constructor, the current document or
+  // |activation_level| passed into the constructor, the current document or
   // ancestors thereof may still match special filtering rules that specifically
   // disable the application of other types of rules on these documents. See
   // proto::ActivationType for details.
@@ -90,7 +82,7 @@ class DocumentSubresourceFilter
   // |filtering_disabled_for_document_|.
   bool generic_blocking_rules_disabled_ = false;
 
-  Statistics statistics_;
+  DocumentLoadStatistics statistics_;
 
   DISALLOW_COPY_AND_ASSIGN(DocumentSubresourceFilter);
 };

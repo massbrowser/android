@@ -11,10 +11,6 @@
 #include "build/build_config.h"
 #include "content/public/renderer/content_renderer_client.h"
 
-namespace IPC {
-class MessageFilter;
-}
-
 namespace network_hints {
 class PrescientNetworkingDispatcher;
 }  // namespace network_hints
@@ -25,10 +21,6 @@ class MediaCapsObserverImpl;
 }
 
 namespace shell {
-class CastGinRunner;
-class CastRenderThreadObserver;
-
-void ExecuteJavaScript(content::RenderFrame* render_frame, int resourceId);
 
 class CastContentRendererClient : public content::ContentRendererClient {
  public:
@@ -48,10 +40,13 @@ class CastContentRendererClient : public content::ContentRendererClient {
   void DeferMediaLoad(content::RenderFrame* render_frame,
                       bool render_frame_has_played_media_before,
                       const base::Closure& closure) override;
-  void RunScriptsAtDocumentStart(content::RenderFrame* render_frame) override;
+  bool AllowMediaSuspend() override;
 
  protected:
   CastContentRendererClient();
+
+  virtual void RunWhenInForeground(content::RenderFrame* render_frame,
+                                   const base::Closure& closure);
 
  private:
   std::unique_ptr<network_hints::PrescientNetworkingDispatcher>

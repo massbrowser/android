@@ -65,10 +65,6 @@ class CORE_EXPORT LayoutFlexibleBox : public LayoutBlock {
   void paintChildren(const PaintInfo&, const LayoutPoint&) const final;
 
   bool isHorizontalFlow() const;
-  virtual LayoutObject* layoutSpecialExcludedChild(bool relayoutChildren,
-                                                   SubtreeLayoutScope&) {
-    return nullptr;
-  }
 
   const OrderIterator& orderIterator() const { return m_orderIterator; }
 
@@ -258,6 +254,7 @@ class CORE_EXPORT LayoutFlexibleBox : public LayoutBlock {
 
   // This is SizeIsUnknown outside of layoutBlock()
   mutable SizeDefiniteness m_hasDefiniteHeight;
+  bool m_inLayout;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutFlexibleBox, isFlexibleBox());

@@ -26,7 +26,7 @@ namespace gpu {
 // GpuMemoryBufferManager::CreateGpuMemoryBuffer.
 // On Android, the handle is used in the GPU process to get a reference to the
 // ANativeWindow, using GpuSurfaceLookup (implemented by
-// SurfaceTextureManagerImpl).
+// ChildProcessSurfaceManager).
 // On Mac, the handle just passes through the GPU process, and is sent back via
 // GpuCommandBufferMsg_SwapBuffersCompleted to reference the surface.
 // This class is thread safe.
@@ -39,8 +39,7 @@ class GPU_EXPORT GpuSurfaceTracker : public gpu::GpuSurfaceLookup {
       gpu::SurfaceHandle surface_handle) override;
 
 #if defined(OS_ANDROID)
-  void RegisterViewSurface(int surface_id,
-                           const base::android::JavaRef<jobject>& j_surface);
+  void RegisterViewSurface(int surface_id, jobject j_surface);
   void UnregisterViewSurface(int surface_id);
   gl::ScopedJavaSurface AcquireJavaSurface(int surface_id) override;
 #endif

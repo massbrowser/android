@@ -30,9 +30,9 @@
 #include "core/CoreExport.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/SecurityContext.h"
-#include "core/fetch/Resource.h"
 #include "core/inspector/ConsoleTypes.h"
 #include "platform/heap/Handle.h"
+#include "platform/loader/fetch/Resource.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/ResourceRequest.h"
@@ -341,9 +341,12 @@ class CORE_EXPORT ContentSecurityPolicy
 
   bool shouldSendCSPHeader(Resource::Type) const;
 
+  CSPSource* getSelfSource() const { return m_selfSource; }
+
   static bool shouldBypassMainWorld(const ExecutionContext*);
 
   static bool isNonceableElement(const Element*);
+  static const char* getNonceReplacementString() { return "[Replaced]"; }
 
   // This method checks whether the request should be allowed for an
   // experimental EmbeddingCSP feature
@@ -353,6 +356,12 @@ class CORE_EXPORT ContentSecurityPolicy
 
   static const char* getDirectiveName(const DirectiveType&);
   static DirectiveType getDirectiveType(const String& name);
+
+  // This method checks if if this policy subsumes a given policy.
+  // Note the correct result is guaranteed if this policy contains only one
+  // CSPDirectiveList. More information here:
+  // https://w3c.github.io/webappsec-csp/embedded/#subsume-policy
+  bool subsumes(const ContentSecurityPolicy&) const;
 
   Document* document() const;
 

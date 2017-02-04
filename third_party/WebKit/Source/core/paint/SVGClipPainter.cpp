@@ -48,13 +48,14 @@ bool SVGClipPainter::prepareEffect(const LayoutObject& target,
 
   m_clip.clearInvalidationMask();
 
-  if (visualRect.isEmpty() || m_clip.hasCycle())
+  if (m_clip.hasCycle())
     return false;
 
   SVGClipExpansionCycleHelper inClipExpansionChange(m_clip);
 
   AffineTransform animatedLocalTransform =
-      toSVGClipPathElement(m_clip.element())->calculateAnimatedLocalTransform();
+      toSVGClipPathElement(m_clip.element())
+          ->calculateTransform(SVGElement::IncludeMotionTransform);
   // When drawing a clip for non-SVG elements, the CTM does not include the zoom
   // factor.  In this case, we need to apply the zoom scale explicitly - but
   // only for clips with userSpaceOnUse units (the zoom is accounted for
@@ -162,7 +163,7 @@ bool SVGClipPainter::drawClipAsMask(GraphicsContext& context,
 
   LayoutObjectDrawingRecorder drawingRecorder(
       context, layoutObject, DisplayItem::kSVGClip, targetVisualRect);
-  sk_sp<SkPicture> maskPicture = maskPictureBuilder.endRecording();
+  sk_sp<PaintRecord> maskPicture = maskPictureBuilder.endRecording();
   context.drawPicture(maskPicture.get());
   return true;
 }

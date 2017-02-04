@@ -10,15 +10,17 @@ import android.os.ConditionVariable;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.StrictMode;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.json.JSONObject;
 
 import static org.chromium.net.CronetEngine.Builder.HTTP_CACHE_IN_MEMORY;
 
 import org.chromium.base.FileUtils;
+import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.Feature;
 import org.chromium.net.MetricsTestUtil.TestExecutor;
 import org.chromium.net.TestUrlRequestCallback.ResponseStep;
@@ -30,7 +32,10 @@ import org.chromium.net.test.EmbeddedTestServer;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.IOException;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.concurrent.Executor;
@@ -43,6 +48,8 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @JNINamespace("cronet")
 public class CronetUrlRequestContextTest extends CronetTestBase {
+    private static final String TAG = CronetUrlRequestContextTest.class.getSimpleName();
+
     // URLs used for tests.
     private static final String MOCK_CRONET_TEST_FAILED_URL =
             "http://mock.failed.request/-2";
@@ -120,7 +127,7 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         }
 
         @Override
-        public void onFailed(UrlRequest request, UrlResponseInfo info, UrlRequestException error) {
+        public void onFailed(UrlRequest request, UrlResponseInfo info, CronetException error) {
             super.onFailed(request, info, error);
             mCronetEngine.shutdown();
             mCallbackCompletionBlock.open();
@@ -163,7 +170,7 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         ExperimentalCronetEngine.Builder cronetEngineBuilder =
                 new ExperimentalCronetEngine.Builder(getContext());
         if (testingJavaImpl()) {
-            cronetEngineBuilder.enableLegacyMode(true);
+            cronetEngineBuilder = createJavaEngineBuilder();
         }
         cronetEngineBuilder.setUserAgent(userAgentValue);
         final CronetTestFramework testFramework =
@@ -267,7 +274,7 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         mCronetEngineBuilder.enableNetworkQualityEstimator(true);
         final CronetTestFramework testFramework =
                 startCronetTestFrameworkWithUrlAndCronetEngineBuilder(null, mCronetEngineBuilder);
-        testFramework.mCronetEngine.configureNetworkQualityEstimatorForTesting(true, true);
+        testFramework.mCronetEngine.configureNetworkQualityEstimatorForTesting(true, true, false);
 
         testFramework.mCronetEngine.addRttListener(rttListener);
         testFramework.mCronetEngine.removeRttListener(rttListener);
@@ -280,6 +287,18 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         networkQualityExecutor.runAllTasks();
         assertEquals(0, rttListener.rttObservationCount());
         testFramework.mCronetEngine.shutdown();
+    }
+
+    // Returns whether a file contains a particular string.
+    @SuppressFBWarnings("OBL_UNSATISFIED_OBLIGATION_EXCEPTION_EDGE")
+    private boolean fileContainsString(String filename, String content) throws IOException {
+        File file =
+                new File(CronetTestFramework.getTestStorage(getContext()) + "/prefs/" + filename);
+        FileInputStream fileInputStream = new FileInputStream(file);
+        byte[] data = new byte[(int) file.length()];
+        fileInputStream.read(data);
+        fileInputStream.close();
+        return new String(data, "UTF-8").contains(content);
     }
 
     @SmallTest
@@ -296,9 +315,10 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
                 new TestNetworkQualityThroughputListener(listenersExecutor, waitForThroughput);
         mCronetEngineBuilder.enableNetworkQualityEstimator(true).enableHttp2(true).enableQuic(
                 false);
+        mCronetEngineBuilder.setStoragePath(CronetTestFramework.getTestStorage(getContext()));
         final CronetTestFramework testFramework =
                 startCronetTestFrameworkWithUrlAndCronetEngineBuilder(null, mCronetEngineBuilder);
-        testFramework.mCronetEngine.configureNetworkQualityEstimatorForTesting(true, true);
+        testFramework.mCronetEngine.configureNetworkQualityEstimatorForTesting(true, true, true);
 
         testFramework.mCronetEngine.addRttListener(rttListener);
         testFramework.mCronetEngine.addThroughputListener(throughputListener);
@@ -340,19 +360,24 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
 
         // Verify that the HTTP RTT, transport RTT and downstream throughput
         // estimates are available.
-        if (testFramework.mCronetEngine.getEffectiveConnectionType()
-                != ExperimentalCronetEngine.EFFECTIVE_CONNECTION_TYPE_OFFLINE) {
-            assertTrue(testFramework.mCronetEngine.getHttpRttMs() > 0);
-            assertTrue(testFramework.mCronetEngine.getTransportRttMs() > 0);
-            assertTrue(testFramework.mCronetEngine.getDownstreamThroughputKbps() > 0);
-        } else {
-            assertEquals(RttThroughputValues.INVALID_RTT_THROUGHPUT,
-                    testFramework.mCronetEngine.getHttpRttMs());
-            assertEquals(RttThroughputValues.INVALID_RTT_THROUGHPUT,
-                    testFramework.mCronetEngine.getTransportRttMs());
-            assertEquals(RttThroughputValues.INVALID_RTT_THROUGHPUT,
-                    testFramework.mCronetEngine.getDownstreamThroughputKbps());
+        assertTrue(testFramework.mCronetEngine.getHttpRttMs() >= 0);
+        assertTrue(testFramework.mCronetEngine.getTransportRttMs() >= 0);
+        assertTrue(testFramework.mCronetEngine.getDownstreamThroughputKbps() >= 0);
+
+        // Verify that the cached estimates were written to the prefs.
+        while (true) {
+            Log.i(TAG, "Still waiting for pref file update.....");
+            Thread.sleep(10000);
+            try {
+                if (fileContainsString("local_prefs.json", "network_qualities")) {
+                    break;
+                }
+            } catch (FileNotFoundException e) {
+                // Ignored this exception since the file will only be created when updates are
+                // flushed to the disk.
+            }
         }
+        assertTrue(fileContainsString("local_prefs.json", "network_qualities"));
 
         testFramework.mCronetEngine.shutdown();
     }
@@ -785,8 +810,7 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
             }
 
             @Override
-            public void onFailed(
-                    UrlRequest request, UrlResponseInfo info, UrlRequestException error) {
+            public void onFailed(UrlRequest request, UrlResponseInfo info, CronetException error) {
                 throw new RuntimeException("Unexpected");
             }
         }
@@ -837,8 +861,7 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
             }
 
             @Override
-            public void onFailed(
-                    UrlRequest request, UrlResponseInfo info, UrlRequestException error) {
+            public void onFailed(UrlRequest request, UrlResponseInfo info, CronetException error) {
                 throw new RuntimeException("Unexpected");
             }
         }
@@ -1370,7 +1393,8 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         // This is to prompt load of native library.
         startCronetTestFramework();
         // Verify CronetEngine.Builder config is passed down accurately to native code.
-        CronetEngineBuilderImpl builder = new CronetEngineBuilderImpl(getContext());
+        ExperimentalCronetEngine.Builder builder =
+                new ExperimentalCronetEngine.Builder(getContext());
         builder.enableHttp2(false);
         builder.enableQuic(true);
         builder.enableSdch(true);
@@ -1384,7 +1408,8 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         builder.setStoragePath(CronetTestFramework.getTestStorage(getContext()));
         builder.enablePublicKeyPinningBypassForLocalTrustAnchors(false);
         nativeVerifyUrlRequestContextConfig(
-                CronetUrlRequestContext.createNativeUrlRequestContextConfig(builder),
+                CronetUrlRequestContext.createNativeUrlRequestContextConfig(
+                        (CronetEngineBuilderImpl) builder.mBuilderDelegate),
                 CronetTestFramework.getTestStorage(getContext()));
     }
 
@@ -1409,13 +1434,14 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
     public void testSkipLibraryLoading() throws Exception {
-        CronetEngineBuilderImpl builder = new CronetEngineBuilderImpl(getContext());
+        CronetEngine.Builder builder = new CronetEngine.Builder(getContext());
         TestBadLibraryLoader loader = new TestBadLibraryLoader();
         builder.setLibraryLoader(loader);
         try {
             // ensureInitialized() calls native code to check the version right after library load
             // and will error with the message below if library loading was skipped
-            CronetLibraryLoader.ensureInitialized(getContext().getApplicationContext(), builder);
+            CronetLibraryLoader.ensureInitialized(getContext().getApplicationContext(),
+                    (CronetEngineBuilderImpl) builder.mBuilderDelegate);
             fail("Native library should not be loaded");
         } catch (UnsatisfiedLinkError e) {
             assertTrue(loader.wasCalled());

@@ -8,9 +8,12 @@
 
 #include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/wm/window_state.h"
+#include "ash/common/wm/window_state_util.h"
 #include "ash/common/wm/wm_event.h"
 #include "ash/test/ash_md_test_base.h"
 #include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_util.h"
+#include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
@@ -62,9 +65,6 @@ INSTANTIATE_TEST_CASE_P(
 // Test that a window gets properly snapped to the display's edges in a
 // multi monitor environment.
 TEST_P(WindowStateTest, SnapWindowBasic) {
-  if (!SupportsMultipleDisplays())
-    return;
-
   UpdateDisplay("0+0-500x400, 0+500-600x400");
   const gfx::Rect kPrimaryDisplayWorkAreaBounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
@@ -133,7 +133,8 @@ TEST_P(WindowStateTest, SnapWindowMinimumSize) {
   delegate.set_maximum_size(gfx::Size(0, kWorkAreaBounds.height() - 1));
   EXPECT_FALSE(window_state->CanSnap());
   delegate.set_maximum_size(gfx::Size());
-  window->SetProperty(aura::client::kCanMaximizeKey, false);
+  window->SetProperty(aura::client::kResizeBehaviorKey,
+                      ui::mojom::kResizeBehaviorCanResize);
   EXPECT_FALSE(window_state->CanSnap());
 }
 
@@ -358,6 +359,33 @@ TEST_P(WindowStateTest, DoNotResizeMaximizedWindowInFullscreen) {
             maximized->GetBoundsInScreen().ToString());
 }
 
+TEST_P(WindowStateTest, TrustedPinned) {
+  std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
+  WindowState* window_state = GetWindowState(window.get());
+  EXPECT_FALSE(window_state->IsTrustedPinned());
+  wm::PinWindow(window.get(), true /* trusted */);
+  EXPECT_TRUE(window_state->IsTrustedPinned());
+
+  gfx::Rect work_area =
+      display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
+  EXPECT_EQ(work_area.ToString(), window->bounds().ToString());
+
+  // Sending non-unpin/non-workspace related event should be ignored.
+  {
+    const WMEvent fullscreen_event(WM_EVENT_FULLSCREEN);
+    window_state->OnWMEvent(&fullscreen_event);
+  }
+  EXPECT_TRUE(window_state->IsTrustedPinned());
+
+  // Update display triggers workspace event.
+  UpdateDisplay("300x200");
+  EXPECT_EQ("0,0 300x200", window->GetBoundsInScreen().ToString());
+
+  // Unpin should work.
+  window_state->Restore();
+  EXPECT_FALSE(window_state->IsTrustedPinned());
+}
+
 TEST_P(WindowStateTest, AllowSetBoundsInMaximized) {
   std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
   WindowState* window_state = GetWindowState(window.get());
@@ -389,6 +417,56 @@ TEST_P(WindowStateTest, AllowSetBoundsInMaximized) {
   EXPECT_EQ(work_area, window->bounds());
   window->SetBounds(new_bounds);
   EXPECT_EQ(work_area, window->bounds());
+}
+
+TEST_P(WindowStateTest, FullscreenMinimizedSwitching) {
+  std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
+  WindowState* window_state = GetWindowState(window.get());
+
+  ash::wm::ToggleFullScreen(window_state, nullptr);
+  ASSERT_TRUE(window_state->IsFullscreen());
+
+  // Toggling the fullscreen window should restore to normal.
+  ash::wm::ToggleFullScreen(window_state, nullptr);
+  ASSERT_TRUE(window_state->IsNormalStateType());
+
+  window_state->Maximize();
+  ASSERT_TRUE(window_state->IsMaximized());
+
+  ash::wm::ToggleFullScreen(window_state, nullptr);
+  ASSERT_TRUE(window_state->IsFullscreen());
+
+  // Toggling the fullscreen window should restore to maximized.
+  ash::wm::ToggleFullScreen(window_state, nullptr);
+  ASSERT_TRUE(window_state->IsMaximized());
+
+  ash::wm::ToggleFullScreen(window_state, nullptr);
+  ASSERT_TRUE(window_state->IsFullscreen());
+
+  // Minimize from fullscreen.
+  window_state->Minimize();
+  ASSERT_TRUE(window_state->IsMinimized());
+
+  // Unminimize should restore to fullscreen.
+  window_state->Unminimize();
+  ASSERT_TRUE(window_state->IsFullscreen());
+
+  // Toggling the fullscreen window should restore to maximized.
+  ash::wm::ToggleFullScreen(window_state, nullptr);
+  ASSERT_TRUE(window_state->IsMaximized());
+
+  // Minimize from fullscreen.
+  window_state->Minimize();
+  ASSERT_TRUE(window_state->IsMinimized());
+
+  // Fullscreen a minimized window.
+  ash::wm::ToggleFullScreen(window_state, nullptr);
+  ASSERT_TRUE(window_state->IsFullscreen());
+
+  // Toggling the fullscreen window should not return to minimized. It should
+  // return to the state before minimizing and fullscreen.
+  ash::wm::ToggleFullScreen(window_state, nullptr);
+  ASSERT_TRUE(window_state->IsMaximized());
 }
 
 // TODO(skuhne): Add more unit test to verify the correctness for the restore

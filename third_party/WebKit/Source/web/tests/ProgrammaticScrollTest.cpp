@@ -50,7 +50,7 @@ TEST_F(ProgrammaticScrollTest, RestoreScrollPositionAndViewStateWithScale) {
 
   WebViewImpl* webViewImpl = toWebViewImpl(webView);
   FrameLoader& loader = webViewImpl->mainFrameImpl()->frame()->loader();
-  loader.setLoadType(FrameLoadTypeBackForward);
+  loader.documentLoader()->setLoadType(FrameLoadTypeBackForward);
 
   webViewImpl->setPageScaleFactor(3.0f);
   webViewImpl->mainFrame()->setScrollOffset(WebSize(0, 500));
@@ -66,7 +66,7 @@ TEST_F(ProgrammaticScrollTest, RestoreScrollPositionAndViewStateWithScale) {
 
   // Expect that both scroll and scale were restored.
   EXPECT_EQ(2.0f, webViewImpl->pageScaleFactor());
-  EXPECT_EQ(200, webViewImpl->mainFrameImpl()->scrollOffset().height);
+  EXPECT_EQ(200, webViewImpl->mainFrameImpl()->getScrollOffset().height);
 }
 
 TEST_F(ProgrammaticScrollTest, RestoreScrollPositionAndViewStateWithoutScale) {
@@ -80,7 +80,7 @@ TEST_F(ProgrammaticScrollTest, RestoreScrollPositionAndViewStateWithoutScale) {
 
   WebViewImpl* webViewImpl = toWebViewImpl(webView);
   FrameLoader& loader = webViewImpl->mainFrameImpl()->frame()->loader();
-  loader.setLoadType(FrameLoadTypeBackForward);
+  loader.documentLoader()->setLoadType(FrameLoadTypeBackForward);
 
   webViewImpl->setPageScaleFactor(3.0f);
   webViewImpl->mainFrame()->setScrollOffset(WebSize(0, 500));
@@ -94,7 +94,7 @@ TEST_F(ProgrammaticScrollTest, RestoreScrollPositionAndViewStateWithoutScale) {
 
   // Expect that only the scroll position was restored.
   EXPECT_EQ(3.0f, webViewImpl->pageScaleFactor());
-  EXPECT_EQ(400, webViewImpl->mainFrameImpl()->scrollOffset().height);
+  EXPECT_EQ(400, webViewImpl->mainFrameImpl()->getScrollOffset().height);
 }
 
 }  // namespace blink

@@ -26,13 +26,16 @@
 
 #include "core/html/shadow/MediaControls.h"
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ClientRect.h"
 #include "core/dom/Fullscreen.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/MouseEvent.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLMediaElement.h"
+#include "core/html/HTMLVideoElement.h"
 #include "core/html/shadow/MediaControlsMediaEventListener.h"
+#include "core/html/shadow/MediaControlsOrientationLockDelegate.h"
 #include "core/html/shadow/MediaControlsWindowEventListener.h"
 #include "core/html/track/TextTrackContainer.h"
 #include "core/html/track/TextTrackList.h"
@@ -74,7 +77,7 @@ static bool shouldShowCastButton(HTMLMediaElement& mediaElement) {
 
 static bool preferHiddenVolumeControls(const Document& document) {
   return !document.settings() ||
-         document.settings()->preferHiddenVolumeControls();
+         document.settings()->getPreferHiddenVolumeControls();
 }
 
 class MediaControls::BatchedControlUpdate {
@@ -127,20 +130,37 @@ MediaControls::MediaControls(HTMLMediaElement& mediaElement)
       m_windowEventListener(MediaControlsWindowEventListener::create(
           this,
           WTF::bind(&MediaControls::hideAllMenus, wrapWeakPersistent(this)))),
-      m_hideMediaControlsTimer(this,
+      m_orientationLockDelegate(nullptr),
+      m_hideMediaControlsTimer(TaskRunnerHelper::get(TaskType::UnspecedTimer,
+                                                     &mediaElement.document()),
+                               this,
                                &MediaControls::hideMediaControlsTimerFired),
       m_hideTimerBehaviorFlags(IgnoreNone),
       m_isMouseOverControls(false),
       m_isPausedForScrubbing(false),
-      m_panelWidthChangedTimer(this,
+      m_panelWidthChangedTimer(TaskRunnerHelper::get(TaskType::UnspecedTimer,
+                                                     &mediaElement.document()),
+                               this,
                                &MediaControls::panelWidthChangedTimerFired),
       m_panelWidth(0),
       m_keepShowingUntilTimerFires(false) {}
 
-MediaControls* MediaControls::create(HTMLMediaElement& mediaElement) {
+MediaControls* MediaControls::create(HTMLMediaElement& mediaElement,
+                                     ShadowRoot& shadowRoot) {
   MediaControls* controls = new MediaControls(mediaElement);
   controls->setShadowPseudoId(AtomicString("-webkit-media-controls"));
   controls->initializeControls();
+  controls->reset();
+
+  // Initialize the orientation lock when going fullscreen feature.
+  if (RuntimeEnabledFeatures::videoFullscreenOrientationLockEnabled() &&
+      mediaElement.isHTMLVideoElement()) {
+    controls->m_orientationLockDelegate =
+        new MediaControlsOrientationLockDelegate(
+            toHTMLVideoElement(mediaElement));
+  }
+
+  shadowRoot.appendChild(controls);
   return controls;
 }
 
@@ -195,7 +215,7 @@ void MediaControls::initializeControls() {
       MediaControlOverlayEnclosureElement::create(*this);
 
   if (document().settings() &&
-      document().settings()->mediaControlsOverlayPlayButtonEnabled()) {
+      document().settings()->getMediaControlsOverlayPlayButtonEnabled()) {
     MediaControlOverlayPlayButtonElement* overlayPlayButton =
         MediaControlOverlayPlayButtonElement::create(*this);
     m_overlayPlayButton = overlayPlayButton;
@@ -339,8 +359,7 @@ void MediaControls::reset() {
   m_timeline->setPosition(mediaElement().currentTime());
 
   onVolumeChange();
-
-  refreshClosedCaptionsButtonVisibility();
+  onTextTracksAddedOrRemoved();
 
   m_fullscreenButton->setIsWanted(shouldShowFullscreenButton(mediaElement()));
 
@@ -419,32 +438,6 @@ bool MediaControls::shouldHideMediaControls(unsigned behaviorFlags) const {
   return true;
 }
 
-void MediaControls::playbackStarted() {
-  BatchedControlUpdate batch(this);
-  updatePlayState();
-  m_timeline->setPosition(mediaElement().currentTime());
-  updateCurrentTimeDisplay();
-
-  startHideMediaControlsTimer();
-}
-
-void MediaControls::playbackProgressed() {
-  m_timeline->setPosition(mediaElement().currentTime());
-  updateCurrentTimeDisplay();
-
-  if (isVisible() && shouldHideMediaControls())
-    makeTransparent();
-}
-
-void MediaControls::playbackStopped() {
-  updatePlayState();
-  m_timeline->setPosition(mediaElement().currentTime());
-  updateCurrentTimeDisplay();
-  makeOpaque();
-
-  stopHideMediaControlsTimer();
-}
-
 void MediaControls::updatePlayState() {
   if (m_isPausedForScrubbing)
     return;
@@ -476,17 +469,8 @@ void MediaControls::updateCurrentTimeDisplay() {
   // Allow the theme to format the time.
   m_currentTimeDisplay->setInnerText(
       LayoutTheme::theme().formatMediaControlsCurrentTime(now, duration),
-      IGNORE_EXCEPTION);
+      IGNORE_EXCEPTION_FOR_TESTING);
   m_currentTimeDisplay->setCurrentValue(now);
-}
-
-void MediaControls::changedClosedCaptionsVisibility() {
-  m_toggleClosedCaptionsButton->updateDisplayType();
-}
-
-void MediaControls::refreshClosedCaptionsButtonVisibility() {
-  m_toggleClosedCaptionsButton->setIsWanted(mediaElement().hasClosedCaptions());
-  BatchedControlUpdate batch(this);
 }
 
 void MediaControls::toggleTextTrackList() {
@@ -565,16 +549,12 @@ void MediaControls::showOverlayCastButtonIfNeeded() {
   resetHideMediaControlsTimer();
 }
 
-void MediaControls::enteredFullscreen() {
-  m_fullscreenButton->setIsFullscreen(true);
-  stopHideMediaControlsTimer();
-  startHideMediaControlsTimer();
+void MediaControls::enterFullscreen() {
+  Fullscreen::requestFullscreen(mediaElement());
 }
 
-void MediaControls::exitedFullscreen() {
-  m_fullscreenButton->setIsFullscreen(false);
-  stopHideMediaControlsTimer();
-  startHideMediaControlsTimer();
+void MediaControls::exitFullscreen() {
+  Fullscreen::exitFullscreen(document());
 }
 
 void MediaControls::startedCasting() {
@@ -589,6 +569,11 @@ void MediaControls::stoppedCasting() {
 
 void MediaControls::defaultEventHandler(Event* event) {
   HTMLDivElement::defaultEventHandler(event);
+
+  // Do not handle events to not interfere with the rest of the page if no
+  // controls should be visible.
+  if (!mediaElement().shouldShowControls())
+    return;
 
   // Add IgnoreControlsHover to m_hideTimerBehaviorFlags when we see a touch
   // event, to allow the hide-timer to do the right thing when it fires.
@@ -716,6 +701,84 @@ void MediaControls::onFocusIn() {
 
   show();
   resetHideMediaControlsTimer();
+}
+
+void MediaControls::onTimeUpdate() {
+  m_timeline->setPosition(mediaElement().currentTime());
+  updateCurrentTimeDisplay();
+
+  // 'timeupdate' might be called in a paused state. The controls should not
+  // become transparent in that case.
+  if (mediaElement().paused()) {
+    makeOpaque();
+    return;
+  }
+
+  if (isVisible() && shouldHideMediaControls())
+    makeTransparent();
+}
+
+void MediaControls::onDurationChange() {
+  const double duration = mediaElement().duration();
+
+  // Update the displayed current time/duration.
+  m_durationDisplay->setTextContent(
+      LayoutTheme::theme().formatMediaControlsTime(duration));
+  m_durationDisplay->setCurrentValue(duration);
+  updateCurrentTimeDisplay();
+
+  // Update the timeline (the UI with the seek marker).
+  m_timeline->setDuration(duration);
+}
+
+void MediaControls::onPlay() {
+  updatePlayState();
+  m_timeline->setPosition(mediaElement().currentTime());
+  updateCurrentTimeDisplay();
+
+  startHideMediaControlsTimer();
+}
+
+void MediaControls::onPause() {
+  updatePlayState();
+  m_timeline->setPosition(mediaElement().currentTime());
+  updateCurrentTimeDisplay();
+  makeOpaque();
+
+  stopHideMediaControlsTimer();
+}
+
+void MediaControls::onTextTracksAddedOrRemoved() {
+  m_toggleClosedCaptionsButton->setIsWanted(mediaElement().hasClosedCaptions());
+  BatchedControlUpdate batch(this);
+}
+
+void MediaControls::onTextTracksChanged() {
+  m_toggleClosedCaptionsButton->updateDisplayType();
+}
+
+void MediaControls::onError() {
+  // TODO(mlamouri): we should only change the aspects of the control that need
+  // to be changed.
+  reset();
+}
+
+void MediaControls::onLoadedMetadata() {
+  // TODO(mlamouri): we should only change the aspects of the control that need
+  // to be changed.
+  reset();
+}
+
+void MediaControls::onEnteredFullscreen() {
+  m_fullscreenButton->setIsFullscreen(true);
+  stopHideMediaControlsTimer();
+  startHideMediaControlsTimer();
+}
+
+void MediaControls::onExitedFullscreen() {
+  m_fullscreenButton->setIsFullscreen(false);
+  stopHideMediaControlsTimer();
+  startHideMediaControlsTimer();
 }
 
 void MediaControls::notifyPanelWidthChanged(const LayoutUnit& newWidth) {
@@ -911,6 +974,7 @@ DEFINE_TRACE(MediaControls) {
   visitor->trace(m_overlayCastButton);
   visitor->trace(m_mediaEventListener);
   visitor->trace(m_windowEventListener);
+  visitor->trace(m_orientationLockDelegate);
   HTMLDivElement::trace(visitor);
 }
 

@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/allocator/allocator_check.h"
 #include "base/allocator/allocator_extension.h"
@@ -45,7 +46,6 @@
 #include "components/tracing/common/tracing_switches.h"
 #include "content/app/mojo/mojo_init.h"
 #include "content/browser/browser_main.h"
-#include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/utility_process_host_impl.h"
 #include "content/common/set_process_title.h"
@@ -71,7 +71,8 @@
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
 
-#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA) && \
+    !defined(CHROME_MULTIPLE_DLL_BROWSER)
 #include "gin/v8_initializer.h"
 #endif
 
@@ -111,6 +112,14 @@
 #include "crypto/nss_util.h"
 #endif
 
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER) && !defined(CHROME_MULTIPLE_DLL_CHILD)
+#include "content/browser/gpu/gpu_process_host.h"
+#endif
+
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+#include "content/common/media/cdm_host_files.h"
+#endif
+
 namespace content {
 extern int GpuMain(const content::MainFunctionParams&);
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -144,13 +153,20 @@ void InitializeFieldTrialAndFeatureList(
 
   // Ensure any field trials in browser are reflected into the child
   // process.
+#if defined(OS_POSIX)
+  // On POSIX systems that use the zygote, we get the trials from a shared
+  // memory segment backed by an fd instead of the command line.
   base::FieldTrialList::CreateTrialsFromCommandLine(
-      command_line, switches::kFieldTrialHandle);
+      command_line, switches::kFieldTrialHandle, kFieldTrialDescriptor);
+#else
+  base::FieldTrialList::CreateTrialsFromCommandLine(
+      command_line, switches::kFieldTrialHandle, -1);
+#endif
 
   std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-  feature_list->InitializeFromCommandLine(
-      command_line.GetSwitchValueASCII(switches::kEnableFeatures),
-      command_line.GetSwitchValueASCII(switches::kDisableFeatures));
+  base::FieldTrialList::CreateFeaturesFromCommandLine(
+      command_line, switches::kEnableFeatures, switches::kDisableFeatures,
+      feature_list.get());
   base::FeatureList::SetInstance(std::move(feature_list));
 }
 
@@ -306,7 +322,7 @@ int RunZygote(const MainFunctionParams& main_function_params,
     { switches::kUtilityProcess,     UtilityMain },
   };
 
-  ScopedVector<ZygoteForkDelegate> zygote_fork_delegates;
+  std::vector<std::unique_ptr<ZygoteForkDelegate>> zygote_fork_delegates;
   if (delegate) {
     delegate->ZygoteStarting(&zygote_fork_delegates);
     media::InitializeMediaLibrary();
@@ -325,6 +341,15 @@ int RunZygote(const MainFunctionParams& main_function_params,
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
   ContentClientInitializer::Set(process_type, delegate);
+
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+  if (process_type != switches::kPpapiPluginProcess) {
+    DVLOG(1) << "Closing CDM files for non-ppapi process.";
+    CdmHostFiles::TakeGlobalInstance().reset();
+  } else {
+    DVLOG(1) << "Not closing CDM files for ppapi process.";
+  }
+#endif
 
   MainFunctionParams main_params(command_line);
   main_params.zygote_child = true;
@@ -446,6 +471,10 @@ class ContentMainRunnerImpl : public ContentMainRunner {
   int Initialize(const ContentMainParams& params) override {
     ui_task_ = params.ui_task;
 
+#if defined(USE_AURA)
+    env_mode_ = params.env_mode;
+#endif
+
     base::EnableTerminationOnOutOfMemory();
 #if defined(OS_WIN)
     base::win::RegisterInvalidParamHandler();
@@ -478,6 +507,10 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     SetupSignalHandlers();
     g_fds->Set(kMojoIPCChannel,
                kMojoIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
+
+    g_fds->Set(
+        kFieldTrialDescriptor,
+        kFieldTrialDescriptor + base::GlobalDescriptors::kBaseDescriptor);
 #endif  // !OS_ANDROID
 
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
@@ -717,8 +750,10 @@ class ContentMainRunnerImpl : public ContentMainRunner {
       gin::V8Initializer::LoadV8Natives();
     }
 #else
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
     gin::V8Initializer::LoadV8Snapshot();
     gin::V8Initializer::LoadV8Natives();
+#endif  // !CHROME_MULTIPLE_DLL_BROWSER
 #endif  // OS_POSIX && !OS_MACOSX
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
@@ -770,6 +805,9 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     main_params.sandbox_info = &sandbox_info_;
 #elif defined(OS_MACOSX)
     main_params.autorelease_pool = autorelease_pool_.get();
+#endif
+#if defined(USE_AURA)
+    main_params.env_mode = env_mode_;
 #endif
 
     return RunNamedProcessTypeMain(process_type, main_params, delegate_);
@@ -828,6 +866,10 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 #endif
 
   base::Closure* ui_task_;
+
+#if defined(USE_AURA)
+  aura::Env::Mode env_mode_ = aura::Env::Mode::LOCAL;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ContentMainRunnerImpl);
 };

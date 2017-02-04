@@ -35,12 +35,12 @@ class TouchPointView : public views::View,
   explicit TouchPointView(views::Widget* parent_widget)
       : circle_center_(kPointRadius + 1, kPointRadius + 1),
         gradient_center_(SkPoint::Make(kPointRadius + 1, kPointRadius + 1)) {
-    SetPaintToLayer(true);
+    SetPaintToLayer();
     layer()->SetFillsBoundsOpaquely(false);
 
     SetSize(gfx::Size(2 * kPointRadius + 2, 2 * kPointRadius + 2));
 
-    stroke_paint_.setStyle(SkPaint::kStroke_Style);
+    stroke_paint_.setStyle(cc::PaintFlags::kStroke_Style);
     stroke_paint_.setColor(kProjectionStrokeColor);
 
     gradient_colors_[0] = kProjectionFillColor;
@@ -120,8 +120,8 @@ class TouchPointView : public views::View,
   const gfx::Point circle_center_;
   const SkPoint gradient_center_;
 
-  SkPaint fill_paint_;
-  SkPaint stroke_paint_;
+  cc::PaintFlags fill_paint_;
+  cc::PaintFlags stroke_paint_;
   SkColor gradient_colors_[2];
   SkScalar gradient_pos_[2];
 

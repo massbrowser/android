@@ -17,8 +17,8 @@ import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkModelObserve
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
+import org.chromium.chrome.browser.widget.selection.SelectableListToolbar;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
-import org.chromium.chrome.browser.widget.selection.SelectionToolbar;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -29,8 +29,8 @@ import java.util.List;
  * Main action bar of bookmark UI. It is responsible for displaying title and buttons
  * associated with the current context.
  */
-public class BookmarkActionBar extends SelectionToolbar<BookmarkId> implements BookmarkUIObserver,
-        OnMenuItemClickListener, OnClickListener {
+public class BookmarkActionBar extends SelectableListToolbar<BookmarkId>
+        implements BookmarkUIObserver, OnMenuItemClickListener, OnClickListener {
     private BookmarkItem mCurrentFolder;
     private BookmarkDelegate mDelegate;
 
@@ -56,7 +56,7 @@ public class BookmarkActionBar extends SelectionToolbar<BookmarkId> implements B
     }
 
     @Override
-    protected void onNavigationBack() {
+    public void onNavigationBack() {
         mDelegate.openFolder(mCurrentFolder.getParentId());
     }
 
@@ -130,7 +130,7 @@ public class BookmarkActionBar extends SelectionToolbar<BookmarkId> implements B
         // try to set the title when a selection is cleared.
         int titleResId = 0;
         initialize(delegate.getSelectionDelegate(), titleResId, delegate.getDrawerLayout(),
-                R.id.normal_menu_group, R.id.selection_mode_menu_group);
+                R.id.normal_menu_group, R.id.selection_mode_menu_group, null);
     }
 
     @Override

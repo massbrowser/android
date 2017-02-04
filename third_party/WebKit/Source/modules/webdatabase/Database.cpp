@@ -28,6 +28,7 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/ExecutionContextTask.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/html/VoidCallback.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/webdatabase/ChangeVersionData.h"
@@ -392,7 +393,7 @@ void Database::closeDatabase() {
 
     ASSERT(guidCount().contains(m_guid));
     if (guidCount().remove(m_guid)) {
-      guidToVersionMap().remove(m_guid);
+      guidToVersionMap().erase(m_guid);
     }
   }
 }
@@ -459,7 +460,7 @@ bool Database::performOpenAndVerify(bool shouldSetVersionInNewDatabase,
     if (entry != guidToVersionMap().end()) {
       // Map null string to empty string (see updateGuidVersionMap()).
       currentVersion =
-          entry->value.isNull() ? emptyString() : entry->value.isolatedCopy();
+          entry->value.isNull() ? emptyString : entry->value.isolatedCopy();
       STORAGE_DVLOG(1) << "Current cached version for guid " << m_guid << " is "
                        << currentVersion;
 
@@ -859,7 +860,7 @@ void Database::runTransaction(SQLTransactionCallback* callback,
 // sometimes firing it ourselves, this code should probably be pushed down
 // into Database so that we only create the SQLTransaction if we're
 // actually going to run it.
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   SQLTransactionErrorCallback* originalErrorCallback = errorCallback;
 #endif
   SQLTransaction* transaction = SQLTransaction::create(
@@ -873,9 +874,10 @@ void Database::runTransaction(SQLTransactionCallback* callback,
       std::unique_ptr<SQLErrorData> error = SQLErrorData::create(
           SQLError::kUnknownErr, "database has been closed");
       getExecutionContext()->postTask(
-          BLINK_FROM_HERE, createSameThreadTask(&callTransactionErrorCallback,
-                                                wrapPersistent(callback),
-                                                passed(std::move(error))));
+          TaskType::DatabaseAccess, BLINK_FROM_HERE,
+          createSameThreadTask(&callTransactionErrorCallback,
+                               wrapPersistent(callback),
+                               WTF::passed(std::move(error))));
     }
   }
 }
@@ -884,7 +886,7 @@ void Database::scheduleTransactionCallback(SQLTransaction* transaction) {
   // The task is constructed in a database thread, and destructed in the
   // context thread.
   getExecutionContext()->postTask(
-      BLINK_FROM_HERE,
+      TaskType::DatabaseAccess, BLINK_FROM_HERE,
       createCrossThreadTask(&SQLTransaction::performPendingCallback,
                             wrapCrossThreadPersistent(transaction)));
 }
@@ -906,7 +908,7 @@ Vector<String> Database::performGetTableNames() {
   while ((result = statement.step()) == SQLResultRow) {
     String name = statement.getColumnText(0);
     if (name != databaseInfoTableName())
-      tableNames.append(name);
+      tableNames.push_back(name);
   }
 
   enableAuthorizer();

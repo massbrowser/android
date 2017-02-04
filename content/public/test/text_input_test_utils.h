@@ -28,6 +28,7 @@ class Range;
 namespace content {
 
 class MessageLoopRunner;
+class RenderFrameHost;
 class RenderProcessHost;
 class RenderWidgetHost;
 class RenderWidgetHostView;
@@ -60,6 +61,9 @@ RenderWidgetHostView* GetActiveViewFromWebContents(WebContents* web_contents);
 // This function will return false if the request is not successfully sent;
 // either due to missing TextInputManager or lack of an active widget.
 bool RequestCompositionInfoFromActiveWidget(WebContents* web_contents);
+
+// Returns true if |frame| has a focused editable element.
+bool DoesFrameHaveFocusedEditableElement(RenderFrameHost* frame);
 
 // This class provides the necessary API for accessing the state of and also
 // observing the TextInputManager for WebContents.
@@ -156,7 +160,6 @@ class TextInputStateSender {
   void SetFlags(int flags);
   void SetCanComposeInline(bool can_compose_inline);
   void SetShowImeIfNeeded(bool show_ime_if_needed);
-  void SetIsNonImeChange(bool is_non_ime_change);
 
  private:
   std::unique_ptr<TextInputState> text_input_state_;

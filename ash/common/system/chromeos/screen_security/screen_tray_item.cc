@@ -58,6 +58,12 @@ ScreenStatusView::ScreenStatusView(ScreenTrayItem* screen_tray_item,
   SetLayoutManager(new views::FillLayout);
   AddChildView(tri_view);
   tri_view->AddView(TriView::Container::START, icon_);
+  // TODO(bruthig): Multiline Labels don't lay out well with borders so we add
+  // the border to the Label's container instead. See https://crbug.com/678337 &
+  // https://crbug.com/682221.
+  tri_view->SetContainerBorder(
+      TriView::Container::CENTER,
+      views::CreateEmptyBorder(0, 0, 0, kTrayPopupLabelRightPadding));
   tri_view->AddView(TriView::Container::CENTER, label_);
   tri_view->AddView(TriView::Container::END, stop_button_);
   tri_view->SetContainerBorder(
@@ -92,6 +98,11 @@ void ScreenStatusView::CreateItems() {
   label_ = TrayPopupUtils::CreateDefaultLabel();
   label_->SetMultiLine(true);
   label_->SetText(label_text_);
+  // TODO(bruthig): Multiline Labels don't lay out well with borders.
+  // See https://crbug.com/678337 & https://crbug.com/682221.
+  label_->SetBorder(nullptr);
+  TrayPopupItemStyle style(TrayPopupItemStyle::FontStyle::DEFAULT_VIEW_LABEL);
+  style.SetupLabel(label_);
 
   stop_button_ = TrayPopupUtils::CreateTrayPopupButton(this, stop_button_text_);
 }
@@ -100,19 +111,6 @@ void ScreenStatusView::UpdateFromScreenTrayItem() {
   // Hide the notification bubble when the ash tray bubble opens.
   screen_tray_item_->HideNotificationView();
   SetVisible(screen_tray_item_->is_started());
-}
-
-void ScreenStatusView::OnNativeThemeChanged(const ui::NativeTheme* theme) {
-  if (!MaterialDesignController::IsSystemTrayMenuMaterial()) {
-    views::View::OnNativeThemeChanged(theme);
-    return;
-  }
-
-  if (theme) {
-    TrayPopupItemStyle style(theme,
-                             TrayPopupItemStyle::FontStyle::DEFAULT_VIEW_LABEL);
-    style.SetupLabel(label_);
-  }
 }
 
 ScreenNotificationDelegate::ScreenNotificationDelegate(

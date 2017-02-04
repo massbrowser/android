@@ -6,6 +6,8 @@ from page_sets.system_health import platforms
 from page_sets.system_health import system_health_story
 from page_sets.system_health.loading_stories import LoadGmailMobileStory
 
+from telemetry import decorators
+
 _WAIT_FOR_VIDEO_SECONDS = 5
 
 class _BackgroundStory(system_health_story.SystemHealthStory):
@@ -54,7 +56,7 @@ class BackgroundNytimesMobileStory(_BackgroundStory):
     action_runner.WaitForElement(selector='#additional-content button')
     action_runner.ScrollPageToElement(selector='#additional-content button')
     # TapElement seems flaky here so use JavaScript instead.
-    action_runner.ExecuteJavaScript(
+    action_runner.ExecuteJavaScript2(
         'document.querySelector("#additional-content button").click()')
 
     # Scroll to video, start it and then wait for a few seconds.
@@ -76,6 +78,7 @@ class BackgroundImgurMobileStory(_BackgroundStory):
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
 
 
+@decorators.Disabled('android')  # crbug.com/676336
 class BackgroundGmailMobileStory(LoadGmailMobileStory):
   NAME = 'background:tools:gmail'
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY

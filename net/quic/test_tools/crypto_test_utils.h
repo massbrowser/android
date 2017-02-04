@@ -5,19 +5,17 @@
 #ifndef NET_QUIC_TEST_TOOLS_CRYPTO_TEST_UTILS_H_
 #define NET_QUIC_TEST_TOOLS_CRYPTO_TEST_UTILS_H_
 
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstdarg>
+#include <cstddef>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string_piece.h"
 #include "net/quic/core/crypto/crypto_framer.h"
 #include "net/quic/core/quic_framer.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 
 namespace net {
@@ -153,9 +151,6 @@ class CryptoTestUtils {
   // Returns a new |ProofVerifier| that uses the QUIC testing root CA.
   static std::unique_ptr<ProofVerifier> ProofVerifierForTesting();
 
-  // Returns a real ProofVerifier (not a fake proof verifier) for testing.
-  static std::unique_ptr<ProofVerifier> RealProofVerifierForTesting();
-
   // Returns a hash of the leaf test certificate.
   static uint64_t LeafCertHashForTesting();
 
@@ -210,7 +205,7 @@ class CryptoTestUtils {
                           PacketSavingConnection* dest_conn,
                           Perspective dest_perspective);
 
-  // Return an inchoate CHLO with some basic tag value std:pairs.
+  // Return an inchoate CHLO with some basic tag value pairs.
   static CryptoHandshakeMessage GenerateDefaultInchoateCHLO(
       const QuicClock* clock,
       QuicVersion version,
@@ -221,11 +216,11 @@ class CryptoTestUtils {
   static void GenerateFullCHLO(
       const CryptoHandshakeMessage& inchoate_chlo,
       QuicCryptoServerConfig* crypto_config,
-      QuicIpAddress server_ip,
+      QuicSocketAddress server_addr,
       QuicSocketAddress client_addr,
       QuicVersion version,
       const QuicClock* clock,
-      scoped_refptr<QuicSignedServerConfig> signed_config,
+      QuicReferenceCountedPointer<QuicSignedServerConfig> signed_config,
       QuicCompressedCertsCache* compressed_certs_cache,
       CryptoHandshakeMessage* out);
 

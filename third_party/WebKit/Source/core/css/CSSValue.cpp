@@ -38,6 +38,7 @@
 #include "core/css/CSSFontFaceSrcValue.h"
 #include "core/css/CSSFontFamilyValue.h"
 #include "core/css/CSSFontFeatureValue.h"
+#include "core/css/CSSFontVariationValue.h"
 #include "core/css/CSSFunctionValue.h"
 #include "core/css/CSSGradientValue.h"
 #include "core/css/CSSGridAutoRepeatValue.h"
@@ -96,10 +97,6 @@ CSSValue* CSSValue::create(const Length& value, float zoom) {
   return nullptr;
 }
 
-bool CSSValue::isImplicitInitialValue() const {
-  return m_classType == InitialClass && toCSSInitialValue(this)->isImplicit();
-}
-
 bool CSSValue::hasFailedOrCanceledSubresources() const {
   if (isValueList())
     return toCSSValueList(this)->hasFailedOrCanceledSubresources();
@@ -113,6 +110,28 @@ bool CSSValue::hasFailedOrCanceledSubresources() const {
     return toCSSImageSetValue(this)->hasFailedOrCanceledSubresources();
 
   return false;
+}
+
+bool CSSValue::mayContainUrl() const {
+  if (isValueList())
+    return toCSSValueList(*this).mayContainUrl();
+  return isImageValue() || isURIValue();
+}
+
+void CSSValue::reResolveUrl(const Document& document) const {
+  // TODO(fs): Should handle all values that can contain URLs.
+  if (isImageValue()) {
+    toCSSImageValue(*this).reResolveURL(document);
+    return;
+  }
+  if (isURIValue()) {
+    toCSSURIValue(*this).reResolveUrl(document);
+    return;
+  }
+  if (isValueList()) {
+    toCSSValueList(*this).reResolveUrl(document);
+    return;
+  }
 }
 
 template <class ChildClassType>
@@ -147,6 +166,8 @@ bool CSSValue::equals(const CSSValue& other) const {
         return compareCSSValues<CSSFontFamilyValue>(*this, other);
       case FontFeatureClass:
         return compareCSSValues<CSSFontFeatureValue>(*this, other);
+      case FontVariationClass:
+        return compareCSSValues<CSSFontVariationValue>(*this, other);
       case FunctionClass:
         return compareCSSValues<CSSFunctionValue>(*this, other);
       case LinearGradientClass:
@@ -241,6 +262,8 @@ String CSSValue::cssText() const {
       return toCSSFontFamilyValue(this)->customCSSText();
     case FontFeatureClass:
       return toCSSFontFeatureValue(this)->customCSSText();
+    case FontVariationClass:
+      return toCSSFontVariationValue(this)->customCSSText();
     case FunctionClass:
       return toCSSFunctionValue(this)->customCSSText();
     case LinearGradientClass:
@@ -342,6 +365,9 @@ void CSSValue::finalizeGarbageCollectedObject() {
       return;
     case FontFeatureClass:
       toCSSFontFeatureValue(this)->~CSSFontFeatureValue();
+      return;
+    case FontVariationClass:
+      toCSSFontVariationValue(this)->~CSSFontVariationValue();
       return;
     case FunctionClass:
       toCSSFunctionValue(this)->~CSSFunctionValue();
@@ -475,6 +501,9 @@ DEFINE_TRACE(CSSValue) {
       return;
     case FontFeatureClass:
       toCSSFontFeatureValue(this)->traceAfterDispatch(visitor);
+      return;
+    case FontVariationClass:
+      toCSSFontVariationValue(this)->traceAfterDispatch(visitor);
       return;
     case FunctionClass:
       toCSSFunctionValue(this)->traceAfterDispatch(visitor);

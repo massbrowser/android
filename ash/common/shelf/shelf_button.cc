@@ -13,10 +13,10 @@
 #include "ash/common/shelf/shelf_view.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/shelf/wm_shelf_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "grit/ash_resources.h"
 #include "skia/ext/image_operations.h"
-#include "third_party/skia/include/core/SkPaint.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
@@ -61,9 +61,9 @@ const int kIconPaddingVerticalMD = 8;
 
 // Paints an activity indicator on |canvas| whose |size| is specified in DIP.
 void PaintIndicatorOnCanvas(gfx::Canvas* canvas, const gfx::Size& size) {
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setColor(kIndicatorColor);
-  paint.setFlags(SkPaint::kAntiAlias_Flag);
+  paint.setFlags(cc::PaintFlags::kAntiAlias_Flag);
   canvas->DrawCircle(
       gfx::Point(size.width() / 2,
                  size.height() - kIndicatorOffsetFromBottom - kIndicatorRadius),
@@ -272,7 +272,7 @@ ShelfButton::ShelfButton(InkDropButtonListener* listener, ShelfView* shelf_view)
   icon_shadows_.assign(kShadows, kShadows + arraysize(kShadows));
 
   // TODO: refactor the layers so each button doesn't require 2.
-  icon_view_->SetPaintToLayer(true);
+  icon_view_->SetPaintToLayer();
   icon_view_->layer()->SetFillsBoundsOpaquely(false);
   icon_view_->SetHorizontalAlignment(views::ImageView::CENTER);
   icon_view_->SetVerticalAlignment(views::ImageView::LEADING);
@@ -442,6 +442,7 @@ void ShelfButton::Layout() {
       gfx::Rect(button_bounds.x() + x_offset, button_bounds.y() + y_offset,
                 icon_width, icon_height);
   icon_view_bounds.Inset(insets_shadows);
+  icon_view_bounds.AdjustToFit(gfx::Rect(size()));
   icon_view_->SetBoundsRect(icon_view_bounds);
 
   // Icon size has been incorrect when running
@@ -472,9 +473,8 @@ void ShelfButton::OnBlur() {
 void ShelfButton::OnPaint(gfx::Canvas* canvas) {
   CustomButton::OnPaint(canvas);
   if (HasFocus()) {
-    gfx::Rect paint_bounds(GetLocalBounds());
-    paint_bounds.Inset(1, 1, 1, 1);
-    canvas->DrawSolidFocusRect(paint_bounds, kFocusBorderColor);
+    canvas->DrawSolidFocusRect(gfx::RectF(GetLocalBounds()), kFocusBorderColor,
+                               kFocusBorderThickness);
   }
 }
 

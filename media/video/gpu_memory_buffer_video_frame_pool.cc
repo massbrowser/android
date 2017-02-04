@@ -19,7 +19,6 @@
 #include "base/containers/stack_container.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -428,6 +427,7 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::CreateHardwareFrame(
     case PIXEL_FORMAT_YUV444P12:
     case PIXEL_FORMAT_Y8:
     case PIXEL_FORMAT_Y16:
+    case PIXEL_FORMAT_I422:
     case PIXEL_FORMAT_UNKNOWN:
       frame_ready_cb.Run(video_frame);
       return;

@@ -17,8 +17,8 @@
 #include "chrome/browser/android/offline_pages/offline_page_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "components/offline_pages/offline_page_model.h"
-#include "components/offline_pages/request_header/offline_page_header.h"
+#include "components/offline_pages/core/offline_page_model.h"
+#include "components/offline_pages/core/request_header/offline_page_header.h"
 #include "components/previews/core/previews_decider.h"
 #include "components/previews/core/previews_experiments.h"
 #include "content/public/browser/browser_thread.h"
@@ -312,10 +312,9 @@ RequestResult AccessOfflineFile(
 
   // If the page is being loaded on a slow network, only use the offline page
   // if it was created within the past day.
-  // TODO(romax): Make the constant be policy driven.
   if (network_state == NetworkState::PROHIBITIVELY_SLOW_NETWORK &&
       base::Time::Now() - offline_page->creation_time >
-          base::TimeDelta::FromDays(1)) {
+          previews::params::OfflinePreviewFreshnessDuration()) {
     return RequestResult::PAGE_NOT_FRESH;
   }
 
@@ -640,6 +639,25 @@ int OfflinePageRequestJob::GetResponseCode() const {
     return URLRequestFileJob::GetResponseCode();
 
   return net::URLRequestRedirectJob::REDIRECT_302_FOUND;
+}
+
+void OfflinePageRequestJob::OnOpenComplete(int result) {
+  UMA_HISTOGRAM_SPARSE_SLOWLY("OfflinePages.RequestJob.OpenFileErrorCode",
+                              -result);
+}
+
+void OfflinePageRequestJob::OnSeekComplete(int64_t result) {
+  if (result < 0) {
+    UMA_HISTOGRAM_SPARSE_SLOWLY("OfflinePages.RequestJob.SeekFileErrorCode",
+                                static_cast<int>(-result));
+  }
+}
+
+void OfflinePageRequestJob::OnReadComplete(net::IOBuffer* buf, int result) {
+  if (result < 0) {
+    UMA_HISTOGRAM_SPARSE_SLOWLY("OfflinePages.RequestJob.ReadFileErrorCode",
+                                -result);
+  }
 }
 
 void OfflinePageRequestJob::FallbackToDefault() {

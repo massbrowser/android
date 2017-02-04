@@ -9,10 +9,10 @@ using blink::WebInputEvent;
 namespace content {
 
 ScopedWebInputEventWithLatencyInfo::ScopedWebInputEventWithLatencyInfo(
-    ui::ScopedWebInputEvent event,
+    blink::WebScopedInputEvent event,
     const ui::LatencyInfo& latency_info)
-    : event_(std::move(event)), latency_(latency_info) {
-}
+    : event_(new blink::WebCoalescedInputEvent(std::move(event))),
+      latency_(latency_info) {}
 
 ScopedWebInputEventWithLatencyInfo::~ScopedWebInputEventWithLatencyInfo() {}
 
@@ -29,9 +29,10 @@ void ScopedWebInputEventWithLatencyInfo::CoalesceWith(
 
   // New events get coalesced into older events, and the newer timestamp
   // should always be preserved.
-  const double time_stamp_seconds = other.event().timeStampSeconds;
-  ui::Coalesce(other.event(), event_.get());
-  event_->timeStampSeconds = time_stamp_seconds;
+  const double time_stamp_seconds = other.event().timeStampSeconds();
+  ui::Coalesce(other.event(), event_->eventPointer());
+  event_->eventPointer()->setTimeStampSeconds(time_stamp_seconds);
+  event_->addCoalescedEvent(other.event());
 
   // When coalescing two input events, we keep the oldest LatencyInfo
   // since it will represent the longest latency.
@@ -40,10 +41,15 @@ void ScopedWebInputEventWithLatencyInfo::CoalesceWith(
 }
 
 const blink::WebInputEvent& ScopedWebInputEventWithLatencyInfo::event() const {
-  return *event_;
+  return event_->event();
 }
 
 blink::WebInputEvent& ScopedWebInputEventWithLatencyInfo::event() {
+  return *event_->eventPointer();
+}
+
+const blink::WebCoalescedInputEvent&
+ScopedWebInputEventWithLatencyInfo::coalesced_event() const {
   return *event_;
 }
 

@@ -44,6 +44,8 @@ String messageSourceValue(MessageSource source) {
       return protocol::Log::LogEntry::SourceEnum::Worker;
     case ViolationMessageSource:
       return protocol::Log::LogEntry::SourceEnum::Violation;
+    case InterventionMessageSource:
+      return protocol::Log::LogEntry::SourceEnum::Intervention;
     default:
       return protocol::Log::LogEntry::SourceEnum::Other;
   }
@@ -51,18 +53,16 @@ String messageSourceValue(MessageSource source) {
 
 String messageLevelValue(MessageLevel level) {
   switch (level) {
-    case DebugMessageLevel:
-      return protocol::Log::LogEntry::LevelEnum::Debug;
-    case LogMessageLevel:
-      return protocol::Log::LogEntry::LevelEnum::Log;
+    case VerboseMessageLevel:
+      return protocol::Log::LogEntry::LevelEnum::Verbose;
+    case InfoMessageLevel:
+      return protocol::Log::LogEntry::LevelEnum::Info;
     case WarningMessageLevel:
       return protocol::Log::LogEntry::LevelEnum::Warning;
     case ErrorMessageLevel:
       return protocol::Log::LogEntry::LevelEnum::Error;
-    case InfoMessageLevel:
-      return protocol::Log::LogEntry::LevelEnum::Info;
   }
-  return protocol::Log::LogEntry::LevelEnum::Log;
+  return protocol::Log::LogEntry::LevelEnum::Info;
 }
 
 }  // namespace
@@ -212,7 +212,7 @@ void InspectorLogAgent::reportLongLayout(double duration) {
       String::format("Forced reflow while executing JavaScript took %ldms",
                      lround(duration * 1000));
   ConsoleMessage* message = ConsoleMessage::create(
-      ViolationMessageSource, WarningMessageLevel, messageText);
+      ViolationMessageSource, VerboseMessageLevel, messageText);
   consoleMessageAdded(message);
 }
 
@@ -221,7 +221,7 @@ void InspectorLogAgent::reportGenericViolation(PerformanceMonitor::Violation,
                                                double time,
                                                SourceLocation* location) {
   ConsoleMessage* message = ConsoleMessage::create(
-      ViolationMessageSource, WarningMessageLevel, text, location->clone());
+      ViolationMessageSource, VerboseMessageLevel, text, location->clone());
   consoleMessageAdded(message);
 };
 

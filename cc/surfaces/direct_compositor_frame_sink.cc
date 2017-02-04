@@ -82,8 +82,7 @@ void DirectCompositorFrameSink::DetachFromClient() {
   // Unregister the SurfaceFactoryClient here instead of the dtor so that only
   // one client is alive for this namespace at any given time.
   surface_manager_->UnregisterSurfaceFactoryClient(frame_sink_id_);
-  if (delegated_local_frame_id_.is_valid())
-    factory_.Destroy(delegated_local_frame_id_);
+  factory_.EvictSurface();
 
   CompositorFrameSink::DetachFromClient();
 }
@@ -91,25 +90,21 @@ void DirectCompositorFrameSink::DetachFromClient() {
 void DirectCompositorFrameSink::SubmitCompositorFrame(CompositorFrame frame) {
   gfx::Size frame_size = frame.render_pass_list.back()->output_rect.size();
   if (frame_size.IsEmpty() || frame_size != last_swap_frame_size_) {
-    if (delegated_local_frame_id_.is_valid()) {
-      factory_.Destroy(delegated_local_frame_id_);
-    }
-    delegated_local_frame_id_ = surface_id_allocator_.GenerateId();
-    factory_.Create(delegated_local_frame_id_);
+    delegated_local_surface_id_ = surface_id_allocator_.GenerateId();
     last_swap_frame_size_ = frame_size;
   }
-  display_->SetLocalFrameId(delegated_local_frame_id_,
-                            frame.metadata.device_scale_factor);
+  display_->SetLocalSurfaceId(delegated_local_surface_id_,
+                              frame.metadata.device_scale_factor);
 
   factory_.SubmitCompositorFrame(
-      delegated_local_frame_id_, std::move(frame),
+      delegated_local_surface_id_, std::move(frame),
       base::Bind(&DirectCompositorFrameSink::DidDrawCallback,
                  base::Unretained(this)));
 }
 
 void DirectCompositorFrameSink::ForceReclaimResources() {
-  if (delegated_local_frame_id_.is_valid())
-    factory_.ClearSurface(delegated_local_frame_id_);
+  if (delegated_local_surface_id_.is_valid())
+    factory_.ClearSurface();
 }
 
 void DirectCompositorFrameSink::ReturnResources(

@@ -5,6 +5,7 @@
 #include "components/reading_list/ios/reading_list_entry.h"
 
 #include "base/memory/ptr_util.h"
+#include "base/test/ios/wait_util.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "components/reading_list/ios/proto/reading_list.pb.h"
 #include "components/sync/protocol/reading_list_specifics.pb.h"
@@ -44,14 +45,40 @@ TEST(ReadingListEntry, MovesAreEquals) {
   EXPECT_EQ(e3.Title(), e2.Title());
 }
 
+TEST(ReadingListEntry, ReadState) {
+  ReadingListEntry e(GURL("http://example.com"), "bar");
+  EXPECT_FALSE(e.HasBeenSeen());
+  EXPECT_FALSE(e.IsRead());
+  e.SetRead(false);
+  EXPECT_TRUE(e.HasBeenSeen());
+  EXPECT_FALSE(e.IsRead());
+  e.SetRead(true);
+  EXPECT_TRUE(e.HasBeenSeen());
+  EXPECT_TRUE(e.IsRead());
+}
+
+TEST(ReadingListEntry, UpdateTitle) {
+  ReadingListEntry e(GURL("http://example.com"), "bar");
+  ASSERT_EQ("bar", e.Title());
+  ASSERT_EQ(e.CreationTime(), e.UpdateTitleTime());
+
+  base::test::ios::SpinRunLoopWithMinDelay(
+      base::TimeDelta::FromMilliseconds(5));
+  e.SetTitle("foo");
+  EXPECT_GT(e.UpdateTitleTime(), e.CreationTime());
+  EXPECT_EQ("foo", e.Title());
+}
+
 TEST(ReadingListEntry, DistilledPathAndURL) {
   ReadingListEntry e(GURL("http://example.com"), "bar");
 
   EXPECT_TRUE(e.DistilledPath().empty());
 
   const base::FilePath distilled_path("distilled/page.html");
-  e.SetDistilledPath(distilled_path);
+  const GURL distilled_url("http://example.com/distilled");
+  e.SetDistilledInfo(distilled_path, distilled_url);
   EXPECT_EQ(distilled_path, e.DistilledPath());
+  EXPECT_EQ(distilled_url, e.DistilledURL());
 }
 
 TEST(ReadingListEntry, DistilledState) {
@@ -63,7 +90,8 @@ TEST(ReadingListEntry, DistilledState) {
   EXPECT_EQ(ReadingListEntry::ERROR, e.DistilledState());
 
   const base::FilePath distilled_path("distilled/page.html");
-  e.SetDistilledPath(distilled_path);
+  const GURL distilled_url("http://example.com/distilled");
+  e.SetDistilledInfo(distilled_path, distilled_url);
   EXPECT_EQ(ReadingListEntry::PROCESSED, e.DistilledState());
 }
 
@@ -155,7 +183,9 @@ TEST(ReadingListEntry, ResetTimeUntilNextTry) {
               kFirstBackoff * fuzzing);
 
   // Action.
-  e.SetDistilledPath(base::FilePath("distilled/page.html"));
+  const base::FilePath distilled_path("distilled/page.html");
+  const GURL distilled_url("http://example.com/distilled");
+  e.SetDistilledInfo(distilled_path, distilled_url);
 
   // Test.
   EXPECT_EQ(0, e.TimeUntilNextTry().InSeconds());
@@ -192,18 +222,18 @@ TEST(ReadingListEntry, AsReadingListSpecifics) {
   int64_t creation_time_us = entry.UpdateTime();
 
   std::unique_ptr<sync_pb::ReadingListSpecifics> pb_entry(
-      entry.AsReadingListSpecifics(false));
+      entry.AsReadingListSpecifics());
   EXPECT_EQ(pb_entry->entry_id(), "http://example.com/");
   EXPECT_EQ(pb_entry->url(), "http://example.com/");
   EXPECT_EQ(pb_entry->title(), "bar");
   EXPECT_EQ(pb_entry->creation_time_us(), creation_time_us);
   EXPECT_EQ(pb_entry->update_time_us(), entry.UpdateTime());
-  EXPECT_EQ(pb_entry->status(), sync_pb::ReadingListSpecifics::UNREAD);
+  EXPECT_EQ(pb_entry->status(), sync_pb::ReadingListSpecifics::UNSEEN);
 
-  entry.MarkEntryUpdated();
+  entry.SetRead(true);
   EXPECT_NE(entry.UpdateTime(), creation_time_us);
   std::unique_ptr<sync_pb::ReadingListSpecifics> updated_pb_entry(
-      entry.AsReadingListSpecifics(true));
+      entry.AsReadingListSpecifics());
   EXPECT_EQ(updated_pb_entry->creation_time_us(), creation_time_us);
   EXPECT_EQ(updated_pb_entry->update_time_us(), entry.UpdateTime());
   EXPECT_EQ(updated_pb_entry->status(), sync_pb::ReadingListSpecifics::READ);
@@ -236,13 +266,13 @@ TEST(ReadingListEntry, AsReadingListLocal) {
   int64_t creation_time_us = entry.UpdateTime();
 
   std::unique_ptr<reading_list::ReadingListLocal> pb_entry(
-      entry.AsReadingListLocal(false));
+      entry.AsReadingListLocal());
   EXPECT_EQ(pb_entry->entry_id(), "http://example.com/");
   EXPECT_EQ(pb_entry->url(), "http://example.com/");
   EXPECT_EQ(pb_entry->title(), "bar");
   EXPECT_EQ(pb_entry->creation_time_us(), creation_time_us);
   EXPECT_EQ(pb_entry->update_time_us(), entry.UpdateTime());
-  EXPECT_EQ(pb_entry->status(), reading_list::ReadingListLocal::UNREAD);
+  EXPECT_EQ(pb_entry->status(), reading_list::ReadingListLocal::UNSEEN);
   EXPECT_EQ(pb_entry->distillation_state(),
             reading_list::ReadingListLocal::WAITING);
   EXPECT_EQ(pb_entry->distilled_path(), "");
@@ -251,16 +281,19 @@ TEST(ReadingListEntry, AsReadingListLocal) {
 
   entry.SetDistilledState(ReadingListEntry::WILL_RETRY);
   std::unique_ptr<reading_list::ReadingListLocal> will_retry_pb_entry(
-      entry.AsReadingListLocal(true));
+      entry.AsReadingListLocal());
   EXPECT_EQ(will_retry_pb_entry->distillation_state(),
             reading_list::ReadingListLocal::WILL_RETRY);
   EXPECT_EQ(will_retry_pb_entry->failed_download_counter(), 1);
 
-  entry.SetDistilledPath(base::FilePath("distilled/page.html"));
+  const base::FilePath distilled_path("distilled/page.html");
+  const GURL distilled_url("http://example.com/distilled");
+  entry.SetDistilledInfo(distilled_path, distilled_url);
+  entry.SetRead(true);
   entry.MarkEntryUpdated();
   EXPECT_NE(entry.UpdateTime(), creation_time_us);
   std::unique_ptr<reading_list::ReadingListLocal> distilled_pb_entry(
-      entry.AsReadingListLocal(true));
+      entry.AsReadingListLocal());
   EXPECT_EQ(distilled_pb_entry->creation_time_us(), creation_time_us);
   EXPECT_EQ(distilled_pb_entry->update_time_us(), entry.UpdateTime());
   EXPECT_NE(distilled_pb_entry->backoff(), "");
@@ -278,7 +311,7 @@ TEST(ReadingListEntry, FromReadingListLocal) {
   base::Time next_call = base::Time::Now() + entry.TimeUntilNextTry();
 
   std::unique_ptr<reading_list::ReadingListLocal> pb_entry(
-      entry.AsReadingListLocal(false));
+      entry.AsReadingListLocal());
 
   pb_entry->set_entry_id("http://example.com/");
   pb_entry->set_url("http://example.com/");
@@ -303,25 +336,28 @@ TEST(ReadingListEntry, FromReadingListLocal) {
   EXPECT_NEAR(delta.InMillisecondsRoundedUp(), 0, 10);
 }
 
-// Tests that the merging of two ReadingListEntry.
-TEST(ReadingListEntry, MergeLocalStateFrom) {
+// Tests the merging of two ReadingListEntry.
+// Additional merging tests are done in
+// ReadingListStoreTest.CompareEntriesForSync
+TEST(ReadingListEntry, MergeWithEntry) {
   ReadingListEntry local_entry(GURL("http://example.com/"), "title");
+  local_entry.SetDistilledState(ReadingListEntry::ERROR);
   base::Time next_call = base::Time::Now() + local_entry.TimeUntilNextTry();
   int64_t local_update_time_us = local_entry.UpdateTime();
-  local_entry.SetDistilledPath(base::FilePath("distilled/page.html"));
 
-  ReadingListEntry sync_entry(GURL("http://example2.com/"), "title2");
+  ReadingListEntry sync_entry(GURL("http://example.com/"), "title2");
   sync_entry.SetDistilledState(ReadingListEntry::ERROR);
   int64_t sync_update_time_us = sync_entry.UpdateTime();
   EXPECT_NE(local_update_time_us, sync_update_time_us);
-  sync_entry.MergeLocalStateFrom(local_entry);
-  EXPECT_EQ(sync_entry.URL().spec(), "http://example2.com/");
-  EXPECT_EQ(sync_entry.Title(), "title2");
-  EXPECT_EQ(sync_entry.UpdateTime(), sync_update_time_us);
-  EXPECT_EQ(sync_entry.FailedDownloadCounter(), 0);
-  EXPECT_EQ(sync_entry.DistilledState(), ReadingListEntry::PROCESSED);
-  EXPECT_EQ(sync_entry.DistilledPath().value(), "distilled/page.html");
-  base::Time sync_next_call = base::Time::Now() + sync_entry.TimeUntilNextTry();
-  base::TimeDelta delta = next_call - sync_next_call;
+  local_entry.MergeWithEntry(sync_entry);
+  EXPECT_EQ(local_entry.URL().spec(), "http://example.com/");
+  EXPECT_EQ(local_entry.Title(), "title2");
+  EXPECT_FALSE(local_entry.HasBeenSeen());
+  EXPECT_EQ(local_entry.UpdateTime(), sync_update_time_us);
+  EXPECT_EQ(local_entry.FailedDownloadCounter(), 1);
+  EXPECT_EQ(local_entry.DistilledState(), ReadingListEntry::ERROR);
+  base::Time merge_next_call =
+      base::Time::Now() + local_entry.TimeUntilNextTry();
+  base::TimeDelta delta = merge_next_call - next_call;
   EXPECT_NEAR(delta.InMillisecondsRoundedUp(), 0, 10);
 }

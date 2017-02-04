@@ -9,7 +9,6 @@
 
 #import "ios/web/net/crw_request_tracker_delegate.h"
 #import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/web_state/crw_web_user_interface_delegate.h"
 #import "ios/web/public/web_state/js/crw_js_injection_evaluator.h"
 #import "ios/web/public/web_state/ui/crw_web_delegate.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
@@ -44,15 +43,8 @@ extern NSString* const kContainerViewID;
 @protocol CRWWebViewProxy;
 class GURL;
 
-namespace base {
-class Value;
-}
-
 namespace web {
-class BrowserState;
-struct Referrer;
 class WebState;
-class WebInterstitialImpl;
 class WebStateImpl;
 }
 
@@ -64,7 +56,6 @@ class WebStateImpl;
 // This is an abstract class which must not be instantiated directly.
 // TODO(stuartmorgan): Move all of the navigation APIs out of this class.
 @interface CRWWebController : NSObject<CRWJSInjectionEvaluator,
-                                       CRWRequestTrackerDelegate,
                                        CRWTouchTrackingDelegate,
                                        UIGestureRecognizerDelegate>
 
@@ -73,7 +64,6 @@ class WebStateImpl;
 @property(nonatomic, assign) BOOL webUsageEnabled;
 
 @property(nonatomic, assign) id<CRWWebDelegate> delegate;
-@property(nonatomic, weak) id<CRWWebUserInterfaceDelegate> UIDelegate;
 @property(nonatomic, assign) id<CRWNativeContentProvider> nativeProvider;
 @property(nonatomic, assign)
     id<CRWSwipeRecognizerProvider> swipeRecognizerProvider;
@@ -231,6 +221,10 @@ class WebStateImpl;
 
 // Notifies the CRWWebController that it has been shown.
 - (void)wasShown;
+
+// Notifies the CRWWebController that the current page is an HTTP page
+// containing a password field.
+- (void)didShowPasswordInputOnHTTP;
 
 // Notifies the CRWWebController that it has been hidden.
 - (void)wasHidden;

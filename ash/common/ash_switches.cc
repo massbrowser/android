@@ -34,11 +34,9 @@ const char kAshDeveloperShortcuts[] = "ash-dev-shortcuts";
 const char kAshDisableMaximizeModeWindowBackdrop[] =
     "ash-disable-maximize-mode-window-backdrop";
 
-#if defined(OS_CHROMEOS)
 // Disable the support for WebContents to lock the screen orientation.
 const char kAshDisableScreenOrientationLock[] =
     "ash-disable-screen-orientation-lock";
-#endif
 
 // Disable the Touch Exploration Mode. Touch Exploration Mode will no longer be
 // turned on automatically when spoken feedback is enabled when this flag is
@@ -46,7 +44,6 @@ const char kAshDisableScreenOrientationLock[] =
 const char kAshDisableTouchExplorationMode[] =
     "ash-disable-touch-exploration-mode";
 
-#if defined(OS_CHROMEOS)
 // Enables fullscreen app list if Ash is in maximize mode.
 const char kAshEnableFullscreenAppList[] = "ash-enable-fullscreen-app-list";
 
@@ -61,22 +58,15 @@ const char kAshEnablePalette[] = "ash-enable-palette";
 const char kAshEnablePaletteOnAllDisplays[] =
     "ash-enable-palette-on-all-displays";
 
-// Enables tablet power button behavior for convertible/tablet devices.
-// TODO(warx): Enable or remove this switch once crbug.com/633304 is fully
-// finished.
-const char kAshEnableTabletPowerButton[] = "ash-enable-tablet-power-button";
-#endif
+// Enables docking windows to the right or left (not to be confused with snapped
+// windows).
+const char kAshEnableDockedWindows[] = "ash-enable-docked-windows";
 
 // Enables the observation of accelerometer events to enter touch-view mode.
 const char kAshEnableTouchView[] = "enable-touchview";
 
 // Enables mirrored screen.
 const char kAshEnableMirroredScreen[] = "ash-enable-mirrored-screen";
-
-// Enables touch view testing.
-// TODO(skuhne): Remove DEBUG_TOGGLE_TOUCH_VIEW accelerator once this flag is
-// removed.
-const char kAshEnableTouchViewTesting[] = "ash-enable-touch-view-testing";
 
 // Hides notifications that are irrelevant to Chrome OS device factory testing,
 // such as battery level updates.
@@ -99,7 +89,6 @@ const char kAshTouchHud[] = "ash-touch-hud";
 // instead of displaying an interactive animation.
 const char kAuraLegacyPowerButton[] = "aura-legacy-power-button";
 
-#if defined(OS_CHROMEOS)
 // Constrains the pointer movement within a root window on desktop.
 bool ConstrainPointerToRoot() {
   const char kAshConstrainPointerToRoot[] = "ash-constrain-pointer-to-root";
@@ -109,7 +98,10 @@ bool ConstrainPointerToRoot() {
              kAshConstrainPointerToRoot);
 }
 
-#endif
+bool DockedWindowsEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      ash::switches::kAshEnableDockedWindows);
+}
 
 }  // namespace switches
 }  // namespace ash

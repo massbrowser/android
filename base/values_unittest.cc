@@ -17,6 +17,197 @@
 
 namespace base {
 
+// Group of tests for the value constructors.
+TEST(ValuesTest, ConstructBool) {
+  FundamentalValue true_value(true);
+  EXPECT_EQ(Value::Type::BOOLEAN, true_value.type());
+  EXPECT_TRUE(true_value.GetBool());
+
+  FundamentalValue false_value(false);
+  EXPECT_EQ(Value::Type::BOOLEAN, false_value.type());
+  EXPECT_FALSE(false_value.GetBool());
+}
+
+TEST(ValuesTest, ConstructInt) {
+  FundamentalValue value(-37);
+  EXPECT_EQ(Value::Type::INTEGER, value.type());
+  EXPECT_EQ(-37, value.GetInt());
+}
+
+TEST(ValuesTest, ConstructDouble) {
+  FundamentalValue value(-4.655);
+  EXPECT_EQ(Value::Type::DOUBLE, value.type());
+  EXPECT_EQ(-4.655, value.GetDouble());
+}
+
+TEST(ValuesTest, ConstructStringFromConstCharPtr) {
+  const char* str = "foobar";
+  StringValue value(str);
+  EXPECT_EQ(Value::Type::STRING, value.type());
+  EXPECT_EQ("foobar", value.GetString());
+}
+
+TEST(ValuesTest, ConstructStringFromStdStringConstRef) {
+  std::string str = "foobar";
+  StringValue value(str);
+  EXPECT_EQ(Value::Type::STRING, value.type());
+  EXPECT_EQ("foobar", value.GetString());
+}
+
+TEST(ValuesTest, ConstructStringFromStdStringRefRef) {
+  std::string str = "foobar";
+  StringValue value(std::move(str));
+  EXPECT_EQ(Value::Type::STRING, value.type());
+  EXPECT_EQ("foobar", value.GetString());
+}
+
+TEST(ValuesTest, ConstructStringFromConstChar16Ptr) {
+  string16 str = ASCIIToUTF16("foobar");
+  StringValue value(str.c_str());
+  EXPECT_EQ(Value::Type::STRING, value.type());
+  EXPECT_EQ("foobar", value.GetString());
+}
+
+TEST(ValuesTest, ConstructStringFromString16) {
+  string16 str = ASCIIToUTF16("foobar");
+  StringValue value(str);
+  EXPECT_EQ(Value::Type::STRING, value.type());
+  EXPECT_EQ("foobar", value.GetString());
+}
+
+TEST(ValuesTest, ConstructStringFromStringPiece) {
+  StringPiece str = "foobar";
+  StringValue value(str);
+  EXPECT_EQ(Value::Type::STRING, value.type());
+  EXPECT_EQ("foobar", value.GetString());
+}
+
+// Group of tests for the copy constructors and copy-assigmnent. For equality
+// checks comparisons of the interesting fields are done instead of relying on
+// Equals being correct.
+TEST(ValuesTest, CopyBool) {
+  FundamentalValue true_value(true);
+  FundamentalValue copied_true_value(true_value);
+  EXPECT_EQ(true_value.type(), copied_true_value.type());
+  EXPECT_EQ(true_value.GetBool(), copied_true_value.GetBool());
+
+  FundamentalValue false_value(false);
+  FundamentalValue copied_false_value(false_value);
+  EXPECT_EQ(false_value.type(), copied_false_value.type());
+  EXPECT_EQ(false_value.GetBool(), copied_false_value.GetBool());
+
+  Value blank;
+
+  blank = true_value;
+  EXPECT_EQ(true_value.type(), blank.type());
+  EXPECT_EQ(true_value.GetBool(), blank.GetBool());
+
+  blank = false_value;
+  EXPECT_EQ(false_value.type(), blank.type());
+  EXPECT_EQ(false_value.GetBool(), blank.GetBool());
+}
+
+TEST(ValuesTest, CopyInt) {
+  FundamentalValue value(74);
+  FundamentalValue copied_value(value);
+  EXPECT_EQ(value.type(), copied_value.type());
+  EXPECT_EQ(value.GetInt(), copied_value.GetInt());
+
+  Value blank;
+
+  blank = value;
+  EXPECT_EQ(value.type(), blank.type());
+  EXPECT_EQ(value.GetInt(), blank.GetInt());
+}
+
+TEST(ValuesTest, CopyDouble) {
+  FundamentalValue value(74.896);
+  FundamentalValue copied_value(value);
+  EXPECT_EQ(value.type(), copied_value.type());
+  EXPECT_EQ(value.GetDouble(), copied_value.GetDouble());
+
+  Value blank;
+
+  blank = value;
+  EXPECT_EQ(value.type(), blank.type());
+  EXPECT_EQ(value.GetDouble(), blank.GetDouble());
+}
+
+TEST(ValuesTest, CopyString) {
+  StringValue value("foobar");
+  StringValue copied_value(value);
+  EXPECT_EQ(value.type(), copied_value.type());
+  EXPECT_EQ(value.GetString(), copied_value.GetString());
+
+  Value blank;
+
+  blank = value;
+  EXPECT_EQ(value.type(), blank.type());
+  EXPECT_EQ(value.GetString(), blank.GetString());
+}
+
+// Group of tests for the move constructors and move-assigmnent.
+TEST(ValuesTest, MoveBool) {
+  FundamentalValue true_value(true);
+  FundamentalValue moved_true_value(std::move(true_value));
+  EXPECT_EQ(Value::Type::BOOLEAN, moved_true_value.type());
+  EXPECT_TRUE(moved_true_value.GetBool());
+
+  FundamentalValue false_value(false);
+  FundamentalValue moved_false_value(std::move(false_value));
+  EXPECT_EQ(Value::Type::BOOLEAN, moved_false_value.type());
+  EXPECT_FALSE(moved_false_value.GetBool());
+
+  Value blank;
+
+  blank = FundamentalValue(true);
+  EXPECT_EQ(Value::Type::BOOLEAN, blank.type());
+  EXPECT_TRUE(blank.GetBool());
+
+  blank = FundamentalValue(false);
+  EXPECT_EQ(Value::Type::BOOLEAN, blank.type());
+  EXPECT_FALSE(blank.GetBool());
+}
+
+TEST(ValuesTest, MoveInt) {
+  FundamentalValue value(74);
+  FundamentalValue moved_value(std::move(value));
+  EXPECT_EQ(Value::Type::INTEGER, moved_value.type());
+  EXPECT_EQ(74, moved_value.GetInt());
+
+  Value blank;
+
+  blank = FundamentalValue(47);
+  EXPECT_EQ(Value::Type::INTEGER, blank.type());
+  EXPECT_EQ(47, blank.GetInt());
+}
+
+TEST(ValuesTest, MoveDouble) {
+  FundamentalValue value(74.896);
+  FundamentalValue moved_value(std::move(value));
+  EXPECT_EQ(Value::Type::DOUBLE, moved_value.type());
+  EXPECT_EQ(74.896, moved_value.GetDouble());
+
+  Value blank;
+
+  blank = FundamentalValue(654.38);
+  EXPECT_EQ(Value::Type::DOUBLE, blank.type());
+  EXPECT_EQ(654.38, blank.GetDouble());
+}
+
+TEST(ValuesTest, MoveString) {
+  StringValue value("foobar");
+  StringValue moved_value(std::move(value));
+  EXPECT_EQ(Value::Type::STRING, moved_value.type());
+  EXPECT_EQ("foobar", moved_value.GetString());
+
+  Value blank;
+
+  blank = StringValue("foobar");
+  EXPECT_EQ(Value::Type::STRING, blank.type());
+  EXPECT_EQ("foobar", blank.GetString());
+}
+
 TEST(ValuesTest, Basic) {
   // Test basic dictionary getting/setting
   DictionaryValue settings;
@@ -145,10 +336,10 @@ TEST(ValuesTest, StringValue) {
   // Test overloaded StringValue constructor.
   std::unique_ptr<Value> narrow_value(new StringValue("narrow"));
   ASSERT_TRUE(narrow_value.get());
-  ASSERT_TRUE(narrow_value->IsType(Value::TYPE_STRING));
+  ASSERT_TRUE(narrow_value->IsType(Value::Type::STRING));
   std::unique_ptr<Value> utf16_value(new StringValue(ASCIIToUTF16("utf16")));
   ASSERT_TRUE(utf16_value.get());
-  ASSERT_TRUE(utf16_value->IsType(Value::TYPE_STRING));
+  ASSERT_TRUE(utf16_value->IsType(Value::Type::STRING));
 
   // Test overloaded GetAsString.
   std::string narrow = "http://google.com";
@@ -179,7 +370,7 @@ TEST(ValuesTest, StringValue) {
 // properly deleted by modifying the value of external flag on destruction.
 class DeletionTestValue : public Value {
  public:
-  explicit DeletionTestValue(bool* deletion_flag) : Value(TYPE_NULL) {
+  explicit DeletionTestValue(bool* deletion_flag) : Value(Type::NONE) {
     Init(deletion_flag);  // Separate function so that we can use ASSERT_*
   }
 
@@ -343,7 +534,7 @@ TEST(ValuesTest, DictionaryWithoutPathExpansion) {
   EXPECT_FALSE(dict.Get("this.isnt.expanded", &value3));
   Value* value4;
   ASSERT_TRUE(dict.GetWithoutPathExpansion("this.isnt.expanded", &value4));
-  EXPECT_EQ(Value::TYPE_NULL, value4->GetType());
+  EXPECT_EQ(Value::Type::NONE, value4->GetType());
 }
 
 // Tests the deprecated version of SetWithoutPathExpansion.
@@ -367,7 +558,7 @@ TEST(ValuesTest, DictionaryWithoutPathExpansionDeprecated) {
   EXPECT_FALSE(dict.Get("this.isnt.expanded", &value3));
   Value* value4;
   ASSERT_TRUE(dict.GetWithoutPathExpansion("this.isnt.expanded", &value4));
-  EXPECT_EQ(Value::TYPE_NULL, value4->GetType());
+  EXPECT_EQ(Value::Type::NONE, value4->GetType());
 }
 
 TEST(ValuesTest, DictionaryRemovePath) {
@@ -378,7 +569,7 @@ TEST(ValuesTest, DictionaryRemovePath) {
   std::unique_ptr<Value> removed_item;
   EXPECT_TRUE(dict.RemovePath("a.long.way.down", &removed_item));
   ASSERT_TRUE(removed_item);
-  EXPECT_TRUE(removed_item->IsType(base::Value::TYPE_INTEGER));
+  EXPECT_TRUE(removed_item->IsType(base::Value::Type::INTEGER));
   EXPECT_FALSE(dict.HasKey("a.long.way.down"));
   EXPECT_FALSE(dict.HasKey("a.long.way"));
   EXPECT_TRUE(dict.Get("a.long.key.path", NULL));
@@ -391,7 +582,7 @@ TEST(ValuesTest, DictionaryRemovePath) {
   removed_item.reset();
   EXPECT_TRUE(dict.RemovePath("a.long.key.path", &removed_item));
   ASSERT_TRUE(removed_item);
-  EXPECT_TRUE(removed_item->IsType(base::Value::TYPE_BOOLEAN));
+  EXPECT_TRUE(removed_item->IsType(base::Value::Type::BOOLEAN));
   EXPECT_TRUE(dict.empty());
 }
 
@@ -450,13 +641,13 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_dict->Get("null", &copy_null));
   ASSERT_TRUE(copy_null);
   ASSERT_NE(copy_null, original_null);
-  ASSERT_TRUE(copy_null->IsType(Value::TYPE_NULL));
+  ASSERT_TRUE(copy_null->IsType(Value::Type::NONE));
 
   Value* copy_bool = NULL;
   ASSERT_TRUE(copy_dict->Get("bool", &copy_bool));
   ASSERT_TRUE(copy_bool);
   ASSERT_NE(copy_bool, original_bool);
-  ASSERT_TRUE(copy_bool->IsType(Value::TYPE_BOOLEAN));
+  ASSERT_TRUE(copy_bool->IsType(Value::Type::BOOLEAN));
   bool copy_bool_value = false;
   ASSERT_TRUE(copy_bool->GetAsBoolean(&copy_bool_value));
   ASSERT_TRUE(copy_bool_value);
@@ -465,7 +656,7 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_dict->Get("int", &copy_int));
   ASSERT_TRUE(copy_int);
   ASSERT_NE(copy_int, original_int);
-  ASSERT_TRUE(copy_int->IsType(Value::TYPE_INTEGER));
+  ASSERT_TRUE(copy_int->IsType(Value::Type::INTEGER));
   int copy_int_value = 0;
   ASSERT_TRUE(copy_int->GetAsInteger(&copy_int_value));
   ASSERT_EQ(42, copy_int_value);
@@ -474,7 +665,7 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_dict->Get("double", &copy_double));
   ASSERT_TRUE(copy_double);
   ASSERT_NE(copy_double, original_double);
-  ASSERT_TRUE(copy_double->IsType(Value::TYPE_DOUBLE));
+  ASSERT_TRUE(copy_double->IsType(Value::Type::DOUBLE));
   double copy_double_value = 0;
   ASSERT_TRUE(copy_double->GetAsDouble(&copy_double_value));
   ASSERT_EQ(3.14, copy_double_value);
@@ -483,7 +674,7 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_dict->Get("string", &copy_string));
   ASSERT_TRUE(copy_string);
   ASSERT_NE(copy_string, original_string);
-  ASSERT_TRUE(copy_string->IsType(Value::TYPE_STRING));
+  ASSERT_TRUE(copy_string->IsType(Value::Type::STRING));
   std::string copy_string_value;
   string16 copy_string16_value;
   ASSERT_TRUE(copy_string->GetAsString(&copy_string_value));
@@ -495,7 +686,7 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_dict->Get("string16", &copy_string16));
   ASSERT_TRUE(copy_string16);
   ASSERT_NE(copy_string16, original_string16);
-  ASSERT_TRUE(copy_string16->IsType(Value::TYPE_STRING));
+  ASSERT_TRUE(copy_string16->IsType(Value::Type::STRING));
   ASSERT_TRUE(copy_string16->GetAsString(&copy_string_value));
   ASSERT_TRUE(copy_string16->GetAsString(&copy_string16_value));
   ASSERT_EQ(std::string("hello16"), copy_string_value);
@@ -505,7 +696,7 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_dict->Get("binary", &copy_binary));
   ASSERT_TRUE(copy_binary);
   ASSERT_NE(copy_binary, original_binary);
-  ASSERT_TRUE(copy_binary->IsType(Value::TYPE_BINARY));
+  ASSERT_TRUE(copy_binary->IsType(Value::Type::BINARY));
   ASSERT_NE(original_binary->GetBuffer(),
     static_cast<BinaryValue*>(copy_binary)->GetBuffer());
   ASSERT_EQ(original_binary->GetSize(),
@@ -518,7 +709,7 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_dict->Get("list", &copy_value));
   ASSERT_TRUE(copy_value);
   ASSERT_NE(copy_value, original_list);
-  ASSERT_TRUE(copy_value->IsType(Value::TYPE_LIST));
+  ASSERT_TRUE(copy_value->IsType(Value::Type::LIST));
   ListValue* copy_list = NULL;
   ASSERT_TRUE(copy_value->GetAsList(&copy_list));
   ASSERT_TRUE(copy_list);
@@ -544,7 +735,7 @@ TEST(ValuesTest, DeepCopy) {
   ASSERT_TRUE(copy_dict->Get("dictionary", &copy_value));
   ASSERT_TRUE(copy_value);
   ASSERT_NE(copy_value, original_nested_dictionary);
-  ASSERT_TRUE(copy_value->IsType(Value::TYPE_DICTIONARY));
+  ASSERT_TRUE(copy_value->IsType(Value::Type::DICTIONARY));
   DictionaryValue* copy_nested_dictionary = NULL;
   ASSERT_TRUE(copy_value->GetAsDictionary(&copy_nested_dictionary));
   ASSERT_TRUE(copy_nested_dictionary);

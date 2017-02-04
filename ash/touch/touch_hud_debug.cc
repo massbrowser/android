@@ -238,10 +238,10 @@ class TouchHudCanvas : public views::View {
  public:
   explicit TouchHudCanvas(const TouchLog& touch_log)
       : touch_log_(touch_log), scale_(1) {
-    SetPaintToLayer(true);
+    SetPaintToLayer();
     layer()->SetFillsBoundsOpaquely(false);
 
-    paint_.setStyle(SkPaint::kFill_Style);
+    paint_.setStyle(cc::PaintFlags::kFill_Style);
   }
 
   ~TouchHudCanvas() override {}
@@ -304,7 +304,7 @@ class TouchHudCanvas : public views::View {
     }
   }
 
-  SkPaint paint_;
+  cc::PaintFlags paint_;
 
   const TouchLog& touch_log_;
   SkPath paths_[kMaxPaths];

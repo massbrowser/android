@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 
 #include "base/logging.h"
@@ -168,8 +169,7 @@ class SpdyTestDeframerImpl : public SpdyTestDeframer,
                      SpdyStreamId promised_stream_id,
                      bool end) override;
   void OnRstStream(SpdyStreamId stream_id, SpdyRstStreamStatus status) override;
-  bool OnRstStreamFrameData(const char* rst_stream_data, size_t len) override;
-  void OnSetting(SpdySettingsIds id, uint8_t flags, uint32_t value) override;
+  void OnSetting(SpdySettingsIds id, uint32_t value) override;
   void OnSettings(bool clear_persisted) override;
   void OnSettingsAck() override;
   void OnSettingsEnd() override;
@@ -178,13 +178,7 @@ class SpdyTestDeframerImpl : public SpdyTestDeframer,
                          size_t len) override;
   void OnStreamEnd(SpdyStreamId stream_id) override;
   void OnStreamPadding(SpdyStreamId stream_id, size_t len) override;
-  void OnSynReply(SpdyStreamId stream_id, bool fin) override;
-  void OnSynStream(SpdyStreamId stream_id,
-                   SpdyStreamId associated_stream_id,
-                   SpdyPriority priority,
-                   bool fin,
-                   bool unidirectional) override;
-  bool OnUnknownFrame(SpdyStreamId stream_id, int frame_type) override;
+  bool OnUnknownFrame(SpdyStreamId stream_id, uint8_t frame_type) override;
   void OnWindowUpdate(SpdyStreamId stream_id, int delta_window_size) override;
 
   // Callbacks defined in SpdyHeadersHandlerInterface.
@@ -487,7 +481,7 @@ void SpdyTestDeframerImpl::OnDataFrameHeader(SpdyStreamId stream_id,
 // The SpdyFramer will not process any more data at this point.
 void SpdyTestDeframerImpl::OnError(SpdyFramer* framer) {
   DVLOG(1) << "SpdyFramer detected an error in the stream: "
-           << SpdyFramer::ErrorCodeToString(framer->error_code())
+           << SpdyFramer::SpdyFramerErrorToString(framer->spdy_framer_error())
            << "     frame_type_: " << Http2FrameTypeToString(frame_type_);
   listener_->OnError(framer, this);
 }
@@ -515,7 +509,7 @@ bool SpdyTestDeframerImpl::OnGoAwayFrameData(const char* goaway_data,
   CHECK_EQ(frame_type_, GOAWAY) << "   frame_type_="
                                 << Http2FrameTypeToString(frame_type_);
   CHECK(goaway_description_);
-  StringPiece(goaway_data, len).AppendToString(goaway_description_.get());
+  goaway_description_->append(goaway_data, len);
   return true;
 }
 
@@ -629,29 +623,15 @@ void SpdyTestDeframerImpl::OnRstStream(SpdyStreamId stream_id,
   listener_->OnRstStream(MakeUnique<SpdyRstStreamIR>(stream_id, status));
 }
 
-// The HTTP/2 spec states that there is no data in the frame other that the
-// SpdyRstStreamStatus passed to OnRstStream, so it appears that SpdyFramer's
-// comments w.r.t. this method are obsolete. We still receive a zero length
-// invocation when RST_STREAM frame processing completes.
-bool SpdyTestDeframerImpl::OnRstStreamFrameData(const char* rst_stream_data,
-                                                size_t len) {
-  DVLOG(1) << "OnRstStreamFrameData";
-  CHECK_EQ(0u, len);
-  return true;
-}
-
 // Called for an individual setting. There is no negotiation, the sender is
 // stating the value that the sender is using.
-void SpdyTestDeframerImpl::OnSetting(SpdySettingsIds id,
-                                     uint8_t flags,
-                                     uint32_t value) {
-  DVLOG(1) << "OnSetting id: " << id << std::hex << "   flags: " << flags
-           << "    value: " << value;
+void SpdyTestDeframerImpl::OnSetting(SpdySettingsIds id, uint32_t value) {
+  DVLOG(1) << "OnSetting id: " << id << std::hex << "    value: " << value;
   CHECK_EQ(frame_type_, SETTINGS) << "   frame_type_="
                                   << Http2FrameTypeToString(frame_type_);
   CHECK(settings_);
   settings_->push_back(std::make_pair(id, value));
-  settings_ir_->AddSetting(id, true, true, value);
+  settings_ir_->AddSetting(id, value);
 }
 
 // Called at the start of a SETTINGS frame with setting entries, but not the
@@ -716,7 +696,7 @@ void SpdyTestDeframerImpl::OnStreamFrameData(SpdyStreamId stream_id,
            << "    len: " << len;
   CHECK_EQ(stream_id_, stream_id);
   CHECK_EQ(frame_type_, DATA);
-  StringPiece(data, len).AppendToString(data_.get());
+  data_->append(data, len);
 }
 
 // Called when padding is skipped over, including the padding length field at
@@ -732,32 +712,6 @@ void SpdyTestDeframerImpl::OnStreamPadding(SpdyStreamId stream_id, size_t len) {
   CHECK_GE(255u, len);
   padding_len_ += len;
   CHECK_LE(padding_len_, 256u) << "len=" << len;
-}
-
-// Obsolete.
-void SpdyTestDeframerImpl::OnSynStream(SpdyStreamId stream_id,
-                                       SpdyStreamId associated_stream_id,
-                                       SpdyPriority priority,
-                                       bool fin,
-                                       bool unidirectional) {
-  DVLOG(1) << "OnSynStream stream_id: " << stream_id;
-  CHECK_EQ(frame_type_, UNSET) << "   frame_type_="
-                               << Http2FrameTypeToString(frame_type_);
-  frame_type_ = UNKNOWN;
-  stream_id_ = stream_id;
-  fin_ = fin;
-  LOG(DFATAL) << "SYN_STREAM is not a valid HTTP/2 frame type.";
-}
-
-// Obsolete.
-void SpdyTestDeframerImpl::OnSynReply(SpdyStreamId stream_id, bool fin) {
-  DVLOG(1) << "OnSynReply stream_id: " << stream_id;
-  CHECK_EQ(frame_type_, UNSET) << "   frame_type_="
-                               << Http2FrameTypeToString(frame_type_);
-  frame_type_ = UNKNOWN;
-  stream_id_ = stream_id;
-  fin_ = fin;
-  LOG(DFATAL) << "SYN_REPLY is not a valid HTTP/2 frame type.";
 }
 
 // WINDOW_UPDATE is supposed to be hop-by-hop, according to the spec.
@@ -781,7 +735,7 @@ void SpdyTestDeframerImpl::OnWindowUpdate(SpdyStreamId stream_id,
 // of the set of currently open streams. For now we'll assume that unknown
 // frame types are unsupported.
 bool SpdyTestDeframerImpl::OnUnknownFrame(SpdyStreamId stream_id,
-                                          int frame_type) {
+                                          uint8_t frame_type) {
   DVLOG(1) << "OnAltSvc stream_id: " << stream_id;
   CHECK_EQ(frame_type_, UNSET) << "   frame_type_="
                                << Http2FrameTypeToString(frame_type_);

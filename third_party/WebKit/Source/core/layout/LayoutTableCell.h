@@ -157,7 +157,7 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
     // add in the border and padding.
     // Call computedCSSPadding* directly to avoid including implicitPadding.
     if (!document().inQuirksMode() &&
-        style()->boxSizing() != BoxSizingBorderBox)
+        style()->boxSizing() != EBoxSizing::kBorderBox)
       styleLogicalHeight +=
           (computedCSSPaddingBefore() + computedCSSPaddingAfter()).floor() +
           borderBefore() + borderAfter();
@@ -195,9 +195,10 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
   int cellBaselinePosition() const;
   bool isBaselineAligned() const {
     EVerticalAlign va = style()->verticalAlign();
-    return va == VerticalAlignBaseline || va == VerticalAlignTextBottom ||
-           va == VerticalAlignTextTop || va == VerticalAlignSuper ||
-           va == VerticalAlignSub || va == VerticalAlignLength;
+    return va == EVerticalAlign::kBaseline ||
+           va == EVerticalAlign::kTextBottom ||
+           va == EVerticalAlign::kTextTop || va == EVerticalAlign::kSuper ||
+           va == EVerticalAlign::kSub || va == EVerticalAlign::kLength;
   }
 
   // Align the cell in the block direction. This is done by calculating an
@@ -278,7 +279,7 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
     return style()->borderEnd();
   }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   bool isFirstOrLastCellInRow() const {
     return !table()->cellAfter(this) || !table()->cellBefore(this);
   }
@@ -293,7 +294,7 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
   // CollapsedBorderValue.
   class CollapsedBorderValues : public DisplayItemClient {
    public:
-    CollapsedBorderValues(const LayoutTable&,
+    CollapsedBorderValues(const LayoutTableCell&,
                           const CollapsedBorderValue& startBorder,
                           const CollapsedBorderValue& endBorder,
                           const CollapsedBorderValue& beforeBorder,
@@ -311,7 +312,7 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
     LayoutRect visualRect() const;
 
    private:
-    const LayoutTable& m_layoutTable;
+    const LayoutTableCell& m_layoutTableCell;
     CollapsedBorderValue m_startBorder;
     CollapsedBorderValue m_endBorder;
     CollapsedBorderValue m_beforeBorder;
@@ -349,6 +350,8 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
   LayoutBox* locationContainer() const override { return section(); }
 
   void ensureIsReadyForPaintInvalidation() override;
+
+  bool hasLineIfEmpty() const override;
 
  protected:
   void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;

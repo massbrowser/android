@@ -22,6 +22,8 @@ namespace prefs {
 const char kArcApps[] = "arc.apps";
 // A preference to store backup and restore state for Android apps.
 const char kArcBackupRestoreEnabled[] = "arc.backup_restore.enabled";
+// A preference to indicate that Android's data directory should be removed.
+const char kArcDataRemoveRequested[] = "arc.data.remove_requested";
 // A preference to keep Android apps enabled state.
 const char kArcEnabled[] = "arc.enabled";
 // A preference that indicated whether Android reported that it's compliant
@@ -73,6 +75,9 @@ const char kHomePage[] = "homepage";
 // prompt. See triggered_profile_resetter.h for more information.
 const char kLastProfileResetTimestamp[] = "profile.last_reset_timestamp";
 #endif
+
+// The URL to open the new tab page to. Only set by Group Policy.
+const char kNewTabPageLocationOverride[] = "newtab_page_location_override";
 
 // An integer that keeps track of the profile icon version. This allows us to
 // determine the state of the profile icon for icon format changes.
@@ -397,13 +402,13 @@ const char kIncognitoModeAvailability[] = "incognito.mode_availability";
 // Boolean that is true when Suggest support is enabled.
 const char kSearchSuggestEnabled[] = "search.suggest_enabled";
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 // String indicating the Contextual Search enabled state.
 // "false" - opt-out (disabled)
 // "" (empty string) - undecided
 // "true" - opt-in (enabled)
 const char kContextualSearchEnabled[] = "search.contextual_search_enabled";
-#endif
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_MACOSX)
 // Boolean that indicates whether the browser should put up a confirmation
@@ -436,6 +441,9 @@ const char kDnsPrefetchingStartupList[] = "dns_prefetching.startup_list";
 // This list is adaptively grown and pruned.
 const char kDnsPrefetchingHostReferralList[] =
     "dns_prefetching.host_referral_list";
+
+// Controls if the QUIC protocol is allowed.
+const char kQuicAllowed[] = "net.quic_allowed";
 
 // Prefs for persisting HttpServerProperties.
 const char kHttpServerProperties[] = "net.http_server_properties";
@@ -683,6 +691,12 @@ const char kEnableStylusTools[] = "settings.enable_stylus_tools";
 const char kLaunchPaletteOnEjectEvent[] =
     "settings.launch_palette_on_eject_event";
 
+// A string pref that contains either a Chrome app ID (see
+// extensions::ExtensionId) or an Android package name (using Java package
+// naming conventions) of the preferred note-taking app. An empty value
+// indicates that the user hasn't selected an app yet.
+const char kNoteTakingAppId[] = "settings.note_taking_app_id";
+
 // A boolean pref indicating whether user activity has been observed in the
 // current session already. The pref is used to restore information about user
 // activity after browser crashes.
@@ -844,9 +858,9 @@ const char kFileSystemProviderMounted[] = "file_system_provider.mounted";
 // A boolean pref set to true if the virtual keyboard should be enabled.
 const char kTouchVirtualKeyboardEnabled[] = "ui.touch_virtual_keyboard_enabled";
 
-// Boolean prefs for the status of the touch screen and the touchpad.
-const char kTouchScreenEnabled[] = "events.touch_screen.enabled";
-const char kTouchPadEnabled[] = "events.touch_pad.enabled";
+// Boolean prefs for the status of the touchscreen and the touchpad.
+const char kTouchscreenEnabled[] = "events.touch_screen.enabled";
+const char kTouchpadEnabled[] = "events.touch_pad.enabled";
 
 // A boolean pref that controls whether the dark connect feature is enabled.
 // The dark connect feature allows a Chrome OS device to periodically wake
@@ -924,6 +938,16 @@ const char kQuickUnlockModeWhitelist[] = "quick_unlock_mode_whitelist";
 // 2 - day. Users will have to enter their password every day.
 // 3 - week. Users will have to enter their password every week.
 const char kQuickUnlockTimeout[] = "quick_unlock_timeout";
+// Integer prefs indicating the minimum and maximum lengths of the lock screen
+// pin.
+const char kPinUnlockMinimumLength[] = "pin_unlock_minimum_length";
+const char kPinUnlockMaximumLength[] = "pin_unlock_maximum_length";
+// Boolean pref indicating whether users are allowed to set easy pins.
+const char kPinUnlockWeakPinsAllowed[] = "pin_unlock_weak_pins_allowed";
+
+// Boolean pref indicating whether fingerprint unlock is enabled.
+const char kEnableQuickUnlockFingerprint[] =
+    "settings.enable_quick_unlock_fingerprint";
 #endif  // defined(OS_CHROMEOS)
 
 // A boolean pref set to true if a Home button to open the Home pages should be
@@ -1313,6 +1337,11 @@ const char kWebRTCUDPPortRange[] = "webrtc.udp_port_range";
 const char kHasSeenWelcomePage[] = "browser.has_seen_welcome_page";
 #endif
 
+#if defined(OS_WIN)
+// Whether or not this profile has been shown the Win10 promo page.
+const char kHasSeenWin10PromoPage[] = "browser.has_seen_win10_promo_page";
+#endif
+
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
 
@@ -1336,12 +1365,16 @@ const char kProfileCreatedByVersion[] = "profile.created_by_version";
 // them.
 const char kProfileInfoCache[] = "profile.info_cache";
 
+// A list of profile paths that should be deleted on shutdown. The deletion does
+// not happen if the browser crashes, so we remove the profile on next start.
+const char kProfilesDeleted[] = "profiles.profiles_deleted";
+
 // Deprecated preference for metric / crash reporting on Android. Use
 // kMetricsReportingEnabled instead.
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 const char kCrashReportingEnabled[] =
     "user_experience_metrics_crash.reporting_enabled";
-#endif
+#endif  // defined(OS_ANDROID)
 
 // This is the location of a list of dictionaries of plugin stability stats.
 const char kStabilityPluginStats[] =
@@ -1361,7 +1394,7 @@ const char kStabilityKernelCrashCount[] =
 const char kStabilitySystemUncleanShutdownCount[] =
     "user_experience_metrics.stability.system_unclean_shutdowns";
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 // Activity type that is currently in the foreground for the UMA session.
 // Uses the ActivityTypeIds::Type enum.
 const char kStabilityForegroundActivityType[] =
@@ -1382,7 +1415,7 @@ const char kStabilityLaunchedActivityCounts[] =
 // Indexed into by ActivityTypeIds::Type.
 const char kStabilityCrashedActivityCounts[] =
     "user_experience_metrics.stability.crashed_activity_counts";
-#endif
+#endif  // defined(OS_ANDROID)
 
 // The keys below are used for the dictionaries in the
 // kStabilityPluginStats list.
@@ -1414,13 +1447,6 @@ const char kTaskManagerColumnVisibility[] = "task_manager.column_visibility";
 
 // A boolean indicating if ending processes are enabled or disabled by policy.
 const char kTaskManagerEndProcessEnabled[] = "task_manager.end_process_enabled";
-
-#if defined(OS_CHROMEOS)
-// Dictionary indicating current network bandwidth throttling settings.
-// Contains a boolean (is throttling enabled) and two integers (upload rate
-// and download rate in kbits/s to throttle to)
-const char kNetworkThrottlingEnabled[] = "net.throttling_enabled";
-#endif
 
 // A collection of position, size, and other data relating to app windows to
 // restore on startup.
@@ -1510,15 +1536,10 @@ const char kDisablePluginFinder[] = "plugins.disable_plugin_finder";
 // Customized app page names that appear on the New Tab Page.
 const char kNtpAppPageNames[] = "ntp.app_page_names";
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
-// Keeps track of currently open tabs collapsed state in the Other Devices menu.
-const char kNtpCollapsedCurrentlyOpenTabs[] = "ntp.collapsed_open_tabs";
-#endif
-
 // Keeps track of which sessions are collapsed in the Other Devices menu.
 const char kNtpCollapsedForeignSessions[] = "ntp.collapsed_foreign_sessions";
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 // Keeps track of recently closed tabs collapsed state in the Other Devices
 // menu.
 const char kNtpCollapsedRecentlyClosedTabs[] =
@@ -1529,7 +1550,12 @@ const char kNtpCollapsedSnapshotDocument[] = "ntp.collapsed_snapshot_document";
 
 // Keeps track of sync promo collapsed state in the Other Devices menu.
 const char kNtpCollapsedSyncPromo[] = "ntp.collapsed_sync_promo";
-#endif
+
+// Tracks how many notifications the user has ignored, so we can tell when we
+// should stop showing them.
+const char kContentSuggestionsConsecutiveIgnoredPrefName[] =
+    "ntp.content_suggestions.notifications.consecutive_ignored";
+#endif  // defined(OS_ANDROID)
 
 // Which page should be visible on the new tab page v4
 const char kNtpShownPage[] = "ntp.shown_page";
@@ -1812,6 +1838,10 @@ const char kDeviceEnrollmentAutoStart[] = "enrollment.auto_start";
 // Whether the user may exit enrollment.
 const char kDeviceEnrollmentCanExit[] = "enrollment.can_exit";
 
+// DM token fetched from the DM server during enrollment. Stored for Active
+// Directory devices only.
+const char kDeviceDMToken[] = "device_dm_token";
+
 // How many times HID detection OOBE dialog was shown.
 const char kTimesHIDDialogShown[] = "HIDDialog.shown_how_many_times";
 
@@ -1883,6 +1913,14 @@ const char kIsBootstrappingSlave[] = "is_oobe_bootstrapping_slave";
 // A preference that controlles Android status reporting.
 const char kReportArcStatusEnabled[] = "arc.status_reporting_enabled";
 
+// Dictionary indicating current network bandwidth throttling settings.
+// Contains a boolean (is throttling enabled) and two integers (upload rate
+// and download rate in kbits/s to throttle to)
+const char kNetworkThrottlingEnabled[] = "net.throttling_enabled";
+
+// Boolean prefs for the local status of the touchscreen.
+const char kTouchscreenEnabledLocal[] = "events.touch_screen.enabled_local";
+
 #endif  // defined(OS_CHROMEOS)
 
 // Whether there is a Flash version installed that supports clearing LSO data.
@@ -1937,6 +1975,11 @@ const char kSystemTimezoneAutomaticDetectionPolicy[] =
 #if defined(ENABLE_MEDIA_ROUTER)
 // Pref name for the policy controlling whether to enable Media Router.
 const char kEnableMediaRouter[] = "media_router.enable_media_router";
+#if !defined(OS_ANDROID)
+// Pref name for the policy controlling whether to force the Cast icon to be
+// shown in the toolbar/overflow menu.
+const char kShowCastIconInToolbar[] = "media_router.show_cast_icon_in_toolbar";
+#endif  // !defined(OS_ANDROID)
 #endif  // defined(ENABLE_MEDIA_ROUTER)
 
 // *************** SERVICE PREFS ***************
@@ -2184,14 +2227,14 @@ const char kEnableDRM[] = "settings.privacy.drm_enabled";
 const char kWatchdogExtensionActive[] =
     "profile.extensions.activity_log.num_consumers_active";
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 // A list of partner bookmark rename/remove mappings.
 // Each list item is a dictionary containing a "url", a "provider_title" and
 // "mapped_title" entries, detailing the bookmark target URL (if any), the title
 // given by the PartnerBookmarksProvider and either the user-visible renamed
 // title or an empty string if the bookmark node was removed.
 const char kPartnerBookmarkMappings[] = "partnerbookmarks.mappings";
-#endif
+#endif  // defined(OS_ANDROID)
 
 // Whether DNS Quick Check is disabled in proxy resolution.
 //
@@ -2295,6 +2338,9 @@ const char kMediaRouterEnableCloudServices[] =
 // user.
 const char kMediaRouterFirstRunFlowAcknowledged[] =
     "media_router.firstrunflow.acknowledged";
+// A list of website origins on which the user has chosen to use tab mirroring.
+const char kMediaRouterTabMirroringSources[] =
+    "media_router.tab_mirroring_sources";
 #endif
 
 // The base64-encoded representation of the public key to use to validate origin
@@ -2320,6 +2366,26 @@ const char kSearchGeolocationDisclosureShownCount[] =
 // When the disclosure was shown last.
 const char kSearchGeolocationDisclosureLastShowDate[] =
     "search_geolocation_disclosure.last_show_date";
+
+// Whether the metrics for the state of geolocation pre-disclosure being shown
+// have been recorded.
+const char kSearchGeolocationPreDisclosureMetricsRecorded[] =
+    "search_geolocation_pre_disclosure_metrics_recorded";
+
+// Whether the metrics for the state of geolocation post-disclosure being shown
+// have been recorded.
+const char kSearchGeolocationPostDisclosureMetricsRecorded[] =
+    "search_geolocation_post_disclosure_metrics_recorded";
 #endif
+
+// A dictionary which stores whether location access is enabled for the current
+// default search engine, if it is the Google search engine.
+const char kGoogleDSEGeolocationSetting[] = "google_dse_geolocation_setting";
+
+// A dictionary of manifest URLs of Web Share Targets to a dictionary containing
+// attributes of its share_target field found in its manifest. Each key in the
+// dictionary is the name of the attribute, and the value is the corresponding
+// value.
+const char kWebShareVisitedTargets[] = "profile.web_share.visited_targets";
 
 }  // namespace prefs

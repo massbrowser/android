@@ -43,7 +43,20 @@ var FilesMetadataBox = Polymer({
       observer: 'metadataUpdated_',
     },
     mediaTrack: {
-      type: Number,
+      type: String,
+      observer: 'metadataUpdated_',
+    },
+    mediaYearRecorded: {
+      type: String,
+      observer: 'metadataUpdated_',
+    },
+    /**
+     * Exif information parsed by exif_parser.js or null if there is no
+     * information.
+     * @type {?Object}
+     */
+    ifd: {
+      type: Object,
       observer: 'metadataUpdated_',
     },
 
@@ -71,7 +84,9 @@ var FilesMetadataBox = Polymer({
     this.mediaAlbum = '';
     this.mediaDuration = 0;
     this.mediaGenre = '';
-    this.mediaTrack = 0;
+    this.mediaTrack = '';
+    this.mediaYearRecorded = '';
+    this.ifd = null;
 
     this.isSizeLoading = false;
   },
@@ -108,7 +123,8 @@ var FilesMetadataBox = Polymer({
     this.hasFileSpecificInfo_ =
         !!(this.imageWidth && this.imageHeight || this.mediaTitle ||
            this.mediaArtist || this.mediaAlbum || this.mediaDuration ||
-           this.mediaGenre || this.mediaTrack);
+           this.mediaGenre || this.mediaTrack || this.mediaYearRecorded ||
+           this.ifd);
   },
 
   /**
@@ -137,10 +153,97 @@ var FilesMetadataBox = Polymer({
    *
    * @private
    */
-  resolution_: function(imageWidth, imageHeight) {
+  dimension_: function(imageWidth, imageHeight) {
     if (imageWidth && imageHeight)
       return imageWidth + " x " + imageHeight;
     return '';
   },
 
+  /**
+   * @param {?Object} ifd
+   * @return {string}
+   *
+   * @private
+   */
+  deviceModel_: function(ifd) {
+    var id = 272;
+    return (ifd && ifd.image && ifd.image[id] && ifd.image[id].value) || '';
+  },
+
+  /**
+   * @param {Array<String>} r array of two strings representing the numerator
+   *     and the denominator.
+   * @return {number}
+   * @private
+   */
+  parseRational_: function(r) {
+    var num = parseInt(r[0], 10);
+    var den = parseInt(r[1], 10);
+    return num / den;
+  },
+
+  /**
+   * Returns geolocation as a string in the form of 'latitude, longitude',
+   * where the values have 3 decimal precision. Negative latitude indicates
+   * south latitude and negative longitude indicates west longitude.
+   * @param {?Object} ifd
+   * @return {string}
+   *
+   * @private
+   */
+  geography_: function(ifd) {
+    var gps = ifd && ifd.gps;
+    if (!gps || !gps[1] || !gps[2] || !gps[3] || !gps[4])
+      return '';
+
+    var computeCoordinate = function(value) {
+      return this.parseRational_(value[0]) +
+          this.parseRational_(value[1]) / 60 +
+          this.parseRational_(value[2]) / 3600;
+    }.bind(this);
+
+    var latitude =
+        computeCoordinate(gps[2].value) * (gps[1].value === 'N\0' ? 1 : -1);
+    var longitude =
+        computeCoordinate(gps[4].value) * (gps[3].value === 'E\0' ? 1 : -1);
+
+    return Number(latitude).toFixed(3) + ', ' + Number(longitude).toFixed(3);
+  },
+
+  /**
+   * Returns device settings as a string in the form of
+   * 'FNumber exposureTime focalLength isoSpeedRating'.
+   * Example: 'f/2 1/120 4.67mm ISO108'.
+   * @param {?Object} ifd
+   * @return {string}
+   *
+   * @private
+   */
+  deviceSettings_: function(ifd) {
+    var exif = ifd && ifd.exif;
+    if (!exif)
+      return '';
+
+    var f = exif[33437] ? this.parseRational_(exif[33437].value) : 0;
+    var fNumber = '';
+    if (f) {
+      fNumber = 'f/' + (Number.isInteger(f) ? f : Number(f).toFixed(1));
+    }
+    var exposureTime =
+        exif[33434] ? exif[33434].value[0] + '/' + exif[33434].value[1] : '';
+    var focalLength = exif[37386] ?
+        Number(this.parseRational_(exif[37386].value)).toFixed(2) + 'mm' :
+        '';
+    var iso = exif[34855] ? 'ISO' + exif[34855].value : '';
+
+    var values = [fNumber, exposureTime, focalLength, iso];
+
+    var result = '';
+    for (var i = 0; i < values.length; i++) {
+      if (values[i]) {
+        result += (result ? ' ' : '') + values[i];
+      }
+    }
+    return result;
+  },
 });

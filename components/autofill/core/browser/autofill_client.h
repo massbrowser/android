@@ -30,7 +30,7 @@ class RectF;
 }
 
 namespace rappor {
-class RapporService;
+class RapporServiceImpl;
 }
 
 namespace syncer {
@@ -103,8 +103,8 @@ class AutofillClient {
   // Gets the IdentityProvider associated with the client (for OAuth2).
   virtual IdentityProvider* GetIdentityProvider() = 0;
 
-  // Gets the RapporService associated with the client (for metrics).
-  virtual rappor::RapporService* GetRapporService() = 0;
+  // Gets the RapporServiceImpl associated with the client (for metrics).
+  virtual rappor::RapporServiceImpl* GetRapporServiceImpl() = 0;
 
   // Causes the Autofill settings UI to be shown.
   virtual void ShowAutofillSettings() = 0;
@@ -189,6 +189,9 @@ class AutofillClient {
   // Starts the signin flow. Should not be called if ShouldShowSigninPromo()
   // returns false.
   virtual void StartSigninFlow() = 0;
+
+  // Shows the explanation of http not secure warning message.
+  virtual void ShowHttpNotSecureExplanation() = 0;
 };
 
 }  // namespace autofill

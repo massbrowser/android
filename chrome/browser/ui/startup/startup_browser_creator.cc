@@ -262,33 +262,35 @@ void DumpBrowserHistograms(const base::FilePath& output_file) {
                   static_cast<int>(output_string.size()));
 }
 
-// Shows the User Manager on startup if the last used profile must sign in or
-// if the last used profile was the guest or system profile.
-// Returns true if the User Manager was shown, false otherwise.
-bool ShowUserManagerOnStartupIfNeeded(
-    Profile* last_used_profile, const base::CommandLine& command_line) {
+// Returns whether |profile| can be opened during Chrome startup without
+// explicit user action.
+bool ProfileCanBeAutoOpened(Profile* profile) {
 #if defined(OS_CHROMEOS)
-  // ChromeOS never shows the User Manager on startup.
-  return false;
+  // On ChromeOS, ther user has alrady chosen and logged into the profile
+  // before Chrome starts up.
+  return true;
 #else
+  // Profiles that require signin are not available.
   ProfileAttributesEntry* entry = nullptr;
-  bool has_entry =
-      g_browser_process->profile_manager()
+  if (g_browser_process->profile_manager()
           ->GetProfileAttributesStorage()
-          .GetProfileAttributesWithPath(last_used_profile->GetPath(), &entry);
-
-  if (!has_entry || !entry->IsSigninRequired()) {
-    // Signin is not required. However, guest, system or locked profiles cannot
-    // be re-opened on startup. The only exception is if there's already a Guest
-    // window open in a separate process (for example, launching a new browser
-    // after clicking on a downloaded file in Guest mode).
-    if ((!last_used_profile->IsGuestSession() &&
-         !last_used_profile->IsSystemProfile()) ||
-        (chrome::GetBrowserCount(last_used_profile->GetOffTheRecordProfile()) >
-         0)) {
-      return false;
-    }
+          .GetProfileAttributesWithPath(profile->GetPath(), &entry) &&
+      entry->IsSigninRequired()) {
+    return false;
   }
+
+  // Guest or system profiles are not available unless a separate process
+  // already has a window open for the profile.
+  return (!profile->IsGuestSession() && !profile->IsSystemProfile()) ||
+         (chrome::GetBrowserCount(profile->GetOffTheRecordProfile()) > 0);
+#endif
+}
+
+// Returns whether the User Manager was shown.
+bool ShowUserManagerOnStartupIfNeeded(Profile* last_used_profile,
+                                      const base::CommandLine& command_line) {
+  if (ProfileCanBeAutoOpened(last_used_profile))
+    return false;
 
   // Show the User Manager.
   profiles::UserManagerAction action =
@@ -298,7 +300,6 @@ bool ShowUserManagerOnStartupIfNeeded(
   UserManager::Show(
       base::FilePath(), profiles::USER_MANAGER_NO_TUTORIAL, action);
   return true;
-#endif
 }
 
 }  // namespace
@@ -478,6 +479,7 @@ void StartupBrowserCreator::RegisterLocalStatePrefs(
 #if defined(OS_WIN)
   registry->RegisterStringPref(prefs::kLastWelcomedOSVersion, std::string());
   registry->RegisterBooleanPref(prefs::kWelcomePageOnOSUpgradeEnabled, true);
+  registry->RegisterBooleanPref(prefs::kHasSeenWin10PromoPage, false);
 #endif
   registry->RegisterBooleanPref(prefs::kSuppressUnsupportedOSWarning, false);
   registry->RegisterBooleanPref(prefs::kWasRestarted, false);
@@ -587,11 +589,16 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
   }
 
   bool silent_launch = false;
+  bool can_use_last_profile =
+      (ProfileCanBeAutoOpened(last_used_profile) &&
+       !IncognitoModePrefs::ShouldLaunchIncognito(
+           command_line, last_used_profile->GetPrefs()));
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   // If we are just displaying a print dialog we shouldn't open browser
   // windows.
   if (command_line.HasSwitch(switches::kCloudPrintFile) &&
+      can_use_last_profile &&
       print_dialog_cloud::CreatePrintDialogFromCommandLine(last_used_profile,
                                                            command_line)) {
     silent_launch = true;
@@ -683,8 +690,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
     return true;
 
   if (command_line.HasSwitch(extensions::switches::kLoadApps) &&
-      !IncognitoModePrefs::ShouldLaunchIncognito(
-          command_line, last_used_profile->GetPrefs())) {
+      can_use_last_profile) {
     if (!ProcessLoadApps(command_line, cur_dir, last_used_profile))
       return false;
 
@@ -698,9 +704,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
   }
 
   // Check for --load-and-launch-app.
-  if (command_line.HasSwitch(apps::kLoadAndLaunchApp) &&
-      !IncognitoModePrefs::ShouldLaunchIncognito(
-          command_line, last_used_profile->GetPrefs())) {
+  if (command_line.HasSwitch(apps::kLoadAndLaunchApp) && can_use_last_profile) {
     base::CommandLine::StringType path =
         command_line.GetSwitchValueNative(apps::kLoadAndLaunchApp);
 
@@ -893,6 +897,22 @@ void StartupBrowserCreator::ProcessCommandLineAlreadyRunning(
   StartupBrowserCreator startup_browser_creator;
   startup_browser_creator.ProcessCmdLineImpl(command_line, cur_dir, false,
                                              profile, Profiles());
+}
+
+// static
+void StartupBrowserCreator::OpenStartupPages(Browser* browser,
+                                             bool process_startup) {
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+  chrome::startup::IsFirstRun is_first_run =
+      first_run::IsChromeFirstRun() ? chrome::startup::IS_FIRST_RUN
+                                    : chrome::startup::IS_NOT_FIRST_RUN;
+  StartupBrowserCreatorImpl startup_browser_creator_impl(
+      base::FilePath(), command_line, is_first_run);
+  SessionStartupPref session_startup_pref =
+      StartupBrowserCreator::GetSessionStartupPref(command_line,
+                                                   browser->profile());
+  startup_browser_creator_impl.OpenURLsInBrowser(browser, process_startup,
+                                                 session_startup_pref.urls);
 }
 
 // static

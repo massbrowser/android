@@ -30,7 +30,6 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
-#include "chrome/browser/browsing_data/registrable_domain_filter_builder.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/engagement/important_sites_util.h"
 #include "chrome/browser/history/web_history_service_factory.h"
@@ -72,6 +71,7 @@ using base::android::CheckException;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 using base::android::ScopedJavaGlobalRef;
 using content::BrowserThread;
@@ -314,6 +314,11 @@ static jboolean GetSearchSuggestManaged(JNIEnv* env,
   return GetPrefService()->IsManagedPreference(prefs::kSearchSuggestEnabled);
 }
 
+static jboolean IsScoutExtendedReportingActive(
+    JNIEnv* env, const JavaParamRef<jobject>& obj) {
+  return safe_browsing::IsScout(*GetPrefService());
+}
+
 static jboolean GetSafeBrowsingExtendedReportingEnabled(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
@@ -324,7 +329,9 @@ static void SetSafeBrowsingExtendedReportingEnabled(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     jboolean enabled) {
-  safe_browsing::SetExtendedReportingPref(GetPrefService(), enabled);
+  safe_browsing::SetExtendedReportingPrefAndMetric(
+      GetPrefService(), enabled,
+      safe_browsing::SBER_OPTIN_SITE_ANDROID_SETTINGS);
 }
 
 static jboolean GetSafeBrowsingExtendedReportingManaged(
@@ -582,6 +589,21 @@ static void SetBrowsingDataDeletionTimePeriod(
                                time_period);
 }
 
+static jint GetLastClearBrowsingDataTab(JNIEnv* env,
+                                        const JavaParamRef<jobject>& obj) {
+  return GetPrefService()->GetInteger(
+      browsing_data::prefs::kLastClearBrowsingDataTab);
+}
+
+static void SetLastClearBrowsingDataTab(JNIEnv* env,
+                                        const JavaParamRef<jobject>& obj,
+                                        jint tab_index) {
+  DCHECK_GE(tab_index, 0);
+  DCHECK_LT(tab_index, 2);
+  GetPrefService()->SetInteger(browsing_data::prefs::kLastClearBrowsingDataTab,
+                               tab_index);
+}
+
 static void ClearBrowsingData(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
@@ -636,13 +658,13 @@ static void ClearBrowsingData(
       env, jignoring_domains.obj(), &ignoring_domains);
   base::android::JavaIntArrayToIntVector(env, jignoring_domain_reasons.obj(),
                                          &ignoring_domain_reasons);
-  std::unique_ptr<RegistrableDomainFilterBuilder> filter_builder(
-      new RegistrableDomainFilterBuilder(BrowsingDataFilterBuilder::BLACKLIST));
+  std::unique_ptr<BrowsingDataFilterBuilder> filter_builder(
+      BrowsingDataFilterBuilder::Create(BrowsingDataFilterBuilder::BLACKLIST));
   for (const std::string& domain : excluding_domains) {
     filter_builder->AddRegisterableDomain(domain);
   }
 
-  if (!excluding_domains.empty()) {
+  if (!excluding_domains.empty() || !ignoring_domains.empty()) {
     ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
         GetOriginalProfile(), excluding_domains, excluding_domain_reasons,
         ignoring_domains, ignoring_domain_reasons);
@@ -660,10 +682,14 @@ static void ClearBrowsingData(
   ClearBrowsingDataObserver* observer = new ClearBrowsingDataObserver(
       env, obj, browsing_data_remover, 2 /* tasks_count */);
 
+  browsing_data::TimePeriod period =
+      static_cast<browsing_data::TimePeriod>(time_period);
+  browsing_data::RecordDeletionForPeriod(period);
+
   if (filterable_mask) {
     browsing_data_remover->RemoveWithFilterAndReply(
-        BrowsingDataRemover::Period(
-            static_cast<browsing_data::TimePeriod>(time_period)),
+        browsing_data::CalculateBeginDeleteTime(period),
+        browsing_data::CalculateEndDeleteTime(period),
         filterable_mask, BrowsingDataHelper::UNPROTECTED_WEB,
         std::move(filter_builder), observer);
   } else {
@@ -673,8 +699,8 @@ static void ClearBrowsingData(
 
   if (nonfilterable_mask) {
     browsing_data_remover->RemoveAndReply(
-        BrowsingDataRemover::Period(
-            static_cast<browsing_data::TimePeriod>(time_period)),
+        browsing_data::CalculateBeginDeleteTime(period),
+        browsing_data::CalculateEndDeleteTime(period),
         nonfilterable_mask, BrowsingDataHelper::UNPROTECTED_WEB, observer);
   } else {
     // Make sure |observer| doesn't wait for the non-filtered task.
@@ -732,7 +758,7 @@ static void MarkOriginAsImportantForTesting(
 }
 
 static void ShowNoticeAboutOtherFormsOfBrowsingHistory(
-    ScopedJavaGlobalRef<jobject>* listener,
+    const JavaRef<jobject>& listener,
     bool show) {
   JNIEnv* env = AttachCurrentThread();
   UMA_HISTOGRAM_BOOLEAN(
@@ -740,17 +766,17 @@ static void ShowNoticeAboutOtherFormsOfBrowsingHistory(
   if (!show)
     return;
   Java_OtherFormsOfBrowsingHistoryListener_showNoticeAboutOtherFormsOfBrowsingHistory(
-      env, listener->obj());
+      env, listener);
 }
 
 static void EnableDialogAboutOtherFormsOfBrowsingHistory(
-    ScopedJavaGlobalRef<jobject>* listener,
+    const JavaRef<jobject>& listener,
     bool enabled) {
   JNIEnv* env = AttachCurrentThread();
   if (!enabled)
     return;
   Java_OtherFormsOfBrowsingHistoryListener_enableDialogAboutOtherFormsOfBrowsingHistory(
-      env, listener->obj());
+      env, listener);
 }
 
 static void RequestInfoAboutOtherFormsOfBrowsingHistory(
@@ -762,7 +788,7 @@ static void RequestInfoAboutOtherFormsOfBrowsingHistory(
       ProfileSyncServiceFactory::GetForProfile(GetOriginalProfile()),
       WebHistoryServiceFactory::GetForProfile(GetOriginalProfile()),
       base::Bind(&ShowNoticeAboutOtherFormsOfBrowsingHistory,
-                 base::Owned(new ScopedJavaGlobalRef<jobject>(env, listener))));
+                 ScopedJavaGlobalRef<jobject>(env, listener)));
 
   // The one-time notice in the dialog.
   browsing_data::ShouldPopupDialogAboutOtherFormsOfBrowsingHistory(
@@ -770,7 +796,7 @@ static void RequestInfoAboutOtherFormsOfBrowsingHistory(
       WebHistoryServiceFactory::GetForProfile(GetOriginalProfile()),
       chrome::GetChannel(),
       base::Bind(&EnableDialogAboutOtherFormsOfBrowsingHistory,
-                 base::Owned(new ScopedJavaGlobalRef<jobject>(env, listener))));
+                 ScopedJavaGlobalRef<jobject>(env, listener)));
 }
 
 static void SetAutoplayEnabled(JNIEnv* env,

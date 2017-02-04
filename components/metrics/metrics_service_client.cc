@@ -4,7 +4,13 @@
 
 #include "components/metrics/metrics_service_client.h"
 
+#include "components/metrics/url_constants.h"
+
 namespace metrics {
+
+ukm::UkmService* MetricsServiceClient::GetUkmService() {
+  return nullptr;
+}
 
 base::string16 MetricsServiceClient::GetRegistryBackupKey() {
   return base::string16();
@@ -20,6 +26,10 @@ EnableMetricsDefault MetricsServiceClient::GetMetricsReportingDefaultState() {
 
 bool MetricsServiceClient::IsUMACellularUploadLogicEnabled() {
   return false;
+}
+
+std::string MetricsServiceClient::GetMetricsServerUrl() {
+  return metrics::kDefaultMetricsServerUrl;
 }
 
 }  // namespace metrics

@@ -48,11 +48,6 @@ class WebContents;
 struct TextInputState;
 }
 
-namespace ui {
-class Compositor;
-class Layer;
-}
-
 @class FullscreenWindowManager;
 @protocol RenderWidgetHostViewMacDelegate;
 
@@ -315,8 +310,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   bool HasAcceleratedSurface(const gfx::Size& desired_size) override;
   gfx::Rect GetBoundsInRootWindow() override;
-  void LockCompositingSurface() override;
-  void UnlockCompositingSurface() override;
 
   bool LockMouse() override;
   void UnlockMouse() override;
@@ -554,6 +547,18 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   // Whether a request to flush input has been issued.
   bool needs_flush_input_;
+
+  // TODO(ekaramad): Remove the following locals and get the selection
+  // information directly from TextInputManager.
+  // A buffer containing the text inside and around the current selection range.
+  base::string16 selection_text_;
+
+  // The offset of the text stored in |selection_text_| relative to the start of
+  // the web page.
+  size_t selection_text_offset_;
+
+  // The current selection range relative to the start of the web page.
+  gfx::Range selection_range_;
 
   // Factory used to safely scope delayed calls to ShutdownHost().
   base::WeakPtrFactory<RenderWidgetHostViewMac> weak_factory_;

@@ -164,9 +164,6 @@ TEST_F(HostContentSettingsMapTest, DefaultValues) {
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetDefaultContentSetting(
                 CONTENT_SETTINGS_TYPE_POPUPS, NULL));
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetDefaultContentSetting(
-                CONTENT_SETTINGS_TYPE_KEYGEN, NULL));
 }
 
 TEST_F(HostContentSettingsMapTest, IndividualSettings) {
@@ -222,13 +219,6 @@ TEST_F(HostContentSettingsMapTest, IndividualSettings) {
       CONTENT_SETTING_ASK,
       host_content_settings_map->GetContentSetting(
           host, host, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string()));
-
-  host_content_settings_map->SetContentSettingDefaultScope(
-      host, GURL(), CONTENT_SETTINGS_TYPE_KEYGEN, std::string(),
-      CONTENT_SETTING_ALLOW);
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_KEYGEN, std::string()));
 
   host_content_settings_map->SetContentSettingDefaultScope(
       host, GURL(), CONTENT_SETTINGS_TYPE_AUTOPLAY, std::string(),
@@ -486,18 +476,18 @@ TEST_F(HostContentSettingsMapTest, HostTrimEndingDotCheck) {
 
   GURL host_ending_with_dot("http://example.com./");
 
-  EXPECT_TRUE(cookie_settings->IsSettingCookieAllowed(
-      host_ending_with_dot, host_ending_with_dot));
+  EXPECT_TRUE(cookie_settings->IsCookieAccessAllowed(host_ending_with_dot,
+                                                     host_ending_with_dot));
   host_content_settings_map->SetContentSettingDefaultScope(
       host_ending_with_dot, GURL(), CONTENT_SETTINGS_TYPE_COOKIES,
       std::string(), CONTENT_SETTING_DEFAULT);
-  EXPECT_TRUE(cookie_settings->IsSettingCookieAllowed(
-      host_ending_with_dot, host_ending_with_dot));
+  EXPECT_TRUE(cookie_settings->IsCookieAccessAllowed(host_ending_with_dot,
+                                                     host_ending_with_dot));
   host_content_settings_map->SetContentSettingDefaultScope(
       host_ending_with_dot, GURL(), CONTENT_SETTINGS_TYPE_COOKIES,
       std::string(), CONTENT_SETTING_BLOCK);
-  EXPECT_FALSE(cookie_settings->IsSettingCookieAllowed(
-      host_ending_with_dot, host_ending_with_dot));
+  EXPECT_FALSE(cookie_settings->IsCookieAccessAllowed(host_ending_with_dot,
+                                                      host_ending_with_dot));
 
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetContentSetting(
@@ -575,25 +565,6 @@ TEST_F(HostContentSettingsMapTest, HostTrimEndingDotCheck) {
                                                    host_ending_with_dot,
                                                    CONTENT_SETTINGS_TYPE_POPUPS,
                                                    std::string()));
-
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                host_ending_with_dot, host_ending_with_dot,
-                CONTENT_SETTINGS_TYPE_KEYGEN, std::string()));
-  host_content_settings_map->SetContentSettingDefaultScope(
-      host_ending_with_dot, GURL(), CONTENT_SETTINGS_TYPE_KEYGEN, std::string(),
-      CONTENT_SETTING_ALLOW);
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                host_ending_with_dot, host_ending_with_dot,
-                CONTENT_SETTINGS_TYPE_KEYGEN, std::string()));
-  host_content_settings_map->SetContentSettingDefaultScope(
-      host_ending_with_dot, GURL(), CONTENT_SETTINGS_TYPE_KEYGEN, std::string(),
-      CONTENT_SETTING_DEFAULT);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                host_ending_with_dot, host_ending_with_dot,
-                CONTENT_SETTINGS_TYPE_KEYGEN, std::string()));
 
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetContentSetting(
@@ -1098,23 +1069,6 @@ TEST_F(HostContentSettingsMapTest, ManagedDefaultContentSetting) {
             host_content_settings_map->GetDefaultContentSetting(
                 CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
 #endif
-
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetDefaultContentSetting(
-                CONTENT_SETTINGS_TYPE_KEYGEN, NULL));
-
-  // Set managed-default content setting through the coresponding preferences.
-  prefs->SetManagedPref(prefs::kManagedDefaultKeygenSetting,
-                        new base::FundamentalValue(CONTENT_SETTING_ALLOW));
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetDefaultContentSetting(
-                CONTENT_SETTINGS_TYPE_KEYGEN, NULL));
-
-  // Remove managed-default content settings preferences.
-  prefs->RemoveManagedPref(prefs::kManagedDefaultKeygenSetting);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetDefaultContentSetting(
-                CONTENT_SETTINGS_TYPE_KEYGEN, NULL));
 }
 
 TEST_F(HostContentSettingsMapTest,
@@ -1296,6 +1250,8 @@ TEST_F(HostContentSettingsMapTest, AddContentSettingsObserver) {
       CONTENT_SETTING_DEFAULT);
 }
 
+// Guest profiles do not exist on Android, so don't run these tests there.
+#if !defined(OS_ANDROID)
 TEST_F(HostContentSettingsMapTest, GuestProfile) {
   TestingProfile profile;
   profile.SetGuestSession(true);
@@ -1367,56 +1323,7 @@ TEST_F(HostContentSettingsMapTest, GuestProfileMigration) {
           GetPrefName(CONTENT_SETTINGS_TYPE_COOKIES));
   EXPECT_TRUE(all_settings_dictionary->empty());
 }
-
-TEST_F(HostContentSettingsMapTest, MigrateKeygenSettings) {
-  TestingProfile profile;
-  HostContentSettingsMap* host_content_settings_map =
-      HostContentSettingsMapFactory::GetForProfile(&profile);
-
-  // Set old formatted settings.
-  GURL host("http://example.com/");
-  ContentSettingsPattern pattern =
-      ContentSettingsPattern::FromURLNoWildcard(host);
-
-  // Default setting is BLOCK.
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_KEYGEN, std::string()));
-
-  host_content_settings_map->SetContentSettingCustomScope(
-      pattern, pattern, CONTENT_SETTINGS_TYPE_KEYGEN, std::string(),
-      CONTENT_SETTING_ALLOW);
-  // Because of the old formatted setting entry which has two same patterns,
-  // SetContentSetting() to (host, GURL()) will be ignored.
-  host_content_settings_map->SetContentSettingDefaultScope(
-      host, GURL(), CONTENT_SETTINGS_TYPE_KEYGEN, std::string(),
-      CONTENT_SETTING_BLOCK);
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_KEYGEN, std::string()));
-
-  host_content_settings_map->MigrateKeygenSettings();
-
-  ContentSettingsForOneType settings;
-  host_content_settings_map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_KEYGEN,
-                                                   std::string(), &settings);
-  for (const ContentSettingPatternSource& setting_entry : settings) {
-    EXPECT_EQ(setting_entry.secondary_pattern,
-              ContentSettingsPattern::Wildcard());
-  }
-
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_KEYGEN, std::string()));
-
-  // After migrating old settings, changes to the setting works.
-  host_content_settings_map->SetContentSettingDefaultScope(
-      host, GURL(), CONTENT_SETTINGS_TYPE_KEYGEN, std::string(),
-      CONTENT_SETTING_BLOCK);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                host, host, CONTENT_SETTINGS_TYPE_KEYGEN, std::string()));
-}
+#endif  // !defined(OS_ANDROID)
 
 TEST_F(HostContentSettingsMapTest, MigrateDomainScopedSettings) {
   TestingProfile profile;
@@ -1593,6 +1500,13 @@ TEST_F(HostContentSettingsMapTest, MigrateDomainScopedSettings) {
 // once after syncing (even when these events occur multiple times).
 TEST_F(HostContentSettingsMapTest, DomainToOriginMigrationStatus) {
   TestingProfile profile;
+
+  // Construct the map now to make the various platforms equivalent. On Android
+  // the map is created with the profile (due to dependencies), while on other
+  // platforms it is created lazily. Note, migration should be run here.
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+
   PrefService* prefs = profile.GetPrefs();
 
   GURL http_host("http://example.com/");
@@ -1618,13 +1532,38 @@ TEST_F(HostContentSettingsMapTest, DomainToOriginMigrationStatus) {
   EXPECT_TRUE(all_settings_dictionary->GetDictionaryWithoutPathExpansion(
       "[*.]example.com,*", &result));
 
-  // Migration is done on construction of HostContentSettingsMap.
-  HostContentSettingsMap* host_content_settings_map =
-      HostContentSettingsMapFactory::GetForProfile(&profile);
+  // Migration is done on construction of HostContentSettingsMap. Try to run it
+  // again. This should not do anything as it has already ran.
+  host_content_settings_map->MigrateDomainScopedSettings(
+      false /* after_sync */);
 
   // Change default setting to BLOCK.
   host_content_settings_map->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_POPUPS, CONTENT_SETTING_BLOCK);
+
+  EXPECT_EQ(
+      CONTENT_SETTING_ALLOW,
+      host_content_settings_map->GetContentSetting(
+          http_host, http_host, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
+
+  // The setting should still be allow as it hasn't been migrated.
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                http_host_narrower, http_host_narrower,
+                CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
+
+  // Set the pref to its initial state so that migration can be triggered again,
+  // just for the sake of testing.
+  int default_value;
+  prefs->GetDefaultPrefValue(prefs::kDomainToOriginMigrationStatus)
+      ->GetAsInteger(&default_value);
+  prefs->SetInteger(prefs::kDomainToOriginMigrationStatus, default_value);
+
+  // Now, do the migration. This should work as we've cleared the pref back to
+  // its default value.
+  host_content_settings_map->MigrateDomainScopedSettings(false);
+
+  // Now the settings should be migrated.
   EXPECT_EQ(
       CONTENT_SETTING_ALLOW,
       host_content_settings_map->GetContentSetting(
@@ -1642,6 +1581,7 @@ TEST_F(HostContentSettingsMapTest, DomainToOriginMigrationStatus) {
       ContentSettingsPattern::FromURL(https_host),
       ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_POPUPS,
       std::string(), CONTENT_SETTING_ALLOW);
+
   EXPECT_EQ(
       CONTENT_SETTING_ALLOW,
       host_content_settings_map->GetContentSetting(
@@ -1801,3 +1741,19 @@ TEST_F(HostContentSettingsMapTest, ClearSettingsForOneTypeWithPredicate) {
   EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(url1),
             host_settings[0].primary_pattern);
 }
+
+TEST_F(HostContentSettingsMapTest, CanSetNarrowestSetting) {
+  TestingProfile profile;
+  const auto* map = HostContentSettingsMapFactory::GetForProfile(&profile);
+
+  GURL valid_url("http://google.com");
+  EXPECT_TRUE(map->CanSetNarrowestContentSetting(
+      valid_url, valid_url,
+      CONTENT_SETTINGS_TYPE_POPUPS));
+
+  GURL invalid_url("about:blank");
+  EXPECT_FALSE(map->CanSetNarrowestContentSetting(
+      invalid_url, invalid_url,
+      CONTENT_SETTINGS_TYPE_POPUPS));
+}
+

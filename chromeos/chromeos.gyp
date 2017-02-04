@@ -390,6 +390,8 @@
       'settings/timezone_settings.h',
       'settings/timezone_settings_helper.cc',
       'settings/timezone_settings_helper.h',
+      'system/devicemode.cc',
+      'system/devicemode.h',
       'system/devicetype.cc',
       'system/devicetype.h',
 
@@ -439,6 +441,7 @@
       'dbus/cras_audio_client_unittest.cc',
       'dbus/cros_disks_client_unittest.cc',
       'dbus/dbus_thread_manager_unittest.cc',
+      'dbus/fake_auth_policy_client_unittest.cc',
       'dbus/fake_cryptohome_client_unittest.cc',
       'dbus/fake_easy_unlock_client_unittest.cc',
       'dbus/fake_power_manager_client_unittest.cc',

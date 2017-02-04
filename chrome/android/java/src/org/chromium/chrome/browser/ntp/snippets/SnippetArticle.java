@@ -27,11 +27,8 @@ public class SnippetArticle {
     /** The snippet preview text. */
     public final String mPreviewText;
 
-    /** The URL of this article. */
+    /** The URL of this article. This may be an AMP url. */
     public final String mUrl;
-
-    /** the AMP url for this article (possible for this to be empty). */
-    public final String mAmpUrl;
 
     /** The time when this article was published. */
     public final long mPublishTimestampMilliseconds;
@@ -39,20 +36,17 @@ public class SnippetArticle {
     /** The score expressing relative quality of the article for the user. */
     public final float mScore;
 
-    /** The position of this article within its section. */
-    public final int mPosition;
+    /** The rank of this article within its section. */
+    private int mPerSectionRank = -1;
 
-    /** The position of this article in the complete list. Populated by NewTabPageAdapter. */
-    public int mGlobalPosition = -1;
+    /** The global rank of this article in the complete list. */
+    private int mGlobalRank = -1;
 
     /** Bitmap of the thumbnail, fetched lazily, when the RecyclerView wants to show the snippet. */
     private Bitmap mThumbnailBitmap;
 
     /** Stores whether impression of this article has been tracked already. */
     private boolean mImpressionTracked;
-
-    /** To be run when the offline status of the article or AMP article changes. */
-    private Runnable mOfflineStatusChangeRunnable;
 
     /** Whether the linked article represents an asset download. */
     public boolean mIsAssetDownload;
@@ -64,7 +58,7 @@ public class SnippetArticle {
     private String mAssetDownloadMimeType;
 
     /** The tab id of the corresponding tab (only for recent tab articles). */
-    private String mRecentTabId;
+    private int mRecentTabId;
 
     /** The offline id of the corresponding offline page, if any. */
     private Long mOfflinePageOfflineId;
@@ -73,18 +67,15 @@ public class SnippetArticle {
      * Creates a SnippetArticleListItem object that will hold the data.
      */
     public SnippetArticle(int category, String idWithinCategory, String title, String publisher,
-            String previewText, String url, String ampUrl, long timestamp, float score,
-            int position) {
+            String previewText, String url, long timestamp, float score) {
         mCategory = category;
         mIdWithinCategory = idWithinCategory;
         mTitle = title;
         mPublisher = publisher;
         mPreviewText = previewText;
         mUrl = url;
-        mAmpUrl = ampUrl;
         mPublishTimestampMilliseconds = timestamp;
         mScore = score;
-        mPosition = position;
     }
 
     @Override
@@ -118,14 +109,6 @@ public class SnippetArticle {
         if (mImpressionTracked) return false;
         mImpressionTracked = true;
         return true;
-    }
-
-    /**
-     * Sets the {@link Runnable} to be run when the article's offline status changes.
-     * Pass null to wipe.
-     */
-    public void setOfflineStatusChangeRunnable(Runnable runnable) {
-        mOfflineStatusChangeRunnable = runnable;
     }
 
     /** @return whether a snippet is either offline page or asset download. */
@@ -190,7 +173,7 @@ public class SnippetArticle {
      * @return the corresponding recent tab id. May only be called if this snippet is a recent tab
      * article.
      */
-    public String getRecentTabId() {
+    public int getRecentTabId() {
         assert isRecentTab();
         return mRecentTabId;
     }
@@ -199,7 +182,7 @@ public class SnippetArticle {
      * Sets tab id and offline page id for recent tab articles. May only be called if this snippet
      * is a recent tab article.
      */
-    public void setRecentTabData(String tabId, long offlinePageId) {
+    public void setRecentTabData(int tabId, long offlinePageId) {
         assert isRecentTab();
         mRecentTabId = tabId;
         setOfflinePageOfflineId(offlinePageId);
@@ -207,14 +190,7 @@ public class SnippetArticle {
 
     /** Sets offline id of the corresponding to the snippet offline page. Null to clear.*/
     public void setOfflinePageOfflineId(@Nullable Long offlineId) {
-        Long previous = mOfflinePageOfflineId;
         mOfflinePageOfflineId = offlineId;
-
-        if (mOfflineStatusChangeRunnable == null) return;
-        if ((previous == null) ? (mOfflinePageOfflineId != null)
-                               : !previous.equals(mOfflinePageOfflineId)) {
-            mOfflineStatusChangeRunnable.run();
-        }
     }
 
     /**
@@ -230,5 +206,18 @@ public class SnippetArticle {
     public String toString() {
         // For debugging purposes. Displays the first 42 characters of the title.
         return String.format("{%s, %1.42s}", getClass().getSimpleName(), mTitle);
+    }
+
+    public void setRank(int perSectionRank, int globalRank) {
+        mPerSectionRank = perSectionRank;
+        mGlobalRank = globalRank;
+    }
+
+    public int getGlobalRank() {
+        return mGlobalRank;
+    }
+
+    public int getPerSectionRank() {
+        return mPerSectionRank;
     }
 }

@@ -7,6 +7,12 @@
 // system. This API is currently only implemented for ChromeOS.
 namespace audio {
 
+  // Type of stream an audio device provides.
+  enum StreamType {
+    INPUT,
+    OUTPUT
+  };
+
   dictionary OutputDeviceInfo {
     // The unique identifier of the audio output device.
     DOMString id;
@@ -36,8 +42,10 @@ namespace audio {
   dictionary AudioDeviceInfo {
     // The unique identifier of the audio device.
     DOMString id;
+    // Stream type associated with this device.
+    StreamType streamType;
     // True for input device; false for output device.
-    boolean isInput;
+    [deprecated="Use |streamType|."] boolean isInput;
     // Type of the device, including "INTERNAL_SPEAKER", "INTERNAL_MIC",
     // "HEADPHONE", "USB", "BLUETOOTH", "HDMI", "MIC", "KEYBOARD_MIC",
     // "AOKR", and "OTHER".
@@ -58,7 +66,7 @@ namespace audio {
 
   dictionary DeviceProperties {
     // True if this is muted.
-    boolean isMuted;
+    [deprecated="Use $(ref:setMute) to set mute state."] boolean? isMuted;
     // If this is an output device then this field indicates the output volume.
     // If this is an input device then this field is ignored.
     double? volume;
@@ -67,31 +75,69 @@ namespace audio {
     double? gain;
   };
 
+  dictionary DeviceIdLists {
+    // <p>List of input devices specified by their ID.</p>
+    // <p>To indicate input devices should be unaffected, leave this property
+    //   unset.</p>
+    DOMString[]? input;
+
+    // <p>List of output devices specified by their ID.</p>
+    // <p>To indicate output devices should be unaffected, leave this property
+    //   unset.</p>
+    DOMString[]? output;
+  };
+
+  dictionary MuteChangedEvent {
+    // The type of the stream for which the mute value changed. The updated mute
+    // value applies to all devices with this stream type.
+    StreamType streamType;
+
+    // Whether or not the stream is now muted.
+    boolean isMuted;
+  };
+
   callback GetInfoCallback = void(OutputDeviceInfo[] outputInfo,
                                   InputDeviceInfo[] inputInfo);
-  callback SetActiveDevicesCallback = void();
-  callback SetPropertiesCallback = void();
+  callback EmptyCallback = void();
+  callback GetMuteCallback = void(boolean value);
 
   interface Functions {
     // Gets the information of all audio output and input devices.
     static void getInfo(GetInfoCallback callback);
 
-  // Sets the active devices to the devices specified by |ids|.
-  // It can pass in the "complete" active device id list of either input
-  // devices, or output devices, or both. If only input device ids are passed
-  // in, it will only change the input devices' active status, output devices will
-  // NOT be changed; similarly for the case if only output devices are passed.
-  // If the devices specified in |new_active_ids| are already active, they will
-  // remain active. Otherwise, the old active devices will be de-activated
-  // before we activate the new devices with the same type(input/output).
-    static void setActiveDevices(DOMString[] ids,
-                                 SetActiveDevicesCallback callback);
+    // Sets lists of active input and/or output devices.
+    // |ids|: <p>Specifies IDs of devices that should be active. If either the
+    //     input or output list is not set, devices in that category are
+    //     unaffected.
+    //     </p>
+    //     <p>It is an error to pass in a non-existent device ID.</p>
+    //     <p><b>NOTE:</b> While the method signature allows device IDs to be
+    //     passed as a list of strings, this method of setting active devices
+    //     is deprecated and should not be relied upon to work. Please use
+    //     $(ref: DeviceIdLists) instead.
+    //     </p>
+    static void setActiveDevices((DeviceIdLists or DOMString[]) ids,
+                                 EmptyCallback callback);
 
     // Sets the properties for the input or output device.
     static void setProperties(DOMString id,
                               DeviceProperties properties,
-                              SetPropertiesCallback callback);
-     };
+                              EmptyCallback callback);
+
+    // Gets the system-wide mute state for the specified stream type.
+    // |streamType|: Stream type for which mute state should be fetched.
+    // |callback|: Callback reporting whether mute is set or not for specified
+    // stream type.
+    static void getMute(StreamType streamType, GetMuteCallback callback);
+
+    // Sets mute state for a stream type. The mute state will apply to all audio
+    // devices with the specified audio stream type.
+    // |streamType|: Stream type for which mute state should be set.
+    // |isMuted|: New mute value.
+    static void setMute(StreamType streamType,
+                        boolean isMuted,
+                        optional EmptyCallback callback);
+  };
 
   interface Events {
     // Fired when anything changes to the audio device configuration.
@@ -103,9 +149,9 @@ namespace audio {
     static void OnLevelChanged(DOMString id, long level);
 
     // Fired when the mute state of the audio input or output changes.
-    // |isInput|: true indicating audio input; false indicating audio output.
-    // |isMuted|: new value of mute state.
-    static void OnMuteChanged(boolean isInput, boolean isMuted);
+    // Note that mute state is system-wide and the new value applies to every
+    // audio device with specified stream type.
+    static void onMuteChanged(MuteChangedEvent event);
 
     // Fired when audio devices change, either new devices being added, or
     // existing devices being removed.

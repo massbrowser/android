@@ -6,12 +6,12 @@
 
 #include "ash/accelerators/accelerator_controller_delegate_aura.h"
 #include "ash/common/system/chromeos/palette/palette_utils.h"
-#include "ash/magnifier/partial_magnification_controller.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/utility/screenshot_controller.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chromeos/note_taking_app_utils.h"
+#include "chrome/browser/chromeos/note_taking_helper.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -57,14 +57,15 @@ void PaletteDelegateChromeOS::CreateNote() {
   if (!profile_)
     return;
 
-  chromeos::LaunchNoteTakingAppForNewNote(profile_, base::FilePath());
+  chromeos::NoteTakingHelper::Get()->LaunchAppForNewNote(profile_,
+                                                         base::FilePath());
 }
 
 bool PaletteDelegateChromeOS::HasNoteApp() {
   if (!profile_)
     return false;
 
-  return chromeos::IsNoteTakingAppAvailable(profile_);
+  return chromeos::NoteTakingHelper::Get()->IsAppAvailable(profile_);
 }
 
 void PaletteDelegateChromeOS::ActiveUserChanged(const AccountId& account_id) {
@@ -128,12 +129,6 @@ void PaletteDelegateChromeOS::OnPartialScreenshotDone(
     const base::Closure& then) {
   if (then)
     then.Run();
-}
-
-void PaletteDelegateChromeOS::SetPartialMagnifierState(bool enabled) {
-  ash::PartialMagnificationController* controller =
-      ash::Shell::GetInstance()->partial_magnification_controller();
-  controller->SetEnabled(enabled);
 }
 
 void PaletteDelegateChromeOS::SetStylusStateChangedCallback(

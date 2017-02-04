@@ -6,7 +6,8 @@
 #define UI_DISPLAY_MANAGER_MANAGED_DISPLAY_INFO_H_
 
 #include <stdint.h>
-
+#include <algorithm>
+#include <array>
 #include <map>
 #include <string>
 #include <vector>
@@ -14,15 +15,44 @@
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "ui/display/display.h"
-#include "ui/display/display_export.h"
+#include "ui/display/manager/display_manager_export.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace display {
 
+// A struct that represents all the data required for touch calibration for the
+// display.
+struct DISPLAY_MANAGER_EXPORT TouchCalibrationData {
+  // CalibrationPointPair.first -> display point
+  // CalibrationPointPair.second -> touch point
+  using CalibrationPointPair = std::pair<gfx::Point, gfx::Point>;
+  using CalibrationPointPairQuad = std::array<CalibrationPointPair, 4>;
+  TouchCalibrationData();
+  TouchCalibrationData(const CalibrationPointPairQuad& point_pairs,
+                       const gfx::Size& bounds);
+  TouchCalibrationData(const TouchCalibrationData& calibration_data);
+
+  static bool CalibrationPointPairCompare(const CalibrationPointPair& pair_1,
+                                          const CalibrationPointPair& pair_2) {
+    return pair_1.first.y() < pair_2.first.y()
+               ? true
+               : pair_1.first.x() < pair_2.first.x();
+  }
+
+  bool operator==(TouchCalibrationData other) const;
+
+  // Calibration point pairs used during calibration. Each point pair contains a
+  // display point and the corresponding touch point.
+  CalibrationPointPairQuad point_pairs;
+
+  // Bounds of the touch display when the calibration was performed.
+  gfx::Size bounds;
+};
+
 // A class that represents the display's mode info.
-class DISPLAY_EXPORT ManagedDisplayMode
+class DISPLAY_MANAGER_EXPORT ManagedDisplayMode
     : public base::RefCounted<ManagedDisplayMode> {
  public:
   ManagedDisplayMode();
@@ -77,7 +107,7 @@ class DISPLAY_EXPORT ManagedDisplayMode
 // ManagedDisplayInfo contains metadata for each display. This is used to create
 // |Display| as well as to maintain extra infomation to manage displays in ash
 // environment. This class is intentionally made copiable.
-class DISPLAY_EXPORT ManagedDisplayInfo {
+class DISPLAY_MANAGER_EXPORT ManagedDisplayInfo {
  public:
   using ManagedDisplayModeList = std::vector<scoped_refptr<ManagedDisplayMode>>;
 
@@ -243,26 +273,34 @@ class DISPLAY_EXPORT ManagedDisplayInfo {
   // display.
   void SetManagedDisplayModes(const ManagedDisplayModeList& display_modes);
 
+
+  // Sets/Gets the touch calibration data for the display.
+  void SetTouchCalibrationData(const TouchCalibrationData& calibration_data);
+  TouchCalibrationData
+      GetTouchCalibrationData() const & { return touch_calibration_data_; }
+  bool has_touch_calibration_data() const
+      { return has_touch_calibration_data_; }
+  void clear_touch_calibration_data() { has_touch_calibration_data_ = false; }
+
   // Returns the native mode size. If a native mode is not present, return an
   // empty size.
   gfx::Size GetNativeModeSize() const;
 
-  ui::ColorCalibrationProfile color_profile() const { return color_profile_; }
+  ColorCalibrationProfile color_profile() const { return color_profile_; }
 
   // Sets the color profile. It will ignore if the specified |profile| is not in
   // |available_color_profiles_|.
-  void SetColorProfile(ui::ColorCalibrationProfile profile);
+  void SetColorProfile(ColorCalibrationProfile profile);
 
   // Returns true if |profile| is in |available_color_profiles_|.
-  bool IsColorProfileAvailable(ui::ColorCalibrationProfile profile) const;
+  bool IsColorProfileAvailable(ColorCalibrationProfile profile) const;
 
-  const std::vector<ui::ColorCalibrationProfile>& available_color_profiles()
-      const {
+  const std::vector<ColorCalibrationProfile>& available_color_profiles() const {
     return available_color_profiles_;
   }
 
   void set_available_color_profiles(
-      const std::vector<ui::ColorCalibrationProfile>& profiles) {
+      const std::vector<ColorCalibrationProfile>& profiles) {
     available_color_profiles_ = profiles;
   }
 
@@ -302,6 +340,7 @@ class DISPLAY_EXPORT ManagedDisplayInfo {
   std::map<Display::RotationSource, Display::Rotation> rotations_;
   Display::RotationSource active_rotation_source_;
   Display::TouchSupport touch_support_;
+  bool has_touch_calibration_data_;
 
   // The set of input devices associated with this display.
   std::vector<int> input_devices_;
@@ -346,20 +385,23 @@ class DISPLAY_EXPORT ManagedDisplayInfo {
   ManagedDisplayModeList display_modes_;
 
   // The current profile of the color calibration.
-  ui::ColorCalibrationProfile color_profile_;
+  ColorCalibrationProfile color_profile_;
 
   // The list of available variations for the color calibration.
-  std::vector<ui::ColorCalibrationProfile> available_color_profiles_;
+  std::vector<ColorCalibrationProfile> available_color_profiles_;
 
   // Maximum cursor size.
   gfx::Size maximum_cursor_size_;
+
+  // Information associated to touch calibration for the display.
+  TouchCalibrationData touch_calibration_data_;
 
   // If you add a new member, you need to update Copy().
 };
 
 // Resets the synthesized display id for testing. This
 // is necessary to avoid overflowing the output index.
-void DISPLAY_EXPORT ResetDisplayIdForTest();
+void DISPLAY_MANAGER_EXPORT ResetDisplayIdForTest();
 
 }  // namespace display
 

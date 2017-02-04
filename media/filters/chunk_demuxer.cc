@@ -15,6 +15,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/media_tracks.h"
@@ -122,6 +123,15 @@ bool ChunkDemuxerStream::EvictCodedFrames(DecodeTimestamp media_time,
                                           size_t newDataSize) {
   base::AutoLock auto_lock(lock_);
   return stream_->GarbageCollectIfNeeded(media_time, newDataSize);
+}
+
+void ChunkDemuxerStream::OnMemoryPressure(
+    DecodeTimestamp media_time,
+    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level,
+    bool force_instant_gc) {
+  base::AutoLock auto_lock(lock_);
+  return stream_->OnMemoryPressure(media_time, memory_pressure_level,
+                                   force_instant_gc);
 }
 
 void ChunkDemuxerStream::OnSetDuration(TimeDelta duration) {
@@ -735,6 +745,19 @@ void ChunkDemuxer::OnSelectedVideoTrackChanged(
   }
 }
 
+void ChunkDemuxer::OnMemoryPressure(
+    base::TimeDelta currentMediaTime,
+    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level,
+    bool force_instant_gc) {
+  DecodeTimestamp media_time_dts =
+      DecodeTimestamp::FromPresentationTime(currentMediaTime);
+  base::AutoLock auto_lock(lock_);
+  for (const auto& itr : source_state_map_) {
+    itr.second->OnMemoryPressure(media_time_dts, memory_pressure_level,
+                                 force_instant_gc);
+  }
+}
+
 bool ChunkDemuxer::EvictCodedFrames(const std::string& id,
                                     base::TimeDelta currentMediaTime,
                                     size_t newDataSize) {
@@ -1208,7 +1231,8 @@ bool ChunkDemuxer::IsValidId(const std::string& source_id) const {
 }
 
 void ChunkDemuxer::UpdateDuration(TimeDelta new_duration) {
-  DCHECK(duration_ != new_duration);
+  DCHECK(duration_ != new_duration ||
+         user_specified_duration_ != new_duration.InSecondsF());
   user_specified_duration_ = -1;
   duration_ = new_duration;
   host_->SetDuration(new_duration);
@@ -1248,8 +1272,12 @@ void ChunkDemuxer::DecreaseDurationIfNecessary() {
   if (max_duration.is_zero())
     return;
 
-  if (max_duration < duration_)
+  // Note: be careful to also check |user_specified_duration_|, which may have
+  // higher precision than |duration_|.
+  if (max_duration < duration_ ||
+      max_duration.InSecondsF() < user_specified_duration_) {
     UpdateDuration(max_duration);
+  }
 }
 
 Ranges<TimeDelta> ChunkDemuxer::GetBufferedRanges() const {

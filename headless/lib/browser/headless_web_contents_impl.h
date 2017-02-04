@@ -20,7 +20,6 @@ class Window;
 }
 
 namespace content {
-class BrowserContext;
 class DevToolsAgentHost;
 class WebContents;
 }
@@ -30,7 +29,6 @@ class Size;
 }
 
 namespace headless {
-class HeadlessDevToolsHostImpl;
 class HeadlessBrowserImpl;
 class WebContentsObserverAdapter;
 
@@ -58,8 +56,10 @@ class HeadlessWebContentsImpl : public HeadlessWebContents,
   HeadlessDevToolsTarget* GetDevToolsTarget() override;
 
   // HeadlessDevToolsTarget implementation:
-  void AttachClient(HeadlessDevToolsClient* client) override;
+  bool AttachClient(HeadlessDevToolsClient* client) override;
+  void ForceAttachClient(HeadlessDevToolsClient* client) override;
   void DetachClient(HeadlessDevToolsClient* client) override;
+  bool IsAttached() override;
 
   // RenderProcessHostObserver implementation:
   void RenderProcessExited(content::RenderProcessHost* host,

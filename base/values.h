@@ -30,6 +30,7 @@
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/memory/manual_constructor.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 
@@ -37,10 +38,10 @@ namespace base {
 
 class BinaryValue;
 class DictionaryValue;
-class FundamentalValue;
 class ListValue;
-class StringValue;
 class Value;
+using FundamentalValue = Value;
+using StringValue = Value;
 
 // The Value class is the base class for Values. A Value can be instantiated
 // via the Create*Value() factory methods, or by directly creating instances of
@@ -49,21 +50,45 @@ class Value;
 // See the file-level comment above for more information.
 class BASE_EXPORT Value {
  public:
-  enum Type {
-    TYPE_NULL = 0,
-    TYPE_BOOLEAN,
-    TYPE_INTEGER,
-    TYPE_DOUBLE,
-    TYPE_STRING,
-    TYPE_BINARY,
-    TYPE_DICTIONARY,
-    TYPE_LIST
+  enum class Type {
+    NONE = 0,
+    BOOLEAN,
+    INTEGER,
+    DOUBLE,
+    STRING,
+    BINARY,
+    DICTIONARY,
+    LIST
     // Note: Do not add more types. See the file-level comment above for why.
   };
 
-  virtual ~Value();
-
   static std::unique_ptr<Value> CreateNullValue();
+
+  Value(const Value& that);
+  Value(Value&& that);
+  Value();  // A null value.
+  explicit Value(Type type);
+  explicit Value(bool in_bool);
+  explicit Value(int in_int);
+  explicit Value(double in_double);
+
+  // Value(const char*) and Value(const char16*) are required despite
+  // Value(const std::string&) and Value(const string16&) because otherwise the
+  // compiler will choose the Value(bool) constructor for these arguments.
+  // Value(std::string&&) allow for efficient move construction.
+  // Value(StringPiece) exists due to many callsites passing StringPieces as
+  // arguments.
+  explicit Value(const char* in_string);
+  explicit Value(const std::string& in_string);
+  explicit Value(std::string&& in_string);
+  explicit Value(const char16* in_string);
+  explicit Value(const string16& in_string);
+  explicit Value(StringPiece in_string);
+
+  Value& operator=(const Value& that);
+  Value& operator=(Value&& that);
+
+  virtual ~Value();
 
   // Returns the name for a given |type|.
   static const char* GetTypeName(Type type);
@@ -73,10 +98,24 @@ class BASE_EXPORT Value {
   // safe to use the Type to determine whether you can cast from
   // Value* to (Implementing Class)*.  Also, a Value object never changes
   // its type after construction.
-  Type GetType() const { return type_; }
+  Type GetType() const { return type_; }  // DEPRECATED, use type().
+  Type type() const { return type_; }
 
   // Returns true if the current object represents a given type.
   bool IsType(Type type) const { return type == type_; }
+  bool is_bool() const { return type() == Type::BOOLEAN; }
+  bool is_int() const { return type() == Type::INTEGER; }
+  bool is_double() const { return type() == Type::DOUBLE; }
+  bool is_string() const { return type() == Type::STRING; }
+  bool is_blob() const { return type() == Type::BINARY; }
+  bool is_dict() const { return type() == Type::DICTIONARY; }
+  bool is_list() const { return type() == Type::LIST; }
+
+  // These will all fatally assert if the type doesn't match.
+  bool GetBool() const;
+  int GetInt() const;
+  double GetDouble() const;  // Implicitly converts from int if necessary.
+  const std::string& GetString() const;
 
   // These methods allow the convenient retrieval of the contents of the Value.
   // If the current object can be converted into the given type, the value is
@@ -88,6 +127,7 @@ class BASE_EXPORT Value {
   virtual bool GetAsString(std::string* out_value) const;
   virtual bool GetAsString(string16* out_value) const;
   virtual bool GetAsString(const StringValue** out_value) const;
+  virtual bool GetAsString(StringPiece* out_value) const;
   virtual bool GetAsBinary(const BinaryValue** out_value) const;
   // ListValue::From is the equivalent for std::unique_ptr conversions.
   virtual bool GetAsList(ListValue** out_value);
@@ -98,8 +138,7 @@ class BASE_EXPORT Value {
   // Note: Do not add more types. See the file-level comment above for why.
 
   // This creates a deep copy of the entire Value tree, and returns a pointer
-  // to the copy.  The caller gets ownership of the copy, of course.
-  //
+  // to the copy. The caller gets ownership of the copy, of course.
   // Subclasses return their own type directly in their overrides;
   // this works because C++ supports covariant return types.
   virtual Value* DeepCopy() const;
@@ -113,64 +152,22 @@ class BASE_EXPORT Value {
   // NULLs are considered equal but different from Value::CreateNullValue().
   static bool Equals(const Value* a, const Value* b);
 
- protected:
-  // These aren't safe for end-users, but they are useful for subclasses.
-  explicit Value(Type type);
-  Value(const Value& that);
-  Value& operator=(const Value& that);
-
  private:
+  void InternalCopyFundamentalValue(const Value& that);
+  void InternalCopyConstructFrom(const Value& that);
+  void InternalMoveConstructFrom(Value&& that);
+  void InternalCopyAssignFrom(const Value& that);
+  void InternalMoveAssignFrom(Value&& that);
+  void InternalCleanup();
+
   Type type_;
-};
 
-// FundamentalValue represents the simple fundamental types of values.
-class BASE_EXPORT FundamentalValue : public Value {
- public:
-  explicit FundamentalValue(bool in_value);
-  explicit FundamentalValue(int in_value);
-  explicit FundamentalValue(double in_value);
-  ~FundamentalValue() override;
-
-  // Overridden from Value:
-  bool GetAsBoolean(bool* out_value) const override;
-  bool GetAsInteger(int* out_value) const override;
-  // Values of both type TYPE_INTEGER and TYPE_DOUBLE can be obtained as
-  // doubles.
-  bool GetAsDouble(double* out_value) const override;
-  FundamentalValue* DeepCopy() const override;
-  bool Equals(const Value* other) const override;
-
- private:
   union {
-    bool boolean_value_;
-    int integer_value_;
+    bool bool_value_;
+    int int_value_;
     double double_value_;
+    ManualConstructor<std::string> string_value_;
   };
-};
-
-class BASE_EXPORT StringValue : public Value {
- public:
-  // Initializes a StringValue with a UTF-8 narrow character string.
-  explicit StringValue(StringPiece in_value);
-
-  // Initializes a StringValue with a string16.
-  explicit StringValue(const string16& in_value);
-
-  ~StringValue() override;
-
-  // Returns |value_| as a pointer or reference.
-  std::string* GetString();
-  const std::string& GetString() const;
-
-  // Overridden from Value:
-  bool GetAsString(std::string* out_value) const override;
-  bool GetAsString(string16* out_value) const override;
-  bool GetAsString(const StringValue** out_value) const override;
-  StringValue* DeepCopy() const override;
-  bool Equals(const Value* other) const override;
-
- private:
-  std::string value_;
 };
 
 class BASE_EXPORT BinaryValue: public Value {
@@ -287,7 +284,7 @@ class BASE_EXPORT DictionaryValue : public Value {
   // |out_value| is optional and will only be set if non-NULL.
   bool GetBoolean(StringPiece path, bool* out_value) const;
   bool GetInteger(StringPiece path, int* out_value) const;
-  // Values of both type TYPE_INTEGER and TYPE_DOUBLE can be obtained as
+  // Values of both type Type::INTEGER and Type::DOUBLE can be obtained as
   // doubles.
   bool GetDouble(StringPiece path, double* out_value) const;
   bool GetString(StringPiece path, std::string* out_value) const;
@@ -327,7 +324,7 @@ class BASE_EXPORT DictionaryValue : public Value {
   // |out_value|.  If |out_value| is NULL, the removed value will be deleted.
   // This method returns true if |path| is a valid path; otherwise it will
   // return false and the DictionaryValue object will be unchanged.
-  virtual bool Remove(StringPiece path, std::unique_ptr<Value>* out_value);
+  bool Remove(StringPiece path, std::unique_ptr<Value>* out_value);
 
   // Like Remove(), but without special treatment of '.'.  This allows e.g. URLs
   // to be used as paths.
@@ -336,7 +333,7 @@ class BASE_EXPORT DictionaryValue : public Value {
 
   // Removes a path, clearing out all dictionaries on |path| that remain empty
   // after removing the value at |path|.
-  virtual bool RemovePath(StringPiece path, std::unique_ptr<Value>* out_value);
+  bool RemovePath(StringPiece path, std::unique_ptr<Value>* out_value);
 
   // Makes a copy of |this| but doesn't include empty dictionaries and lists in
   // the copy.  This never returns NULL, even if |this| itself is empty.
@@ -427,7 +424,7 @@ class BASE_EXPORT ListValue : public Value {
   // |out_value| is optional and will only be set if non-NULL.
   bool GetBoolean(size_t index, bool* out_value) const;
   bool GetInteger(size_t index, int* out_value) const;
-  // Values of both type TYPE_INTEGER and TYPE_DOUBLE can be obtained as
+  // Values of both type Type::INTEGER and Type::DOUBLE can be obtained as
   // doubles.
   bool GetDouble(size_t index, double* out_value) const;
   bool GetString(size_t index, std::string* out_value) const;
@@ -543,16 +540,6 @@ class BASE_EXPORT ValueDeserializer {
 BASE_EXPORT std::ostream& operator<<(std::ostream& out, const Value& value);
 
 BASE_EXPORT inline std::ostream& operator<<(std::ostream& out,
-                                            const FundamentalValue& value) {
-  return out << static_cast<const Value&>(value);
-}
-
-BASE_EXPORT inline std::ostream& operator<<(std::ostream& out,
-                                            const StringValue& value) {
-  return out << static_cast<const Value&>(value);
-}
-
-BASE_EXPORT inline std::ostream& operator<<(std::ostream& out,
                                             const DictionaryValue& value) {
   return out << static_cast<const Value&>(value);
 }
@@ -561,6 +548,10 @@ BASE_EXPORT inline std::ostream& operator<<(std::ostream& out,
                                             const ListValue& value) {
   return out << static_cast<const Value&>(value);
 }
+
+// Stream operator so that enum class Types can be used in log statements.
+BASE_EXPORT std::ostream& operator<<(std::ostream& out,
+                                     const Value::Type& type);
 
 }  // namespace base
 

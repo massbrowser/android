@@ -41,7 +41,11 @@ class CORE_EXPORT ImageDocument final : public HTMLDocument {
     return new ImageDocument(initializer);
   }
 
-  ImageResource* cachedImage();
+  ImageResourceContent* cachedImage();
+
+  // TODO(hiroshige): Remove this.
+  ImageResource* cachedImageResourceDeprecated();
+
   HTMLImageElement* imageElement() const { return m_imageElement.get(); }
 
   void windowSizeChanged();
@@ -49,6 +53,7 @@ class CORE_EXPORT ImageDocument final : public HTMLDocument {
   void imageClicked(int x, int y);
   void imageLoaded();
   void updateImageStyle();
+  bool shouldShrinkToFit() const;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -66,7 +71,6 @@ class CORE_EXPORT ImageDocument final : public HTMLDocument {
   void resizeImageToFit();
   void restoreImageSize();
   bool imageFitsInWindow() const;
-  bool shouldShrinkToFit() const;
   // Calculates the image size multiplier that's needed to fit the image to
   // the window, taking into account page zoom and device scale.
   float scale() const;

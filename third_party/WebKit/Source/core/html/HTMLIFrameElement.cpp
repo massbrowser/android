@@ -97,28 +97,40 @@ void HTMLIFrameElement::collectStyleForPresentationAttribute(
   }
 }
 
-void HTMLIFrameElement::parseAttribute(const QualifiedName& name,
-                                       const AtomicString& oldValue,
-                                       const AtomicString& value) {
+void HTMLIFrameElement::parseAttribute(
+    const AttributeModificationParams& params) {
+  const QualifiedName& name = params.name;
+  const AtomicString& value = params.newValue;
   if (name == nameAttr) {
     if (isInDocumentTree() && document().isHTMLDocument()) {
       HTMLDocument& document = toHTMLDocument(this->document());
       document.removeExtraNamedItem(m_name);
       document.addExtraNamedItem(value);
     }
+    AtomicString oldName = m_name;
     m_name = value;
+    if (m_name != oldName)
+      frameOwnerPropertiesChanged();
   } else if (name == sandboxAttr) {
     m_sandbox->setValue(value);
     UseCounter::count(document(), UseCounter::SandboxViaIFrame);
   } else if (name == referrerpolicyAttr) {
     m_referrerPolicy = ReferrerPolicyDefault;
-    if (!value.isNull())
+    if (!value.isNull()) {
       SecurityPolicy::referrerPolicyFromStringWithLegacyKeywords(
           value, &m_referrerPolicy);
+      UseCounter::count(document(),
+                        UseCounter::HTMLIFrameElementReferrerPolicyAttribute);
+    }
   } else if (name == allowfullscreenAttr) {
     bool oldAllowFullscreen = m_allowFullscreen;
     m_allowFullscreen = !value.isNull();
     if (m_allowFullscreen != oldAllowFullscreen)
+      frameOwnerPropertiesChanged();
+  } else if (name == allowpaymentrequestAttr) {
+    bool oldAllowPaymentRequest = m_allowPaymentRequest;
+    m_allowPaymentRequest = !value.isNull();
+    if (m_allowPaymentRequest != oldAllowPaymentRequest)
       frameOwnerPropertiesChanged();
   } else if (name == permissionsAttr) {
     if (initializePermissionsAttribute())
@@ -139,9 +151,8 @@ void HTMLIFrameElement::parseAttribute(const QualifiedName& name,
       frameOwnerPropertiesChanged();
   } else {
     if (name == srcAttr)
-      logUpdateAttributeIfIsolatedWorldAndInDocument("iframe", srcAttr,
-                                                     oldValue, value);
-    HTMLFrameElementBase::parseAttribute(name, oldValue, value);
+      logUpdateAttributeIfIsolatedWorldAndInDocument("iframe", params);
+    HTMLFrameElementBase::parseAttribute(params);
   }
 }
 

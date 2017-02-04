@@ -18,7 +18,6 @@
 namespace blink {
 
 class MessageCallback;
-class NFCError;
 class NFCPushOptions;
 using NFCPushMessage = StringOrArrayBufferOrNFCMessage;
 class NFCWatchOptions;
@@ -40,7 +39,7 @@ class NFC final : public GarbageCollectedFinalized<NFC>,
   void dispose();
 
   // ContextLifecycleObserver overrides.
-  void contextDestroyed() override;
+  void contextDestroyed(ExecutionContext*) override;
 
   // Pushes NFCPushMessage asynchronously to NFC tag / peer.
   ScriptPromise push(ScriptState*,

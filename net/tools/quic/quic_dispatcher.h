@@ -13,15 +13,16 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "net/base/linked_hash_map.h"
 #include "net/quic/core/crypto/quic_compressed_certs_cache.h"
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/quic_blocked_writer_interface.h"
 #include "net/quic/core/quic_buffered_packet_store.h"
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_crypto_server_stream.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_session.h"
+#include "net/quic/core/quic_version_manager.h"
+#include "net/quic/platform/api/quic_containers.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 
 #include "net/tools/quic/quic_process_packet_interface.h"
@@ -29,13 +30,12 @@
 #include "net/tools/quic/stateless_rejector.h"
 
 namespace net {
-
-class QuicConfig;
-class QuicCryptoServerConfig;
-
 namespace test {
 class QuicDispatcherPeer;
 }  // namespace test
+
+class QuicConfig;
+class QuicCryptoServerConfig;
 
 class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
                        public ProcessPacketInterface,
@@ -44,10 +44,7 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
                        public QuicBufferedPacketStore::VisitorInterface {
  public:
   // Ideally we'd have a linked_hash_set: the  boolean is unused.
-  typedef linked_hash_map<QuicBlockedWriterInterface*,
-                          bool,
-                          QuicBlockedWriterInterfacePtrHash>
-      WriteBlockedList;
+  typedef QuicLinkedHashMap<QuicBlockedWriterInterface*, bool> WriteBlockedList;
 
   QuicDispatcher(const QuicConfig& config,
                  const QuicCryptoServerConfig* crypto_config,
@@ -62,7 +59,7 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   void InitializeWithWriter(QuicPacketWriter* writer);
 
   // Process the incoming packet by creating a new session, passing it to
-  // an existing session, or passing it to the time wait std::list.
+  // an existing session, or passing it to the time wait list.
   void ProcessPacket(const QuicSocketAddress& server_address,
                      const QuicSocketAddress& client_address,
                      const QuicReceivedPacket& packet) override;
@@ -89,9 +86,8 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   void OnWriteBlocked(QuicBlockedWriterInterface* blocked_writer) override;
 
   // QuicTimeWaitListManager::Visitor interface implementation
-  // Called whenever the time wait std::list manager adds a new connection to
-  // the
-  // time-wait std::list.
+  // Called whenever the time wait list manager adds a new connection to the
+  // time-wait list.
   void OnConnectionAddedToTimeWaitList(QuicConnectionId connection_id) override;
 
   using SessionMap =
@@ -275,7 +271,7 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
       QuicConnectionId connection_id);
 
  private:
-  friend class net::test::QuicDispatcherPeer;
+  friend class test::QuicDispatcherPeer;
   friend class StatelessRejectorProcessDoneCallback;
 
   typedef std::unordered_set<QuicConnectionId> QuicConnectionIdSet;
@@ -343,7 +339,7 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   // Entity that manages connection_ids in time wait state.
   std::unique_ptr<QuicTimeWaitListManager> time_wait_list_manager_;
 
-  // The std::list of closed but not-yet-deleted sessions.
+  // The list of closed but not-yet-deleted sessions.
   std::vector<std::unique_ptr<QuicSession>> closed_session_list_;
 
   // The helper used for all connections.

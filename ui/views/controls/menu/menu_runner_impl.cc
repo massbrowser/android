@@ -62,17 +62,22 @@ void MenuRunnerImpl::Release() {
 
     // Verify that the MenuController is still active. It may have been
     // destroyed out of order.
-    if (MenuController::GetActiveInstance()) {
-      DCHECK(controller_);
+    if (controller_) {
       // Release is invoked when MenuRunner is destroyed. Assume this is
       // happening because the object referencing the menu has been destroyed
       // and the menu button is no longer valid.
       controller_->Cancel(MenuController::EXIT_DESTROYED);
       return;
     }
-  }
 
-  delete this;
+    // TODO(jonross): remove after tracking down the cause of
+    // (crbug.com/683087).
+    // Update for the ASAN stack trace to determine if we are in the running
+    // state during the incorrect destruction order.
+    delete this;
+  } else {
+    delete this;
+  }
 }
 
 MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
@@ -86,6 +91,12 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
     // doesn't handle this very well (meaning it crashes).
     return MenuRunner::NORMAL_EXIT;
   }
+
+  // TODO(jonross): remove after tracking down the cause of (crbug.com/683087).
+  // Verify that this was not a delegate previously used for a run, which was
+  // shutdown, but not deleted. Nesting the same delegate multiple times is
+  // dangerous.
+  CHECK(!controller_);
 
   MenuController* controller = MenuController::GetActiveInstance();
   if (controller) {
@@ -122,12 +133,14 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
   if (!controller) {
     // No menus are showing, show one.
     controller = new MenuController(!for_drop_, this);
+    // TODO(jonross): remove after tracking down the cause of
+    // (crbug.com/683087).
     owns_controller_ = true;
   }
   controller->SetAsyncRun(async_);
   controller->set_is_combobox((run_types & MenuRunner::COMBOBOX) != 0);
-  controller_ = controller;
-  menu_->set_controller(controller_);
+  controller_ = controller->AsWeakPtr();
+  menu_->set_controller(controller_.get());
   menu_->PrepareForRun(owns_controller_,
                        has_mnemonics,
                        !for_drop_ && ShouldShowMnemonics(button));
@@ -187,12 +200,13 @@ MenuRunner::RunResult MenuRunnerImpl::MenuDone(NotifyType type,
   menu_->RemoveEmptyMenus();
   menu_->set_controller(nullptr);
 
-  if (owns_controller_) {
+  if (owns_controller_ && controller_) {
     // We created the controller and need to delete it.
-    delete controller_;
+    delete controller_.get();
     owns_controller_ = false;
+    controller_ = nullptr;
   }
-  controller_ = nullptr;
+
   // Make sure all the windows we created to show the menus have been
   // destroyed.
   menu_->DestroyAllMenuHosts();

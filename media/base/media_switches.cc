@@ -126,11 +126,21 @@ const char kForceVideoOverlays[] = "force-video-overlays";
 const char kMSEAudioBufferSizeLimit[] = "mse-audio-buffer-size-limit";
 const char kMSEVideoBufferSizeLimit[] = "mse-video-buffer-size-limit";
 
+// By default, if any CDM host (including signature) file is missing, the CDM
+// will not be called to verify the host. Enable this switch to ignore missing
+// CDM host files. This can be used in tests.
+const char kIgnoreMissingCdmHostFile[] = "ignore-missing-cdm-host-file";
+
 }  // namespace switches
 
 namespace media {
 
 #if defined(OS_WIN)
+// Enables video decode acceleration using the D3D11 video decoder api.
+// This is completely insecure - DO NOT USE except for testing.
+const base::Feature kD3D11VideoDecoding{"D3D11VideoDecoding",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Enables H264 HW encode acceleration using Media Foundation for Windows.
 const base::Feature kMediaFoundationH264Encoding{
     "MediaFoundationH264Encoding", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -159,6 +169,12 @@ const base::Feature kResumeBackgroundVideo {
 const base::Feature kBackgroundVideoTrackOptimization{
     "BackgroundVideoTrackOptimization", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Make MSE garbage collection algorithm more aggressive when we are under
+// moderate or critical memory pressure. This will relieve memory pressure by
+// releasing stale data from MSE buffers.
+const base::Feature kMemoryPressureBasedSourceBufferGC{
+    "MemoryPressureBasedSourceBufferGC", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Use shared block-based buffering for media.
 const base::Feature kUseNewMediaCache{"use-new-media-cache",
                                       base::FEATURE_ENABLED_BY_DEFAULT};
@@ -166,6 +182,10 @@ const base::Feature kUseNewMediaCache{"use-new-media-cache",
 // Correct video colors based on output display?
 const base::Feature kVideoColorManagement{"video-color-management",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Inform video blitter of video color space.
+const base::Feature kVideoBlitColorAccuracy{"video-blit-color-accuracy",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables support for External Clear Key (ECK) key system for testing on
 // supported platforms. On platforms that do not support ECK, this feature has
@@ -177,6 +197,10 @@ const base::Feature kExternalClearKeyForTesting{
 // Replaces WPMA by the MediaPlayerRenderer for HLS and fallback playback.
 const base::Feature kAndroidMediaPlayerRenderer{
     "android-media-player-renderer", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Lock the screen orientation when a video goes fullscreen.
+const base::Feature kVideoFullscreenOrientationLock{
+    "VideoFullscreenOrientationLock", base::FEATURE_ENABLED_BY_DEFAULT};
 #endif
 
 }  // namespace media

@@ -8,7 +8,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "services/service_manager/public/interfaces/connector.mojom.h"
-#include "services/ui/common/event_matcher_util.h"
+#include "services/ui/common/accelerator_util.h"
 #include "services/ui/ws/accelerator.h"
 #include "services/ui/ws/display_manager.h"
 #include "services/ui/ws/platform_display.h"
@@ -165,7 +165,7 @@ void WindowManagerState::SetDragDropSourceWindow(
     DragSource* drag_source,
     ServerWindow* window,
     DragTargetConnection* source_connection,
-    mojo::Map<mojo::String, mojo::Array<uint8_t>> drag_data,
+    const std::unordered_map<std::string, std::vector<uint8_t>>& drag_data,
     uint32_t drag_operation) {
   int32_t drag_pointer = PointerEvent::kMousePointerId;
   if (event_awaiting_input_ack_ &&
@@ -178,9 +178,9 @@ void WindowManagerState::SetDragDropSourceWindow(
     return;
   }
 
-  event_dispatcher_.SetDragDropSourceWindow(
-      drag_source, window, source_connection, drag_pointer,
-      std::move(drag_data), drag_operation);
+  event_dispatcher_.SetDragDropSourceWindow(drag_source, window,
+                                            source_connection, drag_pointer,
+                                            drag_data, drag_operation);
 }
 
 void WindowManagerState::CancelDragDrop() {
@@ -508,6 +508,7 @@ ServerWindow* WindowManagerState::GetFocusedWindowForEventDispatcher() {
 }
 
 void WindowManagerState::SetNativeCapture(ServerWindow* window) {
+  DCHECK(window);
   DCHECK(IsActive());
   WindowManagerDisplayRoot* display_root =
       display_manager()->GetWindowManagerDisplayRoot(window);
@@ -527,11 +528,9 @@ void WindowManagerState::ReleaseNativeCapture() {
 }
 
 void WindowManagerState::UpdateNativeCursorFromDispatcher() {
-  ui::mojom::Cursor cursor_id = mojom::Cursor::CURSOR_NULL;
-  if (event_dispatcher_.GetCurrentMouseCursor(&cursor_id)) {
-    for (Display* display : display_manager()->displays())
-      display->UpdateNativeCursor(cursor_id);
-  }
+  const ui::mojom::Cursor cursor_id = event_dispatcher_.GetCurrentMouseCursor();
+  for (Display* display : display_manager()->displays())
+    display->UpdateNativeCursor(cursor_id);
 }
 
 void WindowManagerState::OnCaptureChanged(ServerWindow* new_capture,
@@ -626,6 +625,8 @@ ServerWindow* WindowManagerState::GetRootWindowContaining(
 void WindowManagerState::OnEventTargetNotFound(const ui::Event& event) {
   window_server()->SendToPointerWatchers(event, user_id(), nullptr, /* window */
                                          nullptr /* ignore_tree */);
+  if (event.IsMousePointerEvent())
+    UpdateNativeCursorFromDispatcher();
 }
 
 void WindowManagerState::OnWindowEmbeddedAppDisconnected(ServerWindow* window) {

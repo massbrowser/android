@@ -6,16 +6,18 @@
 #define NGInlineLayoutAlgorithm_h
 
 #include "core/CoreExport.h"
-#include "core/layout/ng/ng_inline_node.h"
+#include "core/layout/ng/ng_break_token.h"
 #include "core/layout/ng/ng_layout_algorithm.h"
+#include "platform/heap/Handle.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
 
 class ComputedStyle;
+class LayoutObject;
 class NGConstraintSpace;
-class NGPhysicalFragment;
-class NGBreakToken;
+class NGFragmentBuilder;
+class NGInlineNode;
 
 // A class for inline layout (e.g. a anonymous block with inline-level children
 // only).
@@ -26,30 +28,31 @@ class NGBreakToken;
 class CORE_EXPORT NGInlineLayoutAlgorithm : public NGLayoutAlgorithm {
  public:
   // Default constructor.
+  // @param layout_object The LayoutObject associated with this anonymous block.
   // @param style Style reference of the block that is being laid out.
   // @param first_child Our first child; the algorithm will use its NextSibling
   //                    method to access all the children.
   // @param space The constraint space which the algorithm should generate a
   //              fragment within.
-  NGInlineLayoutAlgorithm(PassRefPtr<const ComputedStyle>,
+  NGInlineLayoutAlgorithm(LayoutObject* layout_object,
+                          PassRefPtr<const ComputedStyle> style,
                           NGInlineNode* first_child,
                           NGConstraintSpace* space,
                           NGBreakToken* break_token = nullptr);
 
-  NGLayoutStatus Layout(NGFragmentBase*,
-                        NGPhysicalFragmentBase**,
-                        NGLayoutAlgorithm**) override;
-
-  DECLARE_VIRTUAL_TRACE();
+  NGPhysicalFragment* Layout() override;
 
  private:
   // Read-only Getters.
   const ComputedStyle& Style() const { return *style_; }
 
+  NGConstraintSpace* CreateConstraintSpaceForChild(const NGInlineNode&) const;
+
   RefPtr<const ComputedStyle> style_;
-  Member<NGInlineNode> first_child_;
-  Member<NGConstraintSpace> constraint_space_;
-  Member<NGBreakToken> break_token_;
+  Persistent<NGInlineNode> first_child_;
+  Persistent<NGConstraintSpace> constraint_space_;
+  Persistent<NGBreakToken> break_token_;
+  Persistent<NGFragmentBuilder> builder_;
 };
 
 }  // namespace blink

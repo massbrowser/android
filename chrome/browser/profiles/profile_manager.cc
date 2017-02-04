@@ -22,6 +22,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
+#include "base/value_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/startup_task_runner_service_factory.h"
@@ -110,6 +111,7 @@
 #endif
 
 #if defined(OS_ANDROID)
+#include "chrome/browser/ntp_snippets/content_suggestions_notifier_service_factory.h"
 #include "chrome/browser/ntp_snippets/content_suggestions_service_factory.h"
 #endif
 
@@ -222,6 +224,12 @@ void MarkProfileDirectoryForDeletion(const base::FilePath& path) {
   DCHECK(!ContainsKey(ProfilesToDelete(), path) ||
          ProfilesToDelete()[path] == ProfileDeletionStage::SCHEDULING);
   ProfilesToDelete()[path] = ProfileDeletionStage::MARKED;
+  // Remember that this profile was deleted and files should have been deleted
+  // on shutdown. In case of a crash remaining files are removed on next start.
+  ListPrefUpdate deleted_profiles(g_browser_process->local_state(),
+                                  prefs::kProfilesDeleted);
+  std::unique_ptr<base::Value> value(CreateFilePathValue(path));
+  deleted_profiles->Append(std::move(value));
 }
 
 // Cancel a scheduling deletion, so ScheduleProfileDirectoryForDeletion can be
@@ -247,6 +255,13 @@ void NukeProfileFromDisk(const base::FilePath& profile_path) {
   chrome::GetUserCacheDirectory(profile_path, &cache_path);
   base::DeleteFile(profile_path, true);
   base::DeleteFile(cache_path, true);
+}
+
+// Called after a deleted profile was checked and cleaned up.
+void ProfileCleanedUp(const base::Value* profile_path_value) {
+  ListPrefUpdate deleted_profiles(g_browser_process->local_state(),
+                                  prefs::kProfilesDeleted);
+  deleted_profiles->Remove(*profile_path_value, nullptr);
 }
 
 #if defined(OS_CHROMEOS)
@@ -859,6 +874,42 @@ void ProfileManager::CleanUpEphemeralProfiles() {
   }
 }
 
+void ProfileManager::CleanUpDeletedProfiles() {
+  PrefService* local_state = g_browser_process->local_state();
+  DCHECK(local_state);
+  const base::ListValue* deleted_profiles =
+      local_state->GetList(prefs::kProfilesDeleted);
+  DCHECK(deleted_profiles);
+
+  for (const std::unique_ptr<base::Value>& value : *deleted_profiles) {
+    base::FilePath profile_path;
+    bool is_valid_profile_path =
+        base::GetValueAsFilePath(*value, &profile_path) &&
+        profile_path.DirName() == user_data_dir();
+    // Although it should never happen, make sure this is a valid path in the
+    // user_data_dir, so we don't accidentially delete something else.
+    if (is_valid_profile_path) {
+      if (base::PathExists(profile_path)) {
+        LOG(WARNING) << "Files of a deleted profile still exist after restart. "
+                        "Cleaning up now.";
+        BrowserThread::PostTaskAndReply(
+            BrowserThread::FILE, FROM_HERE,
+            base::Bind(&NukeProfileFromDisk, profile_path),
+            base::Bind(&ProfileCleanedUp, value.get()));
+      } else {
+        // Everything is fine, the profile was removed on shutdown.
+        BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::Bind(&ProfileCleanedUp, value.get()));
+      }
+    } else {
+      LOG(ERROR) << "Found invalid profile path in deleted_profiles: "
+                 << profile_path.AsUTF8Unsafe();
+      NOTREACHED();
+    }
+  }
+}
+
 void ProfileManager::InitProfileUserPrefs(Profile* profile) {
   TRACE_EVENT0("browser", "ProfileManager::InitProfileUserPrefs");
   ProfileAttributesStorage& storage = GetProfileAttributesStorage();
@@ -1201,8 +1252,11 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
       ->InitializeMigration(ProfileSyncServiceFactory::GetForProfile(profile));
 
 #if defined(OS_ANDROID)
+  // TODO(b/678590): create services during profile startup.
   // Service is responsible for fetching content snippets for the NTP.
   ContentSuggestionsServiceFactory::GetForProfile(profile);
+  // Generates notifications from the above, if experiment is enabled.
+  ContentSuggestionsNotifierServiceFactory::GetForProfile(profile);
 #endif
 }
 
@@ -1313,12 +1367,16 @@ Profile* ProfileManager::CreateAndInitializeProfile(
 #if !defined(OS_ANDROID)
 void ProfileManager::EnsureActiveProfileExistsBeforeDeletion(
     const CreateCallback& callback, const base::FilePath& profile_dir) {
-  // In case we delete non-active profile, just proceed.
-  const base::FilePath last_used_profile =
+  // In case we delete non-active profile and current profile is valid, proceed.
+  const base::FilePath last_used_profile_path =
       GetLastUsedProfileDir(user_data_dir_);
-  if (last_used_profile != profile_dir &&
-      last_used_profile != GetGuestProfilePath()) {
-    FinishDeletingProfile(profile_dir, last_used_profile);
+  const base::FilePath guest_profile_path = GetGuestProfilePath();
+  Profile* last_used_profile = GetProfileByPath(last_used_profile_path);
+  if (last_used_profile_path != profile_dir &&
+      last_used_profile_path != guest_profile_path &&
+      last_used_profile != nullptr &&
+      !last_used_profile->IsLegacySupervised()) {
+    FinishDeletingProfile(profile_dir, last_used_profile_path);
     return;
   }
 
@@ -1327,6 +1385,7 @@ void ProfileManager::EnsureActiveProfileExistsBeforeDeletion(
     Profile* profile = browser->profile();
     base::FilePath cur_path = profile->GetPath();
     if (cur_path != profile_dir &&
+        cur_path != guest_profile_path &&
         !profile->IsLegacySupervised() &&
         !IsProfileDirectoryMarkedForDeletion(cur_path)) {
       OnNewActiveProfileLoaded(profile_dir, cur_path, callback, profile,
@@ -1345,6 +1404,7 @@ void ProfileManager::EnsureActiveProfileExistsBeforeDeletion(
     // Make sure that this profile is not pending deletion, and is not
     // legacy-supervised.
     if (cur_path != profile_dir &&
+        cur_path != guest_profile_path &&
         !entry->IsLegacySupervised() &&
         !IsProfileDirectoryMarkedForDeletion(cur_path)) {
       fallback_profile_path = cur_path;
@@ -1613,7 +1673,7 @@ void ProfileManager::BrowserListObserver::OnBrowserRemoved(
     // Gather statistics and store into ProfileInfoCache. For incognito profile
     // we gather the statistics of its parent profile instead, because a window
     // of the parent profile was open.
-    if (!profile->IsSystemProfile()) {
+    if (!profile->IsSystemProfile() && !original_profile->IsSystemProfile()) {
       ProfileStatisticsFactory::GetForProfile(original_profile)->
           GatherStatistics(profiles::ProfileStatisticsCallback());
     }

@@ -5,8 +5,8 @@
 #include "content/browser/mime_registry_impl.h"
 
 #include "base/files/file_path.h"
+#include "base/memory/ptr_util.h"
 #include "content/public/browser/browser_thread.h"
-#include "mojo/common/common_type_converters.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/base/mime_util.h"
 
@@ -29,7 +29,7 @@ void MimeRegistryImpl::GetMimeTypeFromExtension(
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   std::string mime_type;
   net::GetMimeTypeFromExtension(
-      mojo::String(extension).To<base::FilePath::StringType>(), &mime_type);
+      base::FilePath::FromUTF8Unsafe(extension).value(), &mime_type);
   callback.Run(mime_type);
 }
 

@@ -26,6 +26,7 @@
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/validation.h"
+#include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_l10n_util.h"
 #include "components/autofill/core/common/autofill_regexes.h"
 #include "components/autofill/core/common/form_field_data.h"
@@ -39,12 +40,15 @@ using base::ASCIIToUTF16;
 
 namespace autofill {
 
-const base::char16 kMidlineEllipsis[] = { 0x22ef, 0 };
+const base::char16 kMidlineEllipsis[] = { 0x0020, 0x0020,
+                                          0x2022, 0x2006,
+                                          0x2022, 0x2006,
+                                          0x2022, 0x2006,
+                                          0x2022, 0x2006, 0 };
 
 namespace {
 
 const base::char16 kCreditCardObfuscationSymbol = '*';
-const base::char16 kNonBreakingSpace[] = { 0x00a0, 0 };
 
 bool ConvertYear(const base::string16& year, int* num) {
   // If the |year| is empty, clear the stored value.
@@ -72,6 +76,8 @@ base::string16 TypeForFill(const std::string& type) {
     return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_JCB);
   if (type == kMasterCard)
     return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_MASTERCARD);
+  if (type == kMirCard)
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_MIR);
   if (type == kUnionPay)
     return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_UNION_PAY);
   if (type == kVisaCard)
@@ -130,13 +136,15 @@ int CreditCard::IconResourceId(const std::string& type) {
   if (type == kAmericanExpressCard)
     return IDR_AUTOFILL_CC_AMEX;
   if (type == kDinersCard)
-    return IDR_AUTOFILL_CC_GENERIC;
+    return IDR_AUTOFILL_CC_DINERS;
   if (type == kDiscoverCard)
     return IDR_AUTOFILL_CC_DISCOVER;
   if (type == kJCBCard)
-    return IDR_AUTOFILL_CC_GENERIC;
+    return IDR_AUTOFILL_CC_JCB;
   if (type == kMasterCard)
     return IDR_AUTOFILL_CC_MASTERCARD;
+  if (type == kMirCard)
+    return IDR_AUTOFILL_CC_MIR;
   if (type == kUnionPay)
     return IDR_AUTOFILL_CC_GENERIC;
   if (type == kVisaCard)
@@ -187,6 +195,9 @@ const char* CreditCard::GetCreditCardType(const base::string16& number) {
   int first_two_digits = 0;
   if (!base::StringToInt(number.substr(0, 2), &first_two_digits))
     return kGenericCard;
+
+  if (first_two_digits == 22)
+    return kMirCard;
 
   if (first_two_digits == 34 || first_two_digits == 37)
     return kAmericanExpressCard;
@@ -463,7 +474,7 @@ void CreditCard::SetExpirationYear(int expiration_year) {
   // Will normalize 2-digit years to the 4-digit version.
   if (expiration_year > 0 && expiration_year < 100) {
     base::Time::Exploded now_exploded;
-    base::Time::Now().LocalExplode(&now_exploded);
+    AutofillClock::Now().LocalExplode(&now_exploded);
     expiration_year += (now_exploded.year / 100) * 100;
   }
 
@@ -492,8 +503,7 @@ base::string16 CreditCard::TypeAndLastFourDigits() const {
     return type;
 
   // TODO(estade): i18n?
-  return type + base::string16(kNonBreakingSpace) +
-         base::string16(kMidlineEllipsis) + digits;
+  return type + base::string16(kMidlineEllipsis) + digits;
 }
 
 base::string16 CreditCard::AbbreviatedExpirationDateForDisplay() const {
@@ -541,8 +551,8 @@ bool CreditCard::UpdateFromImportedCard(const CreditCard& imported_card,
   if (this->IsVerified() && !imported_card.IsVerified()) {
     // If the original card is expired and the imported card is not, and the
     // name on the cards are identical, update the expiration date.
-    if (this->IsExpired(base::Time::Now()) &&
-        !imported_card.IsExpired(base::Time::Now()) &&
+    if (this->IsExpired(AutofillClock::Now()) &&
+        !imported_card.IsExpired(AutofillClock::Now()) &&
         (name_on_card_ == imported_card.name_on_card_)) {
       DCHECK(imported_card.expiration_month_ && imported_card.expiration_year_);
       expiration_month_ = imported_card.expiration_month_;
@@ -650,8 +660,8 @@ bool CreditCard::IsEmpty(const std::string& app_locale) const {
 
 bool CreditCard::IsValid() const {
   return IsValidCreditCardNumber(number_) &&
-         IsValidCreditCardExpirationDate(
-             expiration_year_, expiration_month_, base::Time::Now());
+         IsValidCreditCardExpirationDate(expiration_year_, expiration_month_,
+                                         AutofillClock::Now());
 }
 
 void CreditCard::GetSupportedTypes(ServerFieldTypeSet* supported_types) const {
@@ -776,7 +786,7 @@ void CreditCard::SetNumber(const base::string16& number) {
 
 void CreditCard::RecordAndLogUse() {
   UMA_HISTOGRAM_COUNTS_1000("Autofill.DaysSinceLastUse.CreditCard",
-                            (base::Time::Now() - use_date()).InDays());
+                            (AutofillClock::Now() - use_date()).InDays());
   RecordUse();
 }
 
@@ -865,6 +875,7 @@ const char kDiscoverCard[] = "discoverCC";
 const char kGenericCard[] = "genericCC";
 const char kJCBCard[] = "jcbCC";
 const char kMasterCard[] = "masterCardCC";
+const char kMirCard[] = "mirCC";
 const char kUnionPay[] = "unionPayCC";
 const char kVisaCard[] = "visaCC";
 

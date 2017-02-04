@@ -7,8 +7,10 @@
 
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "core/dom/ActiveDOMObject.h"
 #include "core/dom/ContextLifecycleObserver.h"
+#include "core/dom/DOMHighResTimeStamp.h"
+#include "core/dom/DOMTimeStamp.h"
+#include "core/dom/SuspendableObject.h"
 #include "core/frame/PlatformEventController.h"
 #include "modules/EventTargetModules.h"
 #include "modules/sensor/SensorOptions.h"
@@ -18,12 +20,11 @@
 namespace blink {
 
 class ExceptionState;
-class ScriptState;
+class ExecutionContext;
 class SensorReading;
-class SensorUpdateNotificationStrategy;
 
 class Sensor : public EventTargetWithInlineData,
-               public ActiveScriptWrappable,
+               public ActiveScriptWrappable<Sensor>,
                public ContextLifecycleObserver,
                public SensorProxy::Observer {
   USING_GARBAGE_COLLECTED_MIXIN(Sensor);
@@ -47,8 +48,7 @@ class Sensor : public EventTargetWithInlineData,
 
   // Getters
   String state() const;
-  // TODO(riju): crbug.com/614797 .
-  SensorReading* reading() const;
+  DOMHighResTimeStamp timestamp(ScriptState*, bool& isNull) const;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(change);
@@ -60,12 +60,10 @@ class Sensor : public EventTargetWithInlineData,
   DECLARE_VIRTUAL_TRACE();
 
  protected:
-  Sensor(ScriptState*,
+  Sensor(ExecutionContext*,
          const SensorOptions&,
          ExceptionState&,
          device::mojom::blink::SensorType);
-  virtual std::unique_ptr<SensorReadingFactory>
-  createSensorReadingFactory() = 0;
 
   using SensorConfigurationPtr = device::mojom::blink::SensorConfigurationPtr;
   using SensorConfiguration = device::mojom::blink::SensorConfiguration;
@@ -74,28 +72,26 @@ class Sensor : public EventTargetWithInlineData,
   // concrete sensor implementations can override this method to handle other
   // parameters if needed.
   virtual SensorConfigurationPtr createSensorConfig();
+  double readingValue(int index, bool& isNull) const;
 
  private:
   void initSensorProxyIfNeeded();
 
   // ContextLifecycleObserver overrides.
-  void contextDestroyed() override;
+  void contextDestroyed(ExecutionContext*) override;
 
   // SensorController::Observer overrides.
   void onSensorInitialized() override;
-  void onSensorReadingChanged() override;
+  void onSensorReadingChanged(double timestamp) override;
   void onSensorError(ExceptionCode,
                      const String& sanitizedMessage,
                      const String& unsanitizedMessage) override;
-  void onSuspended() override;
 
   void onStartRequestCompleted(bool);
   void onStopRequestCompleted(bool);
 
   void startListening();
   void stopListening();
-
-  void onSensorUpdateNotification();
 
   void updateState(SensorState newState);
   void reportError(ExceptionCode = UnknownError,
@@ -106,14 +102,16 @@ class Sensor : public EventTargetWithInlineData,
   void notifyOnActivate();
   void notifyError(DOMException* error);
 
+  bool canReturnReadings() const;
+
  private:
   SensorOptions m_sensorOptions;
   device::mojom::blink::SensorType m_type;
   SensorState m_state;
   Member<SensorProxy> m_sensorProxy;
-  std::unique_ptr<SensorUpdateNotificationStrategy> m_sensorUpdateNotifier;
   device::SensorReading m_storedData;
   SensorConfigurationPtr m_configuration;
+  double m_lastUpdateTimestamp;
 };
 
 }  // namespace blink

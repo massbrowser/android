@@ -47,16 +47,22 @@ class Canvas2DImageBufferSurface final : public ImageBufferSurface {
       int msaaSampleCount,
       OpacityMode opacityMode,
       Canvas2DLayerBridge::AccelerationMode accelerationMode,
-      sk_sp<SkColorSpace> colorSpace,
+      const gfx::ColorSpace& colorSpace,
+      bool skSurfacesUseColorSpace,
       SkColorType colorType)
-      : ImageBufferSurface(size, opacityMode, colorSpace, colorType),
+      : ImageBufferSurface(
+            size,
+            opacityMode,
+            skSurfacesUseColorSpace ? colorSpace.ToSkColorSpace() : nullptr,
+            colorType),
         m_layerBridge(
             adoptRef(new Canvas2DLayerBridge(std::move(contextProvider),
                                              size,
                                              msaaSampleCount,
                                              opacityMode,
                                              accelerationMode,
-                                             std::move(colorSpace),
+                                             colorSpace,
+                                             skSurfacesUseColorSpace,
                                              colorType))) {
     init();
   }
@@ -65,7 +71,7 @@ class Canvas2DImageBufferSurface final : public ImageBufferSurface {
                              const IntSize& size)
       : ImageBufferSurface(size,
                            bridge->opacityMode(),
-                           bridge->colorSpace(),
+                           bridge->skSurfaceColorSpace(),
                            bridge->colorType()),
         m_layerBridge(std::move(bridge)) {
     init();
@@ -78,7 +84,7 @@ class Canvas2DImageBufferSurface final : public ImageBufferSurface {
     m_layerBridge->finalizeFrame(dirtyRect);
   }
   void willOverwriteCanvas() override { m_layerBridge->willOverwriteCanvas(); }
-  SkCanvas* canvas() override { return m_layerBridge->canvas(); }
+  PaintCanvas* canvas() override { return m_layerBridge->canvas(); }
   void disableDeferral(DisableDeferralReason reason) override {
     m_layerBridge->disableDeferral(reason);
   }

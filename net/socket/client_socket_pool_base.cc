@@ -14,11 +14,15 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "base/trace_event/memory_allocator_dump.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "net/base/net_errors.h"
+#include "net/base/trace_constants.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source.h"
@@ -128,7 +132,7 @@ void ConnectJob::SetSocket(std::unique_ptr<StreamSocket> socket) {
 }
 
 void ConnectJob::NotifyDelegateOfCompletion(int rv) {
-  TRACE_EVENT0("net", "ConnectJob::NotifyDelegateOfCompletion");
+  TRACE_EVENT0(kNetTracingCategory, "ConnectJob::NotifyDelegateOfCompletion");
   // The delegate will own |this|.
   Delegate* delegate = delegate_;
   delegate_ = NULL;
@@ -697,6 +701,49 @@ ClientSocketPoolBaseHelper::GetInfoAsValue(const std::string& name,
   return dict;
 }
 
+void ClientSocketPoolBaseHelper::DumpMemoryStats(
+    base::trace_event::ProcessMemoryDump* pmd,
+    const std::string& parent_dump_absolute_name) const {
+  size_t socket_count = 0;
+  size_t total_size = 0;
+  size_t buffer_size = 0;
+  size_t cert_count = 0;
+  size_t serialized_cert_size = 0;
+  for (const auto& kv : group_map_) {
+    for (const auto& socket : kv.second->idle_sockets()) {
+      StreamSocket::SocketMemoryStats stats;
+      socket.socket->DumpMemoryStats(&stats);
+      total_size += stats.total_size;
+      buffer_size += stats.buffer_size;
+      cert_count += stats.cert_count;
+      serialized_cert_size += stats.serialized_cert_size;
+      ++socket_count;
+    }
+  }
+  // Only create a MemoryAllocatorDump if there is at least one idle socket
+  if (socket_count > 0) {
+    base::trace_event::MemoryAllocatorDump* socket_pool_dump =
+        pmd->CreateAllocatorDump(base::StringPrintf(
+            "%s/socket_pool", parent_dump_absolute_name.c_str()));
+    socket_pool_dump->AddScalar(
+        base::trace_event::MemoryAllocatorDump::kNameSize,
+        base::trace_event::MemoryAllocatorDump::kUnitsBytes, total_size);
+    socket_pool_dump->AddScalar(
+        base::trace_event::MemoryAllocatorDump::kNameObjectCount,
+        base::trace_event::MemoryAllocatorDump::kUnitsObjects, socket_count);
+    socket_pool_dump->AddScalar(
+        "buffer_size", base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+        buffer_size);
+    socket_pool_dump->AddScalar(
+        "cert_count", base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+        cert_count);
+    socket_pool_dump->AddScalar(
+        "serialized_cert_size",
+        base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+        serialized_cert_size);
+  }
+}
+
 bool ClientSocketPoolBaseHelper::IdleSocket::IsUsable() const {
   if (socket->WasEverUsed())
     return socket->IsConnectedAndIdle();
@@ -1040,9 +1087,6 @@ void ClientSocketPoolBaseHelper::HandOutSocket(
 
     UMA_HISTOGRAM_COUNTS_1000("Net.Socket.IdleSocketReuseTime",
                               idle_time.InSeconds());
-    UMA_HISTOGRAM_TIMES(
-        "Net.Socket.IdleSocketTimeSaving",
-        connect_timing.connect_end - connect_timing.connect_start);
   }
 
   if (reuse_type != ClientSocketHandle::UNUSED) {

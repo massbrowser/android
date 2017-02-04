@@ -13,9 +13,7 @@
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_runner.h"
-#include "services/ui/public/cpp/gpu/gpu_service.h"
 #include "ui/aura/env.h"
-#include "ui/aura/mus/mus_context_factory.h"
 #include "ui/aura/mus/property_converter.h"
 #include "ui/aura/mus/property_utils.h"
 #include "ui/aura/mus/window_manager_delegate.h"
@@ -25,7 +23,8 @@
 #include "ui/aura/test/test_focus_client.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
-#include "ui/display/test/test_screen.h"
+#include "ui/display/display_list.h"
+#include "ui/display/screen_base.h"
 #include "ui/wm/core/capture_controller.h"
 #include "ui/wm/core/wm_state.h"
 
@@ -45,8 +44,6 @@ class TestWM : public service_manager::Service,
     // WindowTreeClient destruction may callback to us.
     window_tree_client_.reset();
 
-    gpu_service_.reset();
-
     display::Screen::SetScreenInstance(nullptr);
   }
 
@@ -55,16 +52,13 @@ class TestWM : public service_manager::Service,
   void OnStart() override {
     CHECK(!started_);
     started_ = true;
-    test_screen_ = base::MakeUnique<display::test::TestScreen>();
-    display::Screen::SetScreenInstance(test_screen_.get());
+    screen_ = base::MakeUnique<display::ScreenBase>();
+    display::Screen::SetScreenInstance(screen_.get());
     aura_env_ = aura::Env::CreateInstance(aura::Env::Mode::MUS);
-    gpu_service_ = ui::GpuService::Create(context()->connector(), nullptr);
-    compositor_context_factory_ =
-        base::MakeUnique<aura::MusContextFactory>(gpu_service_.get());
-    aura_env_->set_context_factory(compositor_context_factory_.get());
-    window_tree_client_ = base::MakeUnique<aura::WindowTreeClient>(this, this);
+    window_tree_client_ = base::MakeUnique<aura::WindowTreeClient>(
+        context()->connector(), this, this);
     aura_env_->SetWindowTreeClient(window_tree_client_.get());
-    window_tree_client_->ConnectAsWindowManager(context()->connector());
+    window_tree_client_->ConnectAsWindowManager();
   }
 
   bool OnConnect(const service_manager::ServiceInfo& remote_info,
@@ -83,7 +77,8 @@ class TestWM : public service_manager::Service,
     window_tree_host_.reset();
     window_tree_client_.reset();
   }
-  void OnEmbedRootDestroyed(aura::Window* root) override {
+  void OnEmbedRootDestroyed(
+      aura::WindowTreeHostMus* window_tree_host) override {
     // WindowTreeClients configured as the window manager should never get
     // OnEmbedRootDestroyed().
     NOTREACHED();
@@ -91,9 +86,6 @@ class TestWM : public service_manager::Service,
   void OnPointerEventObserved(const ui::PointerEvent& event,
                               aura::Window* target) override {
     // Don't care.
-  }
-  aura::client::CaptureClient* GetCaptureClient() override {
-    return wm_state_.capture_controller();
   }
   aura::PropertyConverter* GetPropertyConverter() override {
     return &property_converter_;
@@ -112,6 +104,7 @@ class TestWM : public service_manager::Service,
       std::unique_ptr<std::vector<uint8_t>>* new_data) override {
     return true;
   }
+  void OnWmSetCanFocus(aura::Window* window, bool can_focus) override {}
   aura::Window* OnWmCreateTopLevelWindow(
       ui::mojom::WindowType window_type,
       std::map<std::string, std::vector<uint8_t>>* properties) override {
@@ -125,6 +118,12 @@ class TestWM : public service_manager::Service,
   void OnWmClientJankinessChanged(const std::set<aura::Window*>& client_windows,
                                   bool janky) override {
     // Don't care.
+  }
+  void OnWmWillCreateDisplay(const display::Display& display) override {
+    // This class only deals with one display.
+    DCHECK_EQ(0u, screen_->display_list().displays().size());
+    screen_->display_list().AddDisplay(display,
+                                       display::DisplayList::Type::PRIMARY);
   }
   void OnWmNewDisplay(std::unique_ptr<aura::WindowTreeHostMus> window_tree_host,
                       const display::Display& display) override {
@@ -154,9 +153,19 @@ class TestWM : public service_manager::Service,
     // Don't care.
   }
   void OnWmCancelMoveLoop(aura::Window* window) override {}
+  void OnWmSetClientArea(
+      aura::Window* window,
+      const gfx::Insets& insets,
+      const std::vector<gfx::Rect>& additional_client_areas) override {}
+  bool IsWindowActive(aura::Window* window) override {
+    // Focus client interface doesn't expose this; assume true.
+    return true;
+  }
+  void OnWmDeactivateWindow(aura::Window* window) override {
+    aura::client::GetFocusClient(root_)->FocusWindow(nullptr);
+  }
 
-  // Dummy screen required to be the screen instance.
-  std::unique_ptr<display::test::TestScreen> test_screen_;
+  std::unique_ptr<display::ScreenBase> screen_;
 
   std::unique_ptr<aura::Env> aura_env_;
   ::wm::WMState wm_state_;
@@ -166,8 +175,6 @@ class TestWM : public service_manager::Service,
   aura::Window* root_ = nullptr;
   aura::WindowManagerClient* window_manager_client_ = nullptr;
   std::unique_ptr<aura::WindowTreeClient> window_tree_client_;
-  std::unique_ptr<ui::GpuService> gpu_service_;
-  std::unique_ptr<aura::MusContextFactory> compositor_context_factory_;
 
   bool started_ = false;
 

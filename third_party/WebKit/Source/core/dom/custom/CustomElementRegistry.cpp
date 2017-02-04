@@ -18,11 +18,12 @@
 #include "core/dom/custom/CustomElementDefinition.h"
 #include "core/dom/custom/CustomElementDefinitionBuilder.h"
 #include "core/dom/custom/CustomElementDescriptor.h"
+#include "core/dom/custom/CustomElementReactionStack.h"
 #include "core/dom/custom/CustomElementUpgradeReaction.h"
 #include "core/dom/custom/CustomElementUpgradeSorter.h"
 #include "core/dom/custom/V0CustomElementRegistrationContext.h"
 #include "core/frame/LocalDOMWindow.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 #include "wtf/Allocator.h"
 
 namespace blink {
@@ -88,6 +89,10 @@ DEFINE_TRACE(CustomElementRegistry) {
   visitor->trace(m_v0);
   visitor->trace(m_upgradeCandidates);
   visitor->trace(m_whenDefinedPromiseMap);
+}
+
+DEFINE_TRACE_WRAPPERS(CustomElementRegistry) {
+  visitor->traceWrappers(&CustomElementReactionStack::current());
 }
 
 CustomElementDefinition* CustomElementRegistry::define(
@@ -233,7 +238,7 @@ bool CustomElementRegistry::nameIsDefined(const AtomicString& name) const {
 }
 
 void CustomElementRegistry::entangle(V0CustomElementRegistrationContext* v0) {
-  m_v0->add(v0);
+  m_v0->insert(v0);
   v0->setV1(this);
 }
 
@@ -262,7 +267,7 @@ void CustomElementRegistry::addCandidate(Element* candidate) {
     set = m_upgradeCandidates->add(name, new UpgradeCandidateSet())
               .storedValue->value;
   }
-  set->add(candidate);
+  set->insert(candidate);
 }
 
 // https://html.spec.whatwg.org/multipage/scripting.html#dom-customelementsregistry-whendefined

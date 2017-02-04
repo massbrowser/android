@@ -6,24 +6,21 @@
 
 #include <utility>
 
-#include "base/debug/stack_trace.h"
-#include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "net/quic/core/crypto/quic_random.h"
-#include "net/quic/core/quic_bug_tracker.h"
 #include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_utils.h"
-
+#include "net/quic/platform/api/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
+#include "net/quic/platform/api/quic_stack_trace.h"
 #include "net/tools/quic/chlo_extractor.h"
 #include "net/tools/quic/quic_per_connection_packet_writer.h"
-#include "net/tools/quic/quic_simple_server_session.h"
 #include "net/tools/quic/quic_simple_server_session.h"
 #include "net/tools/quic/quic_time_wait_list_manager.h"
 #include "net/tools/quic/stateless_rejector.h"
 
 using base::StringPiece;
-using std::list;
 using std::string;
 
 namespace net {
@@ -272,14 +269,14 @@ bool QuicDispatcher::OnUnauthenticatedPublicHeader(
     return false;
   }
 
-  if (FLAGS_quic_buffer_packets_after_chlo &&
+  if (FLAGS_quic_reloadable_flag_quic_buffer_packets_after_chlo &&
       buffered_packets_.HasChloForConnection(connection_id)) {
     BufferEarlyPacket(connection_id);
     return false;
   }
 
   // Check if we are buffering packets for this connection ID
-  if (FLAGS_enable_async_get_proof &&
+  if (FLAGS_quic_reloadable_flag_enable_async_get_proof &&
       (temporarily_buffered_connections_.find(connection_id) !=
        temporarily_buffered_connections_.end())) {
     // This packet was received while the a CHLO for the same connection ID was
@@ -311,7 +308,7 @@ bool QuicDispatcher::OnUnauthenticatedPublicHeader(
   QuicVersion version = GetSupportedVersions().front();
   if (header.version_flag) {
     QuicVersion packet_version = header.versions.front();
-    if (FLAGS_quic_fix_version_manager &&
+    if (FLAGS_quic_reloadable_flag_quic_fix_version_manager &&
         framer_.supported_versions() != GetSupportedVersions()) {
       // Reset framer's version if version flags change in flight.
       framer_.SetSupportedVersions(GetSupportedVersions());
@@ -374,12 +371,12 @@ void QuicDispatcher::ProcessUnauthenticatedHeaderFate(
     case kFateTimeWait:
       // MaybeRejectStatelessly or OnExpiredPackets might have already added the
       // connection to time wait, in which case it should not be added again.
-      if (!FLAGS_quic_use_cheap_stateless_rejects ||
+      if (!FLAGS_quic_reloadable_flag_quic_use_cheap_stateless_rejects ||
           !time_wait_list_manager_->IsConnectionIdInTimeWait(connection_id)) {
         // Add this connection_id to the time-wait state, to safely reject
         // future packets.
-        DVLOG(1) << "Adding connection ID " << connection_id
-                 << "to time-wait list.";
+        QUIC_DLOG(INFO) << "Adding connection ID " << connection_id
+                        << "to time-wait list.";
         time_wait_list_manager_->AddConnectionIdToTimeWait(
             connection_id, framer_.version(),
             /*connection_rejected_statelessly=*/false, nullptr);
@@ -389,7 +386,7 @@ void QuicDispatcher::ProcessUnauthenticatedHeaderFate(
           current_server_address_, current_client_address_, connection_id,
           packet_number, *current_packet_);
 
-      if (FLAGS_enable_async_get_proof) {
+      if (FLAGS_quic_reloadable_flag_enable_async_get_proof) {
         // Any packets which were buffered while the stateless rejector logic
         // was running should be discarded.  Do not inform the time wait list
         // manager, which should already have a made a decision about sending a
@@ -426,8 +423,9 @@ QuicDispatcher::QuicPacketFate QuicDispatcher::ValidityChecks(
   // set.  Since this may be a client continuing a connection we lost track of
   // via server restart, send a rejection to fast-fail the connection.
   if (!header.public_header.version_flag) {
-    DVLOG(1) << "Packet without version arrived for unknown connection ID "
-             << header.public_header.connection_id;
+    QUIC_DLOG(INFO)
+        << "Packet without version arrived for unknown connection ID "
+        << header.public_header.connection_id;
     return kFateTimeWait;
   }
 
@@ -499,11 +497,11 @@ void QuicDispatcher::OnConnectionClosed(QuicConnectionId connection_id,
     QUIC_BUG << "ConnectionId " << connection_id
              << " does not exist in the session map.  Error: "
              << QuicErrorCodeToString(error);
-    QUIC_BUG << base::debug::StackTrace().ToString();
+    QUIC_BUG << QuicStackTrace();
     return;
   }
 
-  DVLOG_IF(1, error != QUIC_NO_ERROR)
+  QUIC_DLOG_IF(INFO, error != QUIC_NO_ERROR)
       << "Closing connection (" << connection_id
       << ") due to error: " << QuicErrorCodeToString(error)
       << ", with details: " << error_details;
@@ -533,7 +531,8 @@ void QuicDispatcher::OnWriteBlocked(
 
 void QuicDispatcher::OnConnectionAddedToTimeWaitList(
     QuicConnectionId connection_id) {
-  DVLOG(1) << "Connection " << connection_id << " added to time wait list.";
+  QUIC_DLOG(INFO) << "Connection " << connection_id
+                  << " added to time wait list.";
 }
 
 void QuicDispatcher::OnPacket() {}
@@ -541,7 +540,7 @@ void QuicDispatcher::OnPacket() {}
 void QuicDispatcher::OnError(QuicFramer* framer) {
   QuicErrorCode error = framer->error();
   SetLastError(error);
-  DVLOG(1) << QuicErrorCodeToString(error);
+  QUIC_DLOG(INFO) << QuicErrorCodeToString(error);
 }
 
 bool QuicDispatcher::ShouldCreateSessionForUnknownVersion(QuicTag version_tag) {
@@ -661,9 +660,8 @@ void QuicDispatcher::ProcessBufferedChlos(size_t max_connections_to_create) {
     }
     QuicSession* session =
         CreateQuicSession(connection_id, packets.front().client_address);
-    DVLOG(1) << "Created new session for " << connection_id;
-    session_map_.insert(
-        std::make_pair(connection_id, base::WrapUnique(session)));
+    QUIC_DLOG(INFO) << "Created new session for " << connection_id;
+    session_map_.insert(std::make_pair(connection_id, QuicWrapUnique(session)));
     DeliverPacketsToSession(packets, session);
   }
 }
@@ -685,8 +683,8 @@ bool QuicDispatcher::HasBufferedPackets(QuicConnectionId connection_id) {
 
 void QuicDispatcher::OnBufferPacketFailure(EnqueuePacketResult result,
                                            QuicConnectionId connection_id) {
-  DVLOG(1) << "Fail to buffer packet on connection " << connection_id
-           << " because of " << result;
+  QUIC_DLOG(INFO) << "Fail to buffer packet on connection " << connection_id
+                  << " because of " << result;
 }
 
 void QuicDispatcher::OnConnectionRejectedStatelessly() {}
@@ -704,7 +702,8 @@ QuicTimeWaitListManager* QuicDispatcher::CreateQuicTimeWaitListManager() {
 
 void QuicDispatcher::BufferEarlyPacket(QuicConnectionId connection_id) {
   bool is_new_connection = !buffered_packets_.HasBufferedPackets(connection_id);
-  if (FLAGS_quic_create_session_after_insertion && is_new_connection &&
+  if (FLAGS_quic_reloadable_flag_quic_create_session_after_insertion &&
+      is_new_connection &&
       !ShouldCreateOrBufferPacketForConnection(connection_id)) {
     return;
   }
@@ -713,19 +712,20 @@ void QuicDispatcher::BufferEarlyPacket(QuicConnectionId connection_id) {
       current_client_address_, /*is_chlo=*/false);
   if (rs != EnqueuePacketResult::SUCCESS) {
     OnBufferPacketFailure(rs, connection_id);
-  } else if (!FLAGS_quic_create_session_after_insertion && is_new_connection) {
+  } else if (!FLAGS_quic_reloadable_flag_quic_create_session_after_insertion &&
+             is_new_connection) {
     ShouldCreateOrBufferPacketForConnection(connection_id);
   }
 }
 
 void QuicDispatcher::ProcessChlo() {
-  if (FLAGS_quic_create_session_after_insertion &&
+  if (FLAGS_quic_reloadable_flag_quic_create_session_after_insertion &&
       !buffered_packets_.HasBufferedPackets(current_connection_id_) &&
       !ShouldCreateOrBufferPacketForConnection(current_connection_id_)) {
     return;
   }
   if (FLAGS_quic_allow_chlo_buffering &&
-      FLAGS_quic_limit_num_new_sessions_per_epoll_loop &&
+      FLAGS_quic_reloadable_flag_quic_limit_num_new_sessions_per_epoll_loop &&
       new_sessions_allowed_per_event_loop_ <= 0) {
     // Can't create new session any more. Wait till next event loop.
     if (!buffered_packets_.HasChloForConnection(current_connection_id_)) {
@@ -740,8 +740,9 @@ void QuicDispatcher::ProcessChlo() {
           current_client_address_, /*is_chlo=*/true);
       if (rs != EnqueuePacketResult::SUCCESS) {
         OnBufferPacketFailure(rs, current_connection_id_);
-      } else if (!FLAGS_quic_create_session_after_insertion &&
-                 is_new_connection) {
+      } else if (
+          !FLAGS_quic_reloadable_flag_quic_create_session_after_insertion &&
+          is_new_connection) {
         ShouldCreateOrBufferPacketForConnection(current_connection_id_);
       }
     }
@@ -750,13 +751,14 @@ void QuicDispatcher::ProcessChlo() {
   // Creates a new session and process all buffered packets for this connection.
   QuicSession* session =
       CreateQuicSession(current_connection_id_, current_client_address_);
-  DVLOG(1) << "Created new session for " << current_connection_id_;
+  QUIC_DLOG(INFO) << "Created new session for " << current_connection_id_;
   session_map_.insert(
-      std::make_pair(current_connection_id_, base::WrapUnique(session)));
+      std::make_pair(current_connection_id_, QuicWrapUnique(session)));
   std::list<BufferedPacket> packets =
       buffered_packets_.DeliverPackets(current_connection_id_);
   // Check if CHLO is the first packet arrived on this connection.
-  if (!FLAGS_quic_create_session_after_insertion && packets.empty()) {
+  if (!FLAGS_quic_reloadable_flag_quic_create_session_after_insertion &&
+      packets.empty()) {
     ShouldCreateOrBufferPacketForConnection(current_connection_id_);
   }
   // Process CHLO at first.
@@ -766,7 +768,7 @@ void QuicDispatcher::ProcessChlo() {
   // Do this even when flag is off because there might be still some packets
   // buffered in the store before flag is turned off.
   DeliverPacketsToSession(packets, session);
-  if (FLAGS_quic_limit_num_new_sessions_per_epoll_loop) {
+  if (FLAGS_quic_reloadable_flag_quic_limit_num_new_sessions_per_epoll_loop) {
     --new_sessions_allowed_per_event_loop_;
   }
 }
@@ -834,8 +836,8 @@ void QuicDispatcher::MaybeRejectStatelessly(QuicConnectionId connection_id,
                                             const QuicPacketHeader& header) {
   // TODO(rch): This logic should probably live completely inside the rejector.
   if (!FLAGS_quic_allow_chlo_buffering ||
-      !FLAGS_quic_use_cheap_stateless_rejects ||
-      !FLAGS_enable_quic_stateless_reject_support ||
+      !FLAGS_quic_reloadable_flag_quic_use_cheap_stateless_rejects ||
+      !FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support ||
       !ShouldAttemptCheapStatelessRejection()) {
     // Not use cheap stateless reject.
     if (FLAGS_quic_allow_chlo_buffering &&
@@ -886,7 +888,7 @@ void QuicDispatcher::MaybeRejectStatelessly(QuicConnectionId connection_id,
   }
 
   // Insert into set of connection IDs to buffer
-  if (FLAGS_enable_async_get_proof) {
+  if (FLAGS_quic_reloadable_flag_enable_async_get_proof) {
     const bool ok =
         temporarily_buffered_connections_.insert(connection_id).second;
     QUIC_BUG_IF(!ok)
@@ -908,7 +910,7 @@ void QuicDispatcher::OnStatelessRejectorProcessDone(
     std::unique_ptr<QuicReceivedPacket> current_packet,
     QuicPacketNumber packet_number,
     QuicVersion first_version) {
-  if (FLAGS_enable_async_get_proof) {
+  if (FLAGS_quic_reloadable_flag_enable_async_get_proof) {
     // Stop buffering packets on this connection
     const auto num_erased =
         temporarily_buffered_connections_.erase(rejector->connection_id());

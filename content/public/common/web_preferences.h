@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/strings/string16.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "ui/base/touch/touch_device.h"
@@ -158,11 +159,9 @@ struct CONTENT_EXPORT WebPreferences {
   bool should_clear_document_background;
   bool enable_scroll_animator;
   bool css_variables_enabled;
-  bool touch_event_api_enabled;
+  bool touch_event_feature_detection_enabled;
   // TODO(mustaq): Nuke when the new API is ready
   bool device_supports_touch;
-  // TODO(mustaq): Nuke when the new API is ready
-  bool device_supports_mouse;
   bool touch_adjustment_enabled;
   int pointer_events_max_touch_points;
   int available_pointer_types;
@@ -171,6 +170,8 @@ struct CONTENT_EXPORT WebPreferences {
   ui::HoverType primary_hover_type;
   bool sync_xhr_in_documents_enabled;
   bool color_correct_rendering_enabled = false;
+  bool color_correct_rendering_default_mode_enabled = false;
+  bool true_color_rendering_enabled = false;
   bool should_respect_image_orientation;
   int number_of_cpu_cores;
   EditingBehavior editing_behavior;
@@ -246,11 +247,11 @@ struct CONTENT_EXPORT WebPreferences {
   // Specifies default setting for spellcheck when the spellcheck attribute is
   // not explicitly specified.
   bool spellcheck_enabled_by_default;
-#endif
-
-  // String that describes how media element autoplay behavior should be
-  // affected by experiment.
-  std::string autoplay_experiment_mode;
+  // If enabled, when a video goes fullscreen, the orientation should be locked.
+  bool video_fullscreen_orientation_lock_enabled;
+#else  // defined(OS_ANDROID)
+  bool cross_origin_media_playback_requires_user_gesture;
+#endif  // defined(OS_ANDROID)
 
   // Default (used if the page or UA doesn't override these) values for page
   // scale limits. These are set directly on the WebView so there's no analogue
@@ -263,6 +264,24 @@ struct CONTENT_EXPORT WebPreferences {
 
   // If enabled, disabled video track when the video is in the background.
   bool background_video_track_optimization_enabled;
+
+  // If background video track optimization is enabled, don't disable video
+  // track for videos with the average keyframe distance greater than this
+  // value.
+  // TODO(avayvod, asvitkine): Query the value directly when it is available in
+  // the renderer process. See https://crbug.com/681160.
+  base::TimeDelta max_keyframe_distance_to_disable_background_video;
+
+  // When memory pressure based garbage collection is enabled for MSE, the
+  // |enable_instant_source_buffer_gc| flag controls whether the GC is done
+  // immediately on memory pressure notification or during the next SourceBuffer
+  // append (slower, but is MSE-spec compliant).
+  // TODO(servolk, asvitkine): Query the value directly when it is available in
+  // the renderer process. See https://crbug.com/681160.
+  bool enable_instant_source_buffer_gc;
+
+  // Whether it is a presentation receiver.
+  bool presentation_receiver;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for

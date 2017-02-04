@@ -23,7 +23,8 @@ namespace {
 
 const char* const kTypeNames[] = {"null",   "boolean", "integer",    "double",
                                   "string", "binary",  "dictionary", "list"};
-static_assert(arraysize(kTypeNames) == Value::TYPE_LIST + 1,
+static_assert(arraysize(kTypeNames) ==
+                  static_cast<size_t>(Value::Type::LIST) + 1,
               "kTypeNames Has Wrong Size");
 
 std::unique_ptr<Value> CopyWithoutEmptyChildren(const Value& node);
@@ -60,10 +61,10 @@ std::unique_ptr<DictionaryValue> CopyDictionaryWithoutEmptyChildren(
 
 std::unique_ptr<Value> CopyWithoutEmptyChildren(const Value& node) {
   switch (node.GetType()) {
-    case Value::TYPE_LIST:
+    case Value::Type::LIST:
       return CopyListWithoutEmptyChildren(static_cast<const ListValue&>(node));
 
-    case Value::TYPE_DICTIONARY:
+    case Value::Type::DICTIONARY:
       return CopyDictionaryWithoutEmptyChildren(
           static_cast<const DictionaryValue&>(node));
 
@@ -72,48 +73,223 @@ std::unique_ptr<Value> CopyWithoutEmptyChildren(const Value& node) {
   }
 }
 
-}  // namespace
+// TODO(crbug.com/646113): Remove this once all types are implemented.
+bool IsAssignmentSafe(Value::Type lhs, Value::Type rhs) {
+  auto IsImplemented = [](Value::Type type) {
+    return type == Value::Type::NONE || type == Value::Type::BOOLEAN ||
+           type == Value::Type::INTEGER || type == Value::Type::DOUBLE ||
+           type == Value::Type::STRING;
+  };
 
-Value::~Value() {
+  return lhs == rhs || (IsImplemented(lhs) && IsImplemented(rhs));
 }
+
+}  // namespace
 
 // static
 std::unique_ptr<Value> Value::CreateNullValue() {
-  return WrapUnique(new Value(TYPE_NULL));
+  return WrapUnique(new Value(Type::NONE));
+}
+
+Value::Value(const Value& that) {
+  InternalCopyConstructFrom(that);
+}
+
+Value::Value(Value&& that) {
+  InternalMoveConstructFrom(std::move(that));
+}
+
+Value::Value() : type_(Type::NONE) {}
+
+Value::Value(Type type) : type_(type) {
+  // Initialize with the default value.
+  switch (type_) {
+    case Type::NONE:
+      return;
+
+    case Type::BOOLEAN:
+      bool_value_ = false;
+      return;
+    case Type::INTEGER:
+      int_value_ = 0;
+      return;
+    case Type::DOUBLE:
+      double_value_ = 0.0;
+      return;
+    case Type::STRING:
+      string_value_.Init();
+      return;
+
+    // TODO(crbug.com/646113): Implement these once the corresponding derived
+    // classes are removed.
+    case Type::BINARY:
+    case Type::LIST:
+    case Type::DICTIONARY:
+      return;
+  }
+}
+
+Value::Value(bool in_bool) : type_(Type::BOOLEAN), bool_value_(in_bool) {}
+
+Value::Value(int in_int) : type_(Type::INTEGER), int_value_(in_int) {}
+
+Value::Value(double in_double) : type_(Type::DOUBLE), double_value_(in_double) {
+  if (!std::isfinite(double_value_)) {
+    NOTREACHED() << "Non-finite (i.e. NaN or positive/negative infinity) "
+                 << "values cannot be represented in JSON";
+    double_value_ = 0.0;
+  }
+}
+
+Value::Value(const char* in_string) : type_(Type::STRING) {
+  string_value_.Init(in_string);
+  DCHECK(IsStringUTF8(*string_value_));
+}
+
+Value::Value(const std::string& in_string) : type_(Type::STRING) {
+  string_value_.Init(in_string);
+  DCHECK(IsStringUTF8(*string_value_));
+}
+
+Value::Value(std::string&& in_string) : type_(Type::STRING) {
+  string_value_.Init(std::move(in_string));
+  DCHECK(IsStringUTF8(*string_value_));
+}
+
+Value::Value(const char16* in_string) : type_(Type::STRING) {
+  string_value_.Init(UTF16ToUTF8(in_string));
+}
+
+Value::Value(const string16& in_string) : type_(Type::STRING) {
+  string_value_.Init(UTF16ToUTF8(in_string));
+}
+
+Value::Value(StringPiece in_string) : Value(in_string.as_string()) {}
+
+Value& Value::operator=(const Value& that) {
+  if (this != &that) {
+    DCHECK(IsAssignmentSafe(type_, that.type_));
+    if (type_ == that.type_) {
+      InternalCopyAssignFrom(that);
+    } else {
+      InternalCleanup();
+      InternalCopyConstructFrom(that);
+    }
+  }
+
+  return *this;
+}
+
+Value& Value::operator=(Value&& that) {
+  if (this != &that) {
+    DCHECK(IsAssignmentSafe(type_, that.type_));
+    if (type_ == that.type_) {
+      InternalMoveAssignFrom(std::move(that));
+    } else {
+      InternalCleanup();
+      InternalMoveConstructFrom(std::move(that));
+    }
+  }
+
+  return *this;
+}
+
+Value::~Value() {
+  InternalCleanup();
 }
 
 // static
 const char* Value::GetTypeName(Value::Type type) {
-  DCHECK_GE(type, 0);
+  DCHECK_GE(static_cast<int>(type), 0);
   DCHECK_LT(static_cast<size_t>(type), arraysize(kTypeNames));
-  return kTypeNames[type];
+  return kTypeNames[static_cast<size_t>(type)];
 }
 
-bool Value::GetAsBinary(const BinaryValue** out_value) const {
-  return false;
+bool Value::GetBool() const {
+  CHECK(is_bool());
+  return bool_value_;
+}
+
+int Value::GetInt() const {
+  CHECK(is_int());
+  return int_value_;
+}
+
+double Value::GetDouble() const {
+  if (is_double())
+    return double_value_;
+  if (is_int())
+    return int_value_;
+  CHECK(false);
+  return 0.0;
+}
+
+const std::string& Value::GetString() const {
+  CHECK(is_string());
+  return *string_value_;
 }
 
 bool Value::GetAsBoolean(bool* out_value) const {
-  return false;
+  if (out_value && is_bool()) {
+    *out_value = bool_value_;
+    return true;
+  }
+  return is_bool();
 }
 
 bool Value::GetAsInteger(int* out_value) const {
-  return false;
+  if (out_value && is_int()) {
+    *out_value = int_value_;
+    return true;
+  }
+  return is_int();
 }
 
 bool Value::GetAsDouble(double* out_value) const {
-  return false;
+  if (out_value && is_double()) {
+    *out_value = double_value_;
+    return true;
+  } else if (out_value && is_int()) {
+    // Allow promotion from int to double.
+    *out_value = int_value_;
+    return true;
+  }
+  return is_double() || is_int();
 }
 
 bool Value::GetAsString(std::string* out_value) const {
-  return false;
+  if (out_value && is_string()) {
+    *out_value = *string_value_;
+    return true;
+  }
+  return is_string();
 }
 
 bool Value::GetAsString(string16* out_value) const {
-  return false;
+  if (out_value && is_string()) {
+    *out_value = UTF8ToUTF16(*string_value_);
+    return true;
+  }
+  return is_string();
 }
 
 bool Value::GetAsString(const StringValue** out_value) const {
+  if (out_value && is_string()) {
+    *out_value = static_cast<const StringValue*>(this);
+    return true;
+  }
+  return is_string();
+}
+
+bool Value::GetAsString(StringPiece* out_value) const {
+  if (out_value && is_string()) {
+    *out_value = *string_value_;
+    return true;
+  }
+  return is_string();
+}
+
+bool Value::GetAsBinary(const BinaryValue** out_value) const {
   return false;
 }
 
@@ -136,8 +312,28 @@ bool Value::GetAsDictionary(const DictionaryValue** out_value) const {
 Value* Value::DeepCopy() const {
   // This method should only be getting called for null Values--all subclasses
   // need to provide their own implementation;.
-  DCHECK(IsType(TYPE_NULL));
-  return CreateNullValue().release();
+  switch (type()) {
+    case Type::NONE:
+      return CreateNullValue().release();
+
+    // For now, make FundamentalValues for backward-compatibility. Convert to
+    // Value when that code is deleted.
+    case Type::BOOLEAN:
+      return new FundamentalValue(bool_value_);
+    case Type::INTEGER:
+      return new FundamentalValue(int_value_);
+    case Type::DOUBLE:
+      return new FundamentalValue(double_value_);
+    // For now, make StringValues for backward-compatibility. Convert to
+    // Value when that code is deleted.
+    case Type::STRING:
+      return new StringValue(*string_value_);
+
+    default:
+      // All other types should be handled by subclasses.
+      NOTREACHED();
+      return nullptr;
+  }
 }
 
 std::unique_ptr<Value> Value::CreateDeepCopy() const {
@@ -145,10 +341,26 @@ std::unique_ptr<Value> Value::CreateDeepCopy() const {
 }
 
 bool Value::Equals(const Value* other) const {
-  // This method should only be getting called for null Values--all subclasses
-  // need to provide their own implementation;.
-  DCHECK(IsType(TYPE_NULL));
-  return other->IsType(TYPE_NULL);
+  if (other->type() != type())
+    return false;
+
+  switch (type()) {
+    case Type::NONE:
+      return true;
+    case Type::BOOLEAN:
+      return bool_value_ == other->bool_value_;
+    case Type::INTEGER:
+      return int_value_ == other->int_value_;
+    case Type::DOUBLE:
+      return double_value_ == other->double_value_;
+    case Type::STRING:
+      return *string_value_ == *(other->string_value_);
+    default:
+      // This method should only be getting called for the above types -- all
+      // subclasses need to provide their own implementation;.
+      NOTREACHED();
+      return false;
+  }
 }
 
 // static
@@ -158,158 +370,151 @@ bool Value::Equals(const Value* a, const Value* b) {
   return a->Equals(b);
 }
 
-Value::Value(Type type) : type_(type) {}
+void Value::InternalCopyFundamentalValue(const Value& that) {
+  switch (type_) {
+    case Type::NONE:
+      // Nothing to do.
+      return;
 
-Value::Value(const Value& that) : type_(that.type_) {}
+    case Type::BOOLEAN:
+      bool_value_ = that.bool_value_;
+      return;
+    case Type::INTEGER:
+      int_value_ = that.int_value_;
+      return;
+    case Type::DOUBLE:
+      double_value_ = that.double_value_;
+      return;
 
-Value& Value::operator=(const Value& that) {
+    default:
+      NOTREACHED();
+  }
+}
+
+void Value::InternalCopyConstructFrom(const Value& that) {
   type_ = that.type_;
-  return *this;
-}
 
-///////////////////// FundamentalValue ////////////////////
+  switch (type_) {
+    case Type::NONE:
+    case Type::BOOLEAN:
+    case Type::INTEGER:
+    case Type::DOUBLE:
+      InternalCopyFundamentalValue(that);
+      return;
 
-FundamentalValue::FundamentalValue(bool in_value)
-    : Value(TYPE_BOOLEAN), boolean_value_(in_value) {
-}
+    case Type::STRING:
+      string_value_.Init(*that.string_value_);
+      return;
 
-FundamentalValue::FundamentalValue(int in_value)
-    : Value(TYPE_INTEGER), integer_value_(in_value) {
-}
-
-FundamentalValue::FundamentalValue(double in_value)
-    : Value(TYPE_DOUBLE), double_value_(in_value) {
-  if (!std::isfinite(double_value_)) {
-    NOTREACHED() << "Non-finite (i.e. NaN or positive/negative infinity) "
-                 << "values cannot be represented in JSON";
-    double_value_ = 0.0;
+    // TODO(crbug.com/646113): Implement these once the corresponding derived
+    // classes are removed.
+    case Type::BINARY:
+    case Type::LIST:
+    case Type::DICTIONARY:
+      return;
   }
 }
 
-FundamentalValue::~FundamentalValue() {
-}
+void Value::InternalMoveConstructFrom(Value&& that) {
+  type_ = that.type_;
 
-bool FundamentalValue::GetAsBoolean(bool* out_value) const {
-  if (out_value && IsType(TYPE_BOOLEAN))
-    *out_value = boolean_value_;
-  return (IsType(TYPE_BOOLEAN));
-}
+  switch (type_) {
+    case Type::NONE:
+    case Type::BOOLEAN:
+    case Type::INTEGER:
+    case Type::DOUBLE:
+      InternalCopyFundamentalValue(that);
+      return;
 
-bool FundamentalValue::GetAsInteger(int* out_value) const {
-  if (out_value && IsType(TYPE_INTEGER))
-    *out_value = integer_value_;
-  return (IsType(TYPE_INTEGER));
-}
+    case Type::STRING:
+      string_value_.InitFromMove(std::move(that.string_value_));
+      return;
 
-bool FundamentalValue::GetAsDouble(double* out_value) const {
-  if (out_value && IsType(TYPE_DOUBLE))
-    *out_value = double_value_;
-  else if (out_value && IsType(TYPE_INTEGER))
-    *out_value = integer_value_;
-  return (IsType(TYPE_DOUBLE) || IsType(TYPE_INTEGER));
-}
-
-FundamentalValue* FundamentalValue::DeepCopy() const {
-  switch (GetType()) {
-    case TYPE_BOOLEAN:
-      return new FundamentalValue(boolean_value_);
-
-    case TYPE_INTEGER:
-      return new FundamentalValue(integer_value_);
-
-    case TYPE_DOUBLE:
-      return new FundamentalValue(double_value_);
-
-    default:
-      NOTREACHED();
-      return NULL;
+    // TODO(crbug.com/646113): Implement these once the corresponding derived
+    // classes are removed.
+    case Type::BINARY:
+    case Type::LIST:
+    case Type::DICTIONARY:
+      return;
   }
 }
 
-bool FundamentalValue::Equals(const Value* other) const {
-  if (other->GetType() != GetType())
-    return false;
+void Value::InternalCopyAssignFrom(const Value& that) {
+  type_ = that.type_;
 
-  switch (GetType()) {
-    case TYPE_BOOLEAN: {
-      bool lhs, rhs;
-      return GetAsBoolean(&lhs) && other->GetAsBoolean(&rhs) && lhs == rhs;
-    }
-    case TYPE_INTEGER: {
-      int lhs, rhs;
-      return GetAsInteger(&lhs) && other->GetAsInteger(&rhs) && lhs == rhs;
-    }
-    case TYPE_DOUBLE: {
-      double lhs, rhs;
-      return GetAsDouble(&lhs) && other->GetAsDouble(&rhs) && lhs == rhs;
-    }
-    default:
-      NOTREACHED();
-      return false;
+  switch (type_) {
+    case Type::NONE:
+    case Type::BOOLEAN:
+    case Type::INTEGER:
+    case Type::DOUBLE:
+      InternalCopyFundamentalValue(that);
+      return;
+
+    case Type::STRING:
+      *string_value_ = *that.string_value_;
+      return;
+
+    // TODO(crbug.com/646113): Implement these once the corresponding derived
+    // classes are removed.
+    case Type::BINARY:
+    case Type::LIST:
+    case Type::DICTIONARY:
+      return;
   }
 }
 
-///////////////////// StringValue ////////////////////
+void Value::InternalMoveAssignFrom(Value&& that) {
+  type_ = that.type_;
 
-StringValue::StringValue(StringPiece in_value)
-    : Value(TYPE_STRING), value_(in_value.as_string()) {
-  DCHECK(IsStringUTF8(in_value));
+  switch (type_) {
+    case Type::NONE:
+    case Type::BOOLEAN:
+    case Type::INTEGER:
+    case Type::DOUBLE:
+      InternalCopyFundamentalValue(that);
+      return;
+
+    case Type::STRING:
+      *string_value_ = std::move(*that.string_value_);
+      return;
+
+    // TODO(crbug.com/646113): Implement these once the corresponding derived
+    // classes are removed.
+    case Type::BINARY:
+    case Type::LIST:
+    case Type::DICTIONARY:
+      return;
+  }
 }
 
-StringValue::StringValue(const string16& in_value)
-    : Value(TYPE_STRING),
-      value_(UTF16ToUTF8(in_value)) {
-}
+void Value::InternalCleanup() {
+  switch (type_) {
+    case Type::NONE:
+    case Type::BOOLEAN:
+    case Type::INTEGER:
+    case Type::DOUBLE:
+      // Nothing to do
+      return;
 
-StringValue::~StringValue() {
-}
+    case Type::STRING:
+      string_value_.Destroy();
+      return;
 
-std::string* StringValue::GetString() {
-  return &value_;
-}
-
-const std::string& StringValue::GetString() const {
-  return value_;
-}
-
-bool StringValue::GetAsString(std::string* out_value) const {
-  if (out_value)
-    *out_value = value_;
-  return true;
-}
-
-bool StringValue::GetAsString(string16* out_value) const {
-  if (out_value)
-    *out_value = UTF8ToUTF16(value_);
-  return true;
-}
-
-bool StringValue::GetAsString(const StringValue** out_value) const {
-  if (out_value)
-    *out_value = this;
-  return true;
-}
-
-StringValue* StringValue::DeepCopy() const {
-  return new StringValue(value_);
-}
-
-bool StringValue::Equals(const Value* other) const {
-  if (other->GetType() != GetType())
-    return false;
-  std::string lhs, rhs;
-  return GetAsString(&lhs) && other->GetAsString(&rhs) && lhs == rhs;
+    // TODO(crbug.com/646113): Implement these once the corresponding derived
+    // classes are removed.
+    case Type::BINARY:
+    case Type::LIST:
+    case Type::DICTIONARY:
+      return;
+  }
 }
 
 ///////////////////// BinaryValue ////////////////////
 
-BinaryValue::BinaryValue()
-    : Value(TYPE_BINARY),
-      size_(0) {
-}
+BinaryValue::BinaryValue() : Value(Type::BINARY), size_(0) {}
 
 BinaryValue::BinaryValue(std::unique_ptr<char[]> buffer, size_t size)
-    : Value(TYPE_BINARY), buffer_(std::move(buffer)), size_(size) {}
+    : Value(Type::BINARY), buffer_(std::move(buffer)), size_(size) {}
 
 BinaryValue::~BinaryValue() {
 }
@@ -355,9 +560,7 @@ std::unique_ptr<DictionaryValue> DictionaryValue::From(
   return nullptr;
 }
 
-DictionaryValue::DictionaryValue()
-    : Value(TYPE_DICTIONARY) {
-}
+DictionaryValue::DictionaryValue() : Value(Type::DICTIONARY) {}
 
 DictionaryValue::~DictionaryValue() {
   Clear();
@@ -561,7 +764,7 @@ bool DictionaryValue::GetBinary(StringPiece path,
                                 const BinaryValue** out_value) const {
   const Value* value;
   bool result = Get(path, &value);
-  if (!result || !value->IsType(TYPE_BINARY))
+  if (!result || !value->IsType(Type::BINARY))
     return false;
 
   if (out_value)
@@ -580,7 +783,7 @@ bool DictionaryValue::GetDictionary(StringPiece path,
                                     const DictionaryValue** out_value) const {
   const Value* value;
   bool result = Get(path, &value);
-  if (!result || !value->IsType(TYPE_DICTIONARY))
+  if (!result || !value->IsType(Type::DICTIONARY))
     return false;
 
   if (out_value)
@@ -600,7 +803,7 @@ bool DictionaryValue::GetList(StringPiece path,
                               const ListValue** out_value) const {
   const Value* value;
   bool result = Get(path, &value);
-  if (!result || !value->IsType(TYPE_LIST))
+  if (!result || !value->IsType(Type::LIST))
     return false;
 
   if (out_value)
@@ -685,7 +888,7 @@ bool DictionaryValue::GetDictionaryWithoutPathExpansion(
     const DictionaryValue** out_value) const {
   const Value* value;
   bool result = GetWithoutPathExpansion(key, &value);
-  if (!result || !value->IsType(TYPE_DICTIONARY))
+  if (!result || !value->IsType(Type::DICTIONARY))
     return false;
 
   if (out_value)
@@ -709,7 +912,7 @@ bool DictionaryValue::GetListWithoutPathExpansion(
     const ListValue** out_value) const {
   const Value* value;
   bool result = GetWithoutPathExpansion(key, &value);
-  if (!result || !value->IsType(TYPE_LIST))
+  if (!result || !value->IsType(Type::LIST))
     return false;
 
   if (out_value)
@@ -790,7 +993,7 @@ void DictionaryValue::MergeDictionary(const DictionaryValue* dictionary) {
   for (DictionaryValue::Iterator it(*dictionary); !it.IsAtEnd(); it.Advance()) {
     const Value* merge_value = &it.value();
     // Check whether we have to merge dictionaries.
-    if (merge_value->IsType(Value::TYPE_DICTIONARY)) {
+    if (merge_value->IsType(Value::Type::DICTIONARY)) {
       DictionaryValue* sub_dict;
       if (GetDictionaryWithoutPathExpansion(it.key(), &sub_dict)) {
         sub_dict->MergeDictionary(
@@ -865,8 +1068,7 @@ std::unique_ptr<ListValue> ListValue::From(std::unique_ptr<Value> value) {
   return nullptr;
 }
 
-ListValue::ListValue() : Value(TYPE_LIST) {
-}
+ListValue::ListValue() : Value(Type::LIST) {}
 
 ListValue::~ListValue() {
   Clear();
@@ -956,7 +1158,7 @@ bool ListValue::GetString(size_t index, string16* out_value) const {
 bool ListValue::GetBinary(size_t index, const BinaryValue** out_value) const {
   const Value* value;
   bool result = Get(index, &value);
-  if (!result || !value->IsType(TYPE_BINARY))
+  if (!result || !value->IsType(Type::BINARY))
     return false;
 
   if (out_value)
@@ -975,7 +1177,7 @@ bool ListValue::GetDictionary(size_t index,
                               const DictionaryValue** out_value) const {
   const Value* value;
   bool result = Get(index, &value);
-  if (!result || !value->IsType(TYPE_DICTIONARY))
+  if (!result || !value->IsType(Type::DICTIONARY))
     return false;
 
   if (out_value)
@@ -993,7 +1195,7 @@ bool ListValue::GetDictionary(size_t index, DictionaryValue** out_value) {
 bool ListValue::GetList(size_t index, const ListValue** out_value) const {
   const Value* value;
   bool result = Get(index, &value);
-  if (!result || !value->IsType(TYPE_LIST))
+  if (!result || !value->IsType(Type::LIST))
     return false;
 
   if (out_value)
@@ -1171,6 +1373,13 @@ std::ostream& operator<<(std::ostream& out, const Value& value) {
   std::string json;
   JSONWriter::WriteWithOptions(value, JSONWriter::OPTIONS_PRETTY_PRINT, &json);
   return out << json;
+}
+
+std::ostream& operator<<(std::ostream& out, const Value::Type& type) {
+  if (static_cast<int>(type) < 0 ||
+      static_cast<size_t>(type) >= arraysize(kTypeNames))
+    return out << "Invalid Type (index = " << static_cast<int>(type) << ")";
+  return out << Value::GetTypeName(type);
 }
 
 }  // namespace base

@@ -91,7 +91,8 @@ V4Database::V4Database(
     std::unique_ptr<StoreMap> store_map)
     : db_task_runner_(db_task_runner),
       store_map_(std::move(store_map)),
-      pending_store_updates_(0) {
+      pending_store_updates_(0),
+      weak_factory_on_io_(this) {
   DCHECK(db_task_runner->RunsTasksOnCurrentThread());
 }
 
@@ -100,6 +101,7 @@ void V4Database::Destroy(std::unique_ptr<V4Database> v4_database) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   V4Database* v4_database_raw = v4_database.release();
   if (v4_database_raw) {
+    v4_database_raw->weak_factory_on_io_.InvalidateWeakPtrs();
     v4_database_raw->db_task_runner_->DeleteSoon(FROM_HERE, v4_database_raw);
   }
 }
@@ -130,8 +132,9 @@ void V4Database::ApplyUpdate(
       if (old_store->state() != response->new_client_state()) {
         // A different state implies there are updates to process.
         pending_store_updates_++;
-        UpdatedStoreReadyCallback store_ready_callback = base::Bind(
-            &V4Database::UpdatedStoreReady, base::Unretained(this), identifier);
+        UpdatedStoreReadyCallback store_ready_callback =
+            base::Bind(&V4Database::UpdatedStoreReady,
+                       weak_factory_on_io_.GetWeakPtr(), identifier);
         db_task_runner_->PostTask(
             FROM_HERE,
             base::Bind(&V4Store::ApplyUpdate, base::Unretained(old_store.get()),
@@ -175,6 +178,19 @@ std::unique_ptr<StoreStateMap> V4Database::GetStoreStateMap() {
   return store_state_map;
 }
 
+bool V4Database::AreStoresAvailable(
+    const StoresToCheck& stores_to_check) const {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  for (const ListIdentifier& identifier : stores_to_check) {
+    const auto& store_pair = store_map_->find(identifier);
+    if (store_pair == store_map_->end())
+      return false;  // Store not in our list
+    if (!store_pair->second->HasValidData())
+      return false;  // Store never properly populated.
+  }
+  return true;
+}
+
 void V4Database::GetStoresMatchingFullHash(
     const FullHash& full_hash,
     const StoresToCheck& stores_to_check,
@@ -207,9 +223,10 @@ void V4Database::VerifyChecksum(
   const scoped_refptr<base::SingleThreadTaskRunner> callback_task_runner =
       base::ThreadTaskRunnerHandle::Get();
   db_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&V4Database::VerifyChecksumOnTaskRunner,
-                            base::Unretained(this), callback_task_runner,
-                            db_ready_for_updates_callback));
+      FROM_HERE,
+      base::Bind(&V4Database::VerifyChecksumOnTaskRunner,
+                 weak_factory_on_io_.GetWeakPtr(), callback_task_runner,
+                 db_ready_for_updates_callback));
 }
 
 void V4Database::VerifyChecksumOnTaskRunner(

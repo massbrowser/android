@@ -14,14 +14,11 @@
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/arc/arc_support_host.h"
-#include "chrome/browser/chromeos/arc/optin/arc_optin_preference_handler_observer.h"
 #include "chrome/browser/chromeos/policy/android_management_client.h"
-#include "components/arc/arc_bridge_service.h"
-#include "components/arc/arc_service.h"
+#include "components/arc/arc_session_observer.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/sync_preferences/pref_service_syncable_observer.h"
 #include "components/sync_preferences/synced_pref_observer.h"
-#include "mojo/public/cpp/bindings/binding.h"
 
 class ArcAppLauncher;
 class Profile;
@@ -39,15 +36,14 @@ namespace arc {
 class ArcAndroidManagementChecker;
 class ArcAuthCodeFetcher;
 class ArcAuthContext;
-class ArcOptInPreferenceHandler;
+class ArcSessionRunner;
+class ArcTermsOfServiceNegotiator;
 enum class ProvisioningResult : int;
 
 // This class proxies the request from the client to fetch an auth code from
 // LSO. It lives on the UI thread.
-class ArcSessionManager : public ArcService,
-                          public ArcBridgeService::Observer,
+class ArcSessionManager : public ArcSessionObserver,
                           public ArcSupportHost::Observer,
-                          public ArcOptInPreferenceHandlerObserver,
                           public sync_preferences::PrefServiceSyncableObserver,
                           public sync_preferences::SyncedPrefObserver {
  public:
@@ -96,6 +92,7 @@ class ArcSessionManager : public ArcService,
     STOPPED,
     SHOWING_TERMS_OF_SERVICE,
     CHECKING_ANDROID_MANAGEMENT,
+    REMOVING_DATA_DIR,
     ACTIVE,
   };
 
@@ -103,39 +100,40 @@ class ArcSessionManager : public ArcService,
    public:
     virtual ~Observer() = default;
 
-    // Called to notify that ARC bridge is shut down.
-    virtual void OnShutdownBridge() {}
+    // Called to notify that ARC session is shut down.
+    // TODO(hidehiko): Rename the observer callback to OnArcSessionShutdown().
+    virtual void OnArcBridgeShutdown() {}
 
     // Called to notify that ARC enabled state has been updated.
-    virtual void OnOptInEnabled(bool enabled) {}
+    virtual void OnArcOptInChanged(bool enabled) {}
 
     // Called to notify that ARC has been initialized successfully.
-    virtual void OnInitialStart() {}
+    virtual void OnArcInitialStart() {}
+
+    // Called to notify that Android data has been removed. Used in
+    // browser_tests
+    virtual void OnArcDataRemoved() {}
   };
 
-  explicit ArcSessionManager(ArcBridgeService* bridge_service);
+  explicit ArcSessionManager(
+      std::unique_ptr<ArcSessionRunner> arc_session_runner);
   ~ArcSessionManager() override;
 
   static ArcSessionManager* Get();
+
+  // Exposed here for unit_tests validation.
+  static bool IsOobeOptInActive();
 
   // It is called from chrome/browser/prefs/browser_prefs.cc.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   static void DisableUIForTesting();
   static void SetShelfDelegateForTesting(ash::ShelfDelegate* shelf_delegate);
-
-  // Checks if OptIn verification was disabled by switch in command line.
-  static bool IsOptInVerificationDisabled();
-
   static void EnableCheckAndroidManagementForTesting();
 
-  // Returns true if Arc is allowed to run for the given profile.
-  static bool IsAllowedForProfile(const Profile* profile);
-
-  // Returns true if ARC should run under Kiosk mode.
-  static bool IsArcKioskMode();
-
   // Returns true if Arc is allowed to run for the current session.
+  // TODO(hidehiko): The name is very close to IsArcAllowedForProfile(), but
+  // has different meaning. Clean this up.
   bool IsAllowed() const;
 
   void OnPrimaryUserProfilePrepared(Profile* profile);
@@ -150,13 +148,28 @@ class ArcSessionManager : public ArcService,
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  // ArcBridgeService::Observer:
-  void OnBridgeStopped(ArcBridgeService::StopReason reason) override;
+  // Adds or removes ArcSessionObservers.
+  // TODO(hidehiko): The observer should be migrated into
+  // ArcSessionManager::Observer.
+  void AddSessionObserver(ArcSessionObserver* observer);
+  void RemoveSessionObserver(ArcSessionObserver* observer);
+
+  // Returns true if ARC instance is running/stopped, respectively.
+  // See ArcSessionRunner::IsRunning()/IsStopped() for details.
+  bool IsSessionRunning() const;
+  bool IsSessionStopped() const;
 
   // Called from Arc support platform app when user cancels signing.
   void CancelAuthCode();
 
+  // TODO(hidehiko): Better to rename longer but descriptive one, e.g.
+  // IsArcEnabledPreferenceManaged.
+  // TODO(hidehiko): Look at the real usage, and write document.
   bool IsArcManaged() const;
+
+  // TODO(hidehiko): better to rename longer but descriptive one, e.g.
+  // IsArcPlayStoreEnabled().
+  // TODO(hidehiko): Look at the real usage, and write document.
   bool IsArcEnabled() const;
 
   // This requires Arc to be allowed (|IsAllowed|)for current profile.
@@ -181,11 +194,6 @@ class ArcSessionManager : public ArcService,
   void OnRetryClicked() override;
   void OnSendFeedbackClicked() override;
 
-  // ArcOptInPreferenceHandlerObserver:
-  void OnMetricsModeChanged(bool enabled, bool managed) override;
-  void OnBackupAndRestoreModeChanged(bool enabled, bool managed) override;
-  void OnLocationServicesModeChanged(bool enabled, bool managed) override;
-
   // Stops ARC without changing ArcEnabled preference.
   void StopArc();
 
@@ -208,12 +216,27 @@ class ArcSessionManager : public ArcService,
 
   void OnProvisioningFinished(ProvisioningResult result);
 
+  // Returns the time when the sign in process started, or a null time if
+  // signing in didn't happen during this session.
+  base::Time sign_in_start_time() const { return sign_in_start_time_; }
+
+  // Returns the time when ARC was about to start, or a null time if ARC has not
+  // been started yet.
+  base::Time arc_start_time() const { return arc_start_time_; }
+
+  // Injectors for testing.
+  void SetArcSessionRunnerForTesting(
+      std::unique_ptr<ArcSessionRunner> arc_session_runner);
+  void SetAttemptUserExitCallbackForTesting(const base::Closure& callback);
+
  private:
-  // TODO(hidehiko): move UI methods/fields to ArcSupportHost.
+  // Negotiates the terms of service to user.
+  void StartTermsOfServiceNegotiation();
+  void OnTermsOfServiceNegotiated(bool accepted);
+
   void SetState(State state);
-  void ShutdownBridge();
+  void ShutdownSession();
   void OnOptInPreferenceChanged();
-  void StartUI();
   void OnAndroidManagementPassed();
   void OnArcDataRemoved(bool success);
   void OnArcSignInTimeout();
@@ -221,6 +244,7 @@ class ArcSessionManager : public ArcService,
   void PrepareContextForAuthCodeRequest();
 
   void StartArcAndroidManagementCheck();
+  void MaybeReenableArc();
 
   // Called when the Android management check is done in opt-in flow or
   // re-auth flow.
@@ -232,6 +256,12 @@ class ArcSessionManager : public ArcService,
   void OnBackgroundAndroidManagementChecked(
       policy::AndroidManagementClient::Result result);
 
+  // ArcSessionObserver:
+  void OnSessionReady() override;
+  void OnSessionStopped(StopReason reason) override;
+
+  std::unique_ptr<ArcSessionRunner> arc_session_runner_;
+
   // Unowned pointer. Keeps current profile.
   Profile* profile_ = nullptr;
 
@@ -240,23 +270,26 @@ class ArcSessionManager : public ArcService,
 
   State state_ = State::NOT_INITIALIZED;
   base::ObserverList<Observer> observer_list_;
+  base::ObserverList<ArcSessionObserver> arc_session_observer_list_;
   std::unique_ptr<ArcAppLauncher> playstore_launcher_;
-  bool clear_required_ = false;
   bool reenable_arc_ = false;
+  bool provisioning_reported_ = false;
   base::OneShotTimer arc_sign_in_timer_;
 
-  // Temporarily keeps the ArcSupportHost instance.
-  // This should be moved to ArcSessionManager when the refactoring is
-  // done.
   std::unique_ptr<ArcSupportHost> support_host_;
-  // Handles preferences and metrics mode.
-  std::unique_ptr<ArcOptInPreferenceHandler> preference_handler_;
+
+  std::unique_ptr<ArcTermsOfServiceNegotiator> terms_of_service_negotiator_;
 
   std::unique_ptr<ArcAuthContext> context_;
   std::unique_ptr<ArcAndroidManagementChecker> android_management_checker_;
 
-  base::Time sign_in_time_;
+  // The time when the sign in process started.
+  base::Time sign_in_start_time_;
+  // The time when ARC was about to start.
+  base::Time arc_start_time_;
+  base::Closure attempt_user_exit_callback_;
 
+  // Must be the last member.
   base::WeakPtrFactory<ArcSessionManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcSessionManager);

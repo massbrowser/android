@@ -12,7 +12,6 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/metrics/field_trial.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
@@ -87,8 +86,6 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_IsCrashReportingEnabled,
                         OnIsCrashReportingEnabled)
 #endif
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FieldTrialActivated,
-                        OnFieldTrialActivated)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -143,15 +140,10 @@ void ChromeRenderMessageFilter::OnNavigationHint(
       base::Bind(&DidStartServiceWorkerForNavigationHint));
 }
 
-void ChromeRenderMessageFilter::OnUpdatedCacheStats(
-    uint64_t min_dead_capacity,
-    uint64_t max_dead_capacity,
-    uint64_t capacity,
-    uint64_t live_size,
-    uint64_t dead_size) {
-  web_cache::WebCacheManager::GetInstance()->ObserveStats(
-      render_process_id_, min_dead_capacity, max_dead_capacity, capacity,
-      live_size, dead_size);
+void ChromeRenderMessageFilter::OnUpdatedCacheStats(uint64_t capacity,
+                                                    uint64_t size) {
+  web_cache::WebCacheManager::GetInstance()->ObserveStats(render_process_id_,
+                                                          capacity, size);
 }
 
 void ChromeRenderMessageFilter::OnAllowDatabase(
@@ -162,7 +154,7 @@ void ChromeRenderMessageFilter::OnAllowDatabase(
     const base::string16& display_name,
     bool* allowed) {
   *allowed =
-      cookie_settings_->IsSettingCookieAllowed(origin_url, top_origin_url);
+      cookie_settings_->IsCookieAccessAllowed(origin_url, top_origin_url);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&TabSpecificContentSettings::WebDatabaseAccessed,
@@ -176,7 +168,7 @@ void ChromeRenderMessageFilter::OnAllowDOMStorage(int render_frame_id,
                                                   bool local,
                                                   bool* allowed) {
   *allowed =
-      cookie_settings_->IsSettingCookieAllowed(origin_url, top_origin_url);
+      cookie_settings_->IsCookieAccessAllowed(origin_url, top_origin_url);
   // Record access to DOM storage for potential display in UI.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -264,7 +256,7 @@ void ChromeRenderMessageFilter::OnRequestFileSystemAccess(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   bool allowed =
-      cookie_settings_->IsSettingCookieAllowed(origin_url, top_origin_url);
+      cookie_settings_->IsCookieAccessAllowed(origin_url, top_origin_url);
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   bool is_web_view_guest = extensions::WebViewRendererState::GetInstance()
@@ -338,7 +330,7 @@ void ChromeRenderMessageFilter::OnAllowIndexedDB(int render_frame_id,
                                                  const base::string16& name,
                                                  bool* allowed) {
   *allowed =
-      cookie_settings_->IsSettingCookieAllowed(origin_url, top_origin_url);
+      cookie_settings_->IsCookieAccessAllowed(origin_url, top_origin_url);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&TabSpecificContentSettings::IndexedDBAccessed,
@@ -351,11 +343,3 @@ void ChromeRenderMessageFilter::OnIsCrashReportingEnabled(bool* enabled) {
   *enabled = ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
 }
 #endif
-
-void ChromeRenderMessageFilter::OnFieldTrialActivated(
-    const std::string& trial_name) {
-  // Activate the trial in the browser process to match its state in the
-  // renderer. This is done by calling FindFullName which finalizes the group
-  // and activates the trial.
-  base::FieldTrialList::FindFullName(trial_name);
-}

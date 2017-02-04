@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_CONNECTION_LOGGER_H_
-#define NET_QUIC_QUIC_CONNECTION_LOGGER_H_
+#ifndef NET_QUIC_CHROMIUM_QUIC_CONNECTION_LOGGER_H_
+#define NET_QUIC_CHROMIUM_QUIC_CONNECTION_LOGGER_H_
 
 #include <stddef.h>
 
@@ -17,7 +17,7 @@
 #include "net/log/net_log_with_source.h"
 #include "net/quic/core/crypto/crypto_handshake_message.h"
 #include "net/quic/core/quic_connection.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_spdy_session.h"
 #include "net/socket/socket_performance_watcher.h"
 
@@ -46,7 +46,6 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
 
   // QuicConnectionDebugVisitorInterface
   void OnPacketSent(const SerializedPacket& serialized_packet,
-                    QuicPathId original_path_id,
                     QuicPacketNumber original_packet_number,
                     TransmissionType transmission_type,
                     QuicTime sent_time) override;
@@ -161,4 +160,4 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_CONNECTION_LOGGER_H_
+#endif  // NET_QUIC_CHROMIUM_QUIC_CONNECTION_LOGGER_H_

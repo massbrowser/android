@@ -76,6 +76,8 @@ SkColor GetAuraColor(NativeTheme::ColorId color_id,
       SkColorSetA(SK_ColorBLACK, 0x48);
   static const SkColor kMenuSeparatorColor = SkColorSetRGB(0xE9, 0xE9, 0xE9);
   static const SkColor kEnabledMenuItemForegroundColor = SK_ColorBLACK;
+  // Separator:
+  static const SkColor kSeparatorColor = SkColorSetRGB(0xE9, 0xE9, 0xE9);
   // Link:
   static const SkColor kLinkEnabledColor = gfx::kGoogleBlue700;
   // Text selection colors:
@@ -183,6 +185,9 @@ SkColor GetAuraColor(NativeTheme::ColorId color_id,
       return kEnabledMenuItemForegroundColor;
     case NativeTheme::kColorId_DisabledMenuItemForegroundColor:
       return kDisabledMenuItemForegroundColor;
+    case NativeTheme::kColorId_MenuItemSubtitleColor:
+      return base_theme->GetSystemColor(
+          NativeTheme::kColorId_DisabledMenuItemForegroundColor);
 
     // Label
     case NativeTheme::kColorId_LabelEnabledColor:
@@ -203,6 +208,10 @@ SkColor GetAuraColor(NativeTheme::ColorId color_id,
     case NativeTheme::kColorId_LinkEnabled:
     case NativeTheme::kColorId_LinkPressed:
       return kLinkEnabledColor;
+
+    // Separator
+    case NativeTheme::kColorId_SeparatorColor:
+      return kSeparatorColor;
 
     // Textfield
     case NativeTheme::kColorId_TextfieldDefaultColor:
@@ -251,6 +260,17 @@ SkColor GetAuraColor(NativeTheme::ColorId color_id,
       return kTableSelectionBackgroundColor;
     case NativeTheme::kColorId_TableGroupingIndicatorColor:
       return kTableGroupingIndicatorColor;
+
+    // Table Header
+    case NativeTheme::kColorId_TableHeaderText:
+      return base_theme->GetSystemColor(
+          NativeTheme::kColorId_EnabledMenuItemForegroundColor);
+    case NativeTheme::kColorId_TableHeaderBackground:
+      return base_theme->GetSystemColor(
+          NativeTheme::kColorId_MenuBackgroundColor);
+    case NativeTheme::kColorId_TableHeaderSeparator:
+      return base_theme->GetSystemColor(
+          NativeTheme::kColorId_EnabledMenuButtonBorderColor);
 
     // FocusableBorder
     case NativeTheme::kColorId_FocusedBorderColor:
@@ -320,11 +340,11 @@ SkColor GetAuraColor(NativeTheme::ColorId color_id,
 
 void CommonThemePaintMenuItemBackground(
     const NativeTheme* theme,
-    SkCanvas* canvas,
+    cc::PaintCanvas* canvas,
     NativeTheme::State state,
     const gfx::Rect& rect,
     const NativeTheme::MenuItemExtraParams& menu_item) {
-  SkPaint paint;
+  cc::PaintFlags paint;
   switch (state) {
     case NativeTheme::kNormal:
     case NativeTheme::kDisabled:

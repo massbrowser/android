@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <memory>
+#include <ostream>
 
 #include "net/quic/core/crypto/crypto_protocol.h"
 #include "net/quic/core/crypto/null_encrypter.h"
@@ -15,23 +16,16 @@
 #include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_framer.h"
 #include "net/quic/core/quic_packet_writer.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/quic/test_tools/quic_time_wait_list_manager_peer.h"
 #include "net/tools/quic/quic_epoll_alarm_factory.h"
 #include "net/tools/quic/quic_epoll_connection_helper.h"
 #include "net/tools/quic/test_tools/mock_epoll_server.h"
-#include "net/tools/quic/test_tools/mock_quic_server_session_visitor.h"
+#include "net/tools/quic/test_tools/mock_quic_session_visitor.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using net::test::kTestPort;
-using net::test::BuildUnsizedDataPacket;
-using net::test::NoOpFramerVisitor;
-using net::test::QuicVersionMax;
-using net::test::QuicVersionMin;
-using net::test::MockPacketWriter;
 
 using testing::Args;
 using testing::Assign;

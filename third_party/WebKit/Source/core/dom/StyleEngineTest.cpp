@@ -5,6 +5,7 @@
 #include "core/dom/StyleEngine.h"
 
 #include "core/css/StyleSheetContents.h"
+#include "core/css/parser/CSSParserContext.h"
 #include "core/dom/Document.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/shadow/ShadowRootInit.h"
@@ -26,8 +27,7 @@ class StyleEngineTest : public ::testing::Test {
   StyleEngine& styleEngine() { return document().styleEngine(); }
 
   bool isDocumentStyleSheetCollectionClean() {
-    return !styleEngine().shouldUpdateDocumentStyleSheetCollection(
-        AnalyzedStyleUpdate);
+    return !styleEngine().shouldUpdateDocumentStyleSheetCollection();
   }
 
   enum RuleSetInvalidation {
@@ -49,22 +49,22 @@ StyleEngineTest::RuleSetInvalidation
 StyleEngineTest::scheduleInvalidationsForRules(TreeScope& treeScope,
                                                const String& cssText) {
   StyleSheetContents* sheet =
-      StyleSheetContents::create(CSSParserContext(HTMLStandardMode, nullptr));
+      StyleSheetContents::create(CSSParserContext::create(HTMLStandardMode));
   sheet->parseString(cssText);
-  HeapVector<Member<RuleSet>> ruleSets;
+  HeapHashSet<Member<RuleSet>> ruleSets;
   RuleSet& ruleSet = sheet->ensureRuleSet(MediaQueryEvaluator(),
                                           RuleHasDocumentSecurityOrigin);
   ruleSet.compactRulesIfNeeded();
   if (ruleSet.needsFullRecalcForRuleSetInvalidation())
     return RuleSetInvalidationFullRecalc;
-  ruleSets.append(&ruleSet);
+  ruleSets.insert(&ruleSet);
   styleEngine().scheduleInvalidationsForRuleSets(treeScope, ruleSets);
   return RuleSetInvalidationsScheduled;
 }
 
 TEST_F(StyleEngineTest, DocumentDirtyAfterInject) {
   StyleSheetContents* parsedSheet =
-      StyleSheetContents::create(CSSParserContext(document(), nullptr));
+      StyleSheetContents::create(CSSParserContext::create(document()));
   parsedSheet->parseString("div {}");
   styleEngine().injectAuthorSheet(parsedSheet);
   document().view()->updateAllLifecyclePhases();
@@ -86,7 +86,7 @@ TEST_F(StyleEngineTest, AnalyzedInject) {
   unsigned beforeCount = styleEngine().styleForElementCount();
 
   StyleSheetContents* parsedSheet =
-      StyleSheetContents::create(CSSParserContext(document(), nullptr));
+      StyleSheetContents::create(CSSParserContext::create(document()));
   parsedSheet->parseString("#t1 { color: green }");
   styleEngine().injectAuthorSheet(parsedSheet);
   document().view()->updateAllLifecyclePhases();
@@ -319,6 +319,58 @@ TEST_F(StyleEngineTest, HasViewportDependentMediaQueries) {
   document().view()->updateAllLifecyclePhases();
 
   EXPECT_FALSE(document().styleEngine().hasViewportDependentMediaQueries());
+}
+
+TEST_F(StyleEngineTest, StyleMediaAttributeStyleChange) {
+  document().body()->setInnerHTML(
+      "<style id='s1' media='(max-width: 1px)'>#t1 { color: green }</style>"
+      "<div id='t1'>Green</div><div></div>");
+  document().view()->updateAllLifecyclePhases();
+
+  Element* t1 = document().getElementById("t1");
+  ASSERT_TRUE(t1);
+  ASSERT_TRUE(t1->computedStyle());
+  EXPECT_EQ(makeRGB(0, 0, 0),
+            t1->computedStyle()->visitedDependentColor(CSSPropertyColor));
+
+  unsigned beforeCount = styleEngine().styleForElementCount();
+
+  Element* s1 = document().getElementById("s1");
+  s1->setAttribute(blink::HTMLNames::mediaAttr, "(max-width: 2000px)");
+  document().view()->updateAllLifecyclePhases();
+
+  unsigned afterCount = styleEngine().styleForElementCount();
+  EXPECT_EQ(1u, afterCount - beforeCount);
+
+  ASSERT_TRUE(t1->computedStyle());
+  EXPECT_EQ(makeRGB(0, 128, 0),
+            t1->computedStyle()->visitedDependentColor(CSSPropertyColor));
+}
+
+TEST_F(StyleEngineTest, StyleMediaAttributeNoStyleChange) {
+  document().body()->setInnerHTML(
+      "<style id='s1' media='(max-width: 1000px)'>#t1 { color: green }</style>"
+      "<div id='t1'>Green</div><div></div>");
+  document().view()->updateAllLifecyclePhases();
+
+  Element* t1 = document().getElementById("t1");
+  ASSERT_TRUE(t1);
+  ASSERT_TRUE(t1->computedStyle());
+  EXPECT_EQ(makeRGB(0, 128, 0),
+            t1->computedStyle()->visitedDependentColor(CSSPropertyColor));
+
+  unsigned beforeCount = styleEngine().styleForElementCount();
+
+  Element* s1 = document().getElementById("s1");
+  s1->setAttribute(blink::HTMLNames::mediaAttr, "(max-width: 2000px)");
+  document().view()->updateAllLifecyclePhases();
+
+  unsigned afterCount = styleEngine().styleForElementCount();
+  EXPECT_EQ(0u, afterCount - beforeCount);
+
+  ASSERT_TRUE(t1->computedStyle());
+  EXPECT_EQ(makeRGB(0, 128, 0),
+            t1->computedStyle()->visitedDependentColor(CSSPropertyColor));
 }
 
 }  // namespace blink

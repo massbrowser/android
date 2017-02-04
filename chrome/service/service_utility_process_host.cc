@@ -17,7 +17,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/process/launch.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -97,9 +97,9 @@ class ServiceUtilityProcessHost::PdfToEmfState {
              const printing::PdfRenderSettings& conversion_settings) {
     if (!temp_dir_.CreateUniqueTempDir())
       return false;
-    return host_->Send(new ChromeUtilityMsg_RenderPDFPagesToMetafiles_Start(
+    return host_->Send(new ChromeUtilityMsg_RenderPDFPagesToMetafiles(
         IPC::TakePlatformFileForTransit(std::move(pdf_file)),
-        conversion_settings, false /* print_text_with_gdi */));
+        conversion_settings));
   }
 
   void GetMorePages() {

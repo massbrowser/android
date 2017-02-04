@@ -5,13 +5,13 @@
 #include "ash/common/shelf/shelf_controller.h"
 
 #include "ash/common/shelf/shelf_item_delegate.h"
-#include "ash/common/shelf/shelf_menu_model.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/wm_lookup.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/root_window_controller.h"
 #include "base/strings/utf_string_conversions.h"
+#include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -54,22 +54,19 @@ class ShelfItemDelegateMus : public ShelfItemDelegate {
 
  private:
   // This application menu model for ShelfItemDelegateMus lists open windows.
-  class ShelfMenuModelMus : public ShelfMenuModel,
+  class ShelfMenuModelMus : public ui::SimpleMenuModel,
                             public ui::SimpleMenuModel::Delegate {
    public:
     explicit ShelfMenuModelMus(ShelfItemDelegateMus* item_delegate)
-        : ShelfMenuModel(this), item_delegate_(item_delegate) {
+        : ui::SimpleMenuModel(this), item_delegate_(item_delegate) {
       AddSeparator(ui::SPACING_SEPARATOR);
-      AddItem(0, item_delegate_->GetTitle());
+      AddItem(0, item_delegate_->title());
       AddSeparator(ui::SPACING_SEPARATOR);
       for (const auto& window : item_delegate_->window_id_to_title())
         AddItem(window.first, window.second);
       AddSeparator(ui::SPACING_SEPARATOR);
     }
     ~ShelfMenuModelMus() override {}
-
-    // ShelfMenuModel:
-    bool IsCommandActive(int command_id) const override { return false; }
 
     // ui::SimpleMenuModel::Delegate:
     bool IsCommandIdChecked(int command_id) const override { return false; }
@@ -100,26 +97,9 @@ class ShelfItemDelegateMus : public ShelfItemDelegate {
     return kNoAction;
   }
 
-  base::string16 GetTitle() override {
-    return window_id_to_title_.empty() ? title_
-                                       : window_id_to_title_.begin()->second;
-  }
-
-  bool CanPin() const override {
-    NOTIMPLEMENTED();
-    return true;
-  }
-
-  ShelfMenuModel* CreateApplicationMenu(int event_flags) override {
+  ui::SimpleMenuModel* CreateApplicationMenu(int event_flags) override {
     return new ShelfMenuModelMus(this);
   }
-
-  bool IsDraggable() override {
-    NOTIMPLEMENTED();
-    return false;
-  }
-
-  bool ShouldShowTooltip() override { return true; }
 
   void Close() override { NOTIMPLEMENTED(); }
 
@@ -155,7 +135,7 @@ gfx::ImageSkia GetShelfIconFromBitmap(const SkBitmap& bitmap) {
 // Returns the WmShelf instance for the display with the given |display_id|.
 WmShelf* GetShelfForDisplay(int64_t display_id) {
   // The controller may be null for invalid ids or for displays being removed.
-  WmRootWindowController* root_window_controller =
+  RootWindowController* root_window_controller =
       WmLookup::Get()->GetRootWindowControllerWithDisplayId(display_id);
   return root_window_controller ? root_window_controller->GetShelf() : nullptr;
 }
@@ -244,13 +224,14 @@ void ShelfController::PinItem(
   shelf_item.type = TYPE_APP_SHORTCUT;
   shelf_item.status = STATUS_CLOSED;
   shelf_item.image = GetShelfIconFromBitmap(item->image);
+  shelf_item.title = base::UTF8ToUTF16(item->app_title);
   model_.Add(shelf_item);
 
-  std::unique_ptr<ShelfItemDelegateMus> item_delegate(
-      new ShelfItemDelegateMus());
+  std::unique_ptr<ShelfItemDelegateMus> item_delegate =
+      base::MakeUnique<ShelfItemDelegateMus>();
   item_delegate->SetDelegate(std::move(delegate));
   item_delegate->set_pinned(true);
-  item_delegate->set_title(base::UTF8ToUTF16(item->app_title));
+  item_delegate->set_title(shelf_item.title);
   model_.SetShelfItemDelegate(shelf_id, std::move(item_delegate));
 }
 

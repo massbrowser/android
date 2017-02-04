@@ -70,6 +70,7 @@ const char DefaultSearchManager::kInputEncodings[] = "input_encodings";
 
 const char DefaultSearchManager::kDateCreated[] = "date_created";
 const char DefaultSearchManager::kLastModified[] = "last_modified";
+const char DefaultSearchManager::kLastVisited[] = "last_visited";
 
 const char DefaultSearchManager::kUsageCount[] = "usage_count";
 const char DefaultSearchManager::kAlternateURLs[] = "alternate_urls";
@@ -161,6 +162,7 @@ void DefaultSearchManager::SetUserSelectedDefaultSearchEngine(
     NotifyObserver();
     return;
   }
+
   pref_service_->Set(kDefaultSearchProviderDataPrefName,
                      *TemplateURLDataToDictionary(data));
 }
@@ -214,10 +216,9 @@ void DefaultSearchManager::MergePrefsDataWithPrepopulated() {
   if (!prefs_default_search_ || !prefs_default_search_->prepopulate_id)
     return;
 
-  size_t default_search_index;
   std::vector<std::unique_ptr<TemplateURLData>> prepopulated_urls =
       TemplateURLPrepopulateData::GetPrepopulatedEngines(pref_service_,
-                                                         &default_search_index);
+                                                         nullptr);
 
   for (auto& engine : prepopulated_urls) {
     if (engine->prepopulate_id != prefs_default_search_->prepopulate_id)
@@ -232,6 +233,7 @@ void DefaultSearchManager::MergePrefsDataWithPrepopulated() {
     engine->sync_guid = prefs_default_search_->sync_guid;
     engine->date_created = prefs_default_search_->date_created;
     engine->last_modified = prefs_default_search_->last_modified;
+    engine->last_visited = prefs_default_search_->last_visited;
 
     prefs_default_search_ = std::move(engine);
     return;

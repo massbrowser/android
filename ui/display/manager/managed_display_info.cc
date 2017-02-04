@@ -75,6 +75,31 @@ struct ManagedDisplayModeSorter {
 
 }  // namespace
 
+TouchCalibrationData::TouchCalibrationData() {}
+
+TouchCalibrationData::TouchCalibrationData(
+    const TouchCalibrationData::CalibrationPointPairQuad& point_pairs,
+    const gfx::Size& bounds) : point_pairs(point_pairs),
+                               bounds(bounds) {}
+
+TouchCalibrationData::TouchCalibrationData(
+    const TouchCalibrationData& calibration_data)
+    : point_pairs(calibration_data.point_pairs),
+      bounds(calibration_data.bounds) {}
+
+bool TouchCalibrationData::operator==(TouchCalibrationData other) const {
+  if (bounds != other.bounds)
+    return false;
+  CalibrationPointPairQuad quad_1 = point_pairs;
+  CalibrationPointPairQuad& quad_2 = other.point_pairs;
+
+  // Make sure the point pairs are in the correct order.
+  std::sort(quad_1.begin(), quad_1.end(), CalibrationPointPairCompare);
+  std::sort(quad_2.begin(), quad_2.end(), CalibrationPointPairCompare);
+
+  return quad_1 == quad_2;
+}
+
 ManagedDisplayMode::ManagedDisplayMode()
     : refresh_rate_(0.0f),
       is_interlaced_(false),
@@ -279,6 +304,7 @@ ManagedDisplayInfo::ManagedDisplayInfo()
       has_overscan_(false),
       active_rotation_source_(Display::ROTATION_SOURCE_UNKNOWN),
       touch_support_(Display::TOUCH_SUPPORT_UNKNOWN),
+      has_touch_calibration_data_(false),
       device_scale_factor_(1.0f),
       device_dpi_(kDpi96),
       overscan_insets_in_dip_(0, 0, 0, 0),
@@ -286,7 +312,7 @@ ManagedDisplayInfo::ManagedDisplayInfo()
       native_(false),
       is_aspect_preserving_scaling_(false),
       clear_overscan_insets_(false),
-      color_profile_(ui::COLOR_PROFILE_STANDARD) {}
+      color_profile_(COLOR_PROFILE_STANDARD) {}
 
 ManagedDisplayInfo::ManagedDisplayInfo(int64_t id,
                                        const std::string& name,
@@ -296,6 +322,7 @@ ManagedDisplayInfo::ManagedDisplayInfo(int64_t id,
       has_overscan_(has_overscan),
       active_rotation_source_(Display::ROTATION_SOURCE_UNKNOWN),
       touch_support_(Display::TOUCH_SUPPORT_UNKNOWN),
+      has_touch_calibration_data_(false),
       device_scale_factor_(1.0f),
       device_dpi_(kDpi96),
       overscan_insets_in_dip_(0, 0, 0, 0),
@@ -303,7 +330,7 @@ ManagedDisplayInfo::ManagedDisplayInfo(int64_t id,
       native_(false),
       is_aspect_preserving_scaling_(false),
       clear_overscan_insets_(false),
-      color_profile_(ui::COLOR_PROFILE_STANDARD) {}
+      color_profile_(COLOR_PROFILE_STANDARD) {}
 
 ManagedDisplayInfo::ManagedDisplayInfo(const ManagedDisplayInfo& other) =
     default;
@@ -356,6 +383,10 @@ void ManagedDisplayInfo::Copy(const ManagedDisplayInfo& native_info) {
       overscan_insets_in_dip_.Set(0, 0, 0, 0);
     else if (!native_info.overscan_insets_in_dip_.IsEmpty())
       overscan_insets_in_dip_ = native_info.overscan_insets_in_dip_;
+
+    has_touch_calibration_data_ = native_info.has_touch_calibration_data_;
+    if (has_touch_calibration_data_)
+      touch_calibration_data_ = native_info.touch_calibration_data_;
 
     rotations_ = native_info.rotations_;
     configured_ui_scale_ = native_info.configured_ui_scale_;
@@ -469,13 +500,13 @@ std::string ManagedDisplayInfo::ToFullString() const {
   return ToString() + ", display_modes==" + display_modes_str;
 }
 
-void ManagedDisplayInfo::SetColorProfile(ui::ColorCalibrationProfile profile) {
+void ManagedDisplayInfo::SetColorProfile(ColorCalibrationProfile profile) {
   if (IsColorProfileAvailable(profile))
     color_profile_ = profile;
 }
 
 bool ManagedDisplayInfo::IsColorProfileAvailable(
-    ui::ColorCalibrationProfile profile) const {
+    ColorCalibrationProfile profile) const {
   return std::find(available_color_profiles_.begin(),
                    available_color_profiles_.end(),
                    profile) != available_color_profiles_.end();
@@ -495,6 +526,12 @@ void ManagedDisplayInfo::ClearInputDevices() {
 
 void ResetDisplayIdForTest() {
   synthesized_display_id = kSynthesizedDisplayIdStart;
+}
+
+void ManagedDisplayInfo::SetTouchCalibrationData(
+    const TouchCalibrationData& touch_calibration_data) {
+  has_touch_calibration_data_ = true;
+  touch_calibration_data_ = touch_calibration_data;
 }
 
 }  // namespace display

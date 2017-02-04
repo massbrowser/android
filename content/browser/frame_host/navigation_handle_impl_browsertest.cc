@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/weak_ptr.h"
 #include "content/browser/frame_host/navigation_handle_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents.h"
@@ -36,7 +37,6 @@ class NavigationHandleObserver : public WebContentsObserver {
         is_parent_main_frame_(false),
         is_renderer_initiated_(true),
         is_same_page_(false),
-        is_srcdoc_(false),
         was_redirected_(false),
         frame_tree_node_id_(-1),
         page_transition_(ui::PAGE_TRANSITION_LINK),
@@ -56,7 +56,6 @@ class NavigationHandleObserver : public WebContentsObserver {
     is_parent_main_frame_ = navigation_handle->IsParentMainFrame();
     is_renderer_initiated_ = navigation_handle->IsRendererInitiated();
     is_same_page_ = navigation_handle->IsSamePage();
-    is_srcdoc_ = navigation_handle->IsSrcdoc();
     was_redirected_ = navigation_handle->WasServerRedirect();
     frame_tree_node_id_ = navigation_handle->GetFrameTreeNodeId();
   }
@@ -69,7 +68,6 @@ class NavigationHandleObserver : public WebContentsObserver {
     DCHECK_EQ(is_parent_main_frame_, navigation_handle->IsParentMainFrame());
     DCHECK_EQ(is_same_page_, navigation_handle->IsSamePage());
     DCHECK_EQ(is_renderer_initiated_, navigation_handle->IsRendererInitiated());
-    DCHECK_EQ(is_srcdoc_, navigation_handle->IsSrcdoc());
     DCHECK_EQ(frame_tree_node_id_, navigation_handle->GetFrameTreeNodeId());
 
     was_redirected_ = navigation_handle->WasServerRedirect();
@@ -96,7 +94,6 @@ class NavigationHandleObserver : public WebContentsObserver {
   bool is_parent_main_frame() { return is_parent_main_frame_; }
   bool is_renderer_initiated() { return is_renderer_initiated_; }
   bool is_same_page() { return is_same_page_; }
-  bool is_srcdoc() { return is_srcdoc_; }
   bool was_redirected() { return was_redirected_; }
   int frame_tree_node_id() { return frame_tree_node_id_; }
 
@@ -115,7 +112,6 @@ class NavigationHandleObserver : public WebContentsObserver {
   bool is_parent_main_frame_;
   bool is_renderer_initiated_;
   bool is_same_page_;
-  bool is_srcdoc_;
   bool was_redirected_;
   int frame_tree_node_id_;
   ui::PageTransition page_transition_;
@@ -155,8 +151,8 @@ class TestNavigationThrottle : public NavigationThrottle {
     NavigationHandleImpl* navigation_handle_impl =
         static_cast<NavigationHandleImpl*>(navigation_handle());
     CHECK_NE(REQUEST_CONTEXT_TYPE_UNSPECIFIED,
-             navigation_handle_impl->GetRequestContextType());
-    request_context_type_ = navigation_handle_impl->GetRequestContextType();
+             navigation_handle_impl->request_context_type());
+    request_context_type_ = navigation_handle_impl->request_context_type();
 
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, did_call_will_start_);
     return will_start_result_;
@@ -166,7 +162,7 @@ class TestNavigationThrottle : public NavigationThrottle {
     NavigationHandleImpl* navigation_handle_impl =
         static_cast<NavigationHandleImpl*>(navigation_handle());
     CHECK_EQ(request_context_type_,
-             navigation_handle_impl->GetRequestContextType());
+             navigation_handle_impl->request_context_type());
 
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                             did_call_will_redirect_);
@@ -177,7 +173,7 @@ class TestNavigationThrottle : public NavigationThrottle {
     NavigationHandleImpl* navigation_handle_impl =
         static_cast<NavigationHandleImpl*>(navigation_handle());
     CHECK_EQ(request_context_type_,
-             navigation_handle_impl->GetRequestContextType());
+             navigation_handle_impl->request_context_type());
 
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                             did_call_will_process_);
@@ -211,8 +207,9 @@ class TestNavigationThrottleInstaller : public WebContentsObserver {
         will_start_called_(0),
         will_redirect_called_(0),
         will_process_called_(0),
-        navigation_throttle_(nullptr) {}
-  ~TestNavigationThrottleInstaller() override{};
+        navigation_throttle_(nullptr),
+        weak_factory_(this) {}
+  ~TestNavigationThrottleInstaller() override {}
 
   TestNavigationThrottle* navigation_throttle() { return navigation_throttle_; }
 
@@ -249,11 +246,11 @@ class TestNavigationThrottleInstaller : public WebContentsObserver {
     std::unique_ptr<NavigationThrottle> throttle(new TestNavigationThrottle(
         handle, will_start_result_, will_redirect_result_, will_process_result_,
         base::Bind(&TestNavigationThrottleInstaller::DidCallWillStartRequest,
-                   base::Unretained(this)),
+                   weak_factory_.GetWeakPtr()),
         base::Bind(&TestNavigationThrottleInstaller::DidCallWillRedirectRequest,
-                   base::Unretained(this)),
+                   weak_factory_.GetWeakPtr()),
         base::Bind(&TestNavigationThrottleInstaller::DidCallWillProcessResponse,
-                   base::Unretained(this))));
+                   weak_factory_.GetWeakPtr())));
     navigation_throttle_ = static_cast<TestNavigationThrottle*>(throttle.get());
     handle->RegisterThrottleForTesting(std::move(throttle));
   }
@@ -294,6 +291,10 @@ class TestNavigationThrottleInstaller : public WebContentsObserver {
   scoped_refptr<MessageLoopRunner> will_start_loop_runner_;
   scoped_refptr<MessageLoopRunner> will_redirect_loop_runner_;
   scoped_refptr<MessageLoopRunner> will_process_loop_runner_;
+
+  // The throttle installer can be deleted before all tasks posted by its
+  // throttles are run, so it must be referenced via weak pointers.
+  base::WeakPtrFactory<TestNavigationThrottleInstaller> weak_factory_;
 };
 
 // Records all navigation start URLs from the WebContents.
@@ -504,18 +505,19 @@ IN_PROC_BROWSER_TEST_F(NavigationHandleImplBrowserTest,
   }
 }
 
-// Ensure that the IsSrcdoc() method on NavigationHandle behaves correctly.
+// Ensure that methods on NavigationHandle behave correctly with an iframe that
+// navigates to its srcdoc attribute.
 IN_PROC_BROWSER_TEST_F(NavigationHandleImplBrowserTest, VerifySrcdoc) {
   GURL url(embedded_test_server()->GetURL(
       "/frame_tree/page_with_srcdoc_frame.html"));
   NavigationHandleObserver observer(shell()->web_contents(),
-                                    GURL(url::kAboutBlankURL));
+                                    GURL(kAboutSrcDocURL));
 
   EXPECT_TRUE(NavigateToURL(shell(), url));
 
   EXPECT_TRUE(observer.has_committed());
   EXPECT_FALSE(observer.is_error());
-  EXPECT_TRUE(observer.is_srcdoc());
+  EXPECT_EQ(GURL(kAboutSrcDocURL), observer.last_committed_url());
 }
 
 // Ensure that the IsSamePage() method on NavigationHandle behaves correctly.

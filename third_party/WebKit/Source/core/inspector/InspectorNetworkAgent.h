@@ -36,7 +36,6 @@
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/protocol/Network.h"
-#include "platform/Timer.h"
 #include "platform/heap/Handle.h"
 #include "wtf/text/WTFString.h"
 
@@ -97,8 +96,10 @@ class CORE_EXPORT InspectorNetworkAgent final
   void didReceiveData(LocalFrame*,
                       unsigned long identifier,
                       const char* data,
-                      int dataLength,
-                      int encodedDataLength);
+                      int dataLength);
+  void didReceiveEncodedDataLength(LocalFrame*,
+                                   unsigned long identifier,
+                                   int encodedDataLength);
   void didFinishLoading(unsigned long identifier,
                         double monotonicFinishTime,
                         int64_t encodedDataLength);
@@ -150,6 +151,9 @@ class CORE_EXPORT InspectorNetworkAgent final
                                     const AtomicString& eventId,
                                     const String& data);
   void didFinishEventSourceRequest(ThreadableLoaderClient*);
+
+  // Detach and remove all references to the given client.
+  void detachClientRequest(ThreadableLoaderClient*);
 
   void willDestroyResource(Resource*);
 
@@ -225,6 +229,7 @@ class CORE_EXPORT InspectorNetworkAgent final
                             const KURL&,
                             String* content,
                             bool* base64Encoded);
+  bool cacheDisabled();
 
  private:
   explicit InspectorNetworkAgent(InspectedFrames*);
@@ -277,7 +282,7 @@ class CORE_EXPORT InspectorNetworkAgent final
 
   HeapHashSet<Member<XMLHttpRequest>> m_replayXHRs;
   HeapHashSet<Member<XMLHttpRequest>> m_replayXHRsToBeDeleted;
-  Timer<InspectorNetworkAgent> m_removeFinishedReplayXHRTimer;
+  TaskRunnerTimer<InspectorNetworkAgent> m_removeFinishedReplayXHRTimer;
 };
 
 }  // namespace blink

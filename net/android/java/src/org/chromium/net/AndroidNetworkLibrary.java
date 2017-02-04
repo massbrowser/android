@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.ConnectivityManager;
+import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkInfo;
@@ -17,12 +18,14 @@ import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.security.KeyChain;
+import android.security.NetworkSecurityPolicy;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.CalledByNativeUnchecked;
 
+import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.net.URLConnection;
@@ -30,6 +33,7 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
 import java.util.Enumeration;
+import java.util.List;
 
 /**
  * This class implements net utilities required by the net component.
@@ -242,5 +246,46 @@ class AndroidNetworkLibrary {
             }
         }
         return "";
+    }
+
+    /**
+     * Returns true if cleartext traffic to |host| is allowed by the current app. Always true on L
+     * and older.
+     */
+    @TargetApi(Build.VERSION_CODES.N)
+    @CalledByNative
+    private static boolean isCleartextPermitted(String host) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            NetworkSecurityPolicy policy = NetworkSecurityPolicy.getInstance();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                return policy.isCleartextTrafficPermitted(host);
+            }
+            return policy.isCleartextTrafficPermitted();
+        }
+        return true;
+    }
+
+    @TargetApi(Build.VERSION_CODES.M)
+    @CalledByNative
+    private static byte[][] getDnsServers(Context context) {
+        ConnectivityManager connectivityManager =
+                (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivityManager == null) {
+            return new byte[0][0];
+        }
+        Network network = connectivityManager.getActiveNetwork();
+        if (network == null) {
+            return new byte[0][0];
+        }
+        LinkProperties linkProperties = connectivityManager.getLinkProperties(network);
+        if (linkProperties == null) {
+            return new byte[0][0];
+        }
+        List<InetAddress> dnsServersList = linkProperties.getDnsServers();
+        byte[][] dnsServers = new byte[dnsServersList.size()][];
+        for (int i = 0; i < dnsServersList.size(); i++) {
+            dnsServers[i] = dnsServersList.get(i).getAddress();
+        }
+        return dnsServers;
     }
 }

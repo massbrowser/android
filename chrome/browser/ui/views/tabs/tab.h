@@ -52,6 +52,9 @@ class Tab : public gfx::AnimationDelegate,
   // The Tab's class name.
   static const char kViewClassName[];
 
+  // The amount of overlap between two adjacent tabs.
+  static constexpr int kOverlap = 16;
+
   Tab(TabController* controller, gfx::AnimationContainer* container);
   ~Tab() override;
 
@@ -171,7 +174,6 @@ class Tab : public gfx::AnimationDelegate,
   friend class AlertIndicatorButtonTest;
   friend class TabTest;
   friend class TabStripTest;
-  FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabHitTestMaskWhenStacked);
   FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabCloseButtonVisibilityWhenStacked);
 
   // The animation object used to swap the favicon with the sad tab icon.

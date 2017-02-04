@@ -13,14 +13,19 @@
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "cc/paint/paint_shader.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/alert_indicator_button.h"
+#include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
+#include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/touch_uma/touch_uma.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -48,7 +53,6 @@
 #include "ui/gfx/path.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/gfx/skia_util.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/image_button.h"
@@ -213,10 +217,10 @@ void DrawHighlight(gfx::Canvas* canvas,
                    SkScalar radius,
                    SkColor color) {
   const SkColor colors[2] = { color, SkColorSetA(color, 0) };
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setAntiAlias(true);
-  paint.setShader(SkGradientShader::MakeRadial(p, radius, colors, nullptr, 2,
-                                               SkShader::kClamp_TileMode));
+  paint.setShader(cc::WrapSkShader(SkGradientShader::MakeRadial(
+      p, radius, colors, nullptr, 2, SkShader::kClamp_TileMode)));
   canvas->sk_canvas()->drawRect(
       SkRect::MakeXYWH(p.x() - radius, p.y() - radius, radius * 2, radius * 2),
       paint);
@@ -494,7 +498,8 @@ bool Tab::ThrobberView::CanProcessEventsWithinSubtree() const {
 
 void Tab::ThrobberView::OnPaint(gfx::Canvas* canvas) {
   const TabRendererData::NetworkState state = owner_->data().network_state;
-  if (state == TabRendererData::NETWORK_STATE_NONE)
+  if (state == TabRendererData::NETWORK_STATE_NONE ||
+      state == TabRendererData::NETWORK_STATE_ERROR)
     return;
 
   const ui::ThemeProvider* tp = GetThemeProvider();
@@ -583,11 +588,9 @@ Tab::Tab(TabController* controller, gfx::AnimationContainer* container)
   // on the current theme and active state.  The hovered and pressed images
   // don't depend on the these, so we can set them here.
   const gfx::ImageSkia& hovered = gfx::CreateVectorIcon(
-      gfx::VectorIconId::TAB_CLOSE_HOVERED_PRESSED,
-      SkColorSetRGB(0xDB, 0x44, 0x37));
+      kTabCloseHoveredPressedIcon, SkColorSetRGB(0xDB, 0x44, 0x37));
   const gfx::ImageSkia& pressed = gfx::CreateVectorIcon(
-      gfx::VectorIconId::TAB_CLOSE_HOVERED_PRESSED,
-      SkColorSetRGB(0xA8, 0x35, 0x2A));
+      kTabCloseHoveredPressedIcon, SkColorSetRGB(0xA8, 0x35, 0x2A));
   close_button_->SetImage(views::CustomButton::STATE_HOVERED, &hovered);
   close_button_->SetImage(views::CustomButton::STATE_PRESSED, &pressed);
 
@@ -674,9 +677,10 @@ void Tab::SetData(const TabRendererData& data) {
 
 void Tab::UpdateLoadingAnimation(TabRendererData::NetworkState state) {
   if (state == data_.network_state &&
-      state == TabRendererData::NETWORK_STATE_NONE) {
-    // If the network state is none and hasn't changed, do nothing. Otherwise we
-    // need to advance the animation frame.
+      (state == TabRendererData::NETWORK_STATE_NONE ||
+       state == TabRendererData::NETWORK_STATE_ERROR)) {
+    // If the network state is none or is a network error and hasn't changed,
+    // do nothing. Otherwise we need to advance the animation frame.
     return;
   }
 
@@ -728,8 +732,7 @@ gfx::Size Tab::GetMinimumActiveSize() {
 // static
 gfx::Size Tab::GetStandardSize() {
   const int kNetTabWidth = 193;
-  return gfx::Size(kNetTabWidth + GetLayoutConstant(TABSTRIP_TAB_OVERLAP),
-                   GetMinimumInactiveSize().height());
+  return gfx::Size(kNetTabWidth + kOverlap, GetMinimumInactiveSize().height());
 }
 
 // static
@@ -739,8 +742,8 @@ int Tab::GetTouchWidth() {
 
 // static
 int Tab::GetPinnedWidth() {
-  return GetMinimumInactiveSize().width() +
-         GetLayoutConstant(TAB_PINNED_CONTENT_WIDTH);
+  constexpr int kTabPinnedContentWidth = 23;
+  return GetMinimumInactiveSize().width() + kTabPinnedContentWidth;
 }
 
 // static
@@ -919,9 +922,9 @@ void Tab::Layout() {
   // Size the title to fill the remaining width and use all available height.
   const bool show_title = ShouldRenderAsNormalTab();
   if (show_title) {
-    const int title_spacing = GetLayoutConstant(TAB_FAVICON_TITLE_SPACING);
-    int title_left = showing_icon_ ?
-        (favicon_bounds_.right() + title_spacing) : start;
+    constexpr int kTitleSpacing = 6;
+    int title_left =
+        showing_icon_ ? (favicon_bounds_.right() + kTitleSpacing) : start;
     int title_width = lb.right() - title_left;
     if (showing_alert_indicator_) {
       title_width =
@@ -1100,7 +1103,7 @@ void Tab::OnGestureEvent(ui::GestureEvent* event) {
 
 void Tab::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ui::AX_ROLE_TAB;
-  node_data->SetName(data_.title);
+  node_data->SetName(controller_->GetAccessibleTabName(this));
   node_data->AddStateFlag(ui::AX_STATE_MULTISELECTABLE);
   node_data->AddStateFlag(ui::AX_STATE_SELECTABLE);
   controller_->UpdateTabAccessibilityState(this, node_data);
@@ -1185,7 +1188,8 @@ void Tab::PaintImmersiveTab(gfx::Canvas* canvas) {
   // Paint network activity indicator.
   // TODO(jamescook): Replace this placeholder animation with a real one.
   // For now, let's go with a Cylon eye effect, but in blue.
-  if (data().network_state != TabRendererData::NETWORK_STATE_NONE) {
+  if (data().network_state != TabRendererData::NETWORK_STATE_NONE &&
+      data().network_state != TabRendererData::NETWORK_STATE_ERROR) {
     const SkColor kEyeColor = SkColorSetARGB(alpha, 71, 138, 217);
     int eye_width = bar_rect.width() / 3;
     int eye_offset = bar_rect.width() * immersive_loading_step_ /
@@ -1271,7 +1275,7 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas,
       use_fill_and_stroke_images ? canvas : nullptr);
   if (use_fill_and_stroke_images) {
     canvas->DrawImageInt(it->fill_image, 0, 0);
-    canvas->sk_canvas()->clipPath(clip, SkRegion::kDifference_Op, true);
+    canvas->sk_canvas()->clipPath(clip, SkClipOp::kDifference, true);
   }
   canvas->DrawImageInt(it->stroke_image, 0, 0);
 }
@@ -1282,7 +1286,7 @@ void Tab::PaintTabBackgroundUsingFillId(gfx::Canvas* fill_canvas,
                                         int fill_id,
                                         int y_offset) {
   gfx::Path fill;
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setAntiAlias(true);
 
   // Draw the fill.
@@ -1354,7 +1358,7 @@ void Tab::PaintPinnedTabTitleChangedIndicatorAndIcon(
     gfx::Canvas icon_canvas(gfx::Size(gfx::kFaviconSize, gfx::kFaviconSize),
                             canvas->image_scale(), false);
     icon_canvas.DrawImageInt(favicon_, 0, 0);
-    SkPaint clear_paint;
+    cc::PaintFlags clear_paint;
     clear_paint.setAntiAlias(true);
     clear_paint.setBlendMode(SkBlendMode::kClear);
     const int circle_x = base::i18n::IsRTL() ? 0 : gfx::kFaviconSize;
@@ -1369,7 +1373,7 @@ void Tab::PaintPinnedTabTitleChangedIndicatorAndIcon(
 
   // Draws the actual pinned tab title changed indicator.
   const int kIndicatorRadius = 3;
-  SkPaint indicator_paint;
+  cc::PaintFlags indicator_paint;
   indicator_paint.setColor(GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_ProminentButtonColor));
   indicator_paint.setAntiAlias(true);
@@ -1390,9 +1394,10 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
     return;
 
   // Throbber will do its own painting.
-  if (data().network_state != TabRendererData::NETWORK_STATE_NONE)
+  if (data().network_state != TabRendererData::NETWORK_STATE_NONE &&
+      data().network_state != TabRendererData::NETWORK_STATE_ERROR) {
     return;
-
+  }
   // Ensure that |favicon_| is created.
   if (favicon_.isNull()) {
     ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
@@ -1442,7 +1447,8 @@ void Tab::AdvanceLoadingAnimation() {
     return;
   }
 
-  if (state == TabRendererData::NETWORK_STATE_NONE) {
+  if (state == TabRendererData::NETWORK_STATE_NONE ||
+      state == TabRendererData::NETWORK_STATE_ERROR) {
     throbber_->ResetStartTimes();
     throbber_->SetVisible(false);
     ScheduleIconPaint();
@@ -1453,10 +1459,12 @@ void Tab::AdvanceLoadingAnimation() {
   // when possible to reduce repaint overhead.
   const bool paint_to_layer = controller_->CanPaintThrobberToLayer();
   if (paint_to_layer != !!throbber_->layer()) {
-    throbber_->SetPaintToLayer(paint_to_layer);
     if (paint_to_layer) {
+      throbber_->SetPaintToLayer();
       throbber_->layer()->SetFillsBoundsOpaquely(false);
       ScheduleIconPaint();  // Ensure the non-layered throbber goes away.
+    } else {
+      throbber_->DestroyLayer();
     }
   }
   if (!throbber_->visible()) {
@@ -1558,8 +1566,8 @@ void Tab::OnButtonColorMaybeChanged() {
     button_color_ = new_button_color;
     title_->SetEnabledColor(title_color);
     alert_indicator_button_->OnParentTabButtonColorChanged();
-    const gfx::ImageSkia& close_button_normal_image = gfx::CreateVectorIcon(
-        gfx::VectorIconId::TAB_CLOSE_NORMAL, button_color_);
+    const gfx::ImageSkia& close_button_normal_image =
+        gfx::CreateVectorIcon(kTabCloseNormalIcon, button_color_);
     close_button_->SetImage(views::CustomButton::STATE_NORMAL,
                             &close_button_normal_image);
   }

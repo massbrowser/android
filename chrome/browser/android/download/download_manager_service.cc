@@ -7,19 +7,23 @@
 #include "base/android/jni_string.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/download/download_controller.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/mime_util/mime_util.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/download_item.h"
 #include "jni/DownloadInfo_jni.h"
 #include "jni/DownloadItem_jni.h"
 #include "jni/DownloadManagerService_jni.h"
+
 #include "ui/base/l10n/l10n_util.h"
 
 using base::android::JavaParamRef;
@@ -28,6 +32,13 @@ using base::android::ConvertUTF8ToJavaString;
 using base::android::ScopedJavaLocalRef;
 
 namespace {
+
+// The remaining time for a download item if it cannot be calculated.
+long kUnknownRemainingTime = -1;
+
+// Finch flag for controlling auto resumption limit.
+int kDefaultAutoResumptionLimit = 5;
+const char kAutoResumptionLimitVariation[] = "AutoResumptionLimit";
 
 bool ShouldShowDownloadItem(content::DownloadItem* item) {
   return !item->IsTemporary();
@@ -80,38 +91,37 @@ DownloadManagerService* DownloadManagerService::GetInstance() {
 // static
 ScopedJavaLocalRef<jobject> DownloadManagerService::CreateJavaDownloadInfo(
     JNIEnv* env, content::DownloadItem* item) {
-  ui::PageTransition base_transition =
-      ui::PageTransitionStripQualifier(item->GetTransitionType());
   bool user_initiated =
       (item->GetTransitionType() & ui::PAGE_TRANSITION_FROM_ADDRESS_BAR) ||
-      base_transition == ui::PAGE_TRANSITION_TYPED ||
-      base_transition == ui::PAGE_TRANSITION_AUTO_BOOKMARK ||
-      base_transition == ui::PAGE_TRANSITION_GENERATED ||
-      base_transition == ui::PAGE_TRANSITION_RELOAD ||
-      base_transition == ui::PAGE_TRANSITION_KEYWORD;
+      PageTransitionCoreTypeIs(item->GetTransitionType(),
+                               ui::PAGE_TRANSITION_TYPED) ||
+      PageTransitionCoreTypeIs(item->GetTransitionType(),
+                               ui::PAGE_TRANSITION_AUTO_BOOKMARK) ||
+      PageTransitionCoreTypeIs(item->GetTransitionType(),
+                               ui::PAGE_TRANSITION_GENERATED) ||
+      PageTransitionCoreTypeIs(item->GetTransitionType(),
+                               ui::PAGE_TRANSITION_RELOAD) ||
+      PageTransitionCoreTypeIs(item->GetTransitionType(),
+                               ui::PAGE_TRANSITION_KEYWORD);
   bool has_user_gesture = item->HasUserGesture() || user_initiated;
 
   base::TimeDelta time_delta;
-  item->TimeRemaining(&time_delta);
-
+  bool time_remaining_known = item->TimeRemaining(&time_delta);
+  std::string original_url = item->GetOriginalUrl().SchemeIs(url::kDataScheme)
+      ? std::string() : item->GetOriginalUrl().spec();
   return Java_DownloadInfo_createDownloadInfo(
-      env,
-      ConvertUTF8ToJavaString(env, item->GetGuid()),
-      ConvertUTF8ToJavaString(env,
-                              item->GetFileNameToReportUser().value()),
+      env, ConvertUTF8ToJavaString(env, item->GetGuid()),
+      ConvertUTF8ToJavaString(env, item->GetFileNameToReportUser().value()),
       ConvertUTF8ToJavaString(env, item->GetTargetFilePath().value()),
       ConvertUTF8ToJavaString(env, item->GetTabUrl().spec()),
       ConvertUTF8ToJavaString(env, item->GetMimeType()),
-      item->GetReceivedBytes(),
-      item->GetBrowserContext()->IsOffTheRecord(),
-      item->GetState(),
-      item->PercentComplete(),
-      item->IsPaused(),
-      has_user_gesture,
-      item->CanResume(),
-      ConvertUTF8ToJavaString(env, item->GetOriginalUrl().spec()),
+      item->GetReceivedBytes(), item->GetBrowserContext()->IsOffTheRecord(),
+      item->GetState(), item->PercentComplete(), item->IsPaused(),
+      has_user_gesture, item->CanResume(),
+      ConvertUTF8ToJavaString(env, original_url),
       ConvertUTF8ToJavaString(env, item->GetReferrerUrl().spec()),
-      time_delta.InMilliseconds());
+      time_remaining_known ? time_delta.InMilliseconds()
+                           : kUnknownRemainingTime);
 }
 
 static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
@@ -274,10 +284,6 @@ void DownloadManagerService::OnHistoryQueryComplete() {
     GetAllDownloadsInternal(false);
   if (pending_get_downloads_actions_ & OFF_THE_RECORD)
     GetAllDownloadsInternal(true);
-
-  // Monitor all DownloadItems for changes.
-  UpdateNotifier(this, GetDownloadManager(false), original_notifier_);
-  UpdateNotifier(this, GetDownloadManager(true), off_the_record_notifier_);
 }
 
 void DownloadManagerService::OnDownloadCreated(
@@ -446,4 +452,19 @@ jboolean IsSupportedMimeType(
     const JavaParamRef<jstring>& jmime_type) {
   std::string mime_type = ConvertJavaStringToUTF8(env, jmime_type);
   return mime_util::IsSupportedMimeType(mime_type);
+}
+
+// static
+jint GetAutoResumptionLimit(JNIEnv* env,
+                            const JavaParamRef<jclass>& clazz) {
+  std::string variation = variations::GetVariationParamValueByFeature(
+      chrome::android::kDownloadAutoResumptionThrottling,
+      kAutoResumptionLimitVariation);
+  int auto_resumption_limit;
+  if (!variation.empty() &&
+      base::StringToInt(variation, &auto_resumption_limit)) {
+    return auto_resumption_limit;
+  }
+
+  return kDefaultAutoResumptionLimit;
 }

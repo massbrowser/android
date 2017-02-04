@@ -24,9 +24,9 @@
 #include "core/CoreExport.h"
 #include "core/dom/PendingScript.h"
 #include "core/dom/ScriptRunner.h"
-#include "core/fetch/FetchRequest.h"
-#include "core/fetch/ResourceClient.h"
 #include "core/loader/resource/ScriptResource.h"
+#include "platform/loader/fetch/FetchRequest.h"
+#include "platform/loader/fetch/ResourceClient.h"
 #include "wtf/text/TextPosition.h"
 #include "wtf/text/WTFString.h"
 
@@ -38,7 +38,7 @@ class ScriptSourceCode;
 class LocalFrame;
 
 class CORE_EXPORT ScriptLoader : public GarbageCollectedFinalized<ScriptLoader>,
-                                 public ScriptResourceClient {
+                                 public PendingScriptClient {
   USING_GARBAGE_COLLECTED_MIXIN(ScriptLoader);
 
  public:
@@ -68,7 +68,6 @@ class CORE_EXPORT ScriptLoader : public GarbageCollectedFinalized<ScriptLoader>,
       const TextPosition& scriptStartPosition = TextPosition::minimumPosition(),
       LegacyTypeSupport = DisallowLegacyTypeInTypeAttribute);
 
-  String scriptCharset() const { return m_characterEncoding; }
   String scriptContent() const;
   // Returns false if and only if execution was blocked.
   bool executeScript(const ScriptSourceCode&);
@@ -129,20 +128,19 @@ class CORE_EXPORT ScriptLoader : public GarbageCollectedFinalized<ScriptLoader>,
   bool isScriptForEventSupported() const;
   void logScriptMIMEType(LocalFrame*, ScriptResource*, const String&);
 
-  bool fetchScript(const String& sourceUrl, FetchRequest::DeferOption);
+  bool fetchScript(const String& sourceUrl,
+                   const String& encoding,
+                   FetchRequest::DeferOption);
   bool doExecuteScript(const ScriptSourceCode&);
 
   ScriptLoaderClient* client() const;
 
-  // ResourceClient
-  void notifyFinished(Resource*) override;
-  String debugName() const override { return "ScriptLoader"; }
+  // PendingScriptClient
+  void pendingScriptFinished(PendingScript*) override;
 
   Member<Element> m_element;
   Member<ScriptResource> m_resource;
   WTF::OrdinalNumber m_startLineNumber;
-  String m_characterEncoding;
-  String m_fallbackCharacterEncoding;
 
   bool m_parserInserted : 1;
   bool m_isExternalScript : 1;

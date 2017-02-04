@@ -116,8 +116,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& current_url,
       const GURL& new_url) override;
   bool ShouldAssignSiteForURL(const GURL& url) override;
-  std::string GetCanonicalEncodingNameByAliasName(
-      const std::string& alias_name) override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
   std::string GetApplicationLocale() override;
@@ -127,11 +125,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool AllowAppCache(const GURL& manifest_url,
                      const GURL& first_party,
                      content::ResourceContext* context) override;
-  bool AllowServiceWorker(const GURL& scope,
-                          const GURL& first_party,
-                          content::ResourceContext* context,
-                          int render_process_id,
-                          int render_frame_id) override;
+  bool AllowServiceWorker(
+      const GURL& scope,
+      const GURL& first_party,
+      content::ResourceContext* context,
+      const base::Callback<content::WebContents*(void)>& wc_getter) override;
   bool AllowGetCookie(const GURL& url,
                       const GURL& first_party,
                       const net::CookieList& cookie_list,
@@ -161,7 +159,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                                 const GURL& first_party_url,
                                 content::ResourceContext* context) override;
 #endif  // BUILDFLAG(ENABLE_WEBRTC)
-  bool AllowKeygen(const GURL& url, content::ResourceContext* context) override;
   AllowWebBluetoothResult AllowWebBluetooth(
       content::BrowserContext* browser_context,
       const url::Origin& requesting_origin,
@@ -191,7 +188,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   content::MediaObserver* GetMediaObserver() override;
   content::PlatformNotificationService* GetPlatformNotificationService()
       override;
-  bool CanCreateWindow(const GURL& opener_url,
+  bool CanCreateWindow(int opener_render_process_id,
+                       int opener_render_frame_id,
+                       const GURL& opener_url,
                        const GURL& opener_top_level_frame_url,
                        const GURL& source_origin,
                        WindowContainerType container_type,
@@ -203,9 +202,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                        bool user_gesture,
                        bool opener_suppressed,
                        content::ResourceContext* context,
-                       int render_process_id,
-                       int opener_render_view_id,
-                       int opener_render_frame_id,
                        bool* no_javascript_access) override;
   void ResourceDispatcherHostCreated() override;
   content::SpeechRecognitionManagerDelegate*
@@ -249,7 +245,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void GetAdditionalFileSystemBackends(
       content::BrowserContext* browser_context,
       const base::FilePath& storage_partition_path,
-      ScopedVector<storage::FileSystemBackend>* additional_backends) override;
+      std::vector<std::unique_ptr<storage::FileSystemBackend>>*
+          additional_backends) override;
   content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
   content::TracingDelegate* GetTracingDelegate() override;
   bool IsPluginAllowedToCallRequestOSFileHandle(
@@ -262,18 +259,12 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost* render_frame_host,
       blink::WebPageVisibilityState* visibility_state) override;
 
-#if defined(OS_ANDROID)
-  void GetAdditionalMappedFilesForChildProcess(
-      const base::CommandLine& command_line,
-      int child_process_id,
-      content::FileDescriptorInfo* mappings,
-      std::map<int, base::MemoryMappedFile::Region>* regions) override;
-#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
       content::FileDescriptorInfo* mappings) override;
-#endif  // defined(OS_ANDROID)
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 #if defined(OS_WIN)
   bool PreSpawnRenderer(sandbox::TargetPolicy* policy) override;
   base::string16 GetAppContainerSidForSandboxType(
@@ -295,26 +286,41 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void RegisterOutOfProcessServices(
       OutOfProcessServiceMap* services) override;
   std::unique_ptr<base::Value> GetServiceManifestOverlay(
-      const std::string& name) override;
+      base::StringPiece name) override;
+  std::vector<content::ContentBrowserClient::ServiceManifestInfo>
+  GetExtraServiceManifests() override;
   void OpenURL(content::BrowserContext* browser_context,
                const content::OpenURLParams& params,
                const base::Callback<void(content::WebContents*)>& callback)
       override;
-  content::PresentationServiceDelegate* GetPresentationServiceDelegate(
+  content::ControllerPresentationServiceDelegate*
+  GetControllerPresentationServiceDelegate(
+      content::WebContents* web_contents) override;
+  content::ReceiverPresentationServiceDelegate*
+  GetReceiverPresentationServiceDelegate(
       content::WebContents* web_contents) override;
   void RecordURLMetric(const std::string& metric, const GURL& url) override;
-  ScopedVector<content::NavigationThrottle> CreateThrottlesForNavigation(
-      content::NavigationHandle* handle) override;
+  std::vector<std::unique_ptr<content::NavigationThrottle>>
+  CreateThrottlesForNavigation(content::NavigationHandle* handle) override;
   std::unique_ptr<content::NavigationUIData> GetNavigationUIData(
       content::NavigationHandle* navigation_handle) override;
   std::unique_ptr<content::MemoryCoordinatorDelegate>
   GetMemoryCoordinatorDelegate() override;
+  ::rappor::RapporService* GetRapporService() override;
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)
   void CreateMediaRemoter(content::RenderFrameHost* render_frame_host,
                           media::mojom::RemotingSourcePtr source,
                           media::mojom::RemoterRequest request) final;
 #endif  // BUILDFLAG(ENABLE_MEDIA_REMOTING)
+
+  void GetTaskSchedulerInitializationParams(
+      std::vector<base::SchedulerWorkerPoolParams>* params_vector,
+      base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
+          index_to_traits_callback) override;
+  void PerformExperimentalTaskSchedulerRedirections() override;
+  bool ShouldRedirectDOMStorageTaskRunner() override;
+  bool RedirectNonUINonIOBrowserThreadsToTaskScheduler() override;
 
  private:
   friend class DisableWebRtcEncryptionFlagTest;

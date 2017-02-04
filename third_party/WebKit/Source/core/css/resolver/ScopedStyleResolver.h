@@ -57,7 +57,6 @@ class ScopedStyleResolver final : public GarbageCollected<ScopedStyleResolver> {
   StyleRuleKeyframes* keyframeStylesForAnimation(
       const StringImpl* animationName);
 
-  void appendCSSStyleSheet(CSSStyleSheet&);
   void appendActiveStyleSheets(unsigned index, const ActiveStyleSheetVector&);
   void collectMatchingAuthorRules(ElementRuleCollector&,
                                   CascadeOrder = ignoreCascadeOrder);
@@ -77,6 +76,8 @@ class ScopedStyleResolver final : public GarbageCollected<ScopedStyleResolver> {
   void setNeedsAppendAllSheets() { m_needsAppendAllSheets = true; }
   static void keyframesRulesAdded(const TreeScope&);
   static ContainerNode& invalidationRootForTreeScope(const TreeScope&);
+  CORE_EXPORT static bool haveSameStyles(const ScopedStyleResolver*,
+                                         const ScopedStyleResolver*);
 
   DECLARE_TRACE();
 

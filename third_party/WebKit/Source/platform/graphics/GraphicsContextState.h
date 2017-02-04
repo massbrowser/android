@@ -32,6 +32,7 @@
 #include "platform/graphics/DrawLooperBuilder.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/graphics/StrokeData.h"
+#include "platform/graphics/paint/PaintFlags.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
@@ -49,20 +50,20 @@ class PLATFORM_EXPORT GraphicsContextState final {
 
  public:
   static std::unique_ptr<GraphicsContextState> create() {
-    return wrapUnique(new GraphicsContextState());
+    return WTF::wrapUnique(new GraphicsContextState());
   }
 
   static std::unique_ptr<GraphicsContextState> createAndCopy(
       const GraphicsContextState& other) {
-    return wrapUnique(new GraphicsContextState(other));
+    return WTF::wrapUnique(new GraphicsContextState(other));
   }
 
   void copy(const GraphicsContextState&);
 
-  // SkPaint objects that reflect the current state. If the length of the
+  // PaintFlags objects that reflect the current state. If the length of the
   // path to be stroked is known, pass it in for correct dash or dot placement.
-  const SkPaint& strokePaint(int strokedPathLength = 0) const;
-  const SkPaint& fillPaint() const { return m_fillPaint; }
+  const PaintFlags& strokePaint(int strokedPathLength = 0) const;
+  const PaintFlags& fillPaint() const { return m_fillPaint; }
 
   uint16_t saveCount() const { return m_saveCount; }
   void incrementSaveCount() { ++m_saveCount; }
@@ -119,8 +120,8 @@ class PLATFORM_EXPORT GraphicsContextState final {
 
   // This is mutable to enable dash path effect updates when the paint is
   // fetched for use.
-  mutable SkPaint m_strokePaint;
-  SkPaint m_fillPaint;
+  mutable PaintFlags m_strokePaint;
+  PaintFlags m_fillPaint;
 
   StrokeData m_strokeData;
 

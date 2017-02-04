@@ -9,6 +9,7 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/threading/thread.h"
 #include "base/time/default_clock.h"
@@ -198,7 +199,7 @@ TEST(ErrorReportTest, FeatureInfo) {
   EXPECT_TRUE(io_thread.StartWithOptions(thread_options));
 
   std::unique_ptr<network_time::FieldTrialTest> field_trial_test(
-      network_time::FieldTrialTest::CreateForUnitTest());
+      new network_time::FieldTrialTest());
   field_trial_test->SetNetworkQueriesWithVariationsService(
       true, 0.0, network_time::NetworkTimeTracker::FETCHES_ON_DEMAND_ONLY);
 

@@ -41,10 +41,6 @@
 #include "core/editing/serializers/Serialization.h"
 #include "core/events/Event.h"
 #include "core/events/ProgressEvent.h"
-#include "core/fetch/CrossOriginAccessControl.h"
-#include "core/fetch/FetchInitiatorTypeNames.h"
-#include "core/fetch/FetchUtils.h"
-#include "core/fetch/ResourceLoaderOptions.h"
 #include "core/fileapi/Blob.h"
 #include "core/fileapi/File.h"
 #include "core/fileapi/FileReaderLoader.h"
@@ -68,6 +64,10 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/SharedBuffer.h"
 #include "platform/blob/BlobData.h"
+#include "platform/loader/fetch/CrossOriginAccessControl.h"
+#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "platform/loader/fetch/FetchUtils.h"
+#include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/NetworkLog.h"
 #include "platform/network/ParsedContentType.h"
@@ -78,6 +78,7 @@
 #include "platform/weborigin/Suborigin.h"
 #include "public/platform/WebURLRequest.h"
 #include "wtf/Assertions.h"
+#include "wtf/AutoReset.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/text/CString.h"
 #include <memory>
@@ -204,17 +205,18 @@ class XMLHttpRequest::BlobLoader final
 XMLHttpRequest* XMLHttpRequest::create(ScriptState* scriptState) {
   ExecutionContext* context = scriptState->getExecutionContext();
   DOMWrapperWorld& world = scriptState->world();
-  RefPtr<SecurityOrigin> isolatedWorldSecurityOrigin =
-      world.isIsolatedWorld() ? world.isolatedWorldSecurityOrigin() : nullptr;
+  if (!world.isIsolatedWorld())
+    return create(context);
+
   XMLHttpRequest* xmlHttpRequest =
-      new XMLHttpRequest(context, isolatedWorldSecurityOrigin);
+      new XMLHttpRequest(context, true, world.isolatedWorldSecurityOrigin());
   xmlHttpRequest->suspendIfNeeded();
 
   return xmlHttpRequest;
 }
 
 XMLHttpRequest* XMLHttpRequest::create(ExecutionContext* context) {
-  XMLHttpRequest* xmlHttpRequest = new XMLHttpRequest(context, nullptr);
+  XMLHttpRequest* xmlHttpRequest = new XMLHttpRequest(context, false, nullptr);
   xmlHttpRequest->suspendIfNeeded();
 
   return xmlHttpRequest;
@@ -222,9 +224,9 @@ XMLHttpRequest* XMLHttpRequest::create(ExecutionContext* context) {
 
 XMLHttpRequest::XMLHttpRequest(
     ExecutionContext* context,
+    bool isIsolatedWorld,
     PassRefPtr<SecurityOrigin> isolatedWorldSecurityOrigin)
-    : ActiveScriptWrappable(this),
-      ActiveDOMObject(context),
+    : SuspendableObject(context),
       m_timeoutMilliseconds(0),
       m_responseBlob(this, nullptr),
       m_state(kUnsent),
@@ -236,6 +238,7 @@ XMLHttpRequest::XMLHttpRequest(
       m_progressEventThrottle(
           XMLHttpRequestProgressEventThrottle::create(this)),
       m_responseTypeCode(ResponseTypeDefault),
+      m_isIsolatedWorld(isIsolatedWorld),
       m_isolatedWorldSecurityOrigin(isolatedWorldSecurityOrigin),
       m_eventDispatchRecursionLevel(0),
       m_async(true),
@@ -386,13 +389,8 @@ DOMArrayBuffer* XMLHttpRequest::responseArrayBuffer() {
     if (m_binaryResponseBuilder && m_binaryResponseBuilder->size()) {
       DOMArrayBuffer* buffer = DOMArrayBuffer::createUninitialized(
           m_binaryResponseBuilder->size(), 1);
-      if (!m_binaryResponseBuilder->getAsBytes(
-              buffer->data(), static_cast<size_t>(buffer->byteLength()))) {
-        // m_binaryResponseBuilder failed to allocate an ArrayBuffer.
-        // We need to crash the renderer since there's no way defined in
-        // the spec to tell this to the user.
-        CRASH();
-      }
+      m_binaryResponseBuilder->getAsBytes(
+          buffer->data(), static_cast<size_t>(buffer->byteLength()));
       m_responseArrayBuffer = buffer;
       m_binaryResponseBuilder.clear();
     } else {
@@ -627,7 +625,7 @@ void XMLHttpRequest::open(const AtomicString& method,
 
   if (!async && getExecutionContext()->isDocument()) {
     if (document()->settings() &&
-        !document()->settings()->syncXHRInDocumentsEnabled()) {
+        !document()->settings()->getSyncXHRInDocumentsEnabled()) {
       exceptionState.throwDOMException(
           InvalidAccessError,
           "Synchronous requests are disabled for this page.");
@@ -775,7 +773,7 @@ void XMLHttpRequest::send(Document* document, ExceptionState& exceptionState) {
         UTF8Encoding().encode(body, WTF::EntitiesForUnencodables));
   }
 
-  createRequest(httpBody.release(), exceptionState);
+  createRequest(std::move(httpBody), exceptionState);
 }
 
 void XMLHttpRequest::send(const String& body, ExceptionState& exceptionState) {
@@ -800,7 +798,7 @@ void XMLHttpRequest::send(const String& body, ExceptionState& exceptionState) {
         UTF8Encoding().encode(body, WTF::EntitiesForUnencodables));
   }
 
-  createRequest(httpBody.release(), exceptionState);
+  createRequest(std::move(httpBody), exceptionState);
 }
 
 void XMLHttpRequest::send(Blob* body, ExceptionState& exceptionState) {
@@ -835,7 +833,7 @@ void XMLHttpRequest::send(Blob* body, ExceptionState& exceptionState) {
     }
   }
 
-  createRequest(httpBody.release(), exceptionState);
+  createRequest(std::move(httpBody), exceptionState);
 }
 
 void XMLHttpRequest::send(FormData* body, ExceptionState& exceptionState) {
@@ -857,7 +855,7 @@ void XMLHttpRequest::send(FormData* body, ExceptionState& exceptionState) {
     }
   }
 
-  createRequest(httpBody.release(), exceptionState);
+  createRequest(std::move(httpBody), exceptionState);
 }
 
 void XMLHttpRequest::send(DOMArrayBuffer* body,
@@ -886,7 +884,7 @@ void XMLHttpRequest::sendBytesData(const void* data,
     httpBody = EncodedFormData::create(data, length);
   }
 
-  createRequest(httpBody.release(), exceptionState);
+  createRequest(std::move(httpBody), exceptionState);
 }
 
 void XMLHttpRequest::sendForInspectorXHRReplay(
@@ -986,7 +984,7 @@ void XMLHttpRequest::createRequest(PassRefPtr<EncodedFormData> httpBody,
   request.setFetchCredentialsMode(
       includeCredentials ? WebURLRequest::FetchCredentialsModeInclude
                          : WebURLRequest::FetchCredentialsModeSameOrigin);
-  request.setSkipServiceWorker(m_isolatedWorldSecurityOrigin.get()
+  request.setSkipServiceWorker(m_isIsolatedWorld
                                    ? WebURLRequest::SkipServiceWorker::All
                                    : WebURLRequest::SkipServiceWorker::None);
   request.setExternalRequestStateFromRequestorAddressSpace(
@@ -1095,6 +1093,12 @@ void XMLHttpRequest::abort() {
     m_state = kUnsent;
 }
 
+void XMLHttpRequest::dispose() {
+  InspectorInstrumentation::detachClientRequest(getExecutionContext(), this);
+  m_progressEventThrottle->stop();
+  internalAbort();
+}
+
 void XMLHttpRequest::clearVariablesForLoading() {
   if (m_blobLoader) {
     m_blobLoader->cancel();
@@ -1113,6 +1117,12 @@ void XMLHttpRequest::clearVariablesForLoading() {
 }
 
 bool XMLHttpRequest::internalAbort() {
+  // Fast path for repeated internalAbort()s; this
+  // will happen if an XHR object is notified of context
+  // destruction followed by finalization.
+  if (m_error && !m_loader)
+    return true;
+
   m_error = true;
 
   if (m_responseDocumentParser && !m_responseDocumentParser->isStopped())
@@ -1610,26 +1620,22 @@ void XMLHttpRequest::endLoading() {
                                                 this, m_method, m_url);
 
   if (m_loader) {
-    const bool hasError = m_error;
     // Set |m_error| in order to suppress the cancel notification (see
     // XMLHttpRequest::didFail).
-    m_error = true;
-    m_loader->cancel();
-    m_error = hasError;
-    m_loader = nullptr;
+    AutoReset<bool> scope(&m_error, true);
+    m_loader.release()->cancel();
   }
 
   m_sendFlag = false;
   changeState(kDone);
 
-  if (!getExecutionContext() || !getExecutionContext()->isDocument() ||
-      !document() || !document()->frame() || !document()->frame()->page())
+  if (!getExecutionContext() || !getExecutionContext()->isDocument())
     return;
 
-  if (status() >= 200 && status() < 300) {
+  if (document() && document()->frame() && document()->frame()->page() &&
+      FetchUtils::isOkStatus(status()))
     document()->frame()->page()->chromeClient().ajaxSucceeded(
         document()->frame());
-  }
 }
 
 void XMLHttpRequest::didSendData(unsigned long long bytesSent,
@@ -1806,11 +1812,12 @@ void XMLHttpRequest::resume() {
   m_progressEventThrottle->resume();
 }
 
-void XMLHttpRequest::contextDestroyed() {
-  InspectorInstrumentation::didFailXHRLoading(getExecutionContext(), this, this,
-                                              m_method, m_url);
-  m_progressEventThrottle->stop();
-  internalAbort();
+void XMLHttpRequest::contextDestroyed(ExecutionContext*) {
+  dispose();
+
+  // In case we are in the middle of send() function, unset the send flag to
+  // stop the operation.
+  m_sendFlag = false;
 }
 
 bool XMLHttpRequest::hasPendingActivity() const {
@@ -1830,7 +1837,7 @@ const AtomicString& XMLHttpRequest::interfaceName() const {
 }
 
 ExecutionContext* XMLHttpRequest::getExecutionContext() const {
-  return ActiveDOMObject::getExecutionContext();
+  return SuspendableObject::getExecutionContext();
 }
 
 DEFINE_TRACE(XMLHttpRequest) {
@@ -1844,7 +1851,7 @@ DEFINE_TRACE(XMLHttpRequest) {
   visitor->trace(m_blobLoader);
   XMLHttpRequestEventTarget::trace(visitor);
   DocumentParserClient::trace(visitor);
-  ActiveDOMObject::trace(visitor);
+  SuspendableObject::trace(visitor);
 }
 
 DEFINE_TRACE_WRAPPERS(XMLHttpRequest) {

@@ -16,6 +16,7 @@
 #include "media/base/test_data_util.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/in_memory_url_protocol.h"
+#include "media/media_features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace media {
@@ -135,6 +136,10 @@ TEST_F(AudioFileReaderTest, InvalidFile) {
   RunTestFailingDemux("ten_byte_file");
 }
 
+TEST_F(AudioFileReaderTest, InfiniteDuration) {
+  RunTestFailingDemux("bear-320x240-live.webm");
+}
+
 TEST_F(AudioFileReaderTest, WithVideo) {
   RunTest("bear.ogv",
           "-2.49,-0.75,0.38,1.60,0.70,-1.22,",
@@ -195,7 +200,7 @@ TEST_F(AudioFileReaderTest, WaveF32LE) {
           12719);
 }
 
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 TEST_F(AudioFileReaderTest, MP3) {
   RunTest("sfx.mp3",
           "1.30,2.72,4.56,5.08,3.74,2.03,",

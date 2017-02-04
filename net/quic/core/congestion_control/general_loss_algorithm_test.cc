@@ -5,16 +5,15 @@
 #include "net/quic/core/congestion_control/general_loss_algorithm.h"
 
 #include <algorithm>
+#include <cstdint>
 
-#include "base/logging.h"
+#include "base/stl_util.h"
 #include "net/quic/core/congestion_control/rtt_stats.h"
 #include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_unacked_packet_map.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using std::vector;
 
 namespace net {
 namespace test {
@@ -193,7 +192,6 @@ TEST_F(GeneralLossAlgorithmTest, DontEarlyRetransmitNeuteredPacket) {
 }
 
 TEST_F(GeneralLossAlgorithmTest, EarlyRetransmitWithLargerUnackablePackets) {
-  FLAGS_quic_largest_sent_retransmittable = true;
   // Transmit 2 data packets and one ack.
   SendDataPacket(1);
   SendDataPacket(2);

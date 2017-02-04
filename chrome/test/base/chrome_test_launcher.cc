@@ -13,7 +13,6 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ptr_util.h"
 #include "base/process/process_metrics.h"
 #include "base/run_loop.h"
@@ -88,9 +87,6 @@ bool ChromeTestLauncherDelegate::AdjustChildProcessCommandLine(
   }
 
   new_command_line.AppendSwitchPath(switches::kUserDataDir, temp_data_dir);
-
-  // file:// access for ChromeOS.
-  new_command_line.AppendSwitch(switches::kAllowFileAccess);
 
   *command_line = new_command_line;
   return true;

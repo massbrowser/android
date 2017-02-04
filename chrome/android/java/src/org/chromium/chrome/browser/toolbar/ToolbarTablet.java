@@ -61,9 +61,8 @@ public class ToolbarTablet extends ToolbarLayout implements OnClickListener {
     private OnClickListener mBookmarkListener;
     private OnClickListener mTabSwitcherListener;
 
+    private boolean mIsInTabSwitcherMode;
     private CoinsSingleton.ChangeListener coinsChangeListener;
-
-    private boolean mIsInTabSwitcherMode = false;
 
     private boolean mShowTabStack;
     private boolean mToolbarButtonsVisible;

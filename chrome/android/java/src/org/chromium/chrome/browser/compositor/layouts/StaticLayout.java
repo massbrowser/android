@@ -83,8 +83,8 @@ public class StaticLayout extends Layout {
     }
 
     @Override
-    public int getSizingFlags() {
-        return SizingFlags.HELPER_SUPPORTS_FULLSCREEN;
+    public ViewportMode getViewportMode() {
+        return ViewportMode.DYNAMIC_BROWSER_CONTROLS;
     }
 
     /**
@@ -233,8 +233,8 @@ public class StaticLayout extends Layout {
         LayoutTab layoutTab = tabs[0];
         final float dpToPx = getContext().getResources().getDisplayMetrics().density;
 
-        mSceneLayer.update(dpToPx, contentViewport, layerTitleCache, tabContentManager,
-                fullscreenManager, layoutTab);
+        mSceneLayer.update(
+                dpToPx, layerTitleCache, tabContentManager, fullscreenManager, layoutTab);
 
         // TODO(dtrainor): Find the best way to properly track this metric for cold starts.
         // We should probably erase the thumbnail when we select a tab that we need to restore.

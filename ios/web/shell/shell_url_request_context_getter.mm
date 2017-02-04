@@ -12,9 +12,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/threading/worker_pool.h"
-#include "ios/net/cookies/cookie_store_ios.h"
-#include "ios/web/public/web_client.h"
+#import "ios/net/cookies/cookie_store_ios_persistent.h"
+#import "ios/web/public/web_client.h"
 #include "ios/web/public/web_thread.h"
 #include "ios/web/shell/shell_network_delegate.h"
 #include "net/base/cache_type.h"
@@ -85,8 +84,7 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
                 web::WebThread::GetBlockingPool()->GetSequenceToken()),
             true, nullptr);
     std::unique_ptr<net::CookieStoreIOS> cookie_store(
-        new net::CookieStoreIOS(persistent_store.get()));
-    net::CookieStoreIOS::SwitchSynchronizedStore(nullptr, cookie_store.get());
+        new net::CookieStoreIOSPersistent(persistent_store.get()));
     storage_->set_cookie_store(std::move(cookie_store));
 
     std::string user_agent = web::GetWebClient()->GetUserAgent(false);
@@ -110,8 +108,7 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         url_request_context_->transport_security_state(), base_path_,
         file_task_runner_, false));
     storage_->set_channel_id_service(base::MakeUnique<net::ChannelIDService>(
-        new net::DefaultChannelIDStore(nullptr),
-        base::WorkerPool::GetTaskRunner(true)));
+        new net::DefaultChannelIDStore(nullptr)));
     storage_->set_http_server_properties(
         std::unique_ptr<net::HttpServerProperties>(
             new net::HttpServerPropertiesImpl()));

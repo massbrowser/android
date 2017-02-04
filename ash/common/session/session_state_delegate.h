@@ -6,7 +6,7 @@
 #define ASH_COMMON_SESSION_SESSION_STATE_DELEGATE_H_
 
 #include "ash/ash_export.h"
-#include "ash/common/session/session_types.h"
+#include "ash/public/cpp/session_types.h"
 #include "components/session_manager/session_manager_types.h"
 
 class AccountId;
@@ -25,6 +25,8 @@ class SessionStateObserver;
 class WmWindow;
 
 // Delegate for checking and modifying the session state.
+// DEPRECATED in favor of SessionController/SessionControllerClient for mash.
+// TODO(xiyuan): Remove this when SessionController etc are ready.
 class ASH_EXPORT SessionStateDelegate {
  public:
   // Defines the cycle direction for |CycleActiveUser|.

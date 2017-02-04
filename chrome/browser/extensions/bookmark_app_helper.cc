@@ -11,7 +11,9 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_delegate.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -26,8 +28,10 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/browser/webshare/share_target_pref_helper.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
+#include "chrome/common/origin_trials/chrome_origin_trial_policy.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/platform_locale_settings.h"
 #include "components/prefs/pref_service.h"
@@ -107,8 +111,8 @@ class GeneratedIconImageSource : public gfx::CanvasImageSource {
 #endif
 
     // Draw a rounded rect of the given |color|.
-    SkPaint background_paint;
-    background_paint.setFlags(SkPaint::kAntiAlias_Flag);
+    cc::PaintFlags background_paint;
+    background_paint.setAntiAlias(true);
     background_paint.setColor(color_);
 
     gfx::Rect icon_rect(icon_inset, icon_inset, icon_size, icon_size);
@@ -581,6 +585,22 @@ void BookmarkAppHelper::OnDidGetManifest(const GURL& manifest_url,
 
   UpdateWebAppInfoFromManifest(manifest, &web_app_info_);
 
+  if (!ChromeOriginTrialPolicy().IsFeatureDisabled("WebShare")) {
+    const std::string& manifest_url_string = manifest_url.spec();
+
+    base::Optional<std::string> url_template;
+    if (manifest.share_target.has_value() &&
+        !manifest.share_target.value().url_template.is_null()) {
+      url_template = base::Optional<std::string>(base::UTF16ToUTF8(
+          manifest.share_target.value().url_template.string()));
+    }
+
+    // Add this site as a share target, if it declares a url_template in its
+    // manifest, or remove if it doesn't.
+    UpdateShareTargetInPrefs(manifest_url_string, std::move(url_template),
+                             profile_->GetPrefs());
+  }
+
   // Add urls from the WebApplicationInfo.
   std::vector<GURL> web_app_info_icon_urls;
   for (std::vector<WebApplicationInfo::IconInfo>::const_iterator it =
@@ -689,6 +709,13 @@ void BookmarkAppHelper::FinishInstallation(const Extension* extension) {
     callback_.Run(extension, web_app_info_);
     return;
   }
+
+  // Record an app banner added to homescreen event to ensure banners are not
+  // shown for this app.
+  AppBannerSettingsHelper::RecordBannerEvent(
+      contents_, web_app_info_.app_url, web_app_info_.app_url.spec(),
+      AppBannerSettingsHelper::APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN,
+      base::Time::Now());
 
   Browser* browser = chrome::FindBrowserWithWebContents(contents_);
   if (!browser) {

@@ -81,8 +81,8 @@ public class SimpleAnimationLayout
     }
 
     @Override
-    public int getSizingFlags() {
-        return SizingFlags.HELPER_SUPPORTS_FULLSCREEN;
+    public ViewportMode getViewportMode() {
+        return ViewportMode.USE_PREVIOUS_BROWSER_CONTROLS_STATE;
     }
 
     @Override
@@ -418,7 +418,8 @@ public class SimpleAnimationLayout
         super.updateSceneLayer(viewport, contentViewport, layerTitleCache, tabContentManager,
                 resourceManager, fullscreenManager);
         assert mSceneLayer != null;
-        mSceneLayer.pushLayers(getContext(), viewport, contentViewport, this, layerTitleCache,
-                tabContentManager, resourceManager, fullscreenManager);
+        // The content viewport is intentionally sent as both params below.
+        mSceneLayer.pushLayers(getContext(), contentViewport, contentViewport, this,
+                layerTitleCache, tabContentManager, resourceManager, fullscreenManager);
     }
 }

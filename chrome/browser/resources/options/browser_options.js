@@ -197,7 +197,7 @@ cr.define('options', function() {
       $('advanced-settings').addEventListener('webkitTransitionEnd',
           this.updateAdvancedSettingsExpander_.bind(this));
 
-      if (loadTimeData.getBoolean('showAbout')) {
+      if (loadTimeData.valueExists('aboutOverlayTabTitle')) {
         $('about-button').hidden = false;
         $('about-button').addEventListener('click', function() {
           PageManager.showPageByName('help');
@@ -441,6 +441,8 @@ cr.define('options', function() {
         if (loadTimeData.getBoolean('showQuickUnlockSettings')) {
           $('manage-screenlock').onclick = function(event) {
             PageManager.showPageByName('quickUnlockConfigureOverlay');
+            settings.recordLockScreenProgress(
+                LockScreenProgress.START_SCREEN_LOCK);
           };
           $('manage-screenlock').hidden = false;
         }
@@ -870,7 +872,10 @@ cr.define('options', function() {
         });
 
         $('android-apps-settings-link').addEventListener('click', function(e) {
-            chrome.send('showAndroidAppsSettings');
+            // MouseEvent.detail indicates the current click count (or tap
+            // count, in the case of touch events) in the 'click' event.
+            var activatedFromKeyboard = e.detail == 0;
+            chrome.send('showAndroidAppsSettings', [activatedFromKeyboard]);
         });
       }
     },
@@ -1221,12 +1226,15 @@ cr.define('options', function() {
       $('sync-action-link').onclick = function(event) {
         switch (syncData.statusAction) {
           case 'reauthenticate':
-<if expr="chromeos">
+            SyncSetupOverlay.startSignIn(false /* creatingSupervisedUser */);
+            break;
+          case 'signOutAndSignIn':
+// <if expr="chromeos">
             // On Chrome OS, sign out the user and sign in again to get fresh
             // credentials on auth errors.
             SyncSetupOverlay.doSignOutOnAuthError();
-</if>
-<if expr="not chromeos">
+// </if>
+// <if expr="not chromeos">
             if (syncData.signoutAllowed) {
               // Silently sign the user out without deleting their profile and
               // prompt them to sign back in.
@@ -1235,7 +1243,7 @@ cr.define('options', function() {
             } else {
               chrome.send('showDisconnectManagedProfileDialog');
             }
-</if>
+// </if>
             break;
           case 'upgradeClient':
             PageManager.showPageByName('help');

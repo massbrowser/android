@@ -12,10 +12,12 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/test/test_simple_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/version.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/component_updater/mock_component_updater_service.h"
@@ -168,7 +170,7 @@ TEST_F(SubresourceFilterComponentInstallerTest,
   base::FieldTrialList field_trial_list(nullptr);
   subresource_filter::testing::ScopedSubresourceFilterFeatureToggle
       scoped_feature_toggle(base::FeatureList::OVERRIDE_DISABLE_FEATURE,
-                            subresource_filter::kActivationStateEnabled,
+                            subresource_filter::kActivationLevelEnabled,
                             subresource_filter::kActivationScopeNoSites);
   std::unique_ptr<SubresourceFilterMockComponentUpdateService>
       component_updater(new SubresourceFilterMockComponentUpdateService());
@@ -182,7 +184,7 @@ TEST_F(SubresourceFilterComponentInstallerTest,
   base::FieldTrialList field_trial_list(nullptr);
   subresource_filter::testing::ScopedSubresourceFilterFeatureToggle
       scoped_feature_toggle(base::FeatureList::OVERRIDE_ENABLE_FEATURE,
-                            subresource_filter::kActivationStateDisabled,
+                            subresource_filter::kActivationLevelDisabled,
                             subresource_filter::kActivationScopeNoSites);
   std::unique_ptr<SubresourceFilterMockComponentUpdateService>
       component_updater(new SubresourceFilterMockComponentUpdateService());

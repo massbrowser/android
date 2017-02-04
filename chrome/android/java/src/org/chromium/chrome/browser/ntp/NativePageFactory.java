@@ -14,6 +14,7 @@ import org.chromium.chrome.browser.NativePage;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.bookmarks.BookmarkPage;
 import org.chromium.chrome.browser.download.DownloadPage;
+import org.chromium.chrome.browser.history.HistoryPage;
 import org.chromium.chrome.browser.physicalweb.PhysicalWebDiagnosticsPage;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -22,9 +23,6 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
  * Creates NativePage objects to show chrome-native:// URLs using the native Android view system.
  */
 public class NativePageFactory {
-
-    public static final String CHROME_NATIVE_SCHEME = "chrome-native";
-
     private static NativePageBuilder sNativePageBuilder = new NativePageBuilder();
 
     @VisibleForTesting
@@ -46,6 +44,10 @@ public class NativePageFactory {
             return new DownloadPage(activity, tab);
         }
 
+        protected NativePage buildHistoryPage(Activity activity, Tab tab) {
+            return new HistoryPage(activity, tab);
+        }
+
         protected NativePage buildRecentTabsPage(Activity activity, Tab tab) {
             RecentTabsManager recentTabsManager =
                     new RecentTabsManager(tab, tab.getProfile(), activity);
@@ -58,7 +60,7 @@ public class NativePageFactory {
     }
 
     enum NativePageType {
-        NONE, CANDIDATE, NTP, BOOKMARKS, RECENT_TABS, PHYSICAL_WEB, DOWNLOADS,
+        NONE, CANDIDATE, NTP, BOOKMARKS, RECENT_TABS, PHYSICAL_WEB, DOWNLOADS, HISTORY,
     }
 
     private static NativePageType nativePageType(String url, NativePage candidatePage,
@@ -66,7 +68,7 @@ public class NativePageFactory {
         if (url == null) return NativePageType.NONE;
 
         Uri uri = Uri.parse(url);
-        if (!CHROME_NATIVE_SCHEME.equals(uri.getScheme())) {
+        if (!UrlConstants.CHROME_NATIVE_SCHEME.equals(uri.getScheme())) {
             return NativePageType.NONE;
         }
 
@@ -81,9 +83,11 @@ public class NativePageFactory {
             return NativePageType.BOOKMARKS;
         } else if (UrlConstants.DOWNLOADS_HOST.equals(host)) {
             return NativePageType.DOWNLOADS;
+        } else if (UrlConstants.HISTORY_HOST.equals(host)) {
+            return NativePageType.HISTORY;
         } else if (UrlConstants.RECENT_TABS_HOST.equals(host) && !isIncognito) {
             return NativePageType.RECENT_TABS;
-        } else if (UrlConstants.PHYSICAL_WEB_HOST.equals(host)) {
+        } else if (UrlConstants.PHYSICAL_WEB_DIAGNOSTICS_HOST.equals(host)) {
             if (ChromeFeatureList.isEnabled("PhysicalWeb")) {
                 return NativePageType.PHYSICAL_WEB;
             } else {
@@ -132,6 +136,9 @@ public class NativePageFactory {
                 break;
             case DOWNLOADS:
                 page = sNativePageBuilder.buildDownloadsPage(activity, tab);
+                break;
+            case HISTORY:
+                page = sNativePageBuilder.buildHistoryPage(activity, tab);
                 break;
             case RECENT_TABS:
                 page = sNativePageBuilder.buildRecentTabsPage(activity, tab);

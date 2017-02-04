@@ -2,7 +2,6 @@
 <head>
 <script src='../inspector-test.js'></script>
 <script src='../debugger-test.js'></script>
-<script src='../workspace-test.js'></script>
 <script src='../isolated-filesystem-test.js'></script>
 <script src='./persistence-test.js'></script>
 <script>
@@ -31,16 +30,16 @@ function test()
             InspectorTest.waitForBinding('foo.js').then(next);
         },
 
-        function setBreakpointInNetworkUISourceCode(next)
+        function setBreakpointInFileSystemUISourceCode(next)
         {
-            InspectorTest.waitForUISourceCode('foo.js', Workspace.projectTypes.Network)
+            InspectorTest.waitForUISourceCode('foo.js', Workspace.projectTypes.FileSystem)
                 .then(sourceCode => InspectorTest.showUISourceCodePromise(sourceCode))
                 .then(onSourceFrame);
 
             function onSourceFrame(sourceFrame)
             {
                 InspectorTest.setBreakpoint(sourceFrame, 0, '', true);
-                InspectorTest.waitBreakpointSidebarPane().then(dumpBreakpointSidebarPane).then(next);
+                InspectorTest.waitBreakpointSidebarPane(true).then(dumpBreakpointSidebarPane).then(next);
             }
         },
 

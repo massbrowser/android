@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -27,11 +28,11 @@ const int kStreamCloseDelaySeconds = 5;
 
 // Default maximum number of output streams that can be open simultaneously
 // for all platforms.
-const int kDefaultMaxOutputStreams = 16;
+const int kDefaultMaxOutputStreams = 32;
 
 // Default maximum number of input streams that can be open simultaneously
 // for all platforms.
-const int kDefaultMaxInputStreams = 16;
+const int kDefaultMaxInputStreams = 32;
 
 const int kMaxInputChannels = 3;
 
@@ -49,7 +50,7 @@ struct AudioManagerBase::DispatcherParams {
   const AudioParameters input_params;
   const AudioParameters output_params;
   const std::string output_device_id;
-  scoped_refptr<AudioOutputDispatcher> dispatcher;
+  std::unique_ptr<AudioOutputDispatcher> dispatcher;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DispatcherParams);
@@ -100,6 +101,30 @@ AudioManagerBase::~AudioManagerBase() {
 
 base::string16 AudioManagerBase::GetAudioInputDeviceModel() {
   return base::string16();
+}
+
+void AudioManagerBase::GetAudioInputDeviceDescriptions(
+    AudioDeviceDescriptions* device_descriptions) {
+  CHECK(GetTaskRunner()->BelongsToCurrentThread());
+  AudioDeviceNames device_names;
+  GetAudioInputDeviceNames(&device_names);
+
+  for (const media::AudioDeviceName& name : device_names) {
+    device_descriptions->emplace_back(name.device_name, name.unique_id,
+                                      GetGroupIDInput(name.unique_id));
+  }
+}
+
+void AudioManagerBase::GetAudioOutputDeviceDescriptions(
+    AudioDeviceDescriptions* device_descriptions) {
+  CHECK(GetTaskRunner()->BelongsToCurrentThread());
+  AudioDeviceNames device_names;
+  GetAudioOutputDeviceNames(&device_names);
+
+  for (const media::AudioDeviceName& name : device_names) {
+    device_descriptions->emplace_back(name.device_name, name.unique_id,
+                                      GetGroupIDOutput(name.unique_id));
+  }
 }
 
 AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
@@ -253,25 +278,23 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStreamProxy(
                    CompareByParams(dispatcher_params));
   if (it != output_dispatchers_.end()) {
     delete dispatcher_params;
-    return new AudioOutputProxy((*it)->dispatcher.get());
+    return (*it)->dispatcher->CreateStreamProxy();
   }
 
   const base::TimeDelta kCloseDelay =
       base::TimeDelta::FromSeconds(kStreamCloseDelaySeconds);
-  scoped_refptr<AudioOutputDispatcher> dispatcher;
+  std::unique_ptr<AudioOutputDispatcher> dispatcher;
   if (output_params.format() != AudioParameters::AUDIO_FAKE) {
-    dispatcher = new AudioOutputResampler(this, params, output_params,
-                                          output_device_id,
-                                          kCloseDelay);
+    dispatcher = base::MakeUnique<AudioOutputResampler>(
+        this, params, output_params, output_device_id, kCloseDelay);
   } else {
-    dispatcher = new AudioOutputDispatcherImpl(this, output_params,
-                                               output_device_id,
-                                               kCloseDelay);
+    dispatcher = base::MakeUnique<AudioOutputDispatcherImpl>(
+        this, output_params, output_device_id, kCloseDelay);
   }
 
-  dispatcher_params->dispatcher = dispatcher;
+  dispatcher_params->dispatcher = std::move(dispatcher);
   output_dispatchers_.push_back(dispatcher_params);
-  return new AudioOutputProxy(dispatcher.get());
+  return dispatcher_params->dispatcher->CreateStreamProxy();
 }
 
 void AudioManagerBase::ShowAudioInputSettings() {
@@ -306,11 +329,9 @@ void AudioManagerBase::ReleaseInputStream(AudioInputStream* stream) {
 
 void AudioManagerBase::Shutdown() {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+
   // Close all output streams.
-  while (!output_dispatchers_.empty()) {
-    output_dispatchers_.back()->dispatcher->Shutdown();
-    output_dispatchers_.pop_back();
-  }
+  output_dispatchers_.clear();
 
 #if defined(OS_MACOSX)
   // On mac, AudioManager runs on the main thread, loop for which stops
@@ -324,6 +345,7 @@ void AudioManagerBase::Shutdown() {
     AudioInputStream* stream = *iter++;
     stream->Close();
   }
+  CHECK(input_streams_.empty());
 #endif  // OS_MACOSX
 }
 
@@ -394,6 +416,7 @@ std::string AudioManagerBase::GetDefaultOutputDeviceID() {
   return "";
 }
 
+// static
 int AudioManagerBase::GetUserBufferSize() {
   const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
   int buffer_size = 0;
@@ -408,6 +431,12 @@ int AudioManagerBase::GetUserBufferSize() {
 std::unique_ptr<AudioLog> AudioManagerBase::CreateAudioLog(
     AudioLogFactory::AudioComponent component) {
   return audio_log_factory_->CreateAudioLog(component);
+}
+
+void AudioManagerBase::SetMaxStreamCountForTesting(int max_input,
+                                                   int max_output) {
+  max_num_output_streams_ = max_output;
+  max_num_input_streams_ = max_input;
 }
 
 }  // namespace media

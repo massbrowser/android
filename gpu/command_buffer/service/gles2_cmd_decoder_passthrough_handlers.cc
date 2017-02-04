@@ -170,13 +170,13 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetActiveAttrib(
   }
 
   std::string name;
-  error::Error error =
-      DoGetActiveAttrib(program, index, &result->size, &result->type, &name);
+  error::Error error = DoGetActiveAttrib(
+      program, index, &result->size, &result->type, &name, &result->success);
   if (error != error::kNoError) {
+    result->success = 0;
     return error;
   }
 
-  result->success = 1;  // true.
   Bucket* bucket = CreateBucket(name_bucket_id);
   bucket->SetFromString(name.c_str());
   return error::kNoError;
@@ -202,13 +202,13 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetActiveUniform(
   }
 
   std::string name;
-  error::Error error =
-      DoGetActiveUniform(program, index, &result->size, &result->type, &name);
+  error::Error error = DoGetActiveUniform(
+      program, index, &result->size, &result->type, &name, &result->success);
   if (error != error::kNoError) {
+    result->success = 0;
     return error;
   }
 
-  result->success = 1;  // true.
   Bucket* bucket = CreateBucket(name_bucket_id);
   bucket->SetFromString(name.c_str());
   return error::kNoError;
@@ -518,13 +518,13 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetShaderPrecisionFormat(
 
   GLint range[2] = {0, 0};
   GLint precision = 0;
-  error::Error error = DoGetShaderPrecisionFormat(shader_type, precision_type,
-                                                  range, &precision);
+  error::Error error = DoGetShaderPrecisionFormat(
+      shader_type, precision_type, range, &precision, &result->success);
   if (error != error::kNoError) {
+    result->success = 0;
     return error;
   }
 
-  result->success = 1;  // true
   result->min_range = range[0];
   result->max_range = range[1];
   result->precision = precision;
@@ -596,13 +596,13 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetTransformFeedbackVarying(
   GLsizei size = 0;
   GLenum type = 0;
   std::string name;
-  error::Error error =
-      DoGetTransformFeedbackVarying(program, index, &size, &type, &name);
+  error::Error error = DoGetTransformFeedbackVarying(
+      program, index, &size, &type, &name, &result->success);
   if (error != error::kNoError) {
+    result->success = 0;
     return error;
   }
 
-  result->success = 1;  // true.
   result->size = static_cast<int32_t>(size);
   result->type = static_cast<uint32_t>(type);
   Bucket* bucket = CreateBucket(name_bucket_id);
@@ -853,8 +853,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleReadPixels(
 
   GLsizei bufsize = buffer_size;
   GLsizei length = 0;
-  error::Error error =
-      DoReadPixels(x, y, width, height, format, type, bufsize, &length, pixels);
+  int32_t success = 0;
+  error::Error error = DoReadPixels(x, y, width, height, format, type, bufsize,
+                                    &length, pixels, &success);
   if (error != error::kNoError) {
     return error;
   }
@@ -876,7 +877,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleReadPixels(
   }
 
   if (result) {
-    result->success = 1;
+    result->success = success;
     result->row_length = static_cast<uint32_t>(width);
     result->num_rows = static_cast<uint32_t>(height);
   }
@@ -925,22 +926,23 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexImage2D(
   GLint border = static_cast<GLint>(c.border);
   GLenum format = static_cast<GLenum>(c.format);
   GLenum type = static_cast<GLenum>(c.type);
+  uint32_t pixels_shm_id = c.pixels_shm_id;
+  uint32_t pixels_shm_offset = c.pixels_shm_offset;
 
-  GLsizei imagesize = 0;
-  const void* pixels = NULL;
-  if (c.pixels_shm_id != 0 || c.pixels_shm_offset != 0) {
-    unsigned int buffer_size = 0;
+  unsigned int buffer_size = 0;
+  const void* pixels = nullptr;
+
+  if (pixels_shm_id != 0 || pixels_shm_offset != 0) {
     pixels = GetSharedMemoryAndSizeAs<uint8_t*>(
-        c.pixels_shm_id, c.pixels_shm_offset, &buffer_size);
+        pixels_shm_id, pixels_shm_offset, &buffer_size);
     if (!pixels) {
       return error::kOutOfBounds;
     }
-    imagesize = buffer_size;
   }
 
   error::Error error =
       DoTexImage2D(target, level, internal_format, width, height, border,
-                   format, type, imagesize, pixels);
+                   format, type, buffer_size, pixels);
   if (error != error::kNoError) {
     return error;
   }
@@ -962,22 +964,23 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexImage3D(
   GLint border = static_cast<GLint>(c.border);
   GLenum format = static_cast<GLenum>(c.format);
   GLenum type = static_cast<GLenum>(c.type);
+  uint32_t pixels_shm_id = c.pixels_shm_id;
+  uint32_t pixels_shm_offset = c.pixels_shm_offset;
 
-  GLsizei imagesize = 0;
-  const void* pixels = NULL;
-  if (c.pixels_shm_id != 0 || c.pixels_shm_offset != 0) {
-    unsigned int buffer_size = 0;
+  unsigned int buffer_size = 0;
+  const void* pixels = nullptr;
+
+  if (pixels_shm_id != 0 || pixels_shm_offset != 0) {
     pixels = GetSharedMemoryAndSizeAs<uint8_t*>(
-        c.pixels_shm_id, c.pixels_shm_offset, &buffer_size);
+        pixels_shm_id, pixels_shm_offset, &buffer_size);
     if (!pixels) {
       return error::kOutOfBounds;
     }
-    imagesize = buffer_size;
   }
 
   error::Error error =
       DoTexImage3D(target, level, internal_format, width, height, depth, border,
-                   format, type, imagesize, pixels);
+                   format, type, buffer_size, pixels);
   if (error != error::kNoError) {
     return error;
   }
@@ -998,17 +1001,23 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexSubImage2D(
   GLsizei height = static_cast<GLsizei>(c.height);
   GLenum format = static_cast<GLenum>(c.format);
   GLenum type = static_cast<GLenum>(c.type);
+  uint32_t pixels_shm_id = c.pixels_shm_id;
+  uint32_t pixels_shm_offset = c.pixels_shm_offset;
 
   unsigned int buffer_size = 0;
-  const void* pixels = GetSharedMemoryAndSizeAs<uint8_t*>(
-      c.pixels_shm_id, c.pixels_shm_offset, &buffer_size);
-  if (!pixels) {
-    return error::kOutOfBounds;
-  }
-  GLsizei imagesize = buffer_size;
+  const void* pixels = nullptr;
 
-  error::Error error = DoTexSubImage2D(target, level, xoffset, yoffset, width,
-                                       height, format, type, imagesize, pixels);
+  if (pixels_shm_id != 0 || pixels_shm_offset != 0) {
+    pixels = GetSharedMemoryAndSizeAs<uint8_t*>(
+        pixels_shm_id, pixels_shm_offset, &buffer_size);
+    if (!pixels) {
+      return error::kOutOfBounds;
+    }
+  }
+
+  error::Error error =
+      DoTexSubImage2D(target, level, xoffset, yoffset, width, height, format,
+                      type, buffer_size, pixels);
   if (error != error::kNoError) {
     return error;
   }
@@ -1031,18 +1040,23 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexSubImage3D(
   GLsizei depth = static_cast<GLsizei>(c.depth);
   GLenum format = static_cast<GLenum>(c.format);
   GLenum type = static_cast<GLenum>(c.type);
+  uint32_t pixels_shm_id = c.pixels_shm_id;
+  uint32_t pixels_shm_offset = c.pixels_shm_offset;
 
   unsigned int buffer_size = 0;
-  const void* pixels = GetSharedMemoryAndSizeAs<uint8_t*>(
-      c.pixels_shm_id, c.pixels_shm_offset, &buffer_size);
-  if (!pixels) {
-    return error::kOutOfBounds;
+  const void* pixels = nullptr;
+
+  if (pixels_shm_id != 0 || pixels_shm_offset != 0) {
+    pixels = GetSharedMemoryAndSizeAs<uint8_t*>(
+        pixels_shm_id, pixels_shm_offset, &buffer_size);
+    if (!pixels) {
+      return error::kOutOfBounds;
+    }
   }
-  GLsizei imagesize = buffer_size;
 
   error::Error error =
       DoTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height,
-                      depth, format, type, imagesize, pixels);
+                      depth, format, type, buffer_size, pixels);
   if (error != error::kNoError) {
     return error;
   }

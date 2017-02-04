@@ -6,9 +6,9 @@
  * @fileoverview Login UI based on a stripped down OOBE controller.
  */
 
-<include src="login_shared.js">
-<include src="login_non_lock_shared.js">
-<include src="notification_card.js">
+// <include src="login_shared.js">
+// <include src="login_non_lock_shared.js">
+// <include src="notification_card.js">
 
 cr.define('cr.ui.Oobe', function() {
   return {
@@ -36,6 +36,7 @@ cr.define('cr.ui.Oobe', function() {
       login.FatalErrorScreen.register();
       login.DeviceDisabledScreen.register();
       login.UnrecoverableCryptohomeErrorScreen.register();
+      login.ActiveDirectoryPasswordChangeScreen.register(/* lazyInit= */ true);
 
       cr.ui.Bubble.decorate($('bubble'));
       login.HeaderBar.decorate($('login-header-bar'));

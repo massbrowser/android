@@ -4,6 +4,8 @@
 
 #include "content/browser/indexed_db/cursor_impl.h"
 
+#include "base/memory/ptr_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/indexed_db/indexed_db_callbacks.h"
 #include "content/browser/indexed_db/indexed_db_cursor.h"
 #include "content/browser/indexed_db/indexed_db_dispatcher_host.h"
@@ -12,7 +14,7 @@ namespace content {
 
 class CursorImpl::IDBThreadHelper {
  public:
-  explicit IDBThreadHelper(scoped_refptr<IndexedDBCursor> cursor);
+  explicit IDBThreadHelper(std::unique_ptr<IndexedDBCursor> cursor);
   ~IDBThreadHelper();
 
   void Advance(uint32_t count, scoped_refptr<IndexedDBCallbacks> callbacks);
@@ -24,13 +26,13 @@ class CursorImpl::IDBThreadHelper {
 
  private:
   scoped_refptr<IndexedDBDispatcherHost> dispatcher_host_;
-  scoped_refptr<IndexedDBCursor> cursor_;
+  std::unique_ptr<IndexedDBCursor> cursor_;
   const url::Origin origin_;
 
   DISALLOW_COPY_AND_ASSIGN(IDBThreadHelper);
 };
 
-CursorImpl::CursorImpl(scoped_refptr<IndexedDBCursor> cursor,
+CursorImpl::CursorImpl(std::unique_ptr<IndexedDBCursor> cursor,
                        const url::Origin& origin,
                        scoped_refptr<IndexedDBDispatcherHost> dispatcher_host)
     : helper_(new IDBThreadHelper(std::move(cursor))),
@@ -88,10 +90,12 @@ void CursorImpl::PrefetchReset(
 }
 
 CursorImpl::IDBThreadHelper::IDBThreadHelper(
-    scoped_refptr<IndexedDBCursor> cursor)
+    std::unique_ptr<IndexedDBCursor> cursor)
     : cursor_(std::move(cursor)) {}
 
-CursorImpl::IDBThreadHelper::~IDBThreadHelper() {}
+CursorImpl::IDBThreadHelper::~IDBThreadHelper() {
+  cursor_->RemoveCursorFromTransaction();
+}
 
 void CursorImpl::IDBThreadHelper::Advance(
     uint32_t count,

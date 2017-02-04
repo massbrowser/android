@@ -24,12 +24,11 @@
 
 #include "core/html/ImageDocument.h"
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/HTMLNames.h"
 #include "core/dom/RawDataDocumentParser.h"
 #include "core/events/EventListener.h"
 #include "core/events/MouseEvent.h"
-#include "core/fetch/ImageResource.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalDOMWindow.h"
@@ -48,6 +47,8 @@
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
+#include "core/loader/resource/ImageResource.h"
+#include "core/page/Page.h"
 #include "platform/HostWindow.h"
 #include "wtf/text/StringBuilder.h"
 #include <limits>
@@ -145,15 +146,16 @@ void ImageDocumentParser::appendBytes(const char* data, size_t length) {
   LocalFrame* frame = document()->frame();
   Settings* settings = frame->settings();
   if (!frame->loader().client()->allowImage(
-          !settings || settings->imagesEnabled(), document()->url()))
+          !settings || settings->getImagesEnabled(), document()->url()))
     return;
 
-  if (document()->cachedImage()) {
+  if (document()->cachedImageResourceDeprecated()) {
     RELEASE_ASSERT(length <= std::numeric_limits<unsigned>::max());
     // If decoding has already failed, there's no point in sending additional
     // data to the ImageResource.
-    if (document()->cachedImage()->getStatus() != Resource::DecodeError)
-      document()->cachedImage()->appendData(data, length);
+    if (document()->cachedImageResourceDeprecated()->getStatus() !=
+        ResourceStatus::DecodeError)
+      document()->cachedImageResourceDeprecated()->appendData(data, length);
   }
 
   if (!isDetached())
@@ -161,8 +163,10 @@ void ImageDocumentParser::appendBytes(const char* data, size_t length) {
 }
 
 void ImageDocumentParser::finish() {
-  if (!isStopped() && document()->imageElement() && document()->cachedImage()) {
-    ImageResource* cachedImage = document()->cachedImage();
+  if (!isStopped() && document()->imageElement() &&
+      document()->cachedImageResourceDeprecated()) {
+    // TODO(hiroshige): Use ImageResourceContent instead of ImageResource.
+    ImageResource* cachedImage = document()->cachedImageResourceDeprecated();
     DocumentLoader* loader = document()->loader();
     cachedImage->setResponse(loader->response());
     cachedImage->finish(loader->timing().responseEnd());
@@ -203,8 +207,8 @@ ImageDocument::ImageDocument(const DocumentInit& initializer)
       m_imageIsLoaded(false),
       m_styleCheckerSize(0),
       m_styleMouseCursorMode(Default),
-      m_shrinkToFitMode(frame()->settings()->viewportEnabled() ? Viewport
-                                                               : Desktop) {
+      m_shrinkToFitMode(frame()->settings()->getViewportEnabled() ? Viewport
+                                                                  : Desktop) {
   setCompatibilityMode(QuirksMode);
   lockCompatibilityMode();
   UseCounter::count(*this, UseCounter::ImageDocument);
@@ -264,9 +268,10 @@ void ImageDocument::createDocumentStructure() {
   m_imageElement->setLoadingImageDocument();
   m_imageElement->setSrc(url().getString());
   body->appendChild(m_imageElement.get());
-  if (loader() && m_imageElement->cachedImage())
-    m_imageElement->cachedImage()->responseReceived(loader()->response(),
-                                                    nullptr);
+  if (loader() && m_imageElement->cachedImageResourceForImageDocument()) {
+    m_imageElement->cachedImageResourceForImageDocument()->responseReceived(
+        loader()->response(), nullptr);
+  }
 
   if (shouldShrinkToFit()) {
     // Add event listeners
@@ -399,7 +404,7 @@ void ImageDocument::updateImageStyle() {
           scale = viewportWidth / static_cast<double>(calculateDivWidth());
         }
 
-        newCheckerSize = round(std::max(1.0, newCheckerSize / scale));
+        newCheckerSize = std::round(std::max(1.0, newCheckerSize / scale));
       } else {
         // In desktop mode, the user can click on the image to zoom in or out.
         DCHECK_EQ(m_shrinkToFitMode, Desktop);
@@ -565,7 +570,7 @@ void ImageDocument::windowSizeChanged() {
   }
 }
 
-ImageResource* ImageDocument::cachedImage() {
+ImageResourceContent* ImageDocument::cachedImage() {
   if (!m_imageElement) {
     createDocumentStructure();
     if (isStopped()) {
@@ -577,8 +582,25 @@ ImageResource* ImageDocument::cachedImage() {
   return m_imageElement->cachedImage();
 }
 
+ImageResource* ImageDocument::cachedImageResourceDeprecated() {
+  if (!m_imageElement) {
+    createDocumentStructure();
+    if (isStopped()) {
+      m_imageElement = nullptr;
+      return nullptr;
+    }
+  }
+
+  return m_imageElement->cachedImageResourceForImageDocument();
+}
+
 bool ImageDocument::shouldShrinkToFit() const {
-  return frame()->isMainFrame();
+  // WebView automatically resizes to match the contents, causing an infinite
+  // loop as the contents then resize to match the window. To prevent this,
+  // disallow images from shrinking to fit for WebViews.
+  bool isWrapContentWebView =
+      page() ? page()->settings().getForceZeroLayoutHeight() : false;
+  return frame()->isMainFrame() && !isWrapContentWebView;
 }
 
 DEFINE_TRACE(ImageDocument) {

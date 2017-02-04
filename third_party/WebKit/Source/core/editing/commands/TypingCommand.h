@@ -30,7 +30,7 @@
 
 namespace blink {
 
-class TypingCommand final : public CompositeEditCommand {
+class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
  public:
   enum ETypingCommand {
     DeleteSelection,
@@ -45,7 +45,8 @@ class TypingCommand final : public CompositeEditCommand {
   enum TextCompositionType {
     TextCompositionNone,
     TextCompositionUpdate,
-    TextCompositionConfirm
+    TextCompositionConfirm,
+    TextCompositionCancel
   };
 
   enum Option {
@@ -68,12 +69,14 @@ class TypingCommand final : public CompositeEditCommand {
   static void insertText(Document&,
                          const String&,
                          Options,
-                         TextCompositionType = TextCompositionNone);
+                         TextCompositionType = TextCompositionNone,
+                         const bool isIncrementalInsertion = false);
   static void insertText(Document&,
                          const String&,
                          const VisibleSelection&,
                          Options,
-                         TextCompositionType = TextCompositionNone);
+                         TextCompositionType = TextCompositionNone,
+                         const bool isIncrementalInsertion = false);
   static bool insertLineBreak(Document&);
   static bool insertParagraphSeparator(Document&);
   static bool insertParagraphSeparatorInQuotedContent(Document&);
@@ -92,6 +95,10 @@ class TypingCommand final : public CompositeEditCommand {
   void setCompositionType(TextCompositionType type) {
     m_compositionType = type;
   }
+  static void adjustSelectionAfterIncrementalInsertion(TypingCommand*,
+                                                       LocalFrame*,
+                                                       const size_t start,
+                                                       const size_t end);
 
   ETypingCommand commandTypeOfOpenCommand() const { return m_commandType; }
   TextCompositionType compositionType() const { return m_compositionType; }
@@ -155,6 +162,8 @@ class TypingCommand final : public CompositeEditCommand {
     m_commandType = typingCommand;
   }
 
+  bool isIncrementalInsertion() const { return m_isIncrementalInsertion; }
+
   ETypingCommand m_commandType;
   String m_textToInsert;
   bool m_openForMoreTyping;
@@ -172,6 +181,8 @@ class TypingCommand final : public CompositeEditCommand {
 
   bool m_shouldRetainAutocorrectionIndicator;
   bool m_shouldPreventSpellChecking;
+
+  bool m_isIncrementalInsertion;
 };
 
 DEFINE_TYPE_CASTS(TypingCommand,

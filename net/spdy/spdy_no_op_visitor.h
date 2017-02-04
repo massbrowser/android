@@ -9,6 +9,8 @@
 #ifndef NET_SPDY_SPDY_NO_OP_VISITOR_H_
 #define NET_SPDY_SPDY_NO_OP_VISITOR_H_
 
+#include <cstdint>
+
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_protocol.h"
 
@@ -24,12 +26,6 @@ class SpdyNoOpVisitor : public SpdyFramerVisitorInterface,
 
   // SpdyFramerVisitorInterface methods:
   void OnError(SpdyFramer* framer) override {}
-  void OnSynStream(SpdyStreamId stream_id,
-                   SpdyStreamId associated_stream_id,
-                   SpdyPriority priority,
-                   bool fin,
-                   bool unidirectional) override {}
-  void OnSynReply(SpdyStreamId stream_id, bool fin) override {}
   net::SpdyHeadersHandlerInterface* OnHeaderFrameStart(
       SpdyStreamId stream_id) override;
   void OnHeaderFrameEnd(SpdyStreamId stream_id, bool end_headers) override {}
@@ -43,7 +39,7 @@ class SpdyNoOpVisitor : public SpdyFramerVisitorInterface,
   void OnStreamPadding(SpdyStreamId stream_id, size_t len) override {}
   void OnRstStream(SpdyStreamId stream_id,
                    SpdyRstStreamStatus status) override {}
-  void OnSetting(SpdySettingsIds id, uint8_t flags, uint32_t value) override {}
+  void OnSetting(SpdySettingsIds id, uint32_t value) override {}
   void OnPing(SpdyPingId unique_id, bool is_ack) override {}
   void OnSettingsEnd() override {}
   void OnSettingsAck() override {}
@@ -69,7 +65,7 @@ class SpdyNoOpVisitor : public SpdyFramerVisitorInterface,
                   SpdyStreamId parent_stream_id,
                   int weight,
                   bool exclusive) override {}
-  bool OnUnknownFrame(SpdyStreamId stream_id, int frame_type) override;
+  bool OnUnknownFrame(SpdyStreamId stream_id, uint8_t frame_type) override;
 
   // SpdyFramerDebugVisitorInterface methods:
   void OnSendCompressedFrame(SpdyStreamId stream_id,

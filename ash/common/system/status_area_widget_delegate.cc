@@ -12,10 +12,10 @@
 #include "ash/common/shelf/wm_shelf_util.h"
 #include "ash/common/system/tray/tray_constants.h"
 #include "ash/common/wm_lookup.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/root_window_controller.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
@@ -57,7 +57,7 @@ StatusAreaWidgetDelegate::StatusAreaWidgetDelegate()
   // Allow the launcher to surrender the focus to another window upon
   // navigation completion by the user.
   set_allow_deactivate_on_esc(true);
-  SetPaintToLayer(true);
+  SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
 }
 

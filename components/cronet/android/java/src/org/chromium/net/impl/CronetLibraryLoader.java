@@ -23,7 +23,7 @@ public class CronetLibraryLoader {
     // Synchronize initialization.
     private static final Object sLoadLock = new Object();
     private static final String LIBRARY_NAME = "cronet";
-    private static final String TAG = "CronetLibraryLoader";
+    private static final String TAG = CronetLibraryLoader.class.getSimpleName();
     // Has library loading commenced?  Setting guarded by sLoadLock.
     private static volatile boolean sInitStarted = false;
     // Has ensureMainThreadInitialized() completed?  Only accessed on main thread.
@@ -47,13 +47,13 @@ public class CronetLibraryLoader {
                 System.loadLibrary(LIBRARY_NAME);
             }
             ContextUtils.initApplicationContextForNative();
-            if (!ImplVersion.CRONET_VERSION.equals(nativeGetCronetVersion())) {
+            String implVersion = ImplVersion.getCronetVersion();
+            if (!implVersion.equals(nativeGetCronetVersion())) {
                 throw new RuntimeException(String.format("Expected Cronet version number %s, "
                                 + "actual version number %s.",
-                        ImplVersion.CRONET_VERSION, nativeGetCronetVersion()));
+                        implVersion, nativeGetCronetVersion()));
             }
-            Log.i(TAG, "Cronet version: %s, arch: %s", ImplVersion.CRONET_VERSION,
-                    System.getProperty("os.arch"));
+            Log.i(TAG, "Cronet version: %s, arch: %s", implVersion, System.getProperty("os.arch"));
             // Init native Chromium CronetEngine on Main UI thread.
             Runnable task = new Runnable() {
                 @Override

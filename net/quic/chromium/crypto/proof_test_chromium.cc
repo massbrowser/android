@@ -19,7 +19,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using std::string;
-using std::vector;
 
 namespace net {
 namespace test {
@@ -58,7 +57,7 @@ void RunVerification(ProofVerifier* verifier,
                      const string& server_config,
                      QuicVersion quic_version,
                      StringPiece chlo_hash,
-                     const vector<string>& certs,
+                     const std::vector<string>& certs,
                      const string& proof,
                      bool expected_ok) {
   std::unique_ptr<ProofVerifyDetails> details;
@@ -94,12 +93,12 @@ class TestCallback : public ProofSource::Callback {
  public:
   explicit TestCallback(bool* called,
                         bool* ok,
-                        scoped_refptr<ProofSource::Chain>* chain,
+                        QuicReferenceCountedPointer<ProofSource::Chain>* chain,
                         QuicCryptoProof* proof)
       : called_(called), ok_(ok), chain_(chain), proof_(proof) {}
 
   void Run(bool ok,
-           const scoped_refptr<ProofSource::Chain>& chain,
+           const QuicReferenceCountedPointer<ProofSource::Chain>& chain,
            const QuicCryptoProof& proof,
            std::unique_ptr<ProofSource::Details> /* details */) override {
     *ok_ = ok;
@@ -111,7 +110,7 @@ class TestCallback : public ProofSource::Callback {
  private:
   bool* called_;
   bool* ok_;
-  scoped_refptr<ProofSource::Chain>* chain_;
+  QuicReferenceCountedPointer<ProofSource::Chain>* chain_;
   QuicCryptoProof* proof_;
 };
 
@@ -136,18 +135,18 @@ TEST_P(ProofTest, DISABLED_Verify) {
   const string second_chlo_hash = "first chlo hash bytes";
   const QuicVersion quic_version = GetParam();
 
-  scoped_refptr<ProofSource::Chain> chain;
-  scoped_refptr<ProofSource::Chain> first_chain;
+  QuicReferenceCountedPointer<ProofSource::Chain> chain;
+  QuicReferenceCountedPointer<ProofSource::Chain> first_chain;
   string error_details;
   QuicCryptoProof proof, first_proof;
-  QuicIpAddress server_ip;
+  QuicSocketAddress server_addr;
 
-  ASSERT_TRUE(source->GetProof(server_ip, hostname, server_config, quic_version,
-                               first_chlo_hash, QuicTagVector(), &first_chain,
-                               &first_proof));
-  ASSERT_TRUE(source->GetProof(server_ip, hostname, server_config, quic_version,
-                               second_chlo_hash, QuicTagVector(), &chain,
-                               &proof));
+  ASSERT_TRUE(source->GetProof(server_addr, hostname, server_config,
+                               quic_version, first_chlo_hash, QuicTagVector(),
+                               &first_chain, &first_proof));
+  ASSERT_TRUE(source->GetProof(server_addr, hostname, server_config,
+                               quic_version, second_chlo_hash, QuicTagVector(),
+                               &chain, &proof));
 
   // Check that the proof source is caching correctly:
   ASSERT_EQ(first_chain->certs, chain->certs);
@@ -168,7 +167,7 @@ TEST_P(ProofTest, DISABLED_Verify) {
   RunVerification(verifier.get(), hostname, port, server_config, quic_version,
                   first_chlo_hash, chain->certs, corrupt_signature, false);
 
-  vector<string> wrong_certs;
+  std::vector<string> wrong_certs;
   for (size_t i = 1; i < chain->certs.size(); i++) {
     wrong_certs.push_back(chain->certs[i]);
   }
@@ -185,23 +184,23 @@ TEST_P(ProofTest, VerifySourceAsync) {
   const string first_chlo_hash = "first chlo hash bytes";
   const string second_chlo_hash = "first chlo hash bytes";
   const QuicVersion quic_version = GetParam();
-  QuicIpAddress server_ip;
+  QuicSocketAddress server_addr;
 
   // Call synchronous version
-  scoped_refptr<ProofSource::Chain> expected_chain;
+  QuicReferenceCountedPointer<ProofSource::Chain> expected_chain;
   QuicCryptoProof expected_proof;
-  ASSERT_TRUE(source->GetProof(server_ip, hostname, server_config, quic_version,
-                               first_chlo_hash, QuicTagVector(),
+  ASSERT_TRUE(source->GetProof(server_addr, hostname, server_config,
+                               quic_version, first_chlo_hash, QuicTagVector(),
                                &expected_chain, &expected_proof));
 
   // Call asynchronous version and compare results
   bool called = false;
   bool ok;
-  scoped_refptr<ProofSource::Chain> chain;
+  QuicReferenceCountedPointer<ProofSource::Chain> chain;
   QuicCryptoProof proof;
   std::unique_ptr<ProofSource::Callback> cb(
       new TestCallback(&called, &ok, &chain, &proof));
-  source->GetProof(server_ip, hostname, server_config, quic_version,
+  source->GetProof(server_addr, hostname, server_config, quic_version,
                    first_chlo_hash, QuicTagVector(), std::move(cb));
   // TODO(gredner): whan GetProof really invokes the callback asynchronously,
   // figure out what to do here.
@@ -217,12 +216,12 @@ TEST_P(ProofTest, UseAfterFree) {
   const string server_config = "server config bytes";
   const string hostname = "test.example.com";
   const string chlo_hash = "proof nonce bytes";
-  scoped_refptr<ProofSource::Chain> chain;
+  QuicReferenceCountedPointer<ProofSource::Chain> chain;
   string error_details;
   QuicCryptoProof proof;
-  QuicIpAddress server_ip;
+  QuicSocketAddress server_addr;
 
-  ASSERT_TRUE(source->GetProof(server_ip, hostname, server_config, GetParam(),
+  ASSERT_TRUE(source->GetProof(server_addr, hostname, server_config, GetParam(),
                                chlo_hash, QuicTagVector(), &chain, &proof));
 
   // Make sure we can safely access results after deleting where they came from.

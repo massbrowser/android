@@ -5,8 +5,8 @@
 // A toy server, which listens on a specified address for QUIC traffic and
 // handles incoming responses.
 
-#ifndef NET_QUIC_TOOLS_QUIC_SIMPLE_SERVER_H_
-#define NET_QUIC_TOOLS_QUIC_SIMPLE_SERVER_H_
+#ifndef NET_TOOLS_QUIC_QUIC_SIMPLE_SERVER_H_
+#define NET_TOOLS_QUIC_QUIC_SIMPLE_SERVER_H_
 
 #include <memory>
 
@@ -17,8 +17,10 @@
 #include "net/quic/chromium/quic_chromium_alarm_factory.h"
 #include "net/quic/chromium/quic_chromium_connection_helper.h"
 #include "net/quic/core/crypto/quic_crypto_server_config.h"
-#include "net/quic/core/quic_clock.h"
 #include "net/quic/core/quic_config.h"
+#include "net/quic/core/quic_version_manager.h"
+#include "net/quic/platform/impl/quic_chromium_clock.h"
+#include "net/tools/quic/quic_http_response_cache.h"
 
 namespace net {
 
@@ -37,7 +39,8 @@ class QuicSimpleServer {
       std::unique_ptr<ProofSource> proof_source,
       const QuicConfig& config,
       const QuicCryptoServerConfig::ConfigOptions& crypto_config_options,
-      const QuicVersionVector& supported_versions);
+      const QuicVersionVector& supported_versions,
+      QuicHttpResponseCache* response_cache);
 
   virtual ~QuicSimpleServer();
 
@@ -71,7 +74,7 @@ class QuicSimpleServer {
   std::unique_ptr<QuicDispatcher> dispatcher_;
 
   // Used by the helper_ to time alarms.
-  QuicClock clock_;
+  QuicChromiumClock clock_;
 
   // Used to manage the message loop. Owned by dispatcher_.
   QuicChromiumConnectionHelper* helper_;
@@ -111,6 +114,8 @@ class QuicSimpleServer {
   // The log to use for the socket.
   NetLog net_log_;
 
+  QuicHttpResponseCache* response_cache_;
+
   base::WeakPtrFactory<QuicSimpleServer> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicSimpleServer);
@@ -118,4 +123,4 @@ class QuicSimpleServer {
 
 }  // namespace net
 
-#endif  // NET_QUIC_TOOLS_QUIC_SIMPLE_SERVER_H_
+#endif  // NET_TOOLS_QUIC_QUIC_SIMPLE_SERVER_H_

@@ -27,12 +27,12 @@
 #include "core/dom/MessagePort.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
 #include "bindings/core/v8/SerializedScriptValueFactory.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/ExecutionContextTask.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/MessageEvent.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/workers/WorkerGlobalScope.h"
@@ -45,14 +45,11 @@
 namespace blink {
 
 MessagePort* MessagePort::create(ExecutionContext& executionContext) {
-  MessagePort* port = new MessagePort(executionContext);
-  port->suspendIfNeeded();
-  return port;
+  return new MessagePort(executionContext);
 }
 
 MessagePort::MessagePort(ExecutionContext& executionContext)
-    : ActiveScriptWrappable(this),
-      ActiveDOMObject(&executionContext),
+    : ContextLifecycleObserver(&executionContext),
       m_started(false),
       m_closed(false) {}
 
@@ -95,7 +92,8 @@ MessagePort::toWebMessagePortChannelArray(
     std::unique_ptr<MessagePortChannelArray> channels) {
   std::unique_ptr<WebMessagePortChannelArray> webChannels;
   if (channels && channels->size()) {
-    webChannels = wrapUnique(new WebMessagePortChannelArray(channels->size()));
+    webChannels =
+        WTF::wrapUnique(new WebMessagePortChannelArray(channels->size()));
     for (size_t i = 0; i < channels->size(); ++i)
       (*webChannels)[i] = (*channels)[i].release();
   }
@@ -107,7 +105,7 @@ MessagePortArray* MessagePort::toMessagePortArray(
     ExecutionContext* context,
     const WebMessagePortChannelArray& webChannels) {
   std::unique_ptr<MessagePortChannelArray> channels =
-      wrapUnique(new MessagePortChannelArray(webChannels.size()));
+      WTF::wrapUnique(new MessagePortChannelArray(webChannels.size()));
   for (size_t i = 0; i < webChannels.size(); ++i)
     (*channels)[i] = WebMessagePortChannelUniquePtr(webChannels[i]);
   return MessagePort::entanglePorts(*context, std::move(channels));
@@ -125,8 +123,10 @@ WebMessagePortChannelUniquePtr MessagePort::disentangle() {
 // access mutable variables).
 void MessagePort::messageAvailable() {
   DCHECK(getExecutionContext());
+  // TODO(tzik): Use ParentThreadTaskRunners instead of ExecutionContext here to
+  // avoid touching foreign thread GCed object.
   getExecutionContext()->postTask(
-      BLINK_FROM_HERE,
+      TaskType::PostedMessage, BLINK_FROM_HERE,
       createCrossThreadTask(&MessagePort::dispatchMessages,
                             wrapCrossThreadWeakPersistent(this)));
 }
@@ -173,7 +173,7 @@ static bool tryGetMessageFrom(
     return false;
 
   if (webChannels.size()) {
-    channels = wrapUnique(new MessagePortChannelArray(webChannels.size()));
+    channels = WTF::wrapUnique(new MessagePortChannelArray(webChannels.size()));
     for (size_t i = 0; i < webChannels.size(); ++i)
       (*channels)[i] = WebMessagePortChannelUniquePtr(webChannels[i]);
   }
@@ -190,11 +190,6 @@ bool MessagePort::tryGetMessage(
 }
 
 void MessagePort::dispatchMessages() {
-  // Because close() doesn't cancel any in flight calls to dispatchMessages() we
-  // need to check if the port is still open before dispatch.
-  if (m_closed)
-    return;
-
   // Messages for contexts that are not fully active get dispatched too, but
   // JSAbstractEventListener::handleEvent() doesn't call handlers for these.
   // The HTML5 spec specifies that any messages sent to a document that is not
@@ -202,18 +197,28 @@ void MessagePort::dispatchMessages() {
   if (!started())
     return;
 
-  RefPtr<SerializedScriptValue> message;
-  std::unique_ptr<MessagePortChannelArray> channels;
-  while (tryGetMessage(message, channels)) {
-    // close() in Worker onmessage handler should prevent next message from
-    // dispatching.
+  while (true) {
+    // Because close() doesn't cancel any in flight calls to dispatchMessages(),
+    // and can be triggered by the onmessage event handler, we need to check if
+    // the port is still open before each dispatch.
+    if (m_closed)
+      break;
+
+    // WorkerGlobalScope::close() in Worker onmessage handler should prevent
+    // the next message from dispatching.
     if (getExecutionContext()->isWorkerGlobalScope() &&
-        toWorkerGlobalScope(getExecutionContext())->isClosing())
-      return;
+        toWorkerGlobalScope(getExecutionContext())->isClosing()) {
+      break;
+    }
+
+    RefPtr<SerializedScriptValue> message;
+    std::unique_ptr<MessagePortChannelArray> channels;
+    if (!tryGetMessage(message, channels))
+      break;
 
     MessagePortArray* ports =
         MessagePort::entanglePorts(*getExecutionContext(), std::move(channels));
-    Event* evt = MessageEvent::create(ports, message.release());
+    Event* evt = MessageEvent::create(ports, std::move(message));
 
     dispatchEvent(evt);
   }
@@ -254,14 +259,14 @@ std::unique_ptr<MessagePortChannelArray> MessagePort::disentanglePorts(
           "Port at index " + String::number(i) + " is " + type + ".");
       return nullptr;
     }
-    visited.add(port);
+    visited.insert(port);
   }
 
   UseCounter::count(context, UseCounter::MessagePortsTransferred);
 
   // Passed-in ports passed validity checks, so we can disentangle them.
   std::unique_ptr<MessagePortChannelArray> portArray =
-      wrapUnique(new MessagePortChannelArray(ports.size()));
+      WTF::wrapUnique(new MessagePortChannelArray(ports.size()));
   for (unsigned i = 0; i < ports.size(); ++i)
     (*portArray)[i] = ports[i]->disentangle();
   return portArray;
@@ -285,7 +290,7 @@ MessagePortArray* MessagePort::entanglePorts(
 }
 
 DEFINE_TRACE(MessagePort) {
-  ActiveDOMObject::trace(visitor);
+  ContextLifecycleObserver::trace(visitor);
   EventTargetWithInlineData::trace(visitor);
 }
 

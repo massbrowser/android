@@ -38,6 +38,7 @@
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 namespace {
@@ -78,13 +79,12 @@ class TestResourceDispatcher : public ResourceDispatcher {
       std::unique_ptr<ResourceRequest> request,
       int routing_id,
       scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner,
-      const GURL& frame_origin,
+      const url::Origin& frame_origin,
       std::unique_ptr<RequestPeer> peer,
       blink::WebURLRequest::LoadingIPCType ipc_type,
       mojom::URLLoaderFactory* url_loader_factory,
       mojo::AssociatedGroup* associated_group) override {
     EXPECT_FALSE(peer_);
-    EXPECT_EQ(blink::WebURLRequest::LoadingIPCType::ChromeIPC, ipc_type);
     peer_ = std::move(peer);
     url_ = request->url;
     stream_url_ = request->resource_body_stream_url;
@@ -141,11 +141,9 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
 
   // blink::WebURLLoaderClient implementation:
   bool willFollowRedirect(
-      blink::WebURLLoader* loader,
       blink::WebURLRequest& newRequest,
       const blink::WebURLResponse& redirectResponse) override {
     EXPECT_TRUE(loader_);
-    EXPECT_EQ(loader_.get(), loader);
 
     if (check_redirect_request_priority_)
       EXPECT_EQ(redirect_request_priority, newRequest.getPriority());
@@ -160,18 +158,14 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
     return true;
   }
 
-  void didSendData(blink::WebURLLoader* loader,
-                   unsigned long long bytesSent,
+  void didSendData(unsigned long long bytesSent,
                    unsigned long long totalBytesToBeSent) override {
     EXPECT_TRUE(loader_);
-    EXPECT_EQ(loader_.get(), loader);
   }
 
   void didReceiveResponse(
-      blink::WebURLLoader* loader,
       const blink::WebURLResponse& response) override {
     EXPECT_TRUE(loader_);
-    EXPECT_EQ(loader_.get(), loader);
     EXPECT_FALSE(did_receive_response_);
 
     did_receive_response_ = true;
@@ -180,19 +174,12 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
       loader_.reset();
   }
 
-  void didDownloadData(blink::WebURLLoader* loader,
-                       int dataLength,
-                       int encodedDataLength) override {
+  void didDownloadData(int dataLength, int encodedDataLength) override {
     EXPECT_TRUE(loader_);
-    EXPECT_EQ(loader_.get(), loader);
   }
 
-  void didReceiveData(blink::WebURLLoader* loader,
-                      const char* data,
-                      int dataLength,
-                      int encodedDataLength) override {
+  void didReceiveData(const char* data, int dataLength) override {
     EXPECT_TRUE(loader_);
-    EXPECT_EQ(loader_.get(), loader);
     // The response should have started, but must not have finished, or failed.
     EXPECT_TRUE(did_receive_response_);
     EXPECT_FALSE(did_finish_);
@@ -205,18 +192,10 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
       loader_.reset();
   }
 
-  void didReceiveCachedMetadata(blink::WebURLLoader* loader,
-                                const char* data,
-                                int dataLength) override {
-    EXPECT_EQ(loader_.get(), loader);
-  }
-
-  void didFinishLoading(blink::WebURLLoader* loader,
-                        double finishTime,
+  void didFinishLoading(double finishTime,
                         int64_t totalEncodedDataLength,
                         int64_t totalEncodedBodyLength) override {
     EXPECT_TRUE(loader_);
-    EXPECT_EQ(loader_.get(), loader);
     EXPECT_TRUE(did_receive_response_);
     EXPECT_FALSE(did_finish_);
     did_finish_ = true;
@@ -225,12 +204,10 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
       loader_.reset();
   }
 
-  void didFail(blink::WebURLLoader* loader,
-               const blink::WebURLError& error,
+  void didFail(const blink::WebURLError& error,
                int64_t totalEncodedDataLength,
                int64_t totalEncodedBodyLength) override {
     EXPECT_TRUE(loader_);
-    EXPECT_EQ(loader_.get(), loader);
     EXPECT_FALSE(did_finish_);
     error_ = error;
 
@@ -291,6 +268,7 @@ class WebURLLoaderImplTest : public testing::Test {
 
   void DoStartAsyncRequest() {
     blink::WebURLRequest request{GURL(kTestURL)};
+    request.setRequestContext(blink::WebURLRequest::RequestContextInternal);
     client()->loader()->loadAsynchronously(request, client());
     ASSERT_TRUE(peer());
   }
@@ -298,6 +276,7 @@ class WebURLLoaderImplTest : public testing::Test {
   void DoStartAsyncRequestWithPriority(
       blink::WebURLRequest::Priority priority) {
     blink::WebURLRequest request{GURL(kTestURL)};
+    request.setRequestContext(blink::WebURLRequest::RequestContextInternal);
     request.setPriority(priority);
     client()->loader()->loadAsynchronously(request, client());
     ASSERT_TRUE(peer());
@@ -338,7 +317,7 @@ class WebURLLoaderImplTest : public testing::Test {
     EXPECT_EQ("", client()->received_data());
     auto size = strlen(kTestData);
     peer()->OnReceivedData(
-        base::MakeUnique<FixedReceivedData>(kTestData, size, size));
+        base::MakeUnique<FixedReceivedData>(kTestData, size));
     EXPECT_EQ(kTestData, client()->received_data());
   }
 
@@ -372,7 +351,7 @@ class WebURLLoaderImplTest : public testing::Test {
   void DoReceiveDataFtp() {
     auto size = strlen(kFtpDirListing);
     peer()->OnReceivedData(
-        base::MakeUnique<FixedReceivedData>(kFtpDirListing, size, size));
+        base::MakeUnique<FixedReceivedData>(kFtpDirListing, size));
     // The FTP delegate should modify the data the client sees.
     EXPECT_NE(kFtpDirListing, client()->received_data());
   }
@@ -690,6 +669,7 @@ TEST_F(WebURLLoaderImplTest, SyncLengths) {
   const int kEncodedDataLength = 130;
   const GURL url(kTestURL);
   blink::WebURLRequest request(url);
+  request.setRequestContext(blink::WebURLRequest::RequestContextInternal);
 
   // Prepare a mock response
   SyncLoadResponse sync_load_response;

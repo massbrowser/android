@@ -32,9 +32,9 @@
 #include "core/dom/ContextLifecycleNotifier.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/SecurityContext.h"
-#include "core/fetch/AccessControlStatus.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
+#include "platform/loader/fetch/AccessControlStatus.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/ReferrerPolicy.h"
 #include "public/platform/WebTraceLocation.h"
@@ -43,7 +43,7 @@
 
 namespace blink {
 
-class ActiveDOMObject;
+class SuspendableObject;
 class ConsoleMessage;
 class DOMTimerCoordinator;
 class ErrorEvent;
@@ -53,6 +53,12 @@ class ExecutionContextTask;
 class LocalDOMWindow;
 class PublicURLManager;
 class SecurityOrigin;
+enum class TaskType : unsigned;
+
+enum ReasonForCallingCanExecuteScripts {
+  AboutToExecuteScript,
+  NotAboutToExecuteScript
+};
 
 class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
                                      public Supplementable<ExecutionContext> {
@@ -70,6 +76,7 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
   };
 
   virtual bool isDocument() const { return false; }
+  virtual bool isWorkerOrWorkletGlobalScope() const { return false; }
   virtual bool isWorkerGlobalScope() const { return false; }
   virtual bool isWorkletGlobalScope() const { return false; }
   virtual bool isMainThreadWorkletGlobalScope() const { return false; }
@@ -94,9 +101,10 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
   virtual String userAgent() const = 0;
   // Executes the task on context's thread asynchronously.
   virtual void postTask(
+      TaskType,
       const WebTraceLocation&,
       std::unique_ptr<ExecutionContextTask>,
-      const String& taskNameForInstrumentation = emptyString()) = 0;
+      const String& taskNameForInstrumentation = emptyString) = 0;
 
   // Gets the DOMTimerCoordinator which maintains the "active timer
   // list" of tasks created by setTimeout and setInterval. The
@@ -110,6 +118,10 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
     return virtualCompleteURL(url);
   }
 
+  virtual bool canExecuteScripts(ReasonForCallingCanExecuteScripts) {
+    return false;
+  }
+
   bool shouldSanitizeScriptError(const String& sourceURL, AccessControlStatus);
   void dispatchErrorEvent(ErrorEvent*, AccessControlStatus);
 
@@ -120,27 +132,28 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
 
   virtual void removeURLFromMemoryCache(const KURL&);
 
-  void suspendActiveDOMObjects();
-  void resumeActiveDOMObjects();
-  void stopActiveDOMObjects();
+  void suspendSuspendableObjects();
+  void resumeSuspendableObjects();
+  void stopSuspendableObjects();
   void notifyContextDestroyed() override;
 
-  virtual void suspendScheduledTasks();
-  virtual void resumeScheduledTasks();
+  void suspendScheduledTasks();
+  void resumeScheduledTasks();
+
+  // TODO(haraken): Remove these methods by making the customers inherit from
+  // SuspendableObject. SuspendableObject is a standard way to observe context
+  // suspension/resumption.
   virtual bool tasksNeedSuspension() { return false; }
   virtual void tasksWereSuspended() {}
   virtual void tasksWereResumed() {}
 
-  bool activeDOMObjectsAreSuspended() const {
-    return m_activeDOMObjectsAreSuspended;
-  }
-  bool activeDOMObjectsAreStopped() const {
-    return m_activeDOMObjectsAreStopped;
-  }
+  bool isContextSuspended() const { return m_isContextSuspended; }
+  bool isContextDestroyed() const { return m_isContextDestroyed; }
 
-  // Called after the construction of an ActiveDOMObject to synchronize suspend
+  // Called after the construction of an SuspendableObject to synchronize
+  // suspend
   // state.
-  void suspendActiveDOMObjectIfNeeded(ActiveDOMObject*);
+  void suspendSuspendableObjectIfNeeded(SuspendableObject*);
 
   // Gets the next id in a circular sequence from 1 to 2^31-1.
   int circularSequentialID();
@@ -191,8 +204,8 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
   bool m_inDispatchErrorEvent;
   HeapVector<Member<ErrorEvent>> m_pendingExceptions;
 
-  bool m_activeDOMObjectsAreSuspended;
-  bool m_activeDOMObjectsAreStopped;
+  bool m_isContextSuspended;
+  bool m_isContextDestroyed;
 
   Member<PublicURLManager> m_publicURLManager;
 

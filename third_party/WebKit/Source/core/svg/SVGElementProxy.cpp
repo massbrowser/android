@@ -5,11 +5,11 @@
 #include "core/svg/SVGElementProxy.h"
 
 #include "core/dom/IdTargetObserver.h"
-#include "core/fetch/FetchInitiatorTypeNames.h"
-#include "core/fetch/FetchRequest.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/SVGResourceClient.h"
+#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "platform/loader/fetch/FetchRequest.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 
 namespace blink {
 
@@ -127,7 +127,7 @@ void SVGElementProxy::removeClient(SVGResourceClient* client) {
   // Unregister and drop the scope association, then drop the client.
   if (!observer->hasClients()) {
     observer->unregister();
-    m_observers.remove(observer->treeScope());
+    m_observers.erase(observer->treeScope());
   }
   m_clients.remove(entry);
 }
@@ -180,7 +180,7 @@ DEFINE_TRACE(SVGElementProxy) {
 }
 
 void SVGElementProxySet::add(SVGElementProxy& elementProxy) {
-  m_elementProxies.add(&elementProxy);
+  m_elementProxies.insert(&elementProxy);
 }
 
 bool SVGElementProxySet::isEmpty() const {

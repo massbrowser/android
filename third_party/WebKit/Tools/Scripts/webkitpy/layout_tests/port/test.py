@@ -29,7 +29,7 @@
 import base64
 import time
 
-from webkitpy.common.system.crashlogs import CrashLogs
+from webkitpy.common.system.crash_logs import CrashLogs
 from webkitpy.layout_tests.models import test_run_results
 from webkitpy.layout_tests.models.test_configuration import TestConfiguration
 from webkitpy.layout_tests.port.base import Port, VirtualTestSuite
@@ -461,7 +461,7 @@ class TestPort(Port):
     def webkit_base(self):
         return '/test.checkout'
 
-    def _skipped_tests_for_unsupported_features(self, test_list):
+    def skipped_layout_tests(self, _):
         return set(['failures/expected/skip_text.html',
                     'failures/unexpected/skip_pass.html',
                     'virtual/skipped/failures/expected'])
@@ -471,9 +471,6 @@ class TestPort(Port):
 
     def operating_system(self):
         return self._operating_system
-
-    def _path_to_wdiff(self):
-        return None
 
     def default_results_directory(self):
         return '/tmp/layout-test-results'

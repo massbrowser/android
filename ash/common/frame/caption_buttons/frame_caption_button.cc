@@ -56,9 +56,10 @@ FrameCaptionButton::~FrameCaptionButton() {}
 
 void FrameCaptionButton::SetImage(CaptionButtonIcon icon,
                                   Animate animate,
-                                  gfx::VectorIconId icon_image_id) {
+                                  const gfx::VectorIcon& icon_definition) {
   gfx::ImageSkia new_icon_image = gfx::CreateVectorIcon(
-      icon_image_id, use_light_images_ ? SK_ColorWHITE : gfx::kChromeIconGrey);
+      icon_definition,
+      use_light_images_ ? SK_ColorWHITE : gfx::kChromeIconGrey);
 
   // The early return is dependent on |animate| because callers use SetImage()
   // with ANIMATE_NO to progress the crossfade animation to the end.
@@ -72,7 +73,7 @@ void FrameCaptionButton::SetImage(CaptionButtonIcon icon,
     crossfade_icon_image_ = icon_image_;
 
   icon_ = icon;
-  icon_image_id_ = icon_image_id;
+  icon_definition_ = &icon_definition;
   icon_image_ = new_icon_image;
 
   if (animate == ANIMATE_YES) {
@@ -126,7 +127,7 @@ void FrameCaptionButton::OnPaint(gfx::Canvas* canvas) {
 
   if (crossfade_icon_alpha > 0 && !crossfade_icon_image_.isNull()) {
     gfx::Canvas icon_canvas(icon_image_.size(), canvas->image_scale(), false);
-    SkPaint paint;
+    cc::PaintFlags paint;
     paint.setAlpha(icon_alpha);
     icon_canvas.DrawImageInt(icon_image_, 0, 0, paint);
 
@@ -181,7 +182,7 @@ void FrameCaptionButton::PaintCentered(gfx::Canvas* canvas,
     alpha *= inactive_alpha;
   }
 
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setAlpha(alpha);
   canvas->DrawImageInt(to_center, (width() - to_center.width()) / 2,
                        (height() - to_center.height()) / 2, paint);

@@ -5,7 +5,6 @@
 #ifndef WebGL2RenderingContextBase_h
 #define WebGL2RenderingContextBase_h
 
-#include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/TraceWrapperMember.h"
 #include "modules/webgl/WebGLExtension.h"
 #include "modules/webgl/WebGLRenderingContextBase.h"
@@ -17,6 +16,7 @@ class WebGLTexture;
 
 class WebGLActiveInfo;
 class WebGLBuffer;
+class WebGLGetBufferSubDataAsync;
 class WebGLGetBufferSubDataAsyncCallback;
 class WebGLProgram;
 class WebGLQuery;
@@ -28,8 +28,6 @@ class WebGLVertexArrayObject;
 
 class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
  public:
-  ~WebGL2RenderingContextBase() override;
-
   void destroyContext() override;
 
   /* Buffer objects */
@@ -48,12 +46,6 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
 
   void copyBufferSubData(GLenum, GLenum, long long, long long, long long);
   void getBufferSubData(GLenum, long long, DOMArrayBufferView*, GLuint, GLuint);
-  ScriptPromise getBufferSubDataAsync(ScriptState*,
-                                      GLenum target,
-                                      GLintptr srcByteOffset,
-                                      DOMArrayBufferView*,
-                                      GLuint dstOffset,
-                                      GLuint length);
 
   void registerGetBufferSubDataAsyncCallback(
       WebGLGetBufferSubDataAsyncCallback*);
@@ -535,6 +527,43 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
                                DOMArrayBufferView*,
                                GLuint,
                                GLuint);
+  void compressedTexImage2D(GLenum target,
+                            GLint level,
+                            GLenum internalformat,
+                            GLsizei width,
+                            GLsizei height,
+                            GLint border,
+                            GLsizei imageSize,
+                            GLintptr offset);
+  void compressedTexSubImage2D(GLenum target,
+                               GLint level,
+                               GLint xoffset,
+                               GLint yoffset,
+                               GLsizei width,
+                               GLsizei height,
+                               GLenum format,
+                               GLsizei imageSize,
+                               GLintptr offset);
+  void compressedTexImage3D(GLenum target,
+                            GLint level,
+                            GLenum internalformat,
+                            GLsizei width,
+                            GLsizei height,
+                            GLsizei depth,
+                            GLint border,
+                            GLsizei imageSize,
+                            GLintptr offset);
+  void compressedTexSubImage3D(GLenum target,
+                               GLint level,
+                               GLint xoffset,
+                               GLint yoffset,
+                               GLint zoffset,
+                               GLsizei width,
+                               GLsizei height,
+                               GLsizei depth,
+                               GLenum format,
+                               GLsizei imageSize,
+                               GLintptr offset);
 
   // Have to re-declare/re-define the following compressedTex{Sub}Image2D
   // functions from the base class. This is because the above
@@ -744,12 +773,12 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
                   DOMArrayBufferView* pixels) override;
   void restoreCurrentFramebuffer() override;
 
-  EAGERLY_FINALIZE();
   DECLARE_VIRTUAL_TRACE();
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
  protected:
   friend class V8WebGL2RenderingContext;
+  friend class WebGLGetBufferSubDataAsync;
 
   WebGL2RenderingContextBase(
       HTMLCanvasElement*,

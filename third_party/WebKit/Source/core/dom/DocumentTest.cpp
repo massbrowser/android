@@ -30,6 +30,7 @@
 
 #include "core/dom/Document.h"
 
+#include "core/dom/NodeWithIndex.h"
 #include "core/dom/SynchronousMutationObserver.h"
 #include "core/dom/Text.h"
 #include "core/frame/FrameView.h"
@@ -79,13 +80,21 @@ class TestSynchronousMutationObserver
 
  public:
   struct MergeTextNodesRecord : GarbageCollected<MergeTextNodesRecord> {
-    Member<Text> m_node;
+    Member<const Text> m_node;
+    Member<Node> m_nodeToBeRemoved;
     unsigned m_offset = 0;
 
-    MergeTextNodesRecord(Text* node, unsigned offset)
-        : m_node(node), m_offset(offset) {}
+    MergeTextNodesRecord(const Text* node,
+                         const NodeWithIndex& nodeWithIndex,
+                         unsigned offset)
+        : m_node(node),
+          m_nodeToBeRemoved(nodeWithIndex.node()),
+          m_offset(offset) {}
 
-    DEFINE_INLINE_TRACE() { visitor->trace(m_node); }
+    DEFINE_INLINE_TRACE() {
+      visitor->trace(m_node);
+      visitor->trace(m_nodeToBeRemoved);
+    }
   };
 
   struct UpdateCharacterDataRecord
@@ -114,9 +123,17 @@ class TestSynchronousMutationObserver
     return m_contextDestroyedCalledCounter;
   }
 
+  const HeapVector<Member<const ContainerNode>>& childrenChangedNodes() const {
+    return m_childrenChangedNodes;
+  }
+
   const HeapVector<Member<MergeTextNodesRecord>>& mergeTextNodesRecords()
       const {
     return m_mergeTextNodesRecords;
+  }
+
+  const HeapVector<Member<const Node>>& moveTreeToNewDocumentNodes() const {
+    return m_moveTreeToNewDocumentNodes;
   }
 
   const HeapVector<Member<ContainerNode>>& removedChildrenNodes() const {
@@ -140,8 +157,10 @@ class TestSynchronousMutationObserver
 
  private:
   // Implement |SynchronousMutationObserver| member functions.
-  void contextDestroyed() final;
-  void didMergeTextNodes(Text&, unsigned) final;
+  void contextDestroyed(Document*) final;
+  void didChangeChildren(const ContainerNode&) final;
+  void didMergeTextNodes(const Text&, const NodeWithIndex&, unsigned) final;
+  void didMoveTreeToNewDocument(const Node& root) final;
   void didSplitTextNode(const Text&) final;
   void didUpdateCharacterData(CharacterData*,
                               unsigned offset,
@@ -151,7 +170,9 @@ class TestSynchronousMutationObserver
   void nodeWillBeRemoved(Node&) final;
 
   int m_contextDestroyedCalledCounter = 0;
+  HeapVector<Member<const ContainerNode>> m_childrenChangedNodes;
   HeapVector<Member<MergeTextNodesRecord>> m_mergeTextNodesRecords;
+  HeapVector<Member<const Node>> m_moveTreeToNewDocumentNodes;
   HeapVector<Member<ContainerNode>> m_removedChildrenNodes;
   HeapVector<Member<Node>> m_removedNodes;
   HeapVector<Member<const Text>> m_splitTextNodes;
@@ -165,17 +186,30 @@ TestSynchronousMutationObserver::TestSynchronousMutationObserver(
   setContext(&document);
 }
 
-void TestSynchronousMutationObserver::contextDestroyed() {
+void TestSynchronousMutationObserver::contextDestroyed(Document*) {
   ++m_contextDestroyedCalledCounter;
 }
 
-void TestSynchronousMutationObserver::didMergeTextNodes(Text& node,
-                                                        unsigned offset) {
-  m_mergeTextNodesRecords.append(new MergeTextNodesRecord(&node, offset));
+void TestSynchronousMutationObserver::didChangeChildren(
+    const ContainerNode& container) {
+  m_childrenChangedNodes.push_back(&container);
+}
+
+void TestSynchronousMutationObserver::didMergeTextNodes(
+    const Text& node,
+    const NodeWithIndex& nodeWithIndex,
+    unsigned offset) {
+  m_mergeTextNodesRecords.push_back(
+      new MergeTextNodesRecord(&node, nodeWithIndex, offset));
+}
+
+void TestSynchronousMutationObserver::didMoveTreeToNewDocument(
+    const Node& root) {
+  m_moveTreeToNewDocumentNodes.push_back(&root);
 }
 
 void TestSynchronousMutationObserver::didSplitTextNode(const Text& node) {
-  m_splitTextNodes.append(&node);
+  m_splitTextNodes.push_back(&node);
 }
 
 void TestSynchronousMutationObserver::didUpdateCharacterData(
@@ -183,21 +217,23 @@ void TestSynchronousMutationObserver::didUpdateCharacterData(
     unsigned offset,
     unsigned oldLength,
     unsigned newLength) {
-  m_updatedCharacterDataRecords.append(new UpdateCharacterDataRecord(
+  m_updatedCharacterDataRecords.push_back(new UpdateCharacterDataRecord(
       characterData, offset, oldLength, newLength));
 }
 
 void TestSynchronousMutationObserver::nodeChildrenWillBeRemoved(
     ContainerNode& container) {
-  m_removedChildrenNodes.append(&container);
+  m_removedChildrenNodes.push_back(&container);
 }
 
 void TestSynchronousMutationObserver::nodeWillBeRemoved(Node& node) {
-  m_removedNodes.append(&node);
+  m_removedNodes.push_back(&node);
 }
 
 DEFINE_TRACE(TestSynchronousMutationObserver) {
+  visitor->trace(m_childrenChangedNodes);
   visitor->trace(m_mergeTextNodesRecords);
+  visitor->trace(m_moveTreeToNewDocumentNodes);
   visitor->trace(m_removedChildrenNodes);
   visitor->trace(m_removedNodes);
   visitor->trace(m_splitTextNodes);
@@ -438,8 +474,8 @@ TEST_F(DocumentTest, EnforceSandboxFlags) {
 TEST_F(DocumentTest, SynchronousMutationNotifier) {
   auto& observer = *new TestSynchronousMutationObserver(document());
 
-  EXPECT_EQ(observer.lifecycleContext(), document());
-  EXPECT_EQ(observer.countContextDestroyedCalled(), 0);
+  EXPECT_EQ(document(), observer.lifecycleContext());
+  EXPECT_EQ(0, observer.countContextDestroyedCalled());
 
   Element* divNode = document().createElement("div");
   document().body()->appendChild(divNode);
@@ -455,18 +491,33 @@ TEST_F(DocumentTest, SynchronousMutationNotifier) {
   EXPECT_TRUE(observer.removedNodes().isEmpty());
 
   textNode->remove();
-  ASSERT_EQ(observer.removedNodes().size(), 1u);
+  ASSERT_EQ(1u, observer.removedNodes().size());
   EXPECT_EQ(textNode, observer.removedNodes()[0]);
 
   divNode->removeChildren();
-  EXPECT_EQ(observer.removedNodes().size(), 1u)
+  EXPECT_EQ(1u, observer.removedNodes().size())
       << "ContainerNode::removeChildren() doesn't call nodeWillBeRemoved()";
-  ASSERT_EQ(observer.removedChildrenNodes().size(), 1u);
+  ASSERT_EQ(1u, observer.removedChildrenNodes().size());
   EXPECT_EQ(divNode, observer.removedChildrenNodes()[0]);
 
   document().shutdown();
-  EXPECT_EQ(observer.lifecycleContext(), nullptr);
-  EXPECT_EQ(observer.countContextDestroyedCalled(), 1);
+  EXPECT_EQ(nullptr, observer.lifecycleContext());
+  EXPECT_EQ(1, observer.countContextDestroyedCalled());
+}
+
+TEST_F(DocumentTest, SynchronousMutationNotifieAppendChild) {
+  auto& observer = *new TestSynchronousMutationObserver(document());
+  document().body()->appendChild(document().createTextNode("a123456789"));
+  ASSERT_EQ(1u, observer.childrenChangedNodes().size());
+  EXPECT_EQ(document().body(), observer.childrenChangedNodes()[0]);
+}
+
+TEST_F(DocumentTest, SynchronousMutationNotifieInsertBefore) {
+  auto& observer = *new TestSynchronousMutationObserver(document());
+  document().documentElement()->insertBefore(
+      document().createTextNode("a123456789"), document().body());
+  ASSERT_EQ(1u, observer.childrenChangedNodes().size());
+  EXPECT_EQ(document().documentElement(), observer.childrenChangedNodes()[0]);
 }
 
 TEST_F(DocumentTest, SynchronousMutationNotifierMergeTextNodes) {
@@ -478,12 +529,49 @@ TEST_F(DocumentTest, SynchronousMutationNotifierMergeTextNodes) {
   Text* mergeSampleB = document().createTextNode("b123456789");
   document().body()->appendChild(mergeSampleB);
 
-  EXPECT_EQ(observer.mergeTextNodesRecords().size(), 0u);
+  EXPECT_EQ(0u, observer.mergeTextNodesRecords().size());
   document().body()->normalize();
 
-  ASSERT_EQ(observer.mergeTextNodesRecords().size(), 1u);
-  EXPECT_EQ(observer.mergeTextNodesRecords()[0]->m_node, mergeSampleB);
-  EXPECT_EQ(observer.mergeTextNodesRecords()[0]->m_offset, 10u);
+  ASSERT_EQ(1u, observer.mergeTextNodesRecords().size());
+  EXPECT_EQ(mergeSampleA, observer.mergeTextNodesRecords()[0]->m_node);
+  EXPECT_EQ(mergeSampleB,
+            observer.mergeTextNodesRecords()[0]->m_nodeToBeRemoved);
+  EXPECT_EQ(10u, observer.mergeTextNodesRecords()[0]->m_offset);
+}
+
+TEST_F(DocumentTest, SynchronousMutationNotifierMoveTreeToNewDocument) {
+  auto& observer = *new TestSynchronousMutationObserver(document());
+
+  Node* moveSample = document().createElement("div");
+  moveSample->appendChild(document().createTextNode("a123"));
+  moveSample->appendChild(document().createTextNode("b456"));
+  document().body()->appendChild(moveSample);
+
+  Document& anotherDocument = *Document::create();
+  anotherDocument.appendChild(moveSample);
+
+  EXPECT_EQ(1u, observer.moveTreeToNewDocumentNodes().size());
+  EXPECT_EQ(moveSample, observer.moveTreeToNewDocumentNodes()[0]);
+}
+
+TEST_F(DocumentTest, SynchronousMutationNotifieRemoveChild) {
+  auto& observer = *new TestSynchronousMutationObserver(document());
+  document().documentElement()->removeChild(document().body());
+  ASSERT_EQ(1u, observer.childrenChangedNodes().size());
+  EXPECT_EQ(document().documentElement(), observer.childrenChangedNodes()[0]);
+}
+
+TEST_F(DocumentTest, SynchronousMutationNotifieReplaceChild) {
+  auto& observer = *new TestSynchronousMutationObserver(document());
+  Element* const replacedNode = document().body();
+  document().documentElement()->replaceChild(document().createElement("div"),
+                                             document().body());
+  ASSERT_EQ(2u, observer.childrenChangedNodes().size());
+  EXPECT_EQ(document().documentElement(), observer.childrenChangedNodes()[0]);
+  EXPECT_EQ(document().documentElement(), observer.childrenChangedNodes()[1]);
+
+  ASSERT_EQ(1u, observer.removedNodes().size());
+  EXPECT_EQ(replacedNode, observer.removedNodes()[0]);
 }
 
 TEST_F(DocumentTest, SynchronousMutationNotifierSplitTextNode) {
@@ -493,8 +581,8 @@ TEST_F(DocumentTest, SynchronousMutationNotifierSplitTextNode) {
   document().body()->appendChild(splitSample);
 
   splitSample->splitText(4, ASSERT_NO_EXCEPTION);
-  ASSERT_EQ(observer.splitTextNodes().size(), 1u);
-  EXPECT_EQ(observer.splitTextNodes()[0], splitSample);
+  ASSERT_EQ(1u, observer.splitTextNodes().size());
+  EXPECT_EQ(splitSample, observer.splitTextNodes()[0]);
 }
 
 TEST_F(DocumentTest, SynchronousMutationNotifierUpdateCharacterData) {
@@ -512,35 +600,54 @@ TEST_F(DocumentTest, SynchronousMutationNotifierUpdateCharacterData) {
   Text* replaceSample = document().createTextNode("c123456789");
   document().body()->appendChild(replaceSample);
 
-  EXPECT_EQ(observer.updatedCharacterDataRecords().size(), 0u);
+  EXPECT_EQ(0u, observer.updatedCharacterDataRecords().size());
 
   appendSample->appendData("abc");
-  ASSERT_EQ(observer.updatedCharacterDataRecords().size(), 1u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[0]->m_node, appendSample);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[0]->m_offset, 10u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[0]->m_oldLength, 0u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[0]->m_newLength, 3u);
+  ASSERT_EQ(1u, observer.updatedCharacterDataRecords().size());
+  EXPECT_EQ(appendSample, observer.updatedCharacterDataRecords()[0]->m_node);
+  EXPECT_EQ(10u, observer.updatedCharacterDataRecords()[0]->m_offset);
+  EXPECT_EQ(0u, observer.updatedCharacterDataRecords()[0]->m_oldLength);
+  EXPECT_EQ(3u, observer.updatedCharacterDataRecords()[0]->m_newLength);
 
   deleteSample->deleteData(3, 4, ASSERT_NO_EXCEPTION);
-  ASSERT_EQ(observer.updatedCharacterDataRecords().size(), 2u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[1]->m_node, deleteSample);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[1]->m_offset, 3u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[1]->m_oldLength, 4u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[1]->m_newLength, 0u);
+  ASSERT_EQ(2u, observer.updatedCharacterDataRecords().size());
+  EXPECT_EQ(deleteSample, observer.updatedCharacterDataRecords()[1]->m_node);
+  EXPECT_EQ(3u, observer.updatedCharacterDataRecords()[1]->m_offset);
+  EXPECT_EQ(4u, observer.updatedCharacterDataRecords()[1]->m_oldLength);
+  EXPECT_EQ(0u, observer.updatedCharacterDataRecords()[1]->m_newLength);
 
   insertSample->insertData(3, "def", ASSERT_NO_EXCEPTION);
-  ASSERT_EQ(observer.updatedCharacterDataRecords().size(), 3u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[2]->m_node, insertSample);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[2]->m_offset, 3u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[2]->m_oldLength, 0u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[2]->m_newLength, 3u);
+  ASSERT_EQ(3u, observer.updatedCharacterDataRecords().size());
+  EXPECT_EQ(insertSample, observer.updatedCharacterDataRecords()[2]->m_node);
+  EXPECT_EQ(3u, observer.updatedCharacterDataRecords()[2]->m_offset);
+  EXPECT_EQ(0u, observer.updatedCharacterDataRecords()[2]->m_oldLength);
+  EXPECT_EQ(3u, observer.updatedCharacterDataRecords()[2]->m_newLength);
 
   replaceSample->replaceData(6, 4, "ghi", ASSERT_NO_EXCEPTION);
-  ASSERT_EQ(observer.updatedCharacterDataRecords().size(), 4u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[3]->m_node, replaceSample);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[3]->m_offset, 6u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[3]->m_oldLength, 4u);
-  EXPECT_EQ(observer.updatedCharacterDataRecords()[3]->m_newLength, 3u);
+  ASSERT_EQ(4u, observer.updatedCharacterDataRecords().size());
+  EXPECT_EQ(replaceSample, observer.updatedCharacterDataRecords()[3]->m_node);
+  EXPECT_EQ(6u, observer.updatedCharacterDataRecords()[3]->m_offset);
+  EXPECT_EQ(4u, observer.updatedCharacterDataRecords()[3]->m_oldLength);
+  EXPECT_EQ(3u, observer.updatedCharacterDataRecords()[3]->m_newLength);
+}
+
+// This tests that meta-theme-color can be found correctly
+TEST_F(DocumentTest, ThemeColor) {
+  {
+    setHtmlInnerHTML(
+        "<meta name=\"theme-color\" content=\"#00ff00\">"
+        "<body>");
+    EXPECT_EQ(Color(0, 255, 0), document().themeColor())
+        << "Theme color should be bright green.";
+  }
+
+  {
+    setHtmlInnerHTML(
+        "<body>"
+        "<meta name=\"theme-color\" content=\"#00ff00\">");
+    EXPECT_EQ(Color(0, 255, 0), document().themeColor())
+        << "Theme color should be bright green.";
+  }
 }
 
 }  // namespace blink

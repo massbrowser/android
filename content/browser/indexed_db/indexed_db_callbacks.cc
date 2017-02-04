@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -16,16 +17,15 @@
 #include "content/browser/fileapi/fileapi_message_filter.h"
 #include "content/browser/indexed_db/cursor_impl.h"
 #include "content/browser/indexed_db/database_impl.h"
-#include "content/browser/indexed_db/indexed_db_blob_info.h"
 #include "content/browser/indexed_db/indexed_db_connection.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/indexed_db/indexed_db_cursor.h"
 #include "content/browser/indexed_db/indexed_db_database_error.h"
 #include "content/browser/indexed_db/indexed_db_return_value.h"
 #include "content/browser/indexed_db/indexed_db_tracing.h"
+#include "content/browser/indexed_db/indexed_db_transaction.h"
 #include "content/browser/indexed_db/indexed_db_value.h"
 #include "content/common/indexed_db/indexed_db_constants.h"
-#include "content/common/indexed_db/indexed_db_messages.h"
 #include "content/common/indexed_db/indexed_db_metadata.h"
 #include "mojo/public/cpp/bindings/strong_associated_binding.h"
 #include "storage/browser/blob/blob_storage_context.h"
@@ -39,7 +39,6 @@ using storage::ShareableFileReference;
 namespace content {
 
 namespace {
-const int64_t kNoTransaction = -1;
 
 void ConvertBlobInfo(
     const std::vector<IndexedDBBlobInfo>& blob_info,
@@ -74,15 +73,6 @@ void ConvertBlobInfo(
   if (!value->empty())
     swap(mojo_value->value->bits, value->bits);
   ConvertBlobInfo(value->blob_info, &mojo_value->value->blob_or_file_info);
-  return mojo_value;
-}
-
-// Destructively converts an IndexedDBValue to a Mojo Value.
-::indexed_db::mojom::ValuePtr ConvertValue(IndexedDBValue* value) {
-  auto mojo_value = ::indexed_db::mojom::Value::New();
-  if (!value->empty())
-    swap(mojo_value->bits, value->bits);
-  ConvertBlobInfo(value->blob_info, &mojo_value->blob_or_file_info);
   return mojo_value;
 }
 
@@ -132,6 +122,7 @@ class IndexedDBCallbacks::IOThreadHelper {
   bool CreateAllBlobs(
       const std::vector<IndexedDBBlobInfo>& blob_info,
       std::vector<::indexed_db::mojom::BlobInfoPtr>* blob_or_file_info);
+  void OnConnectionError();
 
  private:
   scoped_refptr<IndexedDBDispatcherHost> dispatcher_host_;
@@ -140,12 +131,21 @@ class IndexedDBCallbacks::IOThreadHelper {
   DISALLOW_COPY_AND_ASSIGN(IOThreadHelper);
 };
 
+// static
+::indexed_db::mojom::ValuePtr IndexedDBCallbacks::ConvertAndEraseValue(
+    IndexedDBValue* value) {
+  auto mojo_value = ::indexed_db::mojom::Value::New();
+  if (!value->empty())
+    swap(mojo_value->bits, value->bits);
+  ConvertBlobInfo(value->blob_info, &mojo_value->blob_or_file_info);
+  return mojo_value;
+}
+
 IndexedDBCallbacks::IndexedDBCallbacks(
-    IndexedDBDispatcherHost* dispatcher_host,
+    scoped_refptr<IndexedDBDispatcherHost> dispatcher_host,
     const url::Origin& origin,
     ::indexed_db::mojom::CallbacksAssociatedPtrInfo callbacks_info)
-    : dispatcher_host_(dispatcher_host),
-      host_transaction_id_(kNoTransaction),
+    : dispatcher_host_(std::move(dispatcher_host)),
       origin_(origin),
       data_loss_(blink::WebIDBDataLossNone),
       sent_blocked_(false),
@@ -181,7 +181,6 @@ void IndexedDBCallbacks::OnSuccess(const std::vector<base::string16>& value) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(dispatcher_host_);
   DCHECK(io_helper_);
-  DCHECK_EQ(kNoTransaction, host_transaction_id_);
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -222,11 +221,9 @@ void IndexedDBCallbacks::OnUpgradeNeeded(
   DCHECK(dispatcher_host_);
   DCHECK(io_helper_);
 
-  DCHECK_NE(kNoTransaction, host_transaction_id_);
   DCHECK(!database_sent_);
 
   data_loss_ = data_loss_info.status;
-  dispatcher_host_->RegisterTransactionId(host_transaction_id_, origin_);
   database_sent_ = true;
   auto database = base::MakeUnique<DatabaseImpl>(std::move(connection), origin_,
                                                  dispatcher_host_);
@@ -253,7 +250,6 @@ void IndexedDBCallbacks::OnSuccess(
   DCHECK(dispatcher_host_);
   DCHECK(io_helper_);
 
-  DCHECK_NE(kNoTransaction, host_transaction_id_);
   DCHECK_EQ(database_sent_, !connection);
 
   scoped_refptr<IndexedDBCallbacks> self(this);
@@ -261,9 +257,10 @@ void IndexedDBCallbacks::OnSuccess(
   // Only send a new Database if the connection was not previously sent in
   // OnUpgradeNeeded.
   std::unique_ptr<DatabaseImpl> database;
-  if (!database_sent_)
+  if (!database_sent_) {
     database.reset(
         new DatabaseImpl(std::move(connection), origin_, dispatcher_host_));
+  }
 
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::Bind(&IOThreadHelper::SendSuccessDatabase,
@@ -279,7 +276,7 @@ void IndexedDBCallbacks::OnSuccess(
   }
 }
 
-void IndexedDBCallbacks::OnSuccess(scoped_refptr<IndexedDBCursor> cursor,
+void IndexedDBCallbacks::OnSuccess(std::unique_ptr<IndexedDBCursor> cursor,
                                    const IndexedDBKey& key,
                                    const IndexedDBKey& primary_key,
                                    IndexedDBValue* value) {
@@ -287,16 +284,15 @@ void IndexedDBCallbacks::OnSuccess(scoped_refptr<IndexedDBCursor> cursor,
   DCHECK(dispatcher_host_);
   DCHECK(io_helper_);
 
-  DCHECK_EQ(kNoTransaction, host_transaction_id_);
   DCHECK_EQ(blink::WebIDBDataLossNone, data_loss_);
 
-  auto cursor_impl =
-      base::MakeUnique<CursorImpl>(cursor, origin_, dispatcher_host_);
+  auto cursor_impl = base::MakeUnique<CursorImpl>(std::move(cursor), origin_,
+                                                  dispatcher_host_);
 
   ::indexed_db::mojom::ValuePtr mojo_value;
   std::vector<IndexedDBBlobInfo> blob_info;
   if (value) {
-    mojo_value = ConvertValue(value);
+    mojo_value = ConvertAndEraseValue(value);
     blob_info.swap(value->blob_info);
   }
 
@@ -316,13 +312,12 @@ void IndexedDBCallbacks::OnSuccess(const IndexedDBKey& key,
   DCHECK(dispatcher_host_);
   DCHECK(io_helper_);
 
-  DCHECK_EQ(kNoTransaction, host_transaction_id_);
   DCHECK_EQ(blink::WebIDBDataLossNone, data_loss_);
 
   ::indexed_db::mojom::ValuePtr mojo_value;
   std::vector<IndexedDBBlobInfo> blob_info;
   if (value) {
-    mojo_value = ConvertValue(value);
+    mojo_value = ConvertAndEraseValue(value);
     blob_info.swap(value->blob_info);
   }
 
@@ -344,13 +339,12 @@ void IndexedDBCallbacks::OnSuccessWithPrefetch(
   DCHECK_EQ(keys.size(), primary_keys.size());
   DCHECK_EQ(keys.size(), values->size());
 
-  DCHECK_EQ(kNoTransaction, host_transaction_id_);
   DCHECK_EQ(blink::WebIDBDataLossNone, data_loss_);
 
   std::vector<::indexed_db::mojom::ValuePtr> mojo_values;
   mojo_values.reserve(values->size());
   for (size_t i = 0; i < values->size(); ++i)
-    mojo_values.push_back(ConvertValue(&(*values)[i]));
+    mojo_values.push_back(ConvertAndEraseValue(&(*values)[i]));
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -364,7 +358,6 @@ void IndexedDBCallbacks::OnSuccess(IndexedDBReturnValue* value) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(dispatcher_host_);
 
-  DCHECK_EQ(kNoTransaction, host_transaction_id_);
   DCHECK_EQ(blink::WebIDBDataLossNone, data_loss_);
 
   ::indexed_db::mojom::ReturnValuePtr mojo_value;
@@ -388,7 +381,6 @@ void IndexedDBCallbacks::OnSuccessArray(
   DCHECK(dispatcher_host_);
   DCHECK(io_helper_);
 
-  DCHECK_EQ(kNoTransaction, host_transaction_id_);
   DCHECK_EQ(blink::WebIDBDataLossNone, data_loss_);
 
   std::vector<::indexed_db::mojom::ReturnValuePtr> mojo_values;
@@ -408,7 +400,6 @@ void IndexedDBCallbacks::OnSuccess(const IndexedDBKey& value) {
   DCHECK(dispatcher_host_);
   DCHECK(io_helper_);
 
-  DCHECK_EQ(kNoTransaction, host_transaction_id_);
   DCHECK_EQ(blink::WebIDBDataLossNone, data_loss_);
 
   BrowserThread::PostTask(
@@ -434,19 +425,12 @@ void IndexedDBCallbacks::OnSuccess() {
   DCHECK(dispatcher_host_);
   DCHECK(io_helper_);
 
-  DCHECK_EQ(kNoTransaction, host_transaction_id_);
   DCHECK_EQ(blink::WebIDBDataLossNone, data_loss_);
 
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::Bind(&IOThreadHelper::SendSuccess,
                                      base::Unretained(io_helper_.get())));
   dispatcher_host_ = nullptr;
-}
-
-bool IndexedDBCallbacks::IsValid() const {
-  DCHECK(dispatcher_host_.get());
-
-  return dispatcher_host_->IsOpen();
 }
 
 void IndexedDBCallbacks::SetConnectionOpenStartTime(
@@ -459,23 +443,30 @@ IndexedDBCallbacks::IOThreadHelper::IOThreadHelper(
     scoped_refptr<IndexedDBDispatcherHost> dispatcher_host)
     : dispatcher_host_(std::move(dispatcher_host)) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  callbacks_.Bind(std::move(callbacks_info));
+  if (callbacks_info.is_valid()) {
+    callbacks_.Bind(std::move(callbacks_info));
+    callbacks_.set_connection_error_handler(
+        base::Bind(&IOThreadHelper::OnConnectionError, base::Unretained(this)));
+  }
 }
 
 IndexedDBCallbacks::IOThreadHelper::~IOThreadHelper() {}
 
 void IndexedDBCallbacks::IOThreadHelper::SendError(
     const IndexedDBDatabaseError& error) {
-  callbacks_->Error(error.code(), error.message());
+  if (callbacks_)
+    callbacks_->Error(error.code(), error.message());
 }
 
 void IndexedDBCallbacks::IOThreadHelper::SendSuccessStringList(
     const std::vector<base::string16>& value) {
-  callbacks_->SuccessStringList(value);
+  if (callbacks_)
+    callbacks_->SuccessStringList(value);
 }
 
 void IndexedDBCallbacks::IOThreadHelper::SendBlocked(int64_t existing_version) {
-  callbacks_->Blocked(existing_version);
+  if (callbacks_)
+    callbacks_->Blocked(existing_version);
 }
 
 void IndexedDBCallbacks::IOThreadHelper::SendUpgradeNeeded(
@@ -484,6 +475,9 @@ void IndexedDBCallbacks::IOThreadHelper::SendUpgradeNeeded(
     blink::WebIDBDataLoss data_loss,
     const std::string& data_loss_message,
     const content::IndexedDBDatabaseMetadata& metadata) {
+  if (!callbacks_)
+    return;
+
   ::indexed_db::mojom::DatabaseAssociatedPtrInfo ptr_info;
   ::indexed_db::mojom::DatabaseAssociatedRequest request;
   callbacks_.associated_group()->CreateAssociatedInterface(
@@ -496,6 +490,9 @@ void IndexedDBCallbacks::IOThreadHelper::SendUpgradeNeeded(
 void IndexedDBCallbacks::IOThreadHelper::SendSuccessDatabase(
     std::unique_ptr<DatabaseImpl> database,
     const content::IndexedDBDatabaseMetadata& metadata) {
+  if (!callbacks_)
+    return;
+
   ::indexed_db::mojom::DatabaseAssociatedPtrInfo ptr_info;
   if (database) {
     ::indexed_db::mojom::DatabaseAssociatedRequest request;
@@ -512,6 +509,9 @@ void IndexedDBCallbacks::IOThreadHelper::SendSuccessCursor(
     const IndexedDBKey& primary_key,
     ::indexed_db::mojom::ValuePtr value,
     const std::vector<IndexedDBBlobInfo>& blob_info) {
+  if (!callbacks_)
+    return;
+
   if (value && !CreateAllBlobs(blob_info, &value->blob_or_file_info))
     return;
 
@@ -527,6 +527,9 @@ void IndexedDBCallbacks::IOThreadHelper::SendSuccessCursor(
 void IndexedDBCallbacks::IOThreadHelper::SendSuccessValue(
     ::indexed_db::mojom::ReturnValuePtr value,
     const std::vector<IndexedDBBlobInfo>& blob_info) {
+  if (!callbacks_)
+    return;
+
   if (!value || CreateAllBlobs(blob_info, &value->value->blob_or_file_info))
     callbacks_->SuccessValue(std::move(value));
 }
@@ -535,6 +538,9 @@ void IndexedDBCallbacks::IOThreadHelper::SendSuccessArray(
     std::vector<::indexed_db::mojom::ReturnValuePtr> mojo_values,
     const std::vector<IndexedDBReturnValue>& values) {
   DCHECK_EQ(mojo_values.size(), values.size());
+
+  if (!callbacks_)
+    return;
 
   for (size_t i = 0; i < mojo_values.size(); ++i) {
     if (!CreateAllBlobs(values[i].blob_info,
@@ -549,6 +555,9 @@ void IndexedDBCallbacks::IOThreadHelper::SendSuccessCursorContinue(
     const IndexedDBKey& primary_key,
     ::indexed_db::mojom::ValuePtr value,
     const std::vector<IndexedDBBlobInfo>& blob_info) {
+  if (!callbacks_)
+    return;
+
   if (!value || CreateAllBlobs(blob_info, &value->blob_or_file_info))
     callbacks_->SuccessCursorContinue(key, primary_key, std::move(value));
 }
@@ -559,6 +568,9 @@ void IndexedDBCallbacks::IOThreadHelper::SendSuccessCursorPrefetch(
     std::vector<::indexed_db::mojom::ValuePtr> mojo_values,
     const std::vector<IndexedDBValue>& values) {
   DCHECK_EQ(mojo_values.size(), values.size());
+
+  if (!callbacks_)
+    return;
 
   for (size_t i = 0; i < mojo_values.size(); ++i) {
     if (!CreateAllBlobs(values[i].blob_info,
@@ -572,15 +584,18 @@ void IndexedDBCallbacks::IOThreadHelper::SendSuccessCursorPrefetch(
 
 void IndexedDBCallbacks::IOThreadHelper::SendSuccessKey(
     const IndexedDBKey& value) {
-  callbacks_->SuccessKey(value);
+  if (callbacks_)
+    callbacks_->SuccessKey(value);
 }
 
 void IndexedDBCallbacks::IOThreadHelper::SendSuccessInteger(int64_t value) {
-  callbacks_->SuccessInteger(value);
+  if (callbacks_)
+    callbacks_->SuccessInteger(value);
 }
 
 void IndexedDBCallbacks::IOThreadHelper::SendSuccess() {
-  callbacks_->Success();
+  if (callbacks_)
+    callbacks_->Success();
 }
 
 std::string IndexedDBCallbacks::IOThreadHelper::CreateBlobData(
@@ -612,6 +627,11 @@ bool IndexedDBCallbacks::IOThreadHelper::CreateAllBlobs(
   for (size_t i = 0; i < blob_info.size(); ++i)
     (*blob_or_file_info)[i]->uuid = CreateBlobData(blob_info[i]);
   return true;
+}
+
+void IndexedDBCallbacks::IOThreadHelper::OnConnectionError() {
+  callbacks_.reset();
+  dispatcher_host_ = nullptr;
 }
 
 }  // namespace content

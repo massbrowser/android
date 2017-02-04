@@ -24,6 +24,7 @@ class StringKeyframe : public Keyframe {
 
   MutableStylePropertySet::SetResult setCSSPropertyValue(
       const AtomicString& propertyName,
+      const PropertyRegistry*,
       const String& value,
       StyleSheetContents*);
   MutableStylePropertySet::SetResult setCSSPropertyValue(CSSPropertyID,
@@ -156,7 +157,7 @@ class StringKeyframe : public Keyframe {
 
   PassRefPtr<Keyframe> clone() const override;
   PassRefPtr<Keyframe::PropertySpecificKeyframe> createPropertySpecificKeyframe(
-      PropertyHandle) const override;
+      const PropertyHandle&) const override;
 
   bool isStringKeyframe() const override { return true; }
 

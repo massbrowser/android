@@ -8,12 +8,11 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.graphics.SurfaceTexture;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.text.TextUtils;
-import android.util.Pair;
 import android.view.Surface;
 
 import org.chromium.base.CommandLine;
@@ -21,6 +20,7 @@ import org.chromium.base.CpuFeatures;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.UnguessableToken;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
@@ -132,6 +132,11 @@ public class ChildProcessLauncher {
         @VisibleForTesting
         int allocatedConnectionsCountForTesting() {
             return mChildProcessConnections.length - mFreeConnectionIndices.size();
+        }
+
+        @VisibleForTesting
+        ChildProcessConnection[] connectionArrayForTesting() {
+            return mChildProcessConnections;
         }
     }
 
@@ -382,8 +387,8 @@ public class ChildProcessLauncher {
                         creationParams);
     }
 
-    private static boolean sLinkerInitialized = false;
-    private static long sLinkerLoadAddress = 0;
+    private static boolean sLinkerInitialized;
+    private static long sLinkerLoadAddress;
 
     private static ChromiumLinkerParams getLinkerParamsForNewConnection() {
         if (!sLinkerInitialized) {
@@ -414,12 +419,13 @@ public class ChildProcessLauncher {
 
     private static ChildProcessConnection allocateBoundConnection(Context context,
             String[] commandLine, boolean inSandbox, boolean alwaysInForeground,
-            ChildProcessCreationParams creationParams) {
+            ChildProcessCreationParams creationParams,
+            ChildProcessConnection.StartCallback startCallback) {
         ChromiumLinkerParams chromiumLinkerParams = getLinkerParamsForNewConnection();
         ChildProcessConnection connection = allocateConnection(
                 context, inSandbox, chromiumLinkerParams, alwaysInForeground, creationParams);
         if (connection != null) {
-            connection.start(commandLine);
+            connection.start(commandLine, startCallback);
 
             String packageName = creationParams != null ? creationParams.getPackageName()
                     : context.getPackageName();
@@ -437,7 +443,7 @@ public class ChildProcessLauncher {
     private static final long FREE_CONNECTION_DELAY_MILLIS = 1;
 
     private static void freeConnection(ChildProcessConnection connection) {
-        synchronized (ChildProcessLauncher.class) {
+        synchronized (sSpareConnectionLock) {
             if (connection.equals(sSpareSandboxedConnection)) sSpareSandboxedConnection = null;
         }
 
@@ -484,15 +490,19 @@ public class ChildProcessLauncher {
     private static Map<Integer, ChildProcessConnection> sServiceMap =
             new ConcurrentHashMap<Integer, ChildProcessConnection>();
 
+    // Lock and monitor for these members {{{
+    private static final Object sSpareConnectionLock = new Object();
     // A pre-allocated and pre-bound connection ready for connection setup, or null.
-    private static ChildProcessConnection sSpareSandboxedConnection = null;
+    private static ChildProcessConnection sSpareSandboxedConnection;
+    // If sSpareSandboxedConnection is not null, this indicates whether the service is
+    // ready for connection setup. Wait on the monitor lock to be notified when this
+    // state changes. sSpareSandboxedConnection may be null after waiting, if starting
+    // the service failed.
+    private static boolean sSpareConnectionStarting;
+    // }}}
 
     // Manages oom bindings used to bind chind services.
     private static BindingManager sBindingManager = BindingManagerImpl.createBindingManager();
-
-    // Map from surface texture id to Surface.
-    private static Map<Pair<Integer, Integer>, Surface> sSurfaceTextureSurfaceMap =
-            new ConcurrentHashMap<Pair<Integer, Integer>, Surface>();
 
     // Whether the main application is currently brought to the foreground.
     private static boolean sApplicationInForeground = true;
@@ -506,46 +516,6 @@ public class ChildProcessLauncher {
     @CalledByNative
     private static boolean isOomProtected(int pid) {
         return sBindingManager.isOomProtected(pid);
-    }
-
-    private static void registerSurfaceTextureSurface(
-            int surfaceTextureId, int clientId, Surface surface) {
-        Pair<Integer, Integer> key = new Pair<Integer, Integer>(surfaceTextureId, clientId);
-        sSurfaceTextureSurfaceMap.put(key, surface);
-    }
-
-    private static void unregisterSurfaceTextureSurface(int surfaceTextureId, int clientId) {
-        Pair<Integer, Integer> key = new Pair<Integer, Integer>(surfaceTextureId, clientId);
-        Surface surface = sSurfaceTextureSurfaceMap.remove(key);
-        if (surface == null) return;
-
-        assert surface.isValid();
-        surface.release();
-    }
-
-    @CalledByNative
-    private static void createSurfaceTextureSurface(
-            int surfaceTextureId, int clientId, SurfaceTexture surfaceTexture) {
-        registerSurfaceTextureSurface(surfaceTextureId, clientId, new Surface(surfaceTexture));
-    }
-
-    @CalledByNative
-    private static void destroySurfaceTextureSurface(int surfaceTextureId, int clientId) {
-        unregisterSurfaceTextureSurface(surfaceTextureId, clientId);
-    }
-
-    @CalledByNative
-    private static SurfaceWrapper getSurfaceTextureSurface(
-            int surfaceTextureId, int clientId) {
-        Pair<Integer, Integer> key = new Pair<Integer, Integer>(surfaceTextureId, clientId);
-
-        Surface surface = sSurfaceTextureSurfaceMap.get(key);
-        if (surface == null) {
-            Log.e(TAG, "Invalid Id for surface texture.");
-            return null;
-        }
-        assert surface.isValid();
-        return new SurfaceWrapper(surface);
     }
 
     /**
@@ -612,15 +582,38 @@ public class ChildProcessLauncher {
      * @param context the application context used for the connection.
      */
     public static void warmUp(Context context) {
-        synchronized (ChildProcessLauncher.class) {
+        synchronized (sSpareConnectionLock) {
             assert !ThreadUtils.runningOnUiThread();
             if (sSpareSandboxedConnection == null) {
                 ChildProcessCreationParams params = ChildProcessCreationParams.get();
                 if (params != null) {
                     params = params.copy();
                 }
+
+                sSpareConnectionStarting = true;
+
+                ChildProcessConnection.StartCallback startCallback =
+                        new ChildProcessConnection.StartCallback() {
+                            @Override
+                            public void onChildStarted() {
+                                synchronized (sSpareConnectionLock) {
+                                    sSpareConnectionStarting = false;
+                                    sSpareConnectionLock.notify();
+                                }
+                            }
+
+                            @Override
+                            public void onChildStartFailed() {
+                                Log.e(TAG, "Failed to warm up the spare sandbox service");
+                                synchronized (sSpareConnectionLock) {
+                                    sSpareSandboxedConnection = null;
+                                    sSpareConnectionStarting = false;
+                                    sSpareConnectionLock.notify();
+                                }
+                            }
+                        };
                 sSpareSandboxedConnection = allocateBoundConnection(context, null, true, false,
-                        params);
+                        params, startCallback);
             }
         }
     }
@@ -698,24 +691,30 @@ public class ChildProcessLauncher {
                 callbackType, inSandbox, params);
     }
 
-    private static void startInternal(
-            Context context,
+    private static ChildProcessConnection startInternal(
+            final Context context,
             final String[] commandLine,
-            int childProcessId,
-            FileDescriptorInfo[] filesToBeMapped,
-            long clientContext,
-            int callbackType,
-            boolean inSandbox,
-            ChildProcessCreationParams creationParams) {
+            final int childProcessId,
+            final FileDescriptorInfo[] filesToBeMapped,
+            final long clientContext,
+            final int callbackType,
+            final boolean inSandbox,
+            final ChildProcessCreationParams creationParams) {
         try {
             TraceEvent.begin("ChildProcessLauncher.startInternal");
 
             ChildProcessConnection allocatedConnection = null;
             String packageName = creationParams != null ? creationParams.getPackageName()
                     : context.getPackageName();
-            synchronized (ChildProcessLauncher.class) {
+            synchronized (sSpareConnectionLock) {
                 if (inSandbox && sSpareSandboxedConnection != null
                         && sSpareSandboxedConnection.getPackageName().equals(packageName)) {
+                    while (sSpareConnectionStarting) {
+                        try {
+                            sSpareConnectionLock.wait();
+                        } catch (InterruptedException ex) {
+                        }
+                    }
                     allocatedConnection = sSpareSandboxedConnection;
                     sSpareSandboxedConnection = null;
                 }
@@ -725,15 +724,39 @@ public class ChildProcessLauncher {
                 if (callbackType == CALLBACK_FOR_GPU_PROCESS) alwaysInForeground = true;
                 PendingSpawnQueue pendingSpawnQueue = getPendingSpawnQueue(
                         context, packageName, inSandbox);
+                ChildProcessConnection.StartCallback startCallback =
+                        new ChildProcessConnection.StartCallback() {
+                            @Override
+                            public void onChildStarted() {}
+
+                            @Override
+                            public void onChildStartFailed() {
+                                Log.e(TAG, "ChildProcessConnection.start failed, trying again");
+                                AsyncTask.THREAD_POOL_EXECUTOR.execute(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        // The child process may already be bound to another client
+                                        // (this can happen if multi-process WebView is used in more
+                                        // than one process), so try starting the process again.
+                                        // This connection that failed to start has not been freed,
+                                        // so a new bound connection will be allocated.
+                                        startInternal(context, commandLine, childProcessId,
+                                                filesToBeMapped, clientContext, callbackType,
+                                                inSandbox, creationParams);
+                                    }
+                                });
+                            }
+                        };
                 synchronized (pendingSpawnQueue.mPendingSpawnsLock) {
                     allocatedConnection = allocateBoundConnection(
-                            context, commandLine, inSandbox, alwaysInForeground, creationParams);
+                            context, commandLine, inSandbox, alwaysInForeground, creationParams,
+                            startCallback);
                     if (allocatedConnection == null) {
                         Log.d(TAG, "Allocation of new service failed. Queuing up pending spawn.");
                         pendingSpawnQueue.enqueueLocked(new PendingSpawnData(context, commandLine,
                                 childProcessId, filesToBeMapped, clientContext,
                                 callbackType, inSandbox, creationParams));
-                        return;
+                        return null;
                     }
                 }
             }
@@ -742,6 +765,7 @@ public class ChildProcessLauncher {
                     allocatedConnection.getServiceNumber());
             triggerConnectionSetup(allocatedConnection, commandLine, childProcessId,
                     filesToBeMapped, callbackType, clientContext);
+            return allocatedConnection;
         } finally {
             TraceEvent.end("ChildProcessLauncher.startInternal");
         }
@@ -844,7 +868,7 @@ public class ChildProcessLauncher {
 
             @Override
             public void forwardSurfaceForSurfaceRequest(
-                    long requestTokenHigh, long requestTokenLow, Surface surface) {
+                    UnguessableToken requestToken, Surface surface) {
                 // Do not allow a malicious renderer to connect to a producer. This is only used
                 // from stream textures managed by the GPU process.
                 if (callbackType != CALLBACK_FOR_GPU_PROCESS) {
@@ -852,7 +876,7 @@ public class ChildProcessLauncher {
                     return;
                 }
 
-                nativeCompleteScopedSurfaceRequest(requestTokenHigh, requestTokenLow, surface);
+                nativeCompleteScopedSurfaceRequest(requestToken, surface);
             }
 
             @Override
@@ -868,40 +892,6 @@ public class ChildProcessLauncher {
                 }
                 return new SurfaceWrapper(surface);
             }
-
-            @Override
-            public void registerSurfaceTextureSurface(
-                    int surfaceTextureId, int clientId, Surface surface) {
-                if (callbackType != CALLBACK_FOR_GPU_PROCESS) {
-                    Log.e(TAG, "Illegal callback for non-GPU process.");
-                    return;
-                }
-
-                ChildProcessLauncher.registerSurfaceTextureSurface(surfaceTextureId, clientId,
-                        surface);
-            }
-
-            @Override
-            public void unregisterSurfaceTextureSurface(
-                    int surfaceTextureId, int clientId) {
-                if (callbackType != CALLBACK_FOR_GPU_PROCESS) {
-                    Log.e(TAG, "Illegal callback for non-GPU process.");
-                    return;
-                }
-
-                ChildProcessLauncher.unregisterSurfaceTextureSurface(surfaceTextureId, clientId);
-            }
-
-            @Override
-            public SurfaceWrapper getSurfaceTextureSurface(int surfaceTextureId) {
-                if (callbackType != CALLBACK_FOR_RENDERER_PROCESS) {
-                    Log.e(TAG, "Illegal callback for non-renderer process.");
-                    return null;
-                }
-
-                return ChildProcessLauncher.getSurfaceTextureSurface(surfaceTextureId,
-                        childProcessId);
-            }
         };
     }
 
@@ -913,9 +903,16 @@ public class ChildProcessLauncher {
     }
 
     @VisibleForTesting
+    public static ChildProcessConnection startForTesting(Context context, String[] commandLine,
+            FileDescriptorInfo[] filesToMap, ChildProcessCreationParams params) {
+        return startInternal(context, commandLine, 0, filesToMap, 0,
+                CALLBACK_FOR_RENDERER_PROCESS, true, params);
+    }
+
+    @VisibleForTesting
     static ChildProcessConnection allocateBoundConnectionForTesting(Context context,
             ChildProcessCreationParams creationParams) {
-        return allocateBoundConnection(context, null, true, false, creationParams);
+        return allocateBoundConnection(context, null, true, false, creationParams, null);
     }
 
     @VisibleForTesting
@@ -951,6 +948,15 @@ public class ChildProcessLauncher {
         initConnectionAllocatorsIfNecessary(context, true, packageName);
         return sSandboxedChildConnectionAllocatorMap.get(packageName)
                 .allocatedConnectionsCountForTesting();
+    }
+
+    /**
+     * @return gets the service connection array for a specific package name.
+     */
+    @VisibleForTesting
+    static ChildProcessConnection[] getSandboxedConnectionArrayForTesting(
+            String packageName) {
+        return sSandboxedChildConnectionAllocatorMap.get(packageName).connectionArrayForTesting();
     }
 
     /** @return the count of services set up and working */
@@ -995,7 +1001,7 @@ public class ChildProcessLauncher {
     private static native void nativeEstablishSurfacePeer(
             int pid, Surface surface, int primaryID, int secondaryID);
     private static native void nativeCompleteScopedSurfaceRequest(
-            long requestTokenHigh, long requestTokenLow, Surface surface);
+            UnguessableToken requestToken, Surface surface);
     private static native boolean nativeIsSingleProcess();
     private static native Surface nativeGetViewSurface(int surfaceId);
 }

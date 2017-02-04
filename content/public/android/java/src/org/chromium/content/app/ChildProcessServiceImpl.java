@@ -19,7 +19,9 @@ import android.view.Surface;
 import org.chromium.base.BaseSwitches;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.JNIUtils;
 import org.chromium.base.Log;
+import org.chromium.base.UnguessableToken;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.MainDex;
@@ -30,6 +32,7 @@ import org.chromium.base.library_loader.Linker;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.browser.ChildProcessConstants;
 import org.chromium.content.browser.ChildProcessCreationParams;
+import org.chromium.content.common.ContentSwitches;
 import org.chromium.content.common.FileDescriptorInfo;
 import org.chromium.content.common.IChildProcessCallback;
 import org.chromium.content.common.IChildProcessService;
@@ -52,7 +55,12 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ChildProcessServiceImpl {
     private static final String MAIN_THREAD_NAME = "ChildProcessMain";
     private static final String TAG = "ChildProcessService";
+
+    // Lock that protects the following members.
+    private final Object mBinderLock = new Object();
     private IChildProcessCallback mCallback;
+    // PID of the client of this service, set in bindToCaller().
+    private int mBoundCallingPid;
 
     // This is the native "Main" thread for the renderer / utility process.
     private Thread mMainThread;
@@ -68,9 +76,7 @@ public class ChildProcessServiceImpl {
     private int mLibraryProcessType;
 
     private static AtomicReference<Context> sContext = new AtomicReference<>(null);
-    private boolean mLibraryInitialized = false;
-    // Becomes true once the service is bound. Access must synchronize around mMainThread.
-    private boolean mIsBound = false;
+    private boolean mLibraryInitialized;
 
     /**
      * If >= 0 enables "validation of caller of {@link mBinder}'s methods". A RemoteException
@@ -98,10 +104,38 @@ public class ChildProcessServiceImpl {
     private final IChildProcessService.Stub mBinder = new IChildProcessService.Stub() {
         // NOTE: Implement any IChildProcessService methods here.
         @Override
+        public boolean bindToCaller() {
+            synchronized (mBinderLock) {
+                int callingPid = Binder.getCallingPid();
+                if (mBoundCallingPid == 0) {
+                    mBoundCallingPid = callingPid;
+                } else if (mBoundCallingPid != callingPid) {
+                    Log.e(TAG, "Service is already bound by pid %d, cannot bind for pid %d",
+                            mBoundCallingPid, callingPid);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        @Override
         public int setupConnection(Bundle args, IChildProcessCallback callback) {
-            mCallback = callback;
-            getServiceInfo(args);
-            return Process.myPid();
+            int callingPid = Binder.getCallingPid();
+            synchronized (mBinderLock) {
+                if (mBoundCallingPid != callingPid) {
+                    if (mBoundCallingPid == 0) {
+                        Log.e(TAG, "Service has not been bound with bindToCaller()");
+                    } else {
+                        Log.e(TAG, "Client pid %d does not match the bound pid %d", callingPid,
+                                mBoundCallingPid);
+                    }
+                    return -1;
+                }
+
+                mCallback = callback;
+                getServiceInfo(args);
+                return Process.myPid();
+            }
         }
 
         @Override
@@ -160,14 +194,16 @@ public class ChildProcessServiceImpl {
                     }
                     CommandLine.init(mCommandLineParams);
 
+                    if (ContentSwitches.SWITCH_RENDERER_PROCESS.equals(
+                            CommandLine.getInstance().getSwitchValue(
+                                    ContentSwitches.SWITCH_PROCESS_TYPE))) {
+                        JNIUtils.enableSelectiveJniRegistration();
+                    }
+
                     Linker linker = null;
                     boolean requestedSharedRelro = false;
                     if (Linker.isUsed()) {
-                        synchronized (mMainThread) {
-                            while (!mIsBound) {
-                                mMainThread.wait();
-                            }
-                        }
+                        assert mLinkerParams != null;
                         linker = getLinker();
                         if (mLinkerParams.mWaitForSharedRelro) {
                             requestedSharedRelro = true;
@@ -281,28 +317,24 @@ public class ChildProcessServiceImpl {
         return mBinder;
     }
 
-    void initializeParams(Intent intent) {
+    private void initializeParams(Intent intent) {
         synchronized (mMainThread) {
-            mCommandLineParams =
-                    intent.getStringArrayExtra(ChildProcessConstants.EXTRA_COMMAND_LINE);
             // mLinkerParams is never used if Linker.isUsed() returns false.
             // See onCreate().
             mLinkerParams = new ChromiumLinkerParams(intent);
             mLibraryProcessType = ChildProcessCreationParams.getLibraryProcessType(intent);
-            mIsBound = true;
             mMainThread.notifyAll();
         }
     }
 
-    void getServiceInfo(Bundle bundle) {
+    private void getServiceInfo(Bundle bundle) {
         // Required to unparcel FileDescriptorInfo.
         bundle.setClassLoader(mHostClassLoader);
         synchronized (mMainThread) {
-            // Allow the command line to be set via bind() intent or setupConnection, but
-            // the FD can only be transferred here.
             if (mCommandLineParams == null) {
                 mCommandLineParams =
                         bundle.getStringArray(ChildProcessConstants.EXTRA_COMMAND_LINE);
+                mMainThread.notifyAll();
             }
             // We must have received the command line by now
             assert mCommandLineParams != null;
@@ -371,7 +403,7 @@ public class ChildProcessServiceImpl {
     @SuppressWarnings("unused")
     @CalledByNative
     private void forwardSurfaceTextureForSurfaceRequest(
-            long requestTokenHigh, long requestTokenLow, SurfaceTexture surfaceTexture) {
+            UnguessableToken requestToken, SurfaceTexture surfaceTexture) {
         if (mCallback == null) {
             Log.e(TAG, "No callback interface has been provided.");
             return;
@@ -380,7 +412,7 @@ public class ChildProcessServiceImpl {
         Surface surface = new Surface(surfaceTexture);
 
         try {
-            mCallback.forwardSurfaceForSurfaceRequest(requestTokenHigh, requestTokenLow, surface);
+            mCallback.forwardSurfaceForSurfaceRequest(requestToken, surface);
         } catch (RemoteException e) {
             Log.e(TAG, "Unable to call forwardSurfaceForSurfaceRequest: %s", e);
             return;
@@ -402,55 +434,6 @@ public class ChildProcessServiceImpl {
             return wrapper != null ? wrapper.getSurface() : null;
         } catch (RemoteException e) {
             Log.e(TAG, "Unable to call getViewSurface: %s", e);
-            return null;
-        }
-    }
-
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private void createSurfaceTextureSurface(
-            int surfaceTextureId, int clientId, SurfaceTexture surfaceTexture) {
-        if (mCallback == null) {
-            Log.e(TAG, "No callback interface has been provided.");
-            return;
-        }
-
-        Surface surface = new Surface(surfaceTexture);
-        try {
-            mCallback.registerSurfaceTextureSurface(surfaceTextureId, clientId, surface);
-        } catch (RemoteException e) {
-            Log.e(TAG, "Unable to call registerSurfaceTextureSurface: %s", e);
-        }
-        surface.release();
-    }
-
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private void destroySurfaceTextureSurface(int surfaceTextureId, int clientId) {
-        if (mCallback == null) {
-            Log.e(TAG, "No callback interface has been provided.");
-            return;
-        }
-
-        try {
-            mCallback.unregisterSurfaceTextureSurface(surfaceTextureId, clientId);
-        } catch (RemoteException e) {
-            Log.e(TAG, "Unable to call unregisterSurfaceTextureSurface: %s", e);
-        }
-    }
-
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private Surface getSurfaceTextureSurface(int surfaceTextureId) {
-        if (mCallback == null) {
-            Log.e(TAG, "No callback interface has been provided.");
-            return null;
-        }
-
-        try {
-            return mCallback.getSurfaceTextureSurface(surfaceTextureId).getSurface();
-        } catch (RemoteException e) {
-            Log.e(TAG, "Unable to call getSurfaceTextureSurface: %s", e);
             return null;
         }
     }

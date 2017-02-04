@@ -138,6 +138,10 @@ class CONTENT_EXPORT FrameTreeNode {
   }
 
   // Returns the origin of the last committed page in this frame.
+  // WARNING: To get the last committed origin for a particular
+  // RenderFrameHost, use RenderFrameHost::GetLastCommittedOrigin() instead,
+  // which will behave correctly even when the RenderFrameHost is not the
+  // current one for this frame (such as when it's pending deletion).
   const url::Origin& current_origin() const {
     return replication_state_.origin;
   }
@@ -151,7 +155,7 @@ class CONTENT_EXPORT FrameTreeNode {
 
   // Set the frame's feature policy from an HTTP header, clearing any existing
   // policy.
-  void SetFeaturePolicyHeader(const std::string& header);
+  void SetFeaturePolicyHeader(const ParsedFeaturePolicyHeader& parsed_header);
 
   // Clear any feature policy associated with the frame.
   void ResetFeaturePolicy();
@@ -294,6 +298,8 @@ class CONTENT_EXPORT FrameTreeNode {
 
   // Returns the BlameContext associated with this node.
   FrameTreeNodeBlameContext& blame_context() { return blame_context_; }
+
+  void OnSetHasReceivedUserGesture();
 
  private:
   class OpenerDestroyedObserver;

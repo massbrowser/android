@@ -34,7 +34,7 @@ config("modules_implementation") {
 }
 
 make_names("module_names") {
-  in_files = [ "indexeddb/IndexedDBNames.in" ]
+  in_files = [ "indexeddb/IndexedDBNames.json5" ]
   outputs = [
     "$blink_modules_output_dir/IndexedDBNames.cpp",
     "$blink_modules_output_dir/IndexedDBNames.h",
@@ -119,6 +119,7 @@ target(modules_target_type, "modules") {
     "//third_party/WebKit/Source/modules/imagebitmap",
     "//third_party/WebKit/Source/modules/imagecapture",
     "//third_party/WebKit/Source/modules/indexeddb",
+    "//third_party/WebKit/Source/modules/installation",
     "//third_party/WebKit/Source/modules/installedapp",
     "//third_party/WebKit/Source/modules/mediacapturefromelement",
     "//third_party/WebKit/Source/modules/mediarecorder",
@@ -151,6 +152,7 @@ target(modules_target_type, "modules") {
     "//third_party/WebKit/Source/modules/vr",
     "//third_party/WebKit/Source/modules/wake_lock",
     "//third_party/WebKit/Source/modules/webaudio",
+    "//third_party/WebKit/Source/modules/webauth",
     "//third_party/WebKit/Source/modules/webdatabase",
     "//third_party/WebKit/Source/modules/webgl",
     "//third_party/WebKit/Source/modules/webmidi",
@@ -176,8 +178,16 @@ source_set("modules_testing") {
   sources = [
     "$bindings_modules_v8_output_dir/V8InternalsPartial.cpp",
     "$bindings_modules_v8_output_dir/V8InternalsPartial.h",
+    "$bindings_modules_v8_output_dir/V8WorkerInternalsPartial.cpp",
+    "$bindings_modules_v8_output_dir/V8WorkerInternalsPartial.h",
     "accessibility/testing/InternalsAccessibility.cpp",
     "accessibility/testing/InternalsAccessibility.h",
+    "fetch/testing/InternalsFetch.cpp",
+    "fetch/testing/InternalsFetch.h",
+    "fetch/testing/WorkerInternalsFetch.cpp",
+    "fetch/testing/WorkerInternalsFetch.h",
+    "mediastream/testing/InternalsMediaStream.cpp",
+    "mediastream/testing/InternalsMediaStream.h",
     "navigatorcontentutils/testing/InternalsNavigatorContentUtils.cpp",
     "navigatorcontentutils/testing/InternalsNavigatorContentUtils.h",
     "navigatorcontentutils/testing/NavigatorContentUtilsClientMock.cpp",
@@ -256,10 +266,11 @@ source_set("unit_tests") {
     "notifications/NotificationImageLoaderTest.cpp",
     "notifications/NotificationResourcesLoaderTest.cpp",
     "payments/AbortTest.cpp",
-    "payments/ActivePaymentTest.cpp",
+    "payments/CanMakePaymentTest.cpp",
     "payments/CompleteTest.cpp",
     "payments/OnPaymentResponseTest.cpp",
     "payments/PaymentAddressTest.cpp",
+    "payments/PaymentAppRequestConversionTest.cpp",
     "payments/PaymentRequestDetailsTest.cpp",
     "payments/PaymentRequestTest.cpp",
     "payments/PaymentRequestUpdateEventTest.cpp",
@@ -270,6 +281,7 @@ source_set("unit_tests") {
     "peerconnection/RTCDataChannelTest.cpp",
     "presentation/PresentationAvailabilityTest.cpp",
     "presentation/PresentationReceiverTest.cpp",
+    "presentation/PresentationRequestTest.cpp",
     "push_messaging/PushManagerTest.cpp",
     "push_messaging/PushMessageDataTest.cpp",
     "remoteplayback/RemotePlaybackTest.cpp",

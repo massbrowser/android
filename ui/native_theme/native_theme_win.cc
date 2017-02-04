@@ -17,7 +17,8 @@
 #include "base/win/scoped_select_object.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
-#include "skia/ext/bitmap_platform_device.h"
+#include "cc/paint/paint_canvas.h"
+#include "cc/paint/paint_flags.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/skia_utils_win.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -59,7 +60,7 @@ const int kSystemColors[] = {
   COLOR_WINDOWTEXT,
 };
 
-void SetCheckerboardShader(SkPaint* paint, const RECT& align_rect) {
+void SetCheckerboardShader(cc::PaintFlags* paint, const RECT& align_rect) {
   // Create a 2x2 checkerboard pattern using the 3D face and highlight colors.
   const SkColor face = color_utils::GetSysSkColor(COLOR_3DFACE);
   const SkColor highlight = color_utils::GetSysSkColor(COLOR_3DHILIGHT);
@@ -154,20 +155,14 @@ NativeTheme* NativeTheme::GetInstanceForNativeUi() {
   return NativeThemeWin::instance();
 }
 
-bool NativeThemeWin::IsThemingActive() const {
-  return is_theme_active_ && is_theme_active_();
+// static
+bool NativeThemeWin::IsUsingHighContrastTheme() {
+  return instance()->IsUsingHighContrastThemeInternal();
 }
 
-bool NativeThemeWin::IsUsingHighContrastTheme() const {
-  if (is_using_high_contrast_valid_)
-    return is_using_high_contrast_;
-  HIGHCONTRAST result;
-  result.cbSize = sizeof(HIGHCONTRAST);
-  is_using_high_contrast_ =
-      SystemParametersInfo(SPI_GETHIGHCONTRAST, result.cbSize, &result, 0) &&
-      (result.dwFlags & HCF_HIGHCONTRASTON) == HCF_HIGHCONTRASTON;
-  is_using_high_contrast_valid_ = true;
-  return is_using_high_contrast_;
+// static
+void NativeThemeWin::CloseHandles() {
+  instance()->CloseHandlesInternal();
 }
 
 HRESULT NativeThemeWin::GetThemeColor(ThemeName theme,
@@ -207,18 +202,6 @@ gfx::Size NativeThemeWin::GetThemeBorderSize(ThemeName theme) const {
 void NativeThemeWin::DisableTheming() const {
   if (set_theme_properties_)
     set_theme_properties_(0);
-}
-
-void NativeThemeWin::CloseHandles() const {
-  if (!close_theme_)
-    return;
-
-  for (int i = 0; i < LAST; ++i) {
-    if (theme_handles_[i]) {
-      close_theme_(theme_handles_[i]);
-      theme_handles_[i] = NULL;
-    }
-  }
 }
 
 bool NativeThemeWin::IsClassicTheme(ThemeName name) const {
@@ -270,7 +253,7 @@ gfx::Size NativeThemeWin::GetPartSize(Part part,
       gfx::Size(13, 13) : gfx::Size();
 }
 
-void NativeThemeWin::Paint(SkCanvas* canvas,
+void NativeThemeWin::Paint(cc::PaintCanvas* canvas,
                            Part part,
                            State state,
                            const gfx::Rect& rect,
@@ -283,7 +266,7 @@ void NativeThemeWin::Paint(SkCanvas* canvas,
       PaintMenuGutter(canvas, rect);
       return;
     case kMenuPopupSeparator:
-      PaintMenuSeparator(canvas, rect);
+      PaintMenuSeparator(canvas, *extra.menu_separator.paint_rect);
       return;
     case kMenuPopupBackground:
       PaintMenuBackground(canvas, rect);
@@ -296,18 +279,17 @@ void NativeThemeWin::Paint(SkCanvas* canvas,
       break;
   }
 
-  skia::ScopedPlatformPaint paint(canvas);
-  HDC surface = paint.GetNativeDrawingContext();
+  HDC surface = skia::GetNativeDrawingContext(canvas);
 
   // When drawing the task manager or the bookmark editor, we draw into an
   // offscreen buffer, where we can use OS-specific drawing routines for
   // UI features like scrollbars. However, we need to set up that buffer,
   // and then read it back when it's done and blit it onto the screen.
 
-  if (skia::SupportsPlatformPaint(canvas))
+  if (surface)
     PaintDirect(canvas, surface, part, state, rect, extra);
   else
-    PaintIndirect(canvas, surface, part, state, rect, extra);
+    PaintIndirect(canvas, part, state, rect, extra);
 }
 
 NativeThemeWin::NativeThemeWin()
@@ -319,7 +301,6 @@ NativeThemeWin::NativeThemeWin()
       open_theme_(NULL),
       close_theme_(NULL),
       set_theme_properties_(NULL),
-      is_theme_active_(NULL),
       get_theme_int_(NULL),
       theme_dll_(LoadLibrary(L"uxtheme.dll")),
       color_change_listener_(this),
@@ -342,8 +323,6 @@ NativeThemeWin::NativeThemeWin()
         GetProcAddress(theme_dll_, "CloseThemeData"));
     set_theme_properties_ = reinterpret_cast<SetThemeAppPropertiesPtr>(
         GetProcAddress(theme_dll_, "SetThemeAppProperties"));
-    is_theme_active_ = reinterpret_cast<IsThemeActivePtr>(
-        GetProcAddress(theme_dll_, "IsThemeActive"));
     get_theme_int_ = reinterpret_cast<GetThemeIntPtr>(
         GetProcAddress(theme_dll_, "GetThemeInt"));
   }
@@ -362,6 +341,30 @@ NativeThemeWin::~NativeThemeWin() {
   }
 }
 
+bool NativeThemeWin::IsUsingHighContrastThemeInternal() {
+  if (is_using_high_contrast_valid_)
+    return is_using_high_contrast_;
+  HIGHCONTRAST result;
+  result.cbSize = sizeof(HIGHCONTRAST);
+  is_using_high_contrast_ =
+      SystemParametersInfo(SPI_GETHIGHCONTRAST, result.cbSize, &result, 0) &&
+      (result.dwFlags & HCF_HIGHCONTRASTON) == HCF_HIGHCONTRASTON;
+  is_using_high_contrast_valid_ = true;
+  return is_using_high_contrast_;
+}
+
+void NativeThemeWin::CloseHandlesInternal() {
+  if (!close_theme_)
+    return;
+
+  for (int i = 0; i < LAST; ++i) {
+    if (theme_handles_[i]) {
+      close_theme_(theme_handles_[i]);
+      theme_handles_[i] = nullptr;
+    }
+  }
+}
+
 void NativeThemeWin::OnSysColorChange() {
   UpdateSystemColors();
   is_using_high_contrast_valid_ = false;
@@ -375,7 +378,7 @@ void NativeThemeWin::UpdateSystemColors() {
 
 void NativeThemeWin::PaintMenuSeparator(SkCanvas* canvas,
                                         const gfx::Rect& rect) const {
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setColor(GetSystemColor(NativeTheme::kColorId_MenuSeparatorColor));
   int position_y = rect.y() + rect.height() / 2;
   canvas->drawLine(rect.x(), position_y, rect.right(), position_y, paint);
@@ -383,7 +386,7 @@ void NativeThemeWin::PaintMenuSeparator(SkCanvas* canvas,
 
 void NativeThemeWin::PaintMenuGutter(SkCanvas* canvas,
                                      const gfx::Rect& rect) const {
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setColor(GetSystemColor(NativeTheme::kColorId_MenuSeparatorColor));
   int position_x = rect.x() + rect.width() / 2;
   canvas->drawLine(position_x, rect.y(), position_x, rect.bottom(), paint);
@@ -391,7 +394,7 @@ void NativeThemeWin::PaintMenuGutter(SkCanvas* canvas,
 
 void NativeThemeWin::PaintMenuBackground(SkCanvas* canvas,
                                          const gfx::Rect& rect) const {
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setColor(GetSystemColor(NativeTheme::kColorId_MenuBackgroundColor));
   canvas->drawRect(gfx::RectToSkRect(rect), paint);
 }
@@ -428,7 +431,7 @@ void NativeThemeWin::PaintDirect(SkCanvas* destination_canvas,
       PaintMenuGutter(hdc, rect);
       return;
     case kMenuPopupSeparator:
-      PaintMenuSeparator(hdc, rect);
+      PaintMenuSeparator(hdc, *extra.menu_separator.paint_rect);
       return;
     case kMenuItemBackground:
       PaintMenuItemBackground(hdc, state, rect, extra.menu_item);
@@ -671,7 +674,6 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
 }
 
 void NativeThemeWin::PaintIndirect(SkCanvas* destination_canvas,
-                                   HDC destination_hdc,
                                    Part part,
                                    State state,
                                    const gfx::Rect& rect,
@@ -866,9 +868,8 @@ HRESULT NativeThemeWin::PaintButton(HDC hdc,
   return S_OK;
 }
 
-HRESULT NativeThemeWin::PaintMenuSeparator(
-    HDC hdc,
-    const gfx::Rect& rect) const {
+HRESULT NativeThemeWin::PaintMenuSeparator(HDC hdc,
+                                           const gfx::Rect& rect) const {
   RECT rect_win = rect.ToRECT();
 
   HANDLE handle = GetThemeHandle(MENU);
@@ -1320,7 +1321,7 @@ HRESULT NativeThemeWin::PaintScrollbarTrack(
       (system_colors_[COLOR_SCROLLBAR] != system_colors_[COLOR_WINDOW])) {
     FillRect(hdc, &rect_win, reinterpret_cast<HBRUSH>(COLOR_SCROLLBAR + 1));
   } else {
-    SkPaint paint;
+    cc::PaintFlags paint;
     RECT align_rect = gfx::Rect(extra.track_x, extra.track_y, extra.track_width,
                                 extra.track_height).ToRECT();
     SetCheckerboardShader(&paint, align_rect);
@@ -1439,7 +1440,7 @@ HRESULT NativeThemeWin::PaintTrackbar(
 
     // If the button is pressed, draw hatching.
     if (extra.classic_state & DFCS_PUSHED) {
-      SkPaint paint;
+      cc::PaintFlags paint;
       SetCheckerboardShader(&paint, rect_win);
 
       // Fill all three pieces with the pattern.

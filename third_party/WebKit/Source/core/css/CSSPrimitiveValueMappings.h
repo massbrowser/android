@@ -195,31 +195,31 @@ inline ColumnSpan CSSIdentifierValue::convertTo() const {
 }
 
 template <>
-inline CSSIdentifierValue::CSSIdentifierValue(PrintColorAdjust value)
+inline CSSIdentifierValue::CSSIdentifierValue(EPrintColorAdjust value)
     : CSSValue(IdentifierClass) {
   switch (value) {
-    case PrintColorAdjust::Exact:
+    case EPrintColorAdjust::kExact:
       m_valueID = CSSValueExact;
       break;
-    case PrintColorAdjust::Economy:
+    case EPrintColorAdjust::kEconomy:
       m_valueID = CSSValueEconomy;
       break;
   }
 }
 
 template <>
-inline PrintColorAdjust CSSIdentifierValue::convertTo() const {
+inline EPrintColorAdjust CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueEconomy:
-      return PrintColorAdjust::Economy;
+      return EPrintColorAdjust::kEconomy;
     case CSSValueExact:
-      return PrintColorAdjust::Exact;
+      return EPrintColorAdjust::kExact;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return PrintColorAdjust::Economy;
+  return EPrintColorAdjust::kEconomy;
 }
 
 template <>
@@ -812,10 +812,10 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EBoxSizing e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case BoxSizingBorderBox:
+    case EBoxSizing::kBorderBox:
       m_valueID = CSSValueBorderBox;
       break;
-    case BoxSizingContentBox:
+    case EBoxSizing::kContentBox:
       m_valueID = CSSValueContentBox;
       break;
   }
@@ -825,25 +825,25 @@ template <>
 inline EBoxSizing CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueBorderBox:
-      return BoxSizingBorderBox;
+      return EBoxSizing::kBorderBox;
     case CSSValueContentBox:
-      return BoxSizingContentBox;
+      return EBoxSizing::kContentBox;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return BoxSizingBorderBox;
+  return EBoxSizing::kBorderBox;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EBoxDirection e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case EBoxDirection::Normal:
+    case EBoxDirection::kNormal:
       m_valueID = CSSValueNormal;
       break;
-    case EBoxDirection::Reverse:
+    case EBoxDirection::kReverse:
       m_valueID = CSSValueReverse;
       break;
   }
@@ -853,15 +853,15 @@ template <>
 inline EBoxDirection CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueNormal:
-      return EBoxDirection::Normal;
+      return EBoxDirection::kNormal;
     case CSSValueReverse:
-      return EBoxDirection::Reverse;
+      return EBoxDirection::kReverse;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return EBoxDirection::Normal;
+  return EBoxDirection::kNormal;
 }
 
 template <>
@@ -926,16 +926,16 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(ECaptionSide e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case ECaptionSide::Left:
+    case ECaptionSide::kLeft:
       m_valueID = CSSValueLeft;
       break;
-    case ECaptionSide::Right:
+    case ECaptionSide::kRight:
       m_valueID = CSSValueRight;
       break;
-    case ECaptionSide::Top:
+    case ECaptionSide::kTop:
       m_valueID = CSSValueTop;
       break;
-    case ECaptionSide::Bottom:
+    case ECaptionSide::kBottom:
       m_valueID = CSSValueBottom;
       break;
   }
@@ -945,35 +945,35 @@ template <>
 inline ECaptionSide CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueLeft:
-      return ECaptionSide::Left;
+      return ECaptionSide::kLeft;
     case CSSValueRight:
-      return ECaptionSide::Right;
+      return ECaptionSide::kRight;
     case CSSValueTop:
-      return ECaptionSide::Top;
+      return ECaptionSide::kTop;
     case CSSValueBottom:
-      return ECaptionSide::Bottom;
+      return ECaptionSide::kBottom;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return ECaptionSide::Top;
+  return ECaptionSide::kTop;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EClear e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case ClearNone:
+    case EClear::kNone:
       m_valueID = CSSValueNone;
       break;
-    case ClearLeft:
+    case EClear::kLeft:
       m_valueID = CSSValueLeft;
       break;
-    case ClearRight:
+    case EClear::kRight:
       m_valueID = CSSValueRight;
       break;
-    case ClearBoth:
+    case EClear::kBoth:
       m_valueID = CSSValueBoth;
       break;
   }
@@ -983,131 +983,131 @@ template <>
 inline EClear CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueNone:
-      return ClearNone;
+      return EClear::kNone;
     case CSSValueLeft:
-      return ClearLeft;
+      return EClear::kLeft;
     case CSSValueRight:
-      return ClearRight;
+      return EClear::kRight;
     case CSSValueBoth:
-      return ClearBoth;
+      return EClear::kBoth;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return ClearNone;
+  return EClear::kNone;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(ECursor e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case ECursor::Auto:
+    case ECursor::kAuto:
       m_valueID = CSSValueAuto;
       break;
-    case ECursor::Cross:
+    case ECursor::kCrosshair:
       m_valueID = CSSValueCrosshair;
       break;
-    case ECursor::Default:
+    case ECursor::kDefault:
       m_valueID = CSSValueDefault;
       break;
-    case ECursor::Pointer:
+    case ECursor::kPointer:
       m_valueID = CSSValuePointer;
       break;
-    case ECursor::Move:
+    case ECursor::kMove:
       m_valueID = CSSValueMove;
       break;
-    case ECursor::Cell:
+    case ECursor::kCell:
       m_valueID = CSSValueCell;
       break;
-    case ECursor::VerticalText:
+    case ECursor::kVerticalText:
       m_valueID = CSSValueVerticalText;
       break;
-    case ECursor::ContextMenu:
+    case ECursor::kContextMenu:
       m_valueID = CSSValueContextMenu;
       break;
-    case ECursor::Alias:
+    case ECursor::kAlias:
       m_valueID = CSSValueAlias;
       break;
-    case ECursor::Copy:
+    case ECursor::kCopy:
       m_valueID = CSSValueCopy;
       break;
-    case ECursor::None:
+    case ECursor::kNone:
       m_valueID = CSSValueNone;
       break;
-    case ECursor::Progress:
+    case ECursor::kProgress:
       m_valueID = CSSValueProgress;
       break;
-    case ECursor::NoDrop:
+    case ECursor::kNoDrop:
       m_valueID = CSSValueNoDrop;
       break;
-    case ECursor::NotAllowed:
+    case ECursor::kNotAllowed:
       m_valueID = CSSValueNotAllowed;
       break;
-    case ECursor::ZoomIn:
+    case ECursor::kZoomIn:
       m_valueID = CSSValueZoomIn;
       break;
-    case ECursor::ZoomOut:
+    case ECursor::kZoomOut:
       m_valueID = CSSValueZoomOut;
       break;
-    case ECursor::EResize:
+    case ECursor::kEResize:
       m_valueID = CSSValueEResize;
       break;
-    case ECursor::NeResize:
+    case ECursor::kNeResize:
       m_valueID = CSSValueNeResize;
       break;
-    case ECursor::NwResize:
+    case ECursor::kNwResize:
       m_valueID = CSSValueNwResize;
       break;
-    case ECursor::NResize:
+    case ECursor::kNResize:
       m_valueID = CSSValueNResize;
       break;
-    case ECursor::SeResize:
+    case ECursor::kSeResize:
       m_valueID = CSSValueSeResize;
       break;
-    case ECursor::SwResize:
+    case ECursor::kSwResize:
       m_valueID = CSSValueSwResize;
       break;
-    case ECursor::SResize:
+    case ECursor::kSResize:
       m_valueID = CSSValueSResize;
       break;
-    case ECursor::WResize:
+    case ECursor::kWResize:
       m_valueID = CSSValueWResize;
       break;
-    case ECursor::EwResize:
+    case ECursor::kEwResize:
       m_valueID = CSSValueEwResize;
       break;
-    case ECursor::NsResize:
+    case ECursor::kNsResize:
       m_valueID = CSSValueNsResize;
       break;
-    case ECursor::NeswResize:
+    case ECursor::kNeswResize:
       m_valueID = CSSValueNeswResize;
       break;
-    case ECursor::NwseResize:
+    case ECursor::kNwseResize:
       m_valueID = CSSValueNwseResize;
       break;
-    case ECursor::ColResize:
+    case ECursor::kColResize:
       m_valueID = CSSValueColResize;
       break;
-    case ECursor::RowResize:
+    case ECursor::kRowResize:
       m_valueID = CSSValueRowResize;
       break;
-    case ECursor::Text:
+    case ECursor::kText:
       m_valueID = CSSValueText;
       break;
-    case ECursor::Wait:
+    case ECursor::kWait:
       m_valueID = CSSValueWait;
       break;
-    case ECursor::Help:
+    case ECursor::kHelp:
       m_valueID = CSSValueHelp;
       break;
-    case ECursor::AllScroll:
+    case ECursor::kAllScroll:
       m_valueID = CSSValueAllScroll;
       break;
-    case ECursor::WebkitGrab:
+    case ECursor::kWebkitGrab:
       m_valueID = CSSValueWebkitGrab;
       break;
-    case ECursor::WebkitGrabbing:
+    case ECursor::kWebkitGrabbing:
       m_valueID = CSSValueWebkitGrabbing;
       break;
   }
@@ -1117,82 +1117,82 @@ template <>
 inline ECursor CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueAuto:
-      return ECursor::Auto;
+      return ECursor::kAuto;
     case CSSValueCrosshair:
-      return ECursor::Cross;
+      return ECursor::kCrosshair;
     case CSSValueDefault:
-      return ECursor::Default;
+      return ECursor::kDefault;
     case CSSValuePointer:
-      return ECursor::Pointer;
+      return ECursor::kPointer;
     case CSSValueMove:
-      return ECursor::Move;
+      return ECursor::kMove;
     case CSSValueCell:
-      return ECursor::Cell;
+      return ECursor::kCell;
     case CSSValueVerticalText:
-      return ECursor::VerticalText;
+      return ECursor::kVerticalText;
     case CSSValueContextMenu:
-      return ECursor::ContextMenu;
+      return ECursor::kContextMenu;
     case CSSValueAlias:
-      return ECursor::Alias;
+      return ECursor::kAlias;
     case CSSValueCopy:
-      return ECursor::Copy;
+      return ECursor::kCopy;
     case CSSValueNone:
-      return ECursor::None;
+      return ECursor::kNone;
     case CSSValueProgress:
-      return ECursor::Progress;
+      return ECursor::kProgress;
     case CSSValueNoDrop:
-      return ECursor::NoDrop;
+      return ECursor::kNoDrop;
     case CSSValueNotAllowed:
-      return ECursor::NotAllowed;
+      return ECursor::kNotAllowed;
     case CSSValueZoomIn:
     case CSSValueWebkitZoomIn:
-      return ECursor::ZoomIn;
+      return ECursor::kZoomIn;
     case CSSValueZoomOut:
     case CSSValueWebkitZoomOut:
-      return ECursor::ZoomOut;
+      return ECursor::kZoomOut;
     case CSSValueEResize:
-      return ECursor::EResize;
+      return ECursor::kEResize;
     case CSSValueNeResize:
-      return ECursor::NeResize;
+      return ECursor::kNeResize;
     case CSSValueNwResize:
-      return ECursor::NwResize;
+      return ECursor::kNwResize;
     case CSSValueNResize:
-      return ECursor::NResize;
+      return ECursor::kNResize;
     case CSSValueSeResize:
-      return ECursor::SeResize;
+      return ECursor::kSeResize;
     case CSSValueSwResize:
-      return ECursor::SwResize;
+      return ECursor::kSwResize;
     case CSSValueSResize:
-      return ECursor::SResize;
+      return ECursor::kSResize;
     case CSSValueWResize:
-      return ECursor::WResize;
+      return ECursor::kWResize;
     case CSSValueEwResize:
-      return ECursor::EwResize;
+      return ECursor::kEwResize;
     case CSSValueNsResize:
-      return ECursor::NsResize;
+      return ECursor::kNsResize;
     case CSSValueNeswResize:
-      return ECursor::NeswResize;
+      return ECursor::kNeswResize;
     case CSSValueNwseResize:
-      return ECursor::NwseResize;
+      return ECursor::kNwseResize;
     case CSSValueColResize:
-      return ECursor::ColResize;
+      return ECursor::kColResize;
     case CSSValueRowResize:
-      return ECursor::RowResize;
+      return ECursor::kRowResize;
     case CSSValueText:
-      return ECursor::Text;
+      return ECursor::kText;
     case CSSValueWait:
-      return ECursor::Wait;
+      return ECursor::kWait;
     case CSSValueHelp:
-      return ECursor::Help;
+      return ECursor::kHelp;
     case CSSValueAllScroll:
-      return ECursor::AllScroll;
+      return ECursor::kAllScroll;
     case CSSValueWebkitGrab:
-      return ECursor::WebkitGrab;
+      return ECursor::kWebkitGrab;
     case CSSValueWebkitGrabbing:
-      return ECursor::WebkitGrabbing;
+      return ECursor::kWebkitGrabbing;
     default:
       NOTREACHED();
-      return ECursor::Auto;
+      return ECursor::kAuto;
   }
 }
 
@@ -1263,6 +1263,9 @@ inline CSSIdentifierValue::CSSIdentifierValue(EDisplay e)
     case EDisplay::Contents:
       m_valueID = CSSValueContents;
       break;
+    case EDisplay::FlowRoot:
+      m_valueID = CSSValueFlowRoot;
+      break;
     case EDisplay::None:
       m_valueID = CSSValueNone;
       break;
@@ -1271,27 +1274,70 @@ inline CSSIdentifierValue::CSSIdentifierValue(EDisplay e)
 
 template <>
 inline EDisplay CSSIdentifierValue::convertTo() const {
-  if (m_valueID == CSSValueNone)
-    return EDisplay::None;
-
-  if (m_valueID == CSSValueWebkitFlex)
-    return EDisplay::Flex;
-  if (m_valueID == CSSValueWebkitInlineFlex)
-    return EDisplay::InlineFlex;
-
-  EDisplay display = static_cast<EDisplay>(m_valueID - CSSValueInline);
-  // TODO(sashab): Check display is a valid EDisplay here.
-  return display;
+  switch (m_valueID) {
+    case CSSValueInline:
+      return EDisplay::Inline;
+    case CSSValueBlock:
+      return EDisplay::Block;
+    case CSSValueListItem:
+      return EDisplay::ListItem;
+    case CSSValueInlineBlock:
+      return EDisplay::InlineBlock;
+    case CSSValueTable:
+      return EDisplay::Table;
+    case CSSValueInlineTable:
+      return EDisplay::InlineTable;
+    case CSSValueTableRowGroup:
+      return EDisplay::TableRowGroup;
+    case CSSValueTableHeaderGroup:
+      return EDisplay::TableHeaderGroup;
+    case CSSValueTableFooterGroup:
+      return EDisplay::TableFooterGroup;
+    case CSSValueTableRow:
+      return EDisplay::TableRow;
+    case CSSValueTableColumnGroup:
+      return EDisplay::TableColumnGroup;
+    case CSSValueTableColumn:
+      return EDisplay::TableColumn;
+    case CSSValueTableCell:
+      return EDisplay::TableCell;
+    case CSSValueTableCaption:
+      return EDisplay::TableCaption;
+    case CSSValueWebkitBox:
+      return EDisplay::WebkitBox;
+    case CSSValueWebkitInlineBox:
+      return EDisplay::WebkitInlineBox;
+    case CSSValueFlex:
+    case CSSValueWebkitFlex:
+      return EDisplay::Flex;
+    case CSSValueInlineFlex:
+    case CSSValueWebkitInlineFlex:
+      return EDisplay::InlineFlex;
+    case CSSValueGrid:
+      return EDisplay::Grid;
+    case CSSValueInlineGrid:
+      return EDisplay::InlineGrid;
+    case CSSValueContents:
+      return EDisplay::Contents;
+    case CSSValueFlowRoot:
+      return EDisplay::FlowRoot;
+    case CSSValueNone:
+      return EDisplay::None;
+      break;
+    default:
+      NOTREACHED();
+      return EDisplay::None;
+  }
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EEmptyCells e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case EEmptyCells::Show:
+    case EEmptyCells::kShow:
       m_valueID = CSSValueShow;
       break;
-    case EEmptyCells::Hide:
+    case EEmptyCells::kHide:
       m_valueID = CSSValueHide;
       break;
   }
@@ -1301,15 +1347,15 @@ template <>
 inline EEmptyCells CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueShow:
-      return EEmptyCells::Show;
+      return EEmptyCells::kShow;
     case CSSValueHide:
-      return EEmptyCells::Hide;
+      return EEmptyCells::kHide;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return EEmptyCells::Show;
+  return EEmptyCells::kShow;
 }
 
 template <>
@@ -1387,13 +1433,13 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EFloat e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case EFloat::None:
+    case EFloat::kNone:
       m_valueID = CSSValueNone;
       break;
-    case EFloat::Left:
+    case EFloat::kLeft:
       m_valueID = CSSValueLeft;
       break;
-    case EFloat::Right:
+    case EFloat::kRight:
       m_valueID = CSSValueRight;
       break;
   }
@@ -1403,17 +1449,17 @@ template <>
 inline EFloat CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueLeft:
-      return EFloat::Left;
+      return EFloat::kLeft;
     case CSSValueRight:
-      return EFloat::Right;
+      return EFloat::kRight;
     case CSSValueNone:
-      return EFloat::None;
+      return EFloat::kNone;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return EFloat::None;
+  return EFloat::kNone;
 }
 
 template <>
@@ -1496,10 +1542,10 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EListStylePosition e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case EListStylePosition::Outside:
+    case EListStylePosition::kOutside:
       m_valueID = CSSValueOutside;
       break;
-    case EListStylePosition::Inside:
+    case EListStylePosition::kInside:
       m_valueID = CSSValueInside;
       break;
   }
@@ -1509,187 +1555,187 @@ template <>
 inline EListStylePosition CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueOutside:
-      return EListStylePosition::Outside;
+      return EListStylePosition::kOutside;
     case CSSValueInside:
-      return EListStylePosition::Inside;
+      return EListStylePosition::kInside;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return EListStylePosition::Outside;
+  return EListStylePosition::kOutside;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EListStyleType e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case EListStyleType::ArabicIndic:
+    case EListStyleType::kArabicIndic:
       m_valueID = CSSValueArabicIndic;
       break;
-    case EListStyleType::Armenian:
+    case EListStyleType::kArmenian:
       m_valueID = CSSValueArmenian;
       break;
-    case EListStyleType::Bengali:
+    case EListStyleType::kBengali:
       m_valueID = CSSValueBengali;
       break;
-    case EListStyleType::Cambodian:
+    case EListStyleType::kCambodian:
       m_valueID = CSSValueCambodian;
       break;
-    case EListStyleType::Circle:
+    case EListStyleType::kCircle:
       m_valueID = CSSValueCircle;
       break;
-    case EListStyleType::CjkEarthlyBranch:
+    case EListStyleType::kCjkEarthlyBranch:
       m_valueID = CSSValueCjkEarthlyBranch;
       break;
-    case EListStyleType::CjkHeavenlyStem:
+    case EListStyleType::kCjkHeavenlyStem:
       m_valueID = CSSValueCjkHeavenlyStem;
       break;
-    case EListStyleType::CJKIdeographic:
+    case EListStyleType::kCjkIdeographic:
       m_valueID = CSSValueCjkIdeographic;
       break;
-    case EListStyleType::DecimalLeadingZero:
+    case EListStyleType::kDecimalLeadingZero:
       m_valueID = CSSValueDecimalLeadingZero;
       break;
-    case EListStyleType::DecimalListStyle:
+    case EListStyleType::kDecimal:
       m_valueID = CSSValueDecimal;
       break;
-    case EListStyleType::Devanagari:
+    case EListStyleType::kDevanagari:
       m_valueID = CSSValueDevanagari;
       break;
-    case EListStyleType::Disc:
+    case EListStyleType::kDisc:
       m_valueID = CSSValueDisc;
       break;
-    case EListStyleType::EthiopicHalehame:
+    case EListStyleType::kEthiopicHalehame:
       m_valueID = CSSValueEthiopicHalehame;
       break;
-    case EListStyleType::EthiopicHalehameAm:
+    case EListStyleType::kEthiopicHalehameAm:
       m_valueID = CSSValueEthiopicHalehameAm;
       break;
-    case EListStyleType::EthiopicHalehameTiEt:
+    case EListStyleType::kEthiopicHalehameTiEt:
       m_valueID = CSSValueEthiopicHalehameTiEt;
       break;
-    case EListStyleType::EthiopicHalehameTiEr:
+    case EListStyleType::kEthiopicHalehameTiEr:
       m_valueID = CSSValueEthiopicHalehameTiEr;
       break;
-    case EListStyleType::Georgian:
+    case EListStyleType::kGeorgian:
       m_valueID = CSSValueGeorgian;
       break;
-    case EListStyleType::Gujarati:
+    case EListStyleType::kGujarati:
       m_valueID = CSSValueGujarati;
       break;
-    case EListStyleType::Gurmukhi:
+    case EListStyleType::kGurmukhi:
       m_valueID = CSSValueGurmukhi;
       break;
-    case EListStyleType::Hangul:
+    case EListStyleType::kHangul:
       m_valueID = CSSValueHangul;
       break;
-    case EListStyleType::HangulConsonant:
+    case EListStyleType::kHangulConsonant:
       m_valueID = CSSValueHangulConsonant;
       break;
-    case EListStyleType::KoreanHangulFormal:
+    case EListStyleType::kKoreanHangulFormal:
       m_valueID = CSSValueKoreanHangulFormal;
       break;
-    case EListStyleType::KoreanHanjaFormal:
+    case EListStyleType::kKoreanHanjaFormal:
       m_valueID = CSSValueKoreanHanjaFormal;
       break;
-    case EListStyleType::KoreanHanjaInformal:
+    case EListStyleType::kKoreanHanjaInformal:
       m_valueID = CSSValueKoreanHanjaInformal;
       break;
-    case EListStyleType::Hebrew:
+    case EListStyleType::kHebrew:
       m_valueID = CSSValueHebrew;
       break;
-    case EListStyleType::Hiragana:
+    case EListStyleType::kHiragana:
       m_valueID = CSSValueHiragana;
       break;
-    case EListStyleType::HiraganaIroha:
+    case EListStyleType::kHiraganaIroha:
       m_valueID = CSSValueHiraganaIroha;
       break;
-    case EListStyleType::Kannada:
+    case EListStyleType::kKannada:
       m_valueID = CSSValueKannada;
       break;
-    case EListStyleType::Katakana:
+    case EListStyleType::kKatakana:
       m_valueID = CSSValueKatakana;
       break;
-    case EListStyleType::KatakanaIroha:
+    case EListStyleType::kKatakanaIroha:
       m_valueID = CSSValueKatakanaIroha;
       break;
-    case EListStyleType::Khmer:
+    case EListStyleType::kKhmer:
       m_valueID = CSSValueKhmer;
       break;
-    case EListStyleType::Lao:
+    case EListStyleType::kLao:
       m_valueID = CSSValueLao;
       break;
-    case EListStyleType::LowerAlpha:
+    case EListStyleType::kLowerAlpha:
       m_valueID = CSSValueLowerAlpha;
       break;
-    case EListStyleType::LowerArmenian:
+    case EListStyleType::kLowerArmenian:
       m_valueID = CSSValueLowerArmenian;
       break;
-    case EListStyleType::LowerGreek:
+    case EListStyleType::kLowerGreek:
       m_valueID = CSSValueLowerGreek;
       break;
-    case EListStyleType::LowerLatin:
+    case EListStyleType::kLowerLatin:
       m_valueID = CSSValueLowerLatin;
       break;
-    case EListStyleType::LowerRoman:
+    case EListStyleType::kLowerRoman:
       m_valueID = CSSValueLowerRoman;
       break;
-    case EListStyleType::Malayalam:
+    case EListStyleType::kMalayalam:
       m_valueID = CSSValueMalayalam;
       break;
-    case EListStyleType::Mongolian:
+    case EListStyleType::kMongolian:
       m_valueID = CSSValueMongolian;
       break;
-    case EListStyleType::Myanmar:
+    case EListStyleType::kMyanmar:
       m_valueID = CSSValueMyanmar;
       break;
-    case EListStyleType::NoneListStyle:
+    case EListStyleType::kNone:
       m_valueID = CSSValueNone;
       break;
-    case EListStyleType::Oriya:
+    case EListStyleType::kOriya:
       m_valueID = CSSValueOriya;
       break;
-    case EListStyleType::Persian:
+    case EListStyleType::kPersian:
       m_valueID = CSSValuePersian;
       break;
-    case EListStyleType::SimpChineseFormal:
+    case EListStyleType::kSimpChineseFormal:
       m_valueID = CSSValueSimpChineseFormal;
       break;
-    case EListStyleType::SimpChineseInformal:
+    case EListStyleType::kSimpChineseInformal:
       m_valueID = CSSValueSimpChineseInformal;
       break;
-    case EListStyleType::Square:
+    case EListStyleType::kSquare:
       m_valueID = CSSValueSquare;
       break;
-    case EListStyleType::Telugu:
+    case EListStyleType::kTelugu:
       m_valueID = CSSValueTelugu;
       break;
-    case EListStyleType::Thai:
+    case EListStyleType::kThai:
       m_valueID = CSSValueThai;
       break;
-    case EListStyleType::Tibetan:
+    case EListStyleType::kTibetan:
       m_valueID = CSSValueTibetan;
       break;
-    case EListStyleType::TradChineseFormal:
+    case EListStyleType::kTradChineseFormal:
       m_valueID = CSSValueTradChineseFormal;
       break;
-    case EListStyleType::TradChineseInformal:
+    case EListStyleType::kTradChineseInformal:
       m_valueID = CSSValueTradChineseInformal;
       break;
-    case EListStyleType::UpperAlpha:
+    case EListStyleType::kUpperAlpha:
       m_valueID = CSSValueUpperAlpha;
       break;
-    case EListStyleType::UpperArmenian:
+    case EListStyleType::kUpperArmenian:
       m_valueID = CSSValueUpperArmenian;
       break;
-    case EListStyleType::UpperLatin:
+    case EListStyleType::kUpperLatin:
       m_valueID = CSSValueUpperLatin;
       break;
-    case EListStyleType::UpperRoman:
+    case EListStyleType::kUpperRoman:
       m_valueID = CSSValueUpperRoman;
       break;
-    case EListStyleType::Urdu:
+    case EListStyleType::kUrdu:
       m_valueID = CSSValueUrdu;
       break;
   }
@@ -1699,123 +1745,123 @@ template <>
 inline EListStyleType CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueNone:
-      return EListStyleType::NoneListStyle;
+      return EListStyleType::kNone;
     case CSSValueArabicIndic:
-      return EListStyleType::ArabicIndic;
+      return EListStyleType::kArabicIndic;
     case CSSValueArmenian:
-      return EListStyleType::Armenian;
+      return EListStyleType::kArmenian;
     case CSSValueBengali:
-      return EListStyleType::Bengali;
+      return EListStyleType::kBengali;
     case CSSValueCambodian:
-      return EListStyleType::Cambodian;
+      return EListStyleType::kCambodian;
     case CSSValueCircle:
-      return EListStyleType::Circle;
+      return EListStyleType::kCircle;
     case CSSValueCjkEarthlyBranch:
-      return EListStyleType::CjkEarthlyBranch;
+      return EListStyleType::kCjkEarthlyBranch;
     case CSSValueCjkHeavenlyStem:
-      return EListStyleType::CjkHeavenlyStem;
+      return EListStyleType::kCjkHeavenlyStem;
     case CSSValueCjkIdeographic:
-      return EListStyleType::CJKIdeographic;
+      return EListStyleType::kCjkIdeographic;
     case CSSValueDecimalLeadingZero:
-      return EListStyleType::DecimalLeadingZero;
+      return EListStyleType::kDecimalLeadingZero;
     case CSSValueDecimal:
-      return EListStyleType::DecimalListStyle;
+      return EListStyleType::kDecimal;
     case CSSValueDevanagari:
-      return EListStyleType::Devanagari;
+      return EListStyleType::kDevanagari;
     case CSSValueDisc:
-      return EListStyleType::Disc;
+      return EListStyleType::kDisc;
     case CSSValueEthiopicHalehame:
-      return EListStyleType::EthiopicHalehame;
+      return EListStyleType::kEthiopicHalehame;
     case CSSValueEthiopicHalehameAm:
-      return EListStyleType::EthiopicHalehameAm;
+      return EListStyleType::kEthiopicHalehameAm;
     case CSSValueEthiopicHalehameTiEt:
-      return EListStyleType::EthiopicHalehameTiEt;
+      return EListStyleType::kEthiopicHalehameTiEt;
     case CSSValueEthiopicHalehameTiEr:
-      return EListStyleType::EthiopicHalehameTiEr;
+      return EListStyleType::kEthiopicHalehameTiEr;
     case CSSValueGeorgian:
-      return EListStyleType::Georgian;
+      return EListStyleType::kGeorgian;
     case CSSValueGujarati:
-      return EListStyleType::Gujarati;
+      return EListStyleType::kGujarati;
     case CSSValueGurmukhi:
-      return EListStyleType::Gurmukhi;
+      return EListStyleType::kGurmukhi;
     case CSSValueHangul:
-      return EListStyleType::Hangul;
+      return EListStyleType::kHangul;
     case CSSValueHangulConsonant:
-      return EListStyleType::HangulConsonant;
+      return EListStyleType::kHangulConsonant;
     case CSSValueKoreanHangulFormal:
-      return EListStyleType::KoreanHangulFormal;
+      return EListStyleType::kKoreanHangulFormal;
     case CSSValueKoreanHanjaFormal:
-      return EListStyleType::KoreanHanjaFormal;
+      return EListStyleType::kKoreanHanjaFormal;
     case CSSValueKoreanHanjaInformal:
-      return EListStyleType::KoreanHanjaInformal;
+      return EListStyleType::kKoreanHanjaInformal;
     case CSSValueHebrew:
-      return EListStyleType::Hebrew;
+      return EListStyleType::kHebrew;
     case CSSValueHiragana:
-      return EListStyleType::Hiragana;
+      return EListStyleType::kHiragana;
     case CSSValueHiraganaIroha:
-      return EListStyleType::HiraganaIroha;
+      return EListStyleType::kHiraganaIroha;
     case CSSValueKannada:
-      return EListStyleType::Kannada;
+      return EListStyleType::kKannada;
     case CSSValueKatakana:
-      return EListStyleType::Katakana;
+      return EListStyleType::kKatakana;
     case CSSValueKatakanaIroha:
-      return EListStyleType::KatakanaIroha;
+      return EListStyleType::kKatakanaIroha;
     case CSSValueKhmer:
-      return EListStyleType::Khmer;
+      return EListStyleType::kKhmer;
     case CSSValueLao:
-      return EListStyleType::Lao;
+      return EListStyleType::kLao;
     case CSSValueLowerAlpha:
-      return EListStyleType::LowerAlpha;
+      return EListStyleType::kLowerAlpha;
     case CSSValueLowerArmenian:
-      return EListStyleType::LowerArmenian;
+      return EListStyleType::kLowerArmenian;
     case CSSValueLowerGreek:
-      return EListStyleType::LowerGreek;
+      return EListStyleType::kLowerGreek;
     case CSSValueLowerLatin:
-      return EListStyleType::LowerLatin;
+      return EListStyleType::kLowerLatin;
     case CSSValueLowerRoman:
-      return EListStyleType::LowerRoman;
+      return EListStyleType::kLowerRoman;
     case CSSValueMalayalam:
-      return EListStyleType::Malayalam;
+      return EListStyleType::kMalayalam;
     case CSSValueMongolian:
-      return EListStyleType::Mongolian;
+      return EListStyleType::kMongolian;
     case CSSValueMyanmar:
-      return EListStyleType::Myanmar;
+      return EListStyleType::kMyanmar;
     case CSSValueOriya:
-      return EListStyleType::Oriya;
+      return EListStyleType::kOriya;
     case CSSValuePersian:
-      return EListStyleType::Persian;
+      return EListStyleType::kPersian;
     case CSSValueSimpChineseFormal:
-      return EListStyleType::SimpChineseFormal;
+      return EListStyleType::kSimpChineseFormal;
     case CSSValueSimpChineseInformal:
-      return EListStyleType::SimpChineseInformal;
+      return EListStyleType::kSimpChineseInformal;
     case CSSValueSquare:
-      return EListStyleType::Square;
+      return EListStyleType::kSquare;
     case CSSValueTelugu:
-      return EListStyleType::Telugu;
+      return EListStyleType::kTelugu;
     case CSSValueThai:
-      return EListStyleType::Thai;
+      return EListStyleType::kThai;
     case CSSValueTibetan:
-      return EListStyleType::Tibetan;
+      return EListStyleType::kTibetan;
     case CSSValueTradChineseFormal:
-      return EListStyleType::TradChineseFormal;
+      return EListStyleType::kTradChineseFormal;
     case CSSValueTradChineseInformal:
-      return EListStyleType::TradChineseInformal;
+      return EListStyleType::kTradChineseInformal;
     case CSSValueUpperAlpha:
-      return EListStyleType::UpperAlpha;
+      return EListStyleType::kUpperAlpha;
     case CSSValueUpperArmenian:
-      return EListStyleType::UpperArmenian;
+      return EListStyleType::kUpperArmenian;
     case CSSValueUpperLatin:
-      return EListStyleType::UpperLatin;
+      return EListStyleType::kUpperLatin;
     case CSSValueUpperRoman:
-      return EListStyleType::UpperRoman;
+      return EListStyleType::kUpperRoman;
     case CSSValueUrdu:
-      return EListStyleType::Urdu;
+      return EListStyleType::kUrdu;
     default:
       break;
   }
 
   NOTREACHED();
-  return EListStyleType::NoneListStyle;
+  return EListStyleType::kNone;
 }
 
 template <>
@@ -1855,25 +1901,25 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EOverflow e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case OverflowVisible:
+    case EOverflow::kVisible:
       m_valueID = CSSValueVisible;
       break;
-    case OverflowHidden:
+    case EOverflow::kHidden:
       m_valueID = CSSValueHidden;
       break;
-    case OverflowScroll:
+    case EOverflow::kScroll:
       m_valueID = CSSValueScroll;
       break;
-    case OverflowAuto:
+    case EOverflow::kAuto:
       m_valueID = CSSValueAuto;
       break;
-    case OverflowOverlay:
+    case EOverflow::kOverlay:
       m_valueID = CSSValueOverlay;
       break;
-    case OverflowPagedX:
+    case EOverflow::kWebkitPagedX:
       m_valueID = CSSValueWebkitPagedX;
       break;
-    case OverflowPagedY:
+    case EOverflow::kWebkitPagedY:
       m_valueID = CSSValueWebkitPagedY;
       break;
   }
@@ -1883,25 +1929,25 @@ template <>
 inline EOverflow CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueVisible:
-      return OverflowVisible;
+      return EOverflow::kVisible;
     case CSSValueHidden:
-      return OverflowHidden;
+      return EOverflow::kHidden;
     case CSSValueScroll:
-      return OverflowScroll;
+      return EOverflow::kScroll;
     case CSSValueAuto:
-      return OverflowAuto;
+      return EOverflow::kAuto;
     case CSSValueOverlay:
-      return OverflowOverlay;
+      return EOverflow::kOverlay;
     case CSSValueWebkitPagedX:
-      return OverflowPagedX;
+      return EOverflow::kWebkitPagedX;
     case CSSValueWebkitPagedY:
-      return OverflowPagedY;
+      return EOverflow::kWebkitPagedY;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return OverflowVisible;
+  return EOverflow::kVisible;
 }
 
 template <>
@@ -2065,10 +2111,10 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(ETableLayout e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case TableLayoutAuto:
+    case ETableLayout::kAuto:
       m_valueID = CSSValueAuto;
       break;
-    case TableLayoutFixed:
+    case ETableLayout::kFixed:
       m_valueID = CSSValueFixed;
       break;
   }
@@ -2078,46 +2124,46 @@ template <>
 inline ETableLayout CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueFixed:
-      return TableLayoutFixed;
+      return ETableLayout::kFixed;
     case CSSValueAuto:
-      return TableLayoutAuto;
+      return ETableLayout::kAuto;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return TableLayoutAuto;
+  return ETableLayout::kAuto;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(ETextAlign e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case ETextAlign::Start:
+    case ETextAlign::kStart:
       m_valueID = CSSValueStart;
       break;
-    case ETextAlign::End:
+    case ETextAlign::kEnd:
       m_valueID = CSSValueEnd;
       break;
-    case ETextAlign::Left:
+    case ETextAlign::kLeft:
       m_valueID = CSSValueLeft;
       break;
-    case ETextAlign::Right:
+    case ETextAlign::kRight:
       m_valueID = CSSValueRight;
       break;
-    case ETextAlign::Center:
+    case ETextAlign::kCenter:
       m_valueID = CSSValueCenter;
       break;
-    case ETextAlign::Justify:
+    case ETextAlign::kJustify:
       m_valueID = CSSValueJustify;
       break;
-    case ETextAlign::WebkitLeft:
+    case ETextAlign::kWebkitLeft:
       m_valueID = CSSValueWebkitLeft;
       break;
-    case ETextAlign::WebkitRight:
+    case ETextAlign::kWebkitRight:
       m_valueID = CSSValueWebkitRight;
       break;
-    case ETextAlign::WebkitCenter:
+    case ETextAlign::kWebkitCenter:
       m_valueID = CSSValueWebkitCenter;
       break;
   }
@@ -2128,27 +2174,27 @@ inline ETextAlign CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueWebkitAuto:  // Legacy -webkit-auto. Eqiuvalent to start.
     case CSSValueStart:
-      return ETextAlign::Start;
+      return ETextAlign::kStart;
     case CSSValueEnd:
-      return ETextAlign::End;
+      return ETextAlign::kEnd;
     case CSSValueCenter:
     case CSSValueInternalCenter:
-      return ETextAlign::Center;
+      return ETextAlign::kCenter;
     case CSSValueLeft:
-      return ETextAlign::Left;
+      return ETextAlign::kLeft;
     case CSSValueRight:
-      return ETextAlign::Right;
+      return ETextAlign::kRight;
     case CSSValueJustify:
-      return ETextAlign::Justify;
+      return ETextAlign::kJustify;
     case CSSValueWebkitLeft:
-      return ETextAlign::WebkitLeft;
+      return ETextAlign::kWebkitLeft;
     case CSSValueWebkitRight:
-      return ETextAlign::WebkitRight;
+      return ETextAlign::kWebkitRight;
     case CSSValueWebkitCenter:
-      return ETextAlign::WebkitCenter;
+      return ETextAlign::kWebkitCenter;
     default:
       NOTREACHED();
-      return ETextAlign::Left;
+      return ETextAlign::kLeft;
   }
 }
 
@@ -2374,16 +2420,16 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(ETextTransform e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case ETextTransform::Capitalize:
+    case ETextTransform::kCapitalize:
       m_valueID = CSSValueCapitalize;
       break;
-    case ETextTransform::Uppercase:
+    case ETextTransform::kUppercase:
       m_valueID = CSSValueUppercase;
       break;
-    case ETextTransform::Lowercase:
+    case ETextTransform::kLowercase:
       m_valueID = CSSValueLowercase;
       break;
-    case ETextTransform::None:
+    case ETextTransform::kNone:
       m_valueID = CSSValueNone;
       break;
   }
@@ -2393,70 +2439,70 @@ template <>
 inline ETextTransform CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueCapitalize:
-      return ETextTransform::Capitalize;
+      return ETextTransform::kCapitalize;
     case CSSValueUppercase:
-      return ETextTransform::Uppercase;
+      return ETextTransform::kUppercase;
     case CSSValueLowercase:
-      return ETextTransform::Lowercase;
+      return ETextTransform::kLowercase;
     case CSSValueNone:
-      return ETextTransform::None;
+      return ETextTransform::kNone;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return ETextTransform::None;
+  return ETextTransform::kNone;
 }
 
 template <>
-inline CSSIdentifierValue::CSSIdentifierValue(EUnicodeBidi e)
+inline CSSIdentifierValue::CSSIdentifierValue(UnicodeBidi e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case UBNormal:
+    case UnicodeBidi::kNormal:
       m_valueID = CSSValueNormal;
       break;
-    case Embed:
+    case UnicodeBidi::kEmbed:
       m_valueID = CSSValueEmbed;
       break;
-    case Override:
+    case UnicodeBidi::kBidiOverride:
       m_valueID = CSSValueBidiOverride;
       break;
-    case Isolate:
+    case UnicodeBidi::kIsolate:
       m_valueID = CSSValueIsolate;
       break;
-    case IsolateOverride:
+    case UnicodeBidi::kIsolateOverride:
       m_valueID = CSSValueIsolateOverride;
       break;
-    case Plaintext:
+    case UnicodeBidi::kPlaintext:
       m_valueID = CSSValuePlaintext;
       break;
   }
 }
 
 template <>
-inline EUnicodeBidi CSSIdentifierValue::convertTo() const {
+inline UnicodeBidi CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueNormal:
-      return UBNormal;
+      return UnicodeBidi::kNormal;
     case CSSValueEmbed:
-      return Embed;
+      return UnicodeBidi::kEmbed;
     case CSSValueBidiOverride:
-      return Override;
+      return UnicodeBidi::kBidiOverride;
     case CSSValueIsolate:
     case CSSValueWebkitIsolate:
-      return Isolate;
+      return UnicodeBidi::kIsolate;
     case CSSValueIsolateOverride:
     case CSSValueWebkitIsolateOverride:
-      return IsolateOverride;
+      return UnicodeBidi::kIsolateOverride;
     case CSSValuePlaintext:
     case CSSValueWebkitPlaintext:
-      return Plaintext;
+      return UnicodeBidi::kPlaintext;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return UBNormal;
+  return UnicodeBidi::kNormal;
 }
 
 template <>
@@ -2566,34 +2612,34 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EVerticalAlign a)
     : CSSValue(IdentifierClass) {
   switch (a) {
-    case VerticalAlignTop:
+    case EVerticalAlign::kTop:
       m_valueID = CSSValueTop;
       break;
-    case VerticalAlignBottom:
+    case EVerticalAlign::kBottom:
       m_valueID = CSSValueBottom;
       break;
-    case VerticalAlignMiddle:
+    case EVerticalAlign::kMiddle:
       m_valueID = CSSValueMiddle;
       break;
-    case VerticalAlignBaseline:
+    case EVerticalAlign::kBaseline:
       m_valueID = CSSValueBaseline;
       break;
-    case VerticalAlignTextBottom:
+    case EVerticalAlign::kTextBottom:
       m_valueID = CSSValueTextBottom;
       break;
-    case VerticalAlignTextTop:
+    case EVerticalAlign::kTextTop:
       m_valueID = CSSValueTextTop;
       break;
-    case VerticalAlignSub:
+    case EVerticalAlign::kSub:
       m_valueID = CSSValueSub;
       break;
-    case VerticalAlignSuper:
+    case EVerticalAlign::kSuper:
       m_valueID = CSSValueSuper;
       break;
-    case VerticalAlignBaselineMiddle:
+    case EVerticalAlign::kBaselineMiddle:
       m_valueID = CSSValueWebkitBaselineMiddle;
       break;
-    case VerticalAlignLength:
+    case EVerticalAlign::kLength:
       m_valueID = CSSValueInvalid;
   }
 }
@@ -2602,42 +2648,42 @@ template <>
 inline EVerticalAlign CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueTop:
-      return VerticalAlignTop;
+      return EVerticalAlign::kTop;
     case CSSValueBottom:
-      return VerticalAlignBottom;
+      return EVerticalAlign::kBottom;
     case CSSValueMiddle:
-      return VerticalAlignMiddle;
+      return EVerticalAlign::kMiddle;
     case CSSValueBaseline:
-      return VerticalAlignBaseline;
+      return EVerticalAlign::kBaseline;
     case CSSValueTextBottom:
-      return VerticalAlignTextBottom;
+      return EVerticalAlign::kTextBottom;
     case CSSValueTextTop:
-      return VerticalAlignTextTop;
+      return EVerticalAlign::kTextTop;
     case CSSValueSub:
-      return VerticalAlignSub;
+      return EVerticalAlign::kSub;
     case CSSValueSuper:
-      return VerticalAlignSuper;
+      return EVerticalAlign::kSuper;
     case CSSValueWebkitBaselineMiddle:
-      return VerticalAlignBaselineMiddle;
+      return EVerticalAlign::kBaselineMiddle;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return VerticalAlignTop;
+  return EVerticalAlign::kTop;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EVisibility e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case EVisibility::Visible:
+    case EVisibility::kVisible:
       m_valueID = CSSValueVisible;
       break;
-    case EVisibility::Hidden:
+    case EVisibility::kHidden:
       m_valueID = CSSValueHidden;
       break;
-    case EVisibility::Collapse:
+    case EVisibility::kCollapse:
       m_valueID = CSSValueCollapse;
       break;
   }
@@ -2647,39 +2693,39 @@ template <>
 inline EVisibility CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueHidden:
-      return EVisibility::Hidden;
+      return EVisibility::kHidden;
     case CSSValueVisible:
-      return EVisibility::Visible;
+      return EVisibility::kVisible;
     case CSSValueCollapse:
-      return EVisibility::Collapse;
+      return EVisibility::kCollapse;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return EVisibility::Visible;
+  return EVisibility::kVisible;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EWhiteSpace e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case EWhiteSpace::Normal:
+    case EWhiteSpace::kNormal:
       m_valueID = CSSValueNormal;
       break;
-    case EWhiteSpace::Pre:
+    case EWhiteSpace::kPre:
       m_valueID = CSSValuePre;
       break;
-    case EWhiteSpace::PreWrap:
+    case EWhiteSpace::kPreWrap:
       m_valueID = CSSValuePreWrap;
       break;
-    case EWhiteSpace::PreLine:
+    case EWhiteSpace::kPreLine:
       m_valueID = CSSValuePreLine;
       break;
-    case EWhiteSpace::Nowrap:
+    case EWhiteSpace::kNowrap:
       m_valueID = CSSValueNowrap;
       break;
-    case EWhiteSpace::KhtmlNowrap:
+    case EWhiteSpace::kWebkitNowrap:
       m_valueID = CSSValueWebkitNowrap;
       break;
   }
@@ -2689,23 +2735,23 @@ template <>
 inline EWhiteSpace CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueWebkitNowrap:
-      return EWhiteSpace::KhtmlNowrap;
+      return EWhiteSpace::kWebkitNowrap;
     case CSSValueNowrap:
-      return EWhiteSpace::Nowrap;
+      return EWhiteSpace::kNowrap;
     case CSSValuePre:
-      return EWhiteSpace::Pre;
+      return EWhiteSpace::kPre;
     case CSSValuePreWrap:
-      return EWhiteSpace::PreWrap;
+      return EWhiteSpace::kPreWrap;
     case CSSValuePreLine:
-      return EWhiteSpace::PreLine;
+      return EWhiteSpace::kPreLine;
     case CSSValueNormal:
-      return EWhiteSpace::Normal;
+      return EWhiteSpace::kNormal;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return EWhiteSpace::Normal;
+  return EWhiteSpace::kNormal;
 }
 
 template <>
@@ -2750,13 +2796,13 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EOverflowAnchor e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case AnchorVisible:
+    case EOverflowAnchor::kVisible:
       m_valueID = CSSValueVisible;
       break;
-    case AnchorNone:
+    case EOverflowAnchor::kNone:
       m_valueID = CSSValueNone;
       break;
-    case AnchorAuto:
+    case EOverflowAnchor::kAuto:
       m_valueID = CSSValueAuto;
       break;
   }
@@ -2766,17 +2812,17 @@ template <>
 inline EOverflowAnchor CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueVisible:
-      return AnchorVisible;
+      return EOverflowAnchor::kVisible;
     case CSSValueNone:
-      return AnchorNone;
+      return EOverflowAnchor::kNone;
     case CSSValueAuto:
-      return AnchorAuto;
+      return EOverflowAnchor::kAuto;
     default:
       break;
   }
 
   NOTREACHED();
-  return AnchorNone;
+  return EOverflowAnchor::kNone;
 }
 
 template <>
@@ -2811,10 +2857,10 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(TextDirection e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case LTR:
+    case TextDirection::kLtr:
       m_valueID = CSSValueLtr;
       break;
-    case RTL:
+    case TextDirection::kRtl:
       m_valueID = CSSValueRtl;
       break;
   }
@@ -2824,28 +2870,28 @@ template <>
 inline TextDirection CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueLtr:
-      return LTR;
+      return TextDirection::kLtr;
     case CSSValueRtl:
-      return RTL;
+      return TextDirection::kRtl;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return LTR;
+  return TextDirection::kLtr;
 }
 
 template <>
 inline CSSIdentifierValue::CSSIdentifierValue(WritingMode e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case TopToBottomWritingMode:
+    case WritingMode::kHorizontalTb:
       m_valueID = CSSValueHorizontalTb;
       break;
-    case RightToLeftWritingMode:
+    case WritingMode::kVerticalRl:
       m_valueID = CSSValueVerticalRl;
       break;
-    case LeftToRightWritingMode:
+    case WritingMode::kVerticalLr:
       m_valueID = CSSValueVerticalLr;
       break;
   }
@@ -2859,19 +2905,19 @@ inline WritingMode CSSIdentifierValue::convertTo() const {
     case CSSValueLrTb:
     case CSSValueRl:
     case CSSValueRlTb:
-      return TopToBottomWritingMode;
+      return WritingMode::kHorizontalTb;
     case CSSValueVerticalRl:
     case CSSValueTb:
     case CSSValueTbRl:
-      return RightToLeftWritingMode;
+      return WritingMode::kVerticalRl;
     case CSSValueVerticalLr:
-      return LeftToRightWritingMode;
+      return WritingMode::kVerticalLr;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return TopToBottomWritingMode;
+  return WritingMode::kHorizontalTb;
 }
 
 template <>
@@ -3105,37 +3151,37 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EPointerEvents e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case PE_NONE:
+    case EPointerEvents::kNone:
       m_valueID = CSSValueNone;
       break;
-    case PE_STROKE:
+    case EPointerEvents::kStroke:
       m_valueID = CSSValueStroke;
       break;
-    case PE_FILL:
+    case EPointerEvents::kFill:
       m_valueID = CSSValueFill;
       break;
-    case PE_PAINTED:
+    case EPointerEvents::kPainted:
       m_valueID = CSSValuePainted;
       break;
-    case PE_VISIBLE:
+    case EPointerEvents::kVisible:
       m_valueID = CSSValueVisible;
       break;
-    case PE_VISIBLE_STROKE:
+    case EPointerEvents::kVisibleStroke:
       m_valueID = CSSValueVisibleStroke;
       break;
-    case PE_VISIBLE_FILL:
+    case EPointerEvents::kVisibleFill:
       m_valueID = CSSValueVisibleFill;
       break;
-    case PE_VISIBLE_PAINTED:
+    case EPointerEvents::kVisiblePainted:
       m_valueID = CSSValueVisiblePainted;
       break;
-    case PE_AUTO:
+    case EPointerEvents::kAuto:
       m_valueID = CSSValueAuto;
       break;
-    case PE_ALL:
+    case EPointerEvents::kAll:
       m_valueID = CSSValueAll;
       break;
-    case PE_BOUNDINGBOX:
+    case EPointerEvents::kBoundingBox:
       m_valueID = CSSValueBoundingBox;
       break;
   }
@@ -3145,33 +3191,33 @@ template <>
 inline EPointerEvents CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueAll:
-      return PE_ALL;
+      return EPointerEvents::kAll;
     case CSSValueAuto:
-      return PE_AUTO;
+      return EPointerEvents::kAuto;
     case CSSValueNone:
-      return PE_NONE;
+      return EPointerEvents::kNone;
     case CSSValueVisiblePainted:
-      return PE_VISIBLE_PAINTED;
+      return EPointerEvents::kVisiblePainted;
     case CSSValueVisibleFill:
-      return PE_VISIBLE_FILL;
+      return EPointerEvents::kVisibleFill;
     case CSSValueVisibleStroke:
-      return PE_VISIBLE_STROKE;
+      return EPointerEvents::kVisibleStroke;
     case CSSValueVisible:
-      return PE_VISIBLE;
+      return EPointerEvents::kVisible;
     case CSSValuePainted:
-      return PE_PAINTED;
+      return EPointerEvents::kPainted;
     case CSSValueFill:
-      return PE_FILL;
+      return EPointerEvents::kFill;
     case CSSValueStroke:
-      return PE_STROKE;
+      return EPointerEvents::kStroke;
     case CSSValueBoundingBox:
-      return PE_BOUNDINGBOX;
+      return EPointerEvents::kBoundingBox;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return PE_ALL;
+  return EPointerEvents::kAll;
 }
 
 template <>
@@ -3546,28 +3592,28 @@ inline CSSIdentifierValue::CSSIdentifierValue(ESpeak e)
 }
 
 template <>
-inline Order CSSIdentifierValue::convertTo() const {
+inline EOrder CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueLogical:
-      return LogicalOrder;
+      return EOrder::kLogical;
     case CSSValueVisual:
-      return VisualOrder;
+      return EOrder::kVisual;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return LogicalOrder;
+  return EOrder::kLogical;
 }
 
 template <>
-inline CSSIdentifierValue::CSSIdentifierValue(Order e)
+inline CSSIdentifierValue::CSSIdentifierValue(EOrder e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case LogicalOrder:
+    case EOrder::kLogical:
       m_valueID = CSSValueLogical;
       break;
-    case VisualOrder:
+    case EOrder::kVisual:
       m_valueID = CSSValueVisual;
       break;
   }
@@ -3870,10 +3916,10 @@ template <>
 inline CSSIdentifierValue::CSSIdentifierValue(EBorderCollapse e)
     : CSSValue(IdentifierClass) {
   switch (e) {
-    case EBorderCollapse::Separate:
+    case EBorderCollapse::kSeparate:
       m_valueID = CSSValueSeparate;
       break;
-    case EBorderCollapse::Collapse:
+    case EBorderCollapse::kCollapse:
       m_valueID = CSSValueCollapse;
       break;
   }
@@ -3883,15 +3929,15 @@ template <>
 inline EBorderCollapse CSSIdentifierValue::convertTo() const {
   switch (m_valueID) {
     case CSSValueSeparate:
-      return EBorderCollapse::Separate;
+      return EBorderCollapse::kSeparate;
     case CSSValueCollapse:
-      return EBorderCollapse::Collapse;
+      return EBorderCollapse::kCollapse;
     default:
       break;
   }
 
   ASSERT_NOT_REACHED();
-  return EBorderCollapse::Separate;
+  return EBorderCollapse::kSeparate;
 }
 
 template <>

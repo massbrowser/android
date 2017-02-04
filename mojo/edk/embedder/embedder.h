@@ -27,8 +27,6 @@ class PortProvider;
 namespace mojo {
 namespace edk {
 
-class ProcessDelegate;
-
 using ProcessErrorCallback = base::Callback<void(const std::string& error)>;
 
 // Basic configuration/initialization ------------------------------------------
@@ -150,22 +148,20 @@ PassSharedMemoryHandle(MojoHandle mojo_handle,
 //
 // This subsystem may be shut down using |ShutdownIPCSupport()|. None of the IPC
 // functions may be called after this is called.
-
-// Initializes a process of the given type; to be called after |Init()|.
-//   - |process_delegate| must be a process delegate of the appropriate type
-//     corresponding to |process_type|; its methods will be called on the same
-//     thread as Shutdown.
-//   - |process_delegate|, and |io_thread_task_runner| should live at least
-//     until |ShutdownIPCSupport()|'s callback has been run.
+//
+// |io_thread_task_runner| should live at least until |ShutdownIPCSupport()|'s
+// callback has been run.
 MOJO_SYSTEM_IMPL_EXPORT void InitIPCSupport(
-    ProcessDelegate* process_delegate,
     scoped_refptr<base::TaskRunner> io_thread_task_runner);
+
+// Retrieves the TaskRunner used for IPC I/O, as set by InitIPCSupport.
+MOJO_SYSTEM_IMPL_EXPORT scoped_refptr<base::TaskRunner> GetIOTaskRunner();
 
 // Shuts down the subsystem initialized by |InitIPCSupport()|. It be called from
 // any thread and will attempt to complete shutdown on the I/O thread with which
-// the system was initialized. Upon completion the ProcessDelegate's
-// |OnShutdownComplete()| method is invoked.
-MOJO_SYSTEM_IMPL_EXPORT void ShutdownIPCSupport();
+// the system was initialized. Upon completion, |callback| is invoked on an
+// arbitrary thread.
+MOJO_SYSTEM_IMPL_EXPORT void ShutdownIPCSupport(const base::Closure& callback);
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 // Set the |base::PortProvider| for this process. Can be called on any thread,
@@ -173,15 +169,6 @@ MOJO_SYSTEM_IMPL_EXPORT void ShutdownIPCSupport();
 MOJO_SYSTEM_IMPL_EXPORT void SetMachPortProvider(
     base::PortProvider* port_provider);
 #endif
-
-// Creates a message pipe over an arbitrary platform channel. The other end of
-// the channel must also be passed to this function. Either endpoint can be in
-// any process.
-//
-// Note that the channel is only used to negotiate pipe connection, not as the
-// transport for messages on the pipe.
-MOJO_SYSTEM_IMPL_EXPORT ScopedMessagePipeHandle
-CreateMessagePipe(ScopedPlatformHandle platform_handle);
 
 // Creates a message pipe from a token. A child embedder must also have this
 // token and call CreateChildMessagePipe() with it in order for the pipe to get

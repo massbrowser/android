@@ -60,7 +60,7 @@ class PeopleHandler : public SettingsPageUIHandler,
   ~PeopleHandler() override;
 
   // Initializes the sync setup flow and shows the setup UI.
-  void OpenSyncSetup(bool creating_supervised_user);
+  void OpenSyncSetup();
 
   // Terminates the sync setup flow.
   void CloseSyncSetup();
@@ -71,10 +71,10 @@ class PeopleHandler : public SettingsPageUIHandler,
  private:
   friend class PeopleHandlerTest;
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest,
-                           DisplayConfigureWithBackendDisabledAndCancel);
+                           DisplayConfigureWithEngineDisabledAndCancel);
   FRIEND_TEST_ALL_PREFIXES(
       PeopleHandlerTest,
-      DisplayConfigureWithBackendDisabledAndSyncStartupCompleted);
+      DisplayConfigureWithEngineDisabledAndSyncStartupCompleted);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, HandleSetupUIWhenSyncDisabled);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, SelectCustomEncryption);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, ShowSyncSetupWhenNotSignedIn);
@@ -119,7 +119,7 @@ class PeopleHandler : public SettingsPageUIHandler,
                        const std::string& username) override;
 
   // syncer::SyncServiceObserver implementation.
-  void OnStateChanged() override;
+  void OnStateChanged(syncer::SyncService* sync) override;
 
   // Returns a newly created dictionary with a number of properties that
   // correspond to the status of sync.
@@ -160,7 +160,7 @@ class PeopleHandler : public SettingsPageUIHandler,
   // is running in the background.
   void DisplaySpinner();
 
-  // Displays an error dialog which shows timeout of starting the sync backend.
+  // Displays an error dialog which shows timeout of starting the sync engine.
   void DisplayTimeout();
 
   // Closes the associated sync settings page.
@@ -178,7 +178,7 @@ class PeopleHandler : public SettingsPageUIHandler,
   // Weak pointer.
   Profile* profile_;
 
-  // Helper object used to wait for the sync backend to startup.
+  // Helper object used to wait for the sync engine to startup.
   std::unique_ptr<SyncStartupTracker> sync_startup_tracker_;
 
   // Prevents Sync from running until configuration is complete.
@@ -189,9 +189,9 @@ class PeopleHandler : public SettingsPageUIHandler,
   // histograms in the case that the user cancels out.
   bool configuring_sync_;
 
-  // The OneShotTimer object used to timeout of starting the sync backend
+  // The OneShotTimer object used to timeout of starting the sync engine
   // service.
-  std::unique_ptr<base::OneShotTimer> backend_start_timer_;
+  std::unique_ptr<base::OneShotTimer> engine_start_timer_;
 
   // Used to listen for pref changes to allow or disallow signin.
   PrefChangeRegistrar profile_pref_registrar_;

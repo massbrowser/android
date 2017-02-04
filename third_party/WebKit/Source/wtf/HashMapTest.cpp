@@ -106,8 +106,8 @@ using OwnPtrHashMap = HashMap<int, std::unique_ptr<DestructCounter>>;
 TEST(HashMapTest, OwnPtrAsValue) {
   int destructNumber = 0;
   OwnPtrHashMap map;
-  map.add(1, wrapUnique(new DestructCounter(1, &destructNumber)));
-  map.add(2, wrapUnique(new DestructCounter(2, &destructNumber)));
+  map.add(1, WTF::wrapUnique(new DestructCounter(1, &destructNumber)));
+  map.add(2, WTF::wrapUnique(new DestructCounter(2, &destructNumber)));
 
   DestructCounter* counter1 = map.get(1);
   EXPECT_EQ(1, counter1->get());
@@ -126,7 +126,7 @@ TEST(HashMapTest, OwnPtrAsValue) {
   EXPECT_FALSE(map.contains(1));
   EXPECT_EQ(0, destructNumber);
 
-  map.remove(2);
+  map.erase(2);
   EXPECT_FALSE(map.contains(2));
   EXPECT_EQ(0UL, map.size());
   EXPECT_EQ(1, destructNumber);
@@ -141,18 +141,18 @@ class DummyRefCounted : public RefCounted<DummyRefCounted> {
     m_isDeleted = false;
   }
   ~DummyRefCounted() {
-    ASSERT(!m_isDeleted);
+    DCHECK(!m_isDeleted);
     m_isDeleted = true;
   }
 
   void ref() {
-    ASSERT(!m_isDeleted);
+    DCHECK(!m_isDeleted);
     WTF::RefCounted<DummyRefCounted>::ref();
     ++m_refInvokesCount;
   }
 
   void deref() {
-    ASSERT(!m_isDeleted);
+    DCHECK(!m_isDeleted);
     WTF::RefCounted<DummyRefCounted>::deref();
   }
 
@@ -186,7 +186,7 @@ TEST(HashMapTest, RefPtrAsKey) {
   ptr.clear();
   EXPECT_FALSE(isDeleted);
 
-  map.remove(rawPtr);
+  map.erase(rawPtr);
   EXPECT_EQ(1, DummyRefCounted::m_refInvokesCount);
   EXPECT_TRUE(isDeleted);
   EXPECT_TRUE(map.isEmpty());
@@ -210,7 +210,7 @@ TEST(HashMaptest, RemoveAdd) {
   ptr.clear();
   EXPECT_FALSE(isDeleted);
 
-  map.remove(1);
+  map.erase(1);
   EXPECT_EQ(1, DummyRefCounted::m_refInvokesCount);
   EXPECT_TRUE(isDeleted);
   EXPECT_TRUE(map.isEmpty());
@@ -223,7 +223,7 @@ TEST(HashMaptest, RemoveAdd) {
     EXPECT_FALSE(isDeleted2);
     ptr2.clear();
     EXPECT_FALSE(isDeleted2);
-    map.remove(i);
+    map.erase(i);
     EXPECT_TRUE(isDeleted2);
   }
 }
@@ -246,10 +246,10 @@ TEST(HashMapTest, AddResult) {
   EXPECT_EQ(0, result.storedValue->value.get());
 
   SimpleClass* simple1 = new SimpleClass(1);
-  result.storedValue->value = wrapUnique(simple1);
+  result.storedValue->value = WTF::wrapUnique(simple1);
   EXPECT_EQ(simple1, map.get(1));
 
-  IntSimpleMap::AddResult result2 = map.add(1, makeUnique<SimpleClass>(2));
+  IntSimpleMap::AddResult result2 = map.add(1, WTF::makeUnique<SimpleClass>(2));
   EXPECT_FALSE(result2.isNewEntry);
   EXPECT_EQ(1, result.storedValue->key);
   EXPECT_EQ(1, result.storedValue->value->v());
@@ -264,16 +264,16 @@ TEST(HashMapTest, AddResultVectorValue) {
   EXPECT_EQ(1, result.storedValue->key);
   EXPECT_EQ(0u, result.storedValue->value.size());
 
-  result.storedValue->value.append(11);
+  result.storedValue->value.push_back(11);
   EXPECT_EQ(1u, map.find(1)->value.size());
-  EXPECT_EQ(11, map.find(1)->value.first());
+  EXPECT_EQ(11, map.find(1)->value.front());
 
   IntVectorMap::AddResult result2 = map.add(1, Vector<int>());
   EXPECT_FALSE(result2.isNewEntry);
   EXPECT_EQ(1, result.storedValue->key);
   EXPECT_EQ(1u, result.storedValue->value.size());
-  EXPECT_EQ(11, result.storedValue->value.first());
-  EXPECT_EQ(11, map.find(1)->value.first());
+  EXPECT_EQ(11, result.storedValue->value.front());
+  EXPECT_EQ(11, map.find(1)->value.front());
 }
 
 class InstanceCounter {
@@ -399,7 +399,7 @@ TEST(HashMapTest, MoveOnlyValueType) {
     EXPECT_EQ(999, addResult.storedValue->value.value());
   }
 
-  map.remove(11);
+  map.erase(11);
   iter = map.find(11);
   EXPECT_TRUE(iter == map.end());
 
@@ -454,7 +454,7 @@ TEST(HashMapTest, MoveOnlyKeyType) {
     EXPECT_EQ(999, addResult.storedValue->value);
   }
 
-  map.remove(MoveOnly(11));
+  map.erase(MoveOnly(11));
   iter = map.find(MoveOnly(11));
   EXPECT_TRUE(iter == map.end());
 
@@ -641,7 +641,7 @@ TEST(HashMapTest, MoveOnlyPairKeyType) {
     EXPECT_EQ(999, addResult.storedValue->value);
   }
 
-  map.remove(Pair(MoveOnly(11), -11));
+  map.erase(Pair(MoveOnly(11), -11));
   iter = map.find(Pair(MoveOnly(11), -11));
   EXPECT_TRUE(iter == map.end());
 
@@ -651,6 +651,62 @@ TEST(HashMapTest, MoveOnlyPairKeyType) {
   EXPECT_TRUE(iter == map.end());
 
   map.clear();
+}
+
+bool isOneTwoThree(const HashMap<int, int>& map) {
+  return map.size() == 3 && map.contains(1) && map.contains(2) &&
+         map.contains(3) && map.get(1) == 11 && map.get(2) == 22 &&
+         map.get(3) == 33;
+};
+
+HashMap<int, int> returnOneTwoThree() {
+  return {{1, 11}, {2, 22}, {3, 33}};
+};
+
+TEST(HashMapTest, InitializerList) {
+  HashMap<int, int> empty({});
+  EXPECT_TRUE(empty.isEmpty());
+
+  HashMap<int, int> one({{1, 11}});
+  EXPECT_EQ(one.size(), 1u);
+  EXPECT_TRUE(one.contains(1));
+  EXPECT_EQ(one.get(1), 11);
+
+  HashMap<int, int> oneTwoThree({{1, 11}, {2, 22}, {3, 33}});
+  EXPECT_EQ(oneTwoThree.size(), 3u);
+  EXPECT_TRUE(oneTwoThree.contains(1));
+  EXPECT_TRUE(oneTwoThree.contains(2));
+  EXPECT_TRUE(oneTwoThree.contains(3));
+  EXPECT_EQ(oneTwoThree.get(1), 11);
+  EXPECT_EQ(oneTwoThree.get(2), 22);
+  EXPECT_EQ(oneTwoThree.get(3), 33);
+
+  // Put some jank so we can check if the assignments can clear them later.
+  empty.add(9999, 99999);
+  one.add(9999, 99999);
+  oneTwoThree.add(9999, 99999);
+
+  empty = {};
+  EXPECT_TRUE(empty.isEmpty());
+
+  one = {{1, 11}};
+  EXPECT_EQ(one.size(), 1u);
+  EXPECT_TRUE(one.contains(1));
+  EXPECT_EQ(one.get(1), 11);
+
+  oneTwoThree = {{1, 11}, {2, 22}, {3, 33}};
+  EXPECT_EQ(oneTwoThree.size(), 3u);
+  EXPECT_TRUE(oneTwoThree.contains(1));
+  EXPECT_TRUE(oneTwoThree.contains(2));
+  EXPECT_TRUE(oneTwoThree.contains(3));
+  EXPECT_EQ(oneTwoThree.get(1), 11);
+  EXPECT_EQ(oneTwoThree.get(2), 22);
+  EXPECT_EQ(oneTwoThree.get(3), 33);
+
+  // Other ways of construction: as a function parameter and in a return
+  // statement.
+  EXPECT_TRUE(isOneTwoThree({{1, 11}, {2, 22}, {3, 33}}));
+  EXPECT_TRUE(isOneTwoThree(returnOneTwoThree()));
 }
 
 }  // anonymous namespace

@@ -4,10 +4,10 @@
 
 #include "ash/wm/drag_window_resizer.h"
 
-#include "ash/aura/wm_window_aura.h"
 #include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/shelf/shelf_layout_manager.h"
 #include "ash/common/wm/window_positioning_utils.h"
+#include "ash/common/wm_window.h"
 #include "ash/display/mouse_cursor_event_filter.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
@@ -25,8 +25,8 @@
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer_delegate.h"
 #include "ui/compositor/layer_tree_owner.h"
-#include "ui/display/manager/display_layout.h"
-#include "ui/display/manager/display_layout_builder.h"
+#include "ui/display/display_layout.h"
+#include "ui/display/display_layout_builder.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/widget/widget.h"
@@ -141,7 +141,7 @@ class DragWindowResizerTest : public test::AshMDTestBase {
       aura::Window* window,
       const gfx::Point& point_in_parent,
       int window_component) {
-    return CreateWindowResizer(WmWindowAura::Get(window), point_in_parent,
+    return CreateWindowResizer(WmWindow::Get(window), point_in_parent,
                                window_component,
                                aura::client::WINDOW_MOVE_SOURCE_MOUSE)
         .release();
@@ -179,8 +179,6 @@ INSTANTIATE_TEST_CASE_P(
 
 // Verifies a window can be moved from the primary display to another.
 TEST_P(DragWindowResizerTest, WindowDragWithMultiDisplays) {
-  if (!SupportsMultipleDisplays())
-    return;
   const int height_offset = GetMdMaximizedWindowHeightOffset();
 
   // The secondary display is logically on the right, but on the system (e.g. X)
@@ -304,9 +302,6 @@ TEST_P(DragWindowResizerTest, WindowDragWithMultiDisplays) {
 // Verifies that dragging the active window to another display makes the new
 // root window the active root window.
 TEST_P(DragWindowResizerTest, WindowDragWithMultiDisplaysActiveRoot) {
-  if (!SupportsMultipleDisplays())
-    return;
-
   // The secondary display is logically on the right, but on the system (e.g. X)
   // layer, it's below the primary one. See UpdateDisplay() in ash_test_base.cc.
   UpdateDisplay("800x600,800x600");
@@ -343,9 +338,6 @@ TEST_P(DragWindowResizerTest, WindowDragWithMultiDisplaysActiveRoot) {
 
 // Verifies a window can be moved from the secondary display to primary.
 TEST_P(DragWindowResizerTest, WindowDragWithMultiDisplaysRightToLeft) {
-  if (!SupportsMultipleDisplays())
-    return;
-
   UpdateDisplay("800x600,800x600");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   ASSERT_EQ(2U, root_windows.size());
@@ -370,9 +362,6 @@ TEST_P(DragWindowResizerTest, WindowDragWithMultiDisplaysRightToLeft) {
 
 // Verifies the drag window is shown correctly.
 TEST_P(DragWindowResizerTest, DragWindowController) {
-  if (!SupportsMultipleDisplays())
-    return;
-
   UpdateDisplay("800x600,800x600");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   ASSERT_EQ(2U, root_windows.size());
@@ -463,9 +452,6 @@ TEST_P(DragWindowResizerTest, DragWindowController) {
 }
 
 TEST_P(DragWindowResizerTest, DragWindowControllerAcrossThreeDisplays) {
-  if (!SupportsMultipleDisplays())
-    return;
-
   UpdateDisplay("400x600,400x600,800x600");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
@@ -610,9 +596,6 @@ TEST_P(DragWindowResizerTest, WarpMousePointer) {
 // Verifies cursor's device scale factor is updated whe a window is moved across
 // root windows with different device scale factors (http://crbug.com/154183).
 TEST_P(DragWindowResizerTest, CursorDeviceScaleFactor) {
-  if (!SupportsMultipleDisplays())
-    return;
-
   // The secondary display is logically on the right, but on the system (e.g. X)
   // layer, it's below the primary one. See UpdateDisplay() in ash_test_base.cc.
   UpdateDisplay("400x400,800x800*2");
@@ -667,9 +650,6 @@ TEST_P(DragWindowResizerTest, CursorDeviceScaleFactor) {
 
 // Verifies several kinds of windows can be moved across displays.
 TEST_P(DragWindowResizerTest, MoveWindowAcrossDisplays) {
-  if (!SupportsMultipleDisplays())
-    return;
-
   // The secondary display is logically on the right, but on the system (e.g. X)
   // layer, it's below the primary one. See UpdateDisplay() in ash_test_base.cc.
   UpdateDisplay("400x400,400x400");

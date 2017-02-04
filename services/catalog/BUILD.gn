@@ -21,14 +21,13 @@ source_set("lib") {
     "constants.h",
     "entry.cc",
     "entry.h",
+    "entry_cache.cc",
+    "entry_cache.h",
     "instance.cc",
     "instance.h",
     "manifest_provider.h",
-    "reader.cc",
-    "reader.h",
     "store.cc",
     "store.h",
-    "types.h",
   ]
 
   deps = [
@@ -41,10 +40,6 @@ source_set("lib") {
   public_deps = [
     # directory.mojom.h is #included by catalog.h
     "//components/filesystem/public/interfaces",
-  ]
-
-  data_deps = [
-    ":manifest",
   ]
 }
 

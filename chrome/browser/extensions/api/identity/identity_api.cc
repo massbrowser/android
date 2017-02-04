@@ -23,6 +23,7 @@
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/api/identity/identity_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
@@ -57,26 +58,7 @@
 
 namespace extensions {
 
-namespace identity_constants {
-const char kInvalidClientId[] = "Invalid OAuth2 Client ID.";
-const char kInvalidScopes[] = "Invalid OAuth2 scopes.";
-const char kAuthFailure[] = "OAuth2 request failed: ";
-const char kNoGrant[] = "OAuth2 not granted or revoked.";
-const char kUserRejected[] = "The user did not approve access.";
-const char kUserNotSignedIn[] = "The user is not signed in.";
-const char kInteractionRequired[] = "User interaction required.";
-const char kInvalidRedirect[] = "Did not redirect to the right URL.";
-const char kOffTheRecord[] = "Identity API is disabled in incognito windows.";
-const char kPageLoadFailure[] = "Authorization page could not be loaded.";
-const char kCanceled[] = "canceled";
-
-const int kCachedIssueAdviceTTLSeconds = 1;
-}  // namespace identity_constants
-
 namespace {
-
-static const char kChromiumDomainRedirectUrlPattern[] =
-    "https://%s.chromiumapp.org/";
 
 #if defined(OS_CHROMEOS)
 // The list of apps that are allowed to use the Identity API to retrieve the
@@ -161,7 +143,8 @@ IdentityAPI::IdentityAPI(content::BrowserContext* context)
           LoginUIServiceFactory::GetShowLoginPopupCallbackForProfile(
               Profile::FromBrowserContext(context))),
       account_tracker_(&profile_identity_provider_,
-                       g_browser_process->system_request_context()) {
+                       g_browser_process->system_request_context()),
+      get_auth_token_function_(nullptr) {
   account_tracker_.AddObserver(this);
 }
 
@@ -225,8 +208,8 @@ std::string IdentityAPI::FindAccountKeyByGaiaId(const std::string& gaia_id) {
 }
 
 void IdentityAPI::Shutdown() {
-  for (auto& observer : shutdown_observer_list_)
-    observer.OnShutdown();
+  if (get_auth_token_function_)
+    get_auth_token_function_->Shutdown();
   account_tracker_.RemoveObserver(this);
   account_tracker_.Shutdown();
 }
@@ -258,14 +241,6 @@ void IdentityAPI::OnAccountSignInChanged(const gaia::AccountIds& ids,
                 browser_context_));
 
   EventRouter::Get(browser_context_)->BroadcastEvent(std::move(event));
-}
-
-void IdentityAPI::AddShutdownObserver(ShutdownObserver* observer) {
-  shutdown_observer_list_.AddObserver(observer);
-}
-
-void IdentityAPI::RemoveShutdownObserver(ShutdownObserver* observer) {
-  shutdown_observer_list_.RemoveObserver(observer);
 }
 
 void IdentityAPI::SetAccountStateForTest(gaia::AccountIds ids,
@@ -426,13 +401,13 @@ void IdentityGetAuthTokenFunction::StartAsyncRun() {
   AddRef();
   extensions::IdentityAPI::GetFactoryInstance()
       ->Get(GetProfile())
-      ->AddShutdownObserver(this);
+      ->set_get_auth_token_function(this);
 }
 
 void IdentityGetAuthTokenFunction::CompleteAsyncRun(bool success) {
   extensions::IdentityAPI::GetFactoryInstance()
       ->Get(GetProfile())
-      ->RemoveShutdownObserver(this);
+      ->set_get_auth_token_function(nullptr);
 
   SendResponse(success);
   Release();  // Balanced in StartAsyncRun
@@ -764,7 +739,7 @@ void IdentityGetAuthTokenFunction::OnGetTokenFailure(
   OnGaiaFlowFailure(GaiaWebAuthFlow::SERVICE_AUTH_ERROR, error, std::string());
 }
 
-void IdentityGetAuthTokenFunction::OnShutdown() {
+void IdentityGetAuthTokenFunction::Shutdown() {
   gaia_web_auth_flow_.reset();
   signin_flow_.reset();
   login_token_request_.reset();
@@ -896,130 +871,6 @@ std::string IdentityGetAuthTokenFunction::GetOAuth2ClientId() const {
     client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
   }
   return client_id;
-}
-
-IdentityGetProfileUserInfoFunction::IdentityGetProfileUserInfoFunction() {
-}
-
-IdentityGetProfileUserInfoFunction::~IdentityGetProfileUserInfoFunction() {
-}
-
-ExtensionFunction::ResponseAction IdentityGetProfileUserInfoFunction::Run() {
-  if (GetProfile()->IsOffTheRecord()) {
-    return RespondNow(Error(identity_constants::kOffTheRecord));
-  }
-
-  AccountInfo account =
-      AccountTrackerServiceFactory::GetForProfile(GetProfile())
-          ->GetAccountInfo(GetPrimaryAccountId(GetProfile()));
-  api::identity::ProfileUserInfo profile_user_info;
-  if (extension()->permissions_data()->HasAPIPermission(
-          APIPermission::kIdentityEmail)) {
-    profile_user_info.email = account.email;
-    profile_user_info.id = account.gaia;
-  }
-
-  return RespondNow(OneArgument(profile_user_info.ToValue()));
-}
-
-IdentityRemoveCachedAuthTokenFunction::IdentityRemoveCachedAuthTokenFunction() {
-}
-
-IdentityRemoveCachedAuthTokenFunction::
-    ~IdentityRemoveCachedAuthTokenFunction() {
-}
-
-ExtensionFunction::ResponseAction IdentityRemoveCachedAuthTokenFunction::Run() {
-  if (Profile::FromBrowserContext(browser_context())->IsOffTheRecord())
-    return RespondNow(Error(identity_constants::kOffTheRecord));
-
-  std::unique_ptr<identity::RemoveCachedAuthToken::Params> params(
-      identity::RemoveCachedAuthToken::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-  IdentityAPI::GetFactoryInstance()
-      ->Get(browser_context())
-      ->EraseCachedToken(extension()->id(), params->details.token);
-  return RespondNow(NoArguments());
-}
-
-IdentityLaunchWebAuthFlowFunction::IdentityLaunchWebAuthFlowFunction() {}
-
-IdentityLaunchWebAuthFlowFunction::~IdentityLaunchWebAuthFlowFunction() {
-  if (auth_flow_)
-    auth_flow_.release()->DetachDelegateAndDelete();
-}
-
-bool IdentityLaunchWebAuthFlowFunction::RunAsync() {
-  if (GetProfile()->IsOffTheRecord()) {
-    error_ = identity_constants::kOffTheRecord;
-    return false;
-  }
-
-  std::unique_ptr<identity::LaunchWebAuthFlow::Params> params(
-      identity::LaunchWebAuthFlow::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-
-  GURL auth_url(params->details.url);
-  WebAuthFlow::Mode mode =
-      params->details.interactive && *params->details.interactive ?
-      WebAuthFlow::INTERACTIVE : WebAuthFlow::SILENT;
-
-  // Set up acceptable target URLs. (Does not include chrome-extension
-  // scheme for this version of the API.)
-  InitFinalRedirectURLPrefix(extension()->id());
-
-  AddRef();  // Balanced in OnAuthFlowSuccess/Failure.
-
-  auth_flow_.reset(new WebAuthFlow(this, GetProfile(), auth_url, mode));
-  auth_flow_->Start();
-  return true;
-}
-
-void IdentityLaunchWebAuthFlowFunction::InitFinalRedirectURLPrefixForTest(
-    const std::string& extension_id) {
-  InitFinalRedirectURLPrefix(extension_id);
-}
-
-void IdentityLaunchWebAuthFlowFunction::InitFinalRedirectURLPrefix(
-    const std::string& extension_id) {
-  if (final_url_prefix_.is_empty()) {
-    final_url_prefix_ = GURL(base::StringPrintf(
-        kChromiumDomainRedirectUrlPattern, extension_id.c_str()));
-  }
-}
-
-void IdentityLaunchWebAuthFlowFunction::OnAuthFlowFailure(
-    WebAuthFlow::Failure failure) {
-  switch (failure) {
-    case WebAuthFlow::WINDOW_CLOSED:
-      error_ = identity_constants::kUserRejected;
-      break;
-    case WebAuthFlow::INTERACTION_REQUIRED:
-      error_ = identity_constants::kInteractionRequired;
-      break;
-    case WebAuthFlow::LOAD_FAILED:
-      error_ = identity_constants::kPageLoadFailure;
-      break;
-    default:
-      NOTREACHED() << "Unexpected error from web auth flow: " << failure;
-      error_ = identity_constants::kInvalidRedirect;
-      break;
-  }
-  SendResponse(false);
-  if (auth_flow_)
-    auth_flow_.release()->DetachDelegateAndDelete();
-  Release();  // Balanced in RunAsync.
-}
-
-void IdentityLaunchWebAuthFlowFunction::OnAuthFlowURLChange(
-    const GURL& redirect_url) {
-  if (redirect_url.GetWithEmptyPath() == final_url_prefix_) {
-    SetResult(base::MakeUnique<base::StringValue>(redirect_url.spec()));
-    SendResponse(true);
-    if (auth_flow_)
-      auth_flow_.release()->DetachDelegateAndDelete();
-    Release();  // Balanced in RunAsync.
-  }
 }
 
 }  // namespace extensions

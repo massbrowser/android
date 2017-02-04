@@ -7,7 +7,7 @@ package org.chromium.net;
 import android.os.ConditionVariable;
 import android.os.ParcelFileDescriptor;
 import android.os.StrictMode;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.Feature;
@@ -200,8 +200,7 @@ public class UploadDataProvidersTest extends CronetTestBase {
         first.block();
         callback.blockForDone();
         assertFalse(callback.mOnCanceledCalled);
-        assertEquals(UrlRequestException.ERROR_LISTENER_EXCEPTION_THROWN,
-                callback.mError.getErrorCode());
+        assertTrue(callback.mError instanceof CallbackException);
         assertContains("Exception received from UploadDataProvider", callback.mError.getMessage());
         assertContains(exceptionMessage, callback.mError.getCause().getMessage());
     }

@@ -1,7 +1,6 @@
 <html>
 <head>
 <script src="../../../http/tests/inspector/inspector-test.js"></script>
-<script src="../../../http/tests/inspector/workspace-test.js"></script>
 <script src="breakpoint-manager.js"></script>
 <script>
 function test()
@@ -13,7 +12,7 @@ function test()
     {
         mockTarget.debuggerModel.reset();
         InspectorTest.addResult("  Resetting workspace.");
-        breakpointManager._debuggerWorkspaceBinding._reset(mockTarget);
+        breakpointManager._debuggerWorkspaceBinding._reset(mockTarget.debuggerModel);
         InspectorTest.testNetworkProject._reset();
     }
 
@@ -279,7 +278,7 @@ function test()
             InspectorTest.addResult("\n  Toggling source mapping.");
             var sourceMapping = createSourceMapping(uiSourceCodeA, uiSourceCodeB);
             mockTarget.debuggerModel.pushSourceMapping(sourceMapping);
-            breakpointManager._debuggerWorkspaceBinding.setSourceMapping(mockTarget, uiSourceCodeB, sourceMapping);
+            breakpointManager._debuggerWorkspaceBinding.setSourceMapping(mockTarget.debuggerModel, uiSourceCodeB, sourceMapping);
             InspectorTest.runAfterPendingBreakpointUpdates(breakpointManager, breakpointActionsPerformedBeforeReload.bind(this));
 
             function breakpointActionsPerformedBeforeReload()
@@ -297,7 +296,7 @@ function test()
                 InspectorTest.addResult("\n  Toggling source mapping.");
                 var sourceMapping = createSourceMapping(uiSourceCodeA, uiSourceCodeB);
                 mockTarget.debuggerModel.pushSourceMapping(sourceMapping);
-                breakpointManager._debuggerWorkspaceBinding.setSourceMapping(mockTarget, uiSourceCodeB, sourceMapping);
+                breakpointManager._debuggerWorkspaceBinding.setSourceMapping(mockTarget.debuggerModel, uiSourceCodeB, sourceMapping);
                 InspectorTest.runAfterPendingBreakpointUpdates(breakpointManager, breakpointActionsPerformed.bind(this));
             }
 

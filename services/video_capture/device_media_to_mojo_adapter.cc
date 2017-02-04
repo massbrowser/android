@@ -5,9 +5,10 @@
 #include "services/video_capture/device_media_to_mojo_adapter.h"
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "media/capture/video/video_capture_buffer_pool_impl.h"
+#include "media/capture/video/video_capture_buffer_tracker_factory_impl.h"
 #include "media/capture/video/video_capture_jpeg_decoder.h"
-#include "services/video_capture/buffer_tracker_factory_impl.h"
 #include "services/video_capture/receiver_mojo_to_media_adapter.h"
 
 namespace video_capture {
@@ -37,7 +38,8 @@ void DeviceMediaToMojoAdapter::Start(const CaptureSettings& requested_settings,
 
   // Create a dedicated buffer pool for the device usage session.
   const int kMaxBufferCount = 2;
-  auto buffer_tracker_factory = base::MakeUnique<BufferTrackerFactoryImpl>();
+  auto buffer_tracker_factory =
+      base::MakeUnique<media::VideoCaptureBufferTrackerFactoryImpl>();
   scoped_refptr<media::VideoCaptureBufferPool> buffer_pool(
       new media::VideoCaptureBufferPoolImpl(std::move(buffer_tracker_factory),
                                             kMaxBufferCount));

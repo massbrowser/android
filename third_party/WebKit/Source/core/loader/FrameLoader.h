@@ -37,7 +37,6 @@
 #include "core/dom/IconURL.h"
 #include "core/dom/SandboxFlags.h"
 #include "core/dom/SecurityContext.h"
-#include "core/fetch/ResourceLoaderOptions.h"
 #include "core/frame/FrameTypes.h"
 #include "core/loader/FrameLoaderStateMachine.h"
 #include "core/loader/FrameLoaderTypes.h"
@@ -45,8 +44,9 @@
 #include "core/loader/NavigationPolicy.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
+#include "platform/instrumentation/tracing/TracedValue.h"
+#include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/network/ResourceRequest.h"
-#include "platform/tracing/TracedValue.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "wtf/Forward.h"
 #include "wtf/HashSet.h"
@@ -129,9 +129,6 @@ class CORE_EXPORT FrameLoader final {
   bool shouldTreatURLAsSameAsCurrent(const KURL&) const;
   bool shouldTreatURLAsSrcdocDocument(const KURL&) const;
 
-  FrameLoadType loadType() const;
-  void setLoadType(FrameLoadType loadType) { m_loadType = loadType; }
-
   FrameLoaderClient* client() const;
 
   void setDefersLoading(bool);
@@ -185,10 +182,6 @@ class CORE_EXPORT FrameLoader final {
 
   void applyUserAgent(ResourceRequest&);
 
-  bool shouldInterruptLoadForXFrameOptions(const String&,
-                                           const KURL&,
-                                           unsigned long requestIdentifier);
-
   bool allAncestorsAreComplete() const;  // including this
 
   bool shouldClose(bool isReload = false);
@@ -214,9 +207,19 @@ class CORE_EXPORT FrameLoader final {
                                          ContentSecurityPolicyDisposition,
                                          NavigationType,
                                          NavigationPolicy,
-                                         bool shouldReplaceCurrentEntry,
+                                         FrameLoadType,
                                          bool isClientRedirect,
                                          HTMLFormElement*);
+
+  // PlzNavigate: Navigations handled by the client are treated as
+  // provisional navigations.
+  bool hasProvisionalNavigation() const {
+    return provisionalDocumentLoader() || m_isNavigationHandledByClient;
+  }
+
+  void clearNavigationHandledByClient() {
+    m_isNavigationHandledByClient = false;
+  }
 
   DECLARE_TRACE();
 
@@ -234,8 +237,12 @@ class CORE_EXPORT FrameLoader final {
                                        const String& httpMethod,
                                        FrameLoadType,
                                        const KURL&);
-  void processFragment(const KURL&, LoadStartType);
+  void processFragment(const KURL&, FrameLoadType, LoadStartType);
 
+  bool checkLoadCanStart(FrameLoadRequest&,
+                         FrameLoadType,
+                         NavigationPolicy,
+                         NavigationType);
   void startLoad(FrameLoadRequest&, FrameLoadType, NavigationPolicy);
 
   enum class HistoryNavigationType { DifferentDocument, Fragment, HistoryApi };
@@ -249,6 +256,7 @@ class CORE_EXPORT FrameLoader final {
                           HistoryLoadType,
                           ClientRedirectPolicy,
                           Document*);
+  void restoreScrollPositionAndViewStateForLoadType(FrameLoadType);
 
   void scheduleCheckCompleted();
 
@@ -268,8 +276,6 @@ class CORE_EXPORT FrameLoader final {
   mutable FrameLoaderStateMachine m_stateMachine;
 
   Member<ProgressTracker> m_progressTracker;
-
-  FrameLoadType m_loadType;
 
   // Document loaders for the three phases of frame loading. Note that while a
   // new request is being loaded, the old document loader may still be

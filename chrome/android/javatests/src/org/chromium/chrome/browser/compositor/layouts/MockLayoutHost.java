@@ -94,6 +94,11 @@ class MockLayoutHost implements LayoutManagerHost, LayoutRenderHost {
     }
 
     @Override
+    public void getViewportFullControls(RectF outRect) {
+        outRect.set(0, 0, getWidth(), getHeight());
+    }
+
+    @Override
     public float getHeightMinusBrowserControls() {
         return getHeight();
     }
@@ -136,7 +141,7 @@ class MockLayoutHost implements LayoutManagerHost, LayoutRenderHost {
     public void invalidateAccessibilityProvider() { }
 
     @Override
-    public void onContentViewCoreAdded(ContentViewCore content) { }
+    public void onOverlayPanelContentViewCoreAdded(ContentViewCore content) { }
 
     @Override
     public void onContentChanged() { }

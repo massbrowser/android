@@ -29,7 +29,7 @@ UIEventWithKeyState::UIEventWithKeyState(
     AbstractView* view,
     int detail,
     PlatformEvent::Modifiers modifiers,
-    double platformTimeStamp,
+    TimeTicks platformTimeStamp,
     InputDeviceCapabilities* sourceCapabilities)
     : UIEvent(type,
               canBubble,
@@ -83,25 +83,32 @@ void UIEventWithKeyState::didCreateEventInIsolatedWorld(bool ctrlKey,
 void UIEventWithKeyState::setFromPlatformModifiers(
     EventModifierInit& initializer,
     const PlatformEvent::Modifiers modifiers) {
-  if (modifiers & PlatformEvent::CtrlKey)
+  setFromWebInputEventModifiers(
+      initializer, static_cast<WebInputEvent::Modifiers>(modifiers));
+}
+
+void UIEventWithKeyState::setFromWebInputEventModifiers(
+    EventModifierInit& initializer,
+    WebInputEvent::Modifiers modifiers) {
+  if (modifiers & WebInputEvent::ControlKey)
     initializer.setCtrlKey(true);
-  if (modifiers & PlatformEvent::ShiftKey)
+  if (modifiers & WebInputEvent::ShiftKey)
     initializer.setShiftKey(true);
-  if (modifiers & PlatformEvent::AltKey)
+  if (modifiers & WebInputEvent::AltKey)
     initializer.setAltKey(true);
-  if (modifiers & PlatformEvent::MetaKey)
+  if (modifiers & WebInputEvent::MetaKey)
     initializer.setMetaKey(true);
-  if (modifiers & PlatformEvent::AltGrKey)
+  if (modifiers & WebInputEvent::AltGrKey)
     initializer.setModifierAltGraph(true);
-  if (modifiers & PlatformEvent::FnKey)
+  if (modifiers & WebInputEvent::FnKey)
     initializer.setModifierFn(true);
-  if (modifiers & PlatformEvent::CapsLockOn)
+  if (modifiers & WebInputEvent::CapsLockOn)
     initializer.setModifierCapsLock(true);
-  if (modifiers & PlatformEvent::ScrollLockOn)
+  if (modifiers & WebInputEvent::ScrollLockOn)
     initializer.setModifierScrollLock(true);
-  if (modifiers & PlatformEvent::NumLockOn)
+  if (modifiers & WebInputEvent::NumLockOn)
     initializer.setModifierNumLock(true);
-  if (modifiers & PlatformEvent::SymbolKey)
+  if (modifiers & WebInputEvent::SymbolKey)
     initializer.setModifierSymbol(true);
 }
 
@@ -129,9 +136,9 @@ bool UIEventWithKeyState::getModifierState(const String& keyIdentifier) const {
       {"NumLock", PlatformEvent::NumLockOn},
       {"Symbol", PlatformEvent::SymbolKey},
   };
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(kIdentifiers); ++i) {
-    if (keyIdentifier == kIdentifiers[i].identifier)
-      return m_modifiers & kIdentifiers[i].mask;
+  for (const auto& identifier : kIdentifiers) {
+    if (keyIdentifier == identifier.identifier)
+      return m_modifiers & identifier.mask;
   }
   return false;
 }

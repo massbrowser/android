@@ -8,7 +8,7 @@
 #include "base/macros.h"
 #include "net/quic/core/crypto/quic_crypto_server_config.h"
 #include "net/quic/core/quic_config.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/tools/quic/quic_simple_dispatcher.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -23,7 +23,8 @@ class MockQuicDispatcher : public QuicSimpleDispatcher {
       QuicVersionManager* version_manager,
       std::unique_ptr<QuicConnectionHelperInterface> helper,
       std::unique_ptr<QuicCryptoServerStream::Helper> session_helper,
-      std::unique_ptr<QuicAlarmFactory> alarm_factory);
+      std::unique_ptr<QuicAlarmFactory> alarm_factory,
+      QuicHttpResponseCache* response_cache);
 
   ~MockQuicDispatcher() override;
 

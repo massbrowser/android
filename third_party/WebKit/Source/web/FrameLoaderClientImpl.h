@@ -66,15 +66,11 @@ class FrameLoaderClientImpl final : public FrameLoaderClient {
   void runScriptsAtDocumentReady(bool documentIsEmpty) override;
 
   void didCreateScriptContext(v8::Local<v8::Context>,
-                              int extensionGroup,
                               int worldId) override;
   void willReleaseScriptContext(v8::Local<v8::Context>, int worldId) override;
 
-  // Returns true if we should allow the given V8 extension to be added to
-  // the script context at the currently loading page and given extension group.
-  bool allowScriptExtension(const String& extensionName,
-                            int extensionGroup,
-                            int worldId) override;
+  // Returns true if we should allow register V8 extensions to be added.
+  bool allowScriptExtensions() override;
 
   bool hasWebView() const override;
   bool inShadowTree() const override;
@@ -178,7 +174,6 @@ class FrameLoaderClientImpl final : public FrameLoaderClient {
   void passiveInsecureContentFound(const KURL&) override;
   void didNotAllowScript() override;
   void didNotAllowPlugins() override;
-  void didUseKeygen() override;
 
   WebCookieJar* cookieJar() const override;
   void frameFocused() const override;
@@ -186,7 +181,8 @@ class FrameLoaderClientImpl final : public FrameLoaderClient {
   void didEnforceInsecureRequestPolicy(WebInsecureRequestPolicy) override;
   void didUpdateToUniqueOrigin() override;
   void didChangeSandboxFlags(Frame* childFrame, SandboxFlags) override;
-  void didSetFeaturePolicyHeader(const String& headerValue) override;
+  void didSetFeaturePolicyHeader(
+      const WebParsedFeaturePolicyHeader& parsedHeader) override;
   void didAddContentSecurityPolicy(const String& headerValue,
                                    ContentSecurityPolicyHeaderType,
                                    ContentSecurityPolicyHeaderSource) override;
@@ -222,6 +218,8 @@ class FrameLoaderClientImpl final : public FrameLoaderClient {
   WebEffectiveConnectionType getEffectiveConnectionType() override;
 
   KURL overrideFlashEmbedWithHTML(const KURL&) override;
+
+  void setHasReceivedUserGesture() override;
 
  private:
   explicit FrameLoaderClientImpl(WebLocalFrameImpl*);

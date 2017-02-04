@@ -1,8 +1,0 @@
-This is a testharness.js-based test.
-FAIL new Document(): interfaces Illegal constructor
-FAIL new Document(): children Illegal constructor
-FAIL new Document(): metadata Illegal constructor
-FAIL new Document(): characterSet aliases Illegal constructor
-FAIL new Document(): URL parsing Illegal constructor
-Harness: the test ran to completion.
-

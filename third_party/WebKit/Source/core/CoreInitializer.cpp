@@ -50,13 +50,13 @@
 #include "core/dom/Document.h"
 #include "core/dom/StyleChangeReason.h"
 #include "core/events/EventFactory.h"
-#include "core/fetch/FetchInitiatorTypeNames.h"
 #include "core/html/canvas/CanvasRenderingContextFactory.h"
 #include "core/html/parser/HTMLParserThread.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/FontFamilyNames.h"
 #include "platform/HTTPNames.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityPolicy.h"
@@ -141,10 +141,6 @@ void CoreInitializer::initialize() {
 
   StringImpl::freezeStaticStrings();
 
-  // Creates HTMLParserThread::shared and ScriptStreamerThread::shared, but
-  // does not start the threads.
-  if (!RuntimeEnabledFeatures::parseHTMLOnMainThreadEnabled())
-    HTMLParserThread::init();
   ScriptStreamerThread::init();
 }
 
@@ -153,11 +149,7 @@ void CoreInitializer::shutdown() {
   // that this will wait the thread to stop its operations.
   ScriptStreamerThread::shutdown();
 
-  // Make sure we stop the HTMLParserThread before Platform::current() is
-  // cleared.
   ASSERT(Platform::current());
-  if (!RuntimeEnabledFeatures::parseHTMLOnMainThreadEnabled())
-    HTMLParserThread::shutdown();
 
   WorkerThread::terminateAndWaitForAllWorkers();
 }

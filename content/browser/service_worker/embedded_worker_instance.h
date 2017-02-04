@@ -26,7 +26,6 @@
 #include "content/common/service_worker/embedded_worker.mojom.h"
 #include "content/common/service_worker/service_worker_event_dispatcher.mojom.h"
 #include "content/common/service_worker/service_worker_status_code.h"
-#include "content/public/common/console_message_level.h"
 #include "url/gurl.h"
 
 // Windows headers will redefine SendMessage.
@@ -114,9 +113,8 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
 
   // Stops the worker. It is invalid to call this when the worker is
   // not in STARTING or RUNNING status.
-  // This returns false if stopping a worker fails immediately, e.g. when
-  // IPC couldn't be sent to the worker.
-  ServiceWorkerStatusCode Stop();
+  // This returns false when StopWorker IPC couldn't be sent to the worker.
+  bool Stop();
 
   // Stops the worker if the worker is not being debugged (i.e. devtools is
   // not attached). This method is called by a stop-worker timer to kill
@@ -137,6 +135,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
     DCHECK_EQ(EmbeddedWorkerStatus::STARTING, status());
     return starting_phase_;
   }
+  int restart_count() const { return restart_count_; }
   int process_id() const;
   int thread_id() const { return thread_id_; }
   // This should be called only when the worker instance has a valid process,
@@ -180,7 +179,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
   void OnURLJobCreatedForMainScript();
 
   // Add message to the devtools console.
-  void AddMessageToConsole(ConsoleMessageLevel level,
+  void AddMessageToConsole(blink::WebConsoleMessage::Level level,
                            const std::string& message);
 
   static std::string StatusToString(EmbeddedWorkerStatus status);
@@ -216,7 +215,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
                                      bool wait_for_debugger);
 
   // Sends StartWorker message via Mojo.
-  ServiceWorkerStatusCode SendMojoStartWorker(
+  ServiceWorkerStatusCode SendStartWorker(
       std::unique_ptr<EmbeddedWorkerStartParams> params);
 
   // Called back from StartTask after a start worker message is sent.
@@ -297,6 +296,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
 
   EmbeddedWorkerStatus status_;
   StartingPhase starting_phase_;
+  int restart_count_;
 
   // Current running information.
   std::unique_ptr<EmbeddedWorkerInstance::WorkerProcessHandle> process_handle_;
@@ -305,7 +305,8 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
   // |client_| is used to send messages to the renderer process.
   mojom::EmbeddedWorkerInstanceClientPtr client_;
 
-  // TODO(shimazu): Remove this after non-mojo StartWorker is removed.
+  // TODO(shimazu): Remove this after EmbeddedWorkerStartParams is changed to
+  // a mojo struct.
   mojom::ServiceWorkerEventDispatcherRequest pending_dispatcher_request_;
 
   // Whether devtools is attached or not.

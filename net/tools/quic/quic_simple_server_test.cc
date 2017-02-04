@@ -14,7 +14,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::_;
-using net::test::CryptoTestUtils;
 
 namespace net {
 namespace test {
@@ -35,8 +34,8 @@ class QuicChromeServerDispatchPacketTest : public ::testing::Test {
                 new net::test::MockQuicConnectionHelper),
             std::unique_ptr<QuicCryptoServerStream::Helper>(
                 new QuicSimpleServerSessionHelper(QuicRandom::GetInstance())),
-            std::unique_ptr<MockAlarmFactory>(
-                new net::test::MockAlarmFactory)) {
+            std::unique_ptr<MockAlarmFactory>(new net::test::MockAlarmFactory),
+            &response_cache_) {
     dispatcher_.InitializeWithWriter(nullptr);
   }
 
@@ -52,6 +51,7 @@ class QuicChromeServerDispatchPacketTest : public ::testing::Test {
   QuicCryptoServerConfig crypto_config_;
   QuicVersionManager version_manager_;
   net::test::MockQuicDispatcher dispatcher_;
+  QuicHttpResponseCache response_cache_;
 };
 
 TEST_F(QuicChromeServerDispatchPacketTest, DispatchPacket) {

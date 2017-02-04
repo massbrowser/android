@@ -1830,8 +1830,6 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, WebUIGetsBindings) {
   RenderViewHost* initial_rvh = new_web_contents->
       GetRenderManagerForTesting()->GetSwappedOutRenderViewHost(site_instance1);
   ASSERT_TRUE(initial_rvh);
-  // The following condition is what was causing the bug.
-  EXPECT_EQ(0, initial_rvh->GetEnabledBindings());
 
   // Navigate to url1 and check bindings.
   NavigateToURL(new_shell, url1);
@@ -1839,7 +1837,7 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, WebUIGetsBindings) {
   // |initial_rvh| did not have a chance to be used.
   EXPECT_EQ(new_web_contents->GetSiteInstance(), site_instance1);
   EXPECT_EQ(BINDINGS_POLICY_WEB_UI,
-      new_web_contents->GetRenderViewHost()->GetEnabledBindings());
+            new_web_contents->GetMainFrame()->GetEnabledBindings());
 }
 
 // crbug.com/424526
@@ -1896,9 +1894,10 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   WebUIImpl* web_ui = rfh->web_ui();
 
   EXPECT_TRUE(web_ui->CanCallJavascript());
-  TestWebUIMessageHandler* handler = new TestWebUIMessageHandler();
+  auto handler_owner = base::MakeUnique<TestWebUIMessageHandler>();
+  TestWebUIMessageHandler* handler = handler_owner.get();
 
-  web_ui->AddMessageHandler(handler);
+  web_ui->AddMessageHandler(std::move(handler_owner));
   EXPECT_FALSE(handler->IsJavascriptAllowed());
 
   handler->AllowJavascript();
@@ -2945,6 +2944,160 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   EXPECT_TRUE(popup->web_contents()->GetMainFrame()->IsRenderFrameLive());
   EXPECT_EQ(popup->web_contents()->GetMainFrame()->GetSiteInstance(),
             shell()->web_contents()->GetMainFrame()->GetSiteInstance());
+}
+
+// Verify that GetLastCommittedOrigin() is correct for the full lifetime of a
+// RenderFrameHost, including when it's pending, current, and pending deletion.
+// This is checked both for main frames and subframes.  See
+// https://crbug.com/590035.
+IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, LastCommittedOrigin) {
+  StartEmbeddedServer();
+  GURL url_a(embedded_test_server()->GetURL("a.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url_a));
+
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+  FrameTreeNode* root = web_contents->GetFrameTree()->root();
+  RenderFrameHostImpl* rfh_a = root->current_frame_host();
+  rfh_a->DisableSwapOutTimerForTesting();
+
+  EXPECT_EQ(url::Origin(url_a), rfh_a->GetLastCommittedOrigin());
+  EXPECT_EQ(rfh_a, web_contents->GetMainFrame());
+
+  // Start a navigation to a b.com URL, and don't wait for commit.
+  GURL url_b(embedded_test_server()->GetURL("b.com", "/title2.html"));
+  TestFrameNavigationObserver commit_observer(root);
+  RenderFrameDeletedObserver deleted_observer(rfh_a);
+  shell()->LoadURL(url_b);
+
+  // The pending RFH shouln't have a last committed origin (the default value
+  // is a unique origin). The current RFH shouldn't change its last committed
+  // origin before commit.
+  RenderFrameHostImpl* rfh_b =
+      IsBrowserSideNavigationEnabled()
+          ? root->render_manager()->speculative_frame_host()
+          : root->render_manager()->pending_frame_host();
+  EXPECT_EQ("null", rfh_b->GetLastCommittedOrigin().Serialize());
+  EXPECT_EQ(url::Origin(url_a), rfh_a->GetLastCommittedOrigin());
+
+  // Verify that the last committed origin is set for the b.com RHF once it
+  // commits.
+  commit_observer.WaitForCommit();
+  EXPECT_EQ(url::Origin(url_b), rfh_b->GetLastCommittedOrigin());
+  EXPECT_EQ(rfh_b, web_contents->GetMainFrame());
+
+  // The old RFH should now be pending deletion.  Verify it still has correct
+  // last committed origin.
+  EXPECT_EQ(url::Origin(url_a), rfh_a->GetLastCommittedOrigin());
+  EXPECT_FALSE(rfh_a->is_active());
+
+  // Wait for |rfh_a| to be deleted and double-check |rfh_b|'s origin.
+  deleted_observer.WaitUntilDeleted();
+  EXPECT_EQ(url::Origin(url_b), rfh_b->GetLastCommittedOrigin());
+
+  // Navigate to a same-origin page with an about:blank iframe.  The iframe
+  // should also have a b.com origin.
+  GURL url_b_with_frame(embedded_test_server()->GetURL(
+      "b.com", "/navigation_controller/page_with_iframe.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url_b_with_frame));
+  EXPECT_EQ(rfh_b, web_contents->GetMainFrame());
+  EXPECT_EQ(url::Origin(url_b), rfh_b->GetLastCommittedOrigin());
+  FrameTreeNode* child = root->child_at(0);
+  RenderFrameHostImpl* child_rfh_b = root->child_at(0)->current_frame_host();
+  child_rfh_b->DisableSwapOutTimerForTesting();
+  EXPECT_EQ(url::Origin(url_b), child_rfh_b->GetLastCommittedOrigin());
+
+  // Navigate subframe to c.com.  Wait for commit but not full load, and then
+  // verify the subframe's origin.
+  GURL url_c(embedded_test_server()->GetURL("c.com", "/title3.html"));
+  {
+    TestFrameNavigationObserver commit_observer(root->child_at(0));
+    EXPECT_TRUE(
+        ExecuteScript(child, "location.href = '" + url_c.spec() + "';"));
+    commit_observer.WaitForCommit();
+  }
+  EXPECT_EQ(url::Origin(url_c),
+            child->current_frame_host()->GetLastCommittedOrigin());
+
+  // With OOPIFs, this navigation used a cross-process transfer.  Ensure that
+  // the iframe's old RFH still has correct origin, even though it's pending
+  // deletion.
+  if (AreAllSitesIsolatedForTesting()) {
+    EXPECT_FALSE(child_rfh_b->is_active());
+    EXPECT_NE(child_rfh_b, child->current_frame_host());
+    EXPECT_EQ(url::Origin(url_b), child_rfh_b->GetLastCommittedOrigin());
+  }
+}
+
+// Verify that with Site Isolation enabled, chrome:// pages with subframes
+// to other chrome:// URLs all stay in the same process.
+IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
+                       ChromeSchemeSubframesStayInProcessWithParent) {
+  // Enable Site Isolation so subframes with different chrome:// URLs will be
+  // treated as cross-site.
+  IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
+  StartEmbeddedServer();
+
+  GURL chrome_top_url = GURL(std::string(kChromeUIScheme) + "://" +
+                             std::string(kChromeUIBlobInternalsHost));
+  GURL chrome_child_url = GURL(std::string(kChromeUIScheme) + "://" +
+                               std::string(kChromeUIHistogramHost));
+  GURL regular_web_url(embedded_test_server()->GetURL("/title1.html"));
+
+  NavigationControllerImpl& controller = static_cast<NavigationControllerImpl&>(
+      shell()->web_contents()->GetController());
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  // Navigate the main frame to the top chrome:// URL.
+  NavigateToURL(shell(), chrome_top_url);
+
+  // Inject a frame in the page and navigate it to a chrome:// URL as well.
+  {
+    std::string script = base::StringPrintf(
+        "var frame = document.createElement('iframe');\n"
+        "frame.src = '%s';\n"
+        "document.body.appendChild(frame);\n",
+        chrome_child_url.spec().c_str());
+
+    TestNavigationObserver navigation_observer(shell()->web_contents());
+    EXPECT_TRUE(ExecuteScript(shell(), script));
+    navigation_observer.Wait();
+    EXPECT_EQ(1U, root->child_count());
+
+    // Ensure the subframe navigated to the expected URL and that it is in the
+    // same SiteInstance as the parent frame.
+    NavigationEntryImpl* entry = controller.GetLastCommittedEntry();
+    ASSERT_EQ(1U, entry->root_node()->children.size());
+    EXPECT_EQ(chrome_child_url,
+              entry->root_node()->children[0]->frame_entry->url());
+    EXPECT_EQ(root->current_frame_host()->GetSiteInstance(),
+              root->child_at(0)->current_frame_host()->GetSiteInstance());
+  }
+
+  // Ensure that non-chrome:// pages get a different SiteInstance and process.
+  {
+    std::string script = base::StringPrintf(
+        "var frame = document.createElement('iframe');\n"
+        "frame.src = '%s';\n"
+        "document.body.appendChild(frame);\n",
+        regular_web_url.spec().c_str());
+
+    TestNavigationObserver navigation_observer(shell()->web_contents());
+    EXPECT_TRUE(ExecuteScript(shell(), script));
+    navigation_observer.Wait();
+    EXPECT_EQ(2U, root->child_count());
+
+    // Ensure the subframe navigated to the expected URL and that it is in a
+    // different SiteInstance from the parent frame.
+    NavigationEntryImpl* entry = controller.GetLastCommittedEntry();
+    ASSERT_EQ(2U, entry->root_node()->children.size());
+    EXPECT_EQ(regular_web_url,
+              entry->root_node()->children[1]->frame_entry->url());
+    EXPECT_NE(root->current_frame_host()->GetSiteInstance(),
+              root->child_at(1)->current_frame_host()->GetSiteInstance());
+  }
 }
 
 }  // namespace content

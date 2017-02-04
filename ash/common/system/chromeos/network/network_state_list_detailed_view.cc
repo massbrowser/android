@@ -32,10 +32,10 @@
 #include "ash/common/system/tray/tray_popup_label_button.h"
 #include "ash/common/system/tray/tri_view.h"
 #include "ash/common/wm_lookup.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/root_window_controller.h"
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -195,7 +195,7 @@ const int kFadeIconMs = 500;
 class ScanningThrobber : public ThrobberView {
  public:
   ScanningThrobber() {
-    SetPaintToLayer(true);
+    SetPaintToLayer();
     layer()->SetFillsBoundsOpaquely(false);
     layer()->SetOpacity(1.0);
     accessible_name_ =
@@ -241,7 +241,7 @@ class InfoIcon : public views::ImageButton {
     SetImageAlignment(ALIGN_CENTER, ALIGN_MIDDLE);
     SetAccessibleName(
         bundle.GetLocalizedString(IDS_ASH_STATUS_TRAY_NETWORK_INFO));
-    SetPaintToLayer(true);
+    SetPaintToLayer();
     layer()->SetFillsBoundsOpaquely(false);
     layer()->SetOpacity(1.0);
   }
@@ -497,7 +497,6 @@ void NetworkStateListDetailedView::HandleViewClicked(views::View* view) {
             : UMA_STATUS_AREA_CONNECT_TO_CONFIGURED_NETWORK);
     chromeos::NetworkConnect::Get()->ConnectToNetworkId(network->guid());
   }
-  owner()->system_tray()->CloseSystemBubble();
 }
 
 void NetworkStateListDetailedView::CreateExtraTitleRowButtons() {

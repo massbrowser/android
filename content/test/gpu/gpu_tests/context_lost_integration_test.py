@@ -3,14 +3,15 @@
 # found in the LICENSE file.
 
 import os
+import sys
 import time
 
 from gpu_tests import gpu_integration_test
 from gpu_tests import context_lost_expectations
 from gpu_tests import path_util
 
+import py_utils
 from telemetry.core import exceptions
-from telemetry.core import util
 
 data_path = os.path.join(
     path_util.GetChromiumSrcDir(), 'content', 'test', 'data', 'gpu')
@@ -106,7 +107,7 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
 
   def _WaitForPageToFinish(self, tab):
     try:
-      util.WaitFor(lambda: tab.EvaluateJavaScript(
+      py_utils.WaitFor(lambda: tab.EvaluateJavaScript(
         'window.domAutomationController._finished'), wait_timeout)
       return True
     except exceptions.TimeoutException:
@@ -128,7 +129,7 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       # If we're running the GPU process crash test, we need the test
       # to have fully reset before crashing the GPU process.
       if check_crash_count:
-        util.WaitFor(lambda: tab.EvaluateJavaScript(
+        py_utils.WaitFor(lambda: tab.EvaluateJavaScript(
           'window.domAutomationController._finished'), wait_timeout)
 
       # Crash the GPU process.
@@ -251,3 +252,7 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
     tab.EvaluateJavaScript('loseContextUsingExtension()')
     tab.Activate()
     self._WaitForTabAndCheckCompletion()
+
+def load_tests(loader, tests, pattern):
+  del loader, tests, pattern  # Unused.
+  return gpu_integration_test.LoadAllTestsInModule(sys.modules[__name__])

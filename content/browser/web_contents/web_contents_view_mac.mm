@@ -32,6 +32,7 @@
 #include "ui/base/dragdrop/cocoa_dnd_util.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
+#include "ui/gfx/mac/coordinate_conversion.h"
 
 using blink::WebDragOperation;
 using blink::WebDragOperationsMask;
@@ -163,11 +164,7 @@ void WebContentsViewMac::GetContainerBounds(gfx::Rect* out) const {
     bounds = [window convertRectToScreen:bounds];
   }
 
-  // Flip y to account for screen flip.
-  NSScreen* screen = [[NSScreen screens] firstObject];
-  bounds.origin.y = [screen frame].size.height - bounds.origin.y
-      - bounds.size.height;
-  *out = gfx::Rect(NSRectToCGRect(bounds));
+  *out = gfx::ScreenRectFromNSRect(bounds);
 }
 
 void WebContentsViewMac::StartDragging(
@@ -549,6 +546,7 @@ void WebContentsViewMac::CloseTab() {
                        offset:(NSPoint)offset {
   if (![self webContents])
     return;
+  [dragDest_ setDragStartTrackersForProcess:sourceRWH->GetProcess()->GetID()];
   dragSource_.reset([[WebDragSource alloc]
        initWithContents:[self webContents]
                    view:self

@@ -45,22 +45,26 @@ ThreadDebugger* ThreadDebugger::from(v8::Isolate* isolate) {
 }
 
 // static
-MessageLevel ThreadDebugger::consoleAPITypeToMessageLevel(
-    v8_inspector::V8ConsoleAPIType type) {
-  switch (type) {
-    case v8_inspector::V8ConsoleAPIType::kDebug:
-      return DebugMessageLevel;
-    case v8_inspector::V8ConsoleAPIType::kLog:
-      return LogMessageLevel;
-    case v8_inspector::V8ConsoleAPIType::kInfo:
-      return InfoMessageLevel;
-    case v8_inspector::V8ConsoleAPIType::kWarning:
-      return WarningMessageLevel;
-    case v8_inspector::V8ConsoleAPIType::kError:
-      return ErrorMessageLevel;
+MessageLevel ThreadDebugger::v8MessageLevelToMessageLevel(
+    v8::Isolate::MessageErrorLevel level) {
+  MessageLevel result = InfoMessageLevel;
+  switch (level) {
+    case v8::Isolate::kMessageDebug:
+      result = VerboseMessageLevel;
+      break;
+    case v8::Isolate::kMessageWarning:
+      result = WarningMessageLevel;
+      break;
+    case v8::Isolate::kMessageError:
+      result = ErrorMessageLevel;
+      break;
+    case v8::Isolate::kMessageLog:
+    case v8::Isolate::kMessageInfo:
     default:
-      return LogMessageLevel;
+      result = InfoMessageLevel;
+      break;
   }
+  return result;
 }
 
 void ThreadDebugger::willExecuteScript(v8::Isolate* isolate, int scriptId) {
@@ -137,7 +141,7 @@ void ThreadDebugger::promiseRejectionRevoked(v8::Local<v8::Context> context,
 }
 
 void ThreadDebugger::beginUserGesture() {
-  m_userGestureIndicator = wrapUnique(
+  m_userGestureIndicator = WTF::wrapUnique(
       new UserGestureIndicator(DocumentUserGestureToken::create(nullptr)));
 }
 
@@ -276,7 +280,7 @@ static Vector<String> normalizeEventTypes(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
   Vector<String> types;
   if (info.Length() > 1 && info[1]->IsString())
-    types.append(toCoreString(info[1].As<v8::String>()));
+    types.push_back(toCoreString(info[1].As<v8::String>()));
   if (info.Length() > 1 && info[1]->IsArray()) {
     v8::Local<v8::Array> typesArray = v8::Local<v8::Array>::Cast(info[1]);
     for (size_t i = 0; i < typesArray->Length(); ++i) {
@@ -285,7 +289,7 @@ static Vector<String> normalizeEventTypes(
                .ToLocal(&typeValue) ||
           !typeValue->IsString())
         continue;
-      types.append(toCoreString(v8::Local<v8::String>::Cast(typeValue)));
+      types.push_back(toCoreString(v8::Local<v8::String>::Cast(typeValue)));
     }
   }
   if (info.Length() == 1)
@@ -321,7 +325,7 @@ static Vector<String> normalizeEventTypes(
           Vector<String>({"resize", "scroll", "zoom", "focus", "blur", "select",
                           "input", "change", "submit", "reset"}));
     else
-      outputTypes.append(types[i]);
+      outputTypes.push_back(types[i]);
   }
   return outputTypes;
 }
@@ -456,13 +460,13 @@ void ThreadDebugger::startRepeatingTimer(
     double interval,
     V8InspectorClient::TimerCallback callback,
     void* data) {
-  m_timerData.append(data);
-  m_timerCallbacks.append(callback);
+  m_timerData.push_back(data);
+  m_timerCallbacks.push_back(callback);
 
-  std::unique_ptr<Timer<ThreadDebugger>> timer =
-      wrapUnique(new Timer<ThreadDebugger>(this, &ThreadDebugger::onTimer));
+  std::unique_ptr<Timer<ThreadDebugger>> timer = WTF::wrapUnique(
+      new Timer<ThreadDebugger>(this, &ThreadDebugger::onTimer));
   Timer<ThreadDebugger>* timerPtr = timer.get();
-  m_timers.append(std::move(timer));
+  m_timers.push_back(std::move(timer));
   timerPtr->startRepeating(interval, BLINK_FROM_HERE);
 }
 

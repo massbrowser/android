@@ -26,7 +26,6 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/origin_util.h"
-#include "content/public/renderer/render_frame.h"
 #include "headless/lib/browser/headless_browser_context_impl.h"
 #include "headless/lib/browser/headless_browser_impl.h"
 #include "headless/lib/browser/headless_browser_main_parts.h"
@@ -174,8 +173,7 @@ HeadlessWebContentsImpl::~HeadlessWebContentsImpl() {
 void HeadlessWebContentsImpl::RenderFrameCreated(
     content::RenderFrameHost* render_frame_host) {
   if (!mojo_services_.empty()) {
-    render_frame_host->GetRenderViewHost()->AllowBindings(
-        content::BINDINGS_POLICY_HEADLESS);
+    render_frame_host->AllowBindings(content::BINDINGS_POLICY_HEADLESS);
   }
 
   service_manager::InterfaceRegistry* interface_registry =
@@ -240,13 +238,25 @@ HeadlessDevToolsTarget* HeadlessWebContentsImpl::GetDevToolsTarget() {
   return web_contents()->GetMainFrame()->IsRenderFrameLive() ? this : nullptr;
 }
 
-void HeadlessWebContentsImpl::AttachClient(HeadlessDevToolsClient* client) {
-  HeadlessDevToolsClientImpl::From(client)->AttachToHost(agent_host_.get());
+bool HeadlessWebContentsImpl::AttachClient(HeadlessDevToolsClient* client) {
+  return HeadlessDevToolsClientImpl::From(client)->AttachToHost(
+      agent_host_.get());
+}
+
+void HeadlessWebContentsImpl::ForceAttachClient(
+    HeadlessDevToolsClient* client) {
+  HeadlessDevToolsClientImpl::From(client)->ForceAttachToHost(
+      agent_host_.get());
 }
 
 void HeadlessWebContentsImpl::DetachClient(HeadlessDevToolsClient* client) {
   DCHECK(agent_host_);
   HeadlessDevToolsClientImpl::From(client)->DetachFromHost(agent_host_.get());
+}
+
+bool HeadlessWebContentsImpl::IsAttached() {
+  DCHECK(agent_host_);
+  return agent_host_->IsAttached();
 }
 
 content::WebContents* HeadlessWebContentsImpl::web_contents() const {

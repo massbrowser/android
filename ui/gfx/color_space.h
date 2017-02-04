@@ -10,16 +10,13 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "ui/gfx/gfx_export.h"
 
 namespace IPC {
 template <class P>
 struct ParamTraits;
 }  // namespace IPC
-
-template <typename T>
-class sk_sp;
-class SkColorSpace;
 
 namespace gfx {
 
@@ -53,6 +50,7 @@ class GFX_EXPORT ColorSpace {
     // Chrome-specific values start at 1000.
     UNKNOWN = 1000,
     XYZ_D50,
+    ADOBE_RGB,
     CUSTOM,
     LAST = CUSTOM
   };
@@ -93,6 +91,8 @@ class GFX_EXPORT ColorSpace {
 
     // TODO(hubbe): Need to store an approximation of the gamma function(s).
     CUSTOM,
+    // Like LINEAR, but intended for HDR. (can go outside of 0-1)
+    LINEAR_HDR,
     LAST = CUSTOM,
   };
 
@@ -140,17 +140,28 @@ class GFX_EXPORT ColorSpace {
   };
 
   ColorSpace();
+  ColorSpace(PrimaryID primaries, TransferID transfer);
   ColorSpace(PrimaryID primaries,
              TransferID transfer,
              MatrixID matrix,
              RangeID full_range);
+  ColorSpace(const ColorSpace& other);
   ColorSpace(int primaries, int transfer, int matrix, RangeID full_range);
+  ~ColorSpace();
 
   static PrimaryID PrimaryIDFromInt(int primary_id);
   static TransferID TransferIDFromInt(int transfer_id);
   static MatrixID MatrixIDFromInt(int matrix_id);
 
+  // Returns true if this is not the default-constructor object.
+  bool IsValid() const;
+
   static ColorSpace CreateSRGB();
+  static ColorSpace CreateCustom(const SkMatrix44& to_XYZD50,
+                                 const SkColorSpaceTransferFn& fn);
+  // scRGB is like RGB, but linear and values outside of 0-1 are allowed.
+  // scRGB is normally used with fp16 textures.
+  static ColorSpace CreateSCRGBLinear();
   static ColorSpace CreateXYZD50();
 
   // TODO: Remove these, and replace with more generic constructors.
@@ -162,9 +173,19 @@ class GFX_EXPORT ColorSpace {
   bool operator!=(const ColorSpace& other) const;
   bool operator<(const ColorSpace& other) const;
 
-  // Note that this may return nullptr.
+  bool IsHDR() const;
+
+  // This will return nullptr for non-RGB spaces, spaces with non-FULL
+  // range, and unspecified spaces.
   sk_sp<SkColorSpace> ToSkColorSpace() const;
-  static ColorSpace FromSkColorSpace(const sk_sp<SkColorSpace>& sk_color_space);
+
+  void GetPrimaryMatrix(SkMatrix44* to_XYZD50) const;
+  bool GetTransferFunction(SkColorSpaceTransferFn* fn) const;
+  bool GetInverseTransferFunction(SkColorSpaceTransferFn* fn) const;
+
+  // For most formats, this is the RGB to YUV matrix.
+  void GetTransferMatrix(SkMatrix44* matrix) const;
+  void GetRangeAdjustMatrix(SkMatrix44* matrix) const;
 
  private:
   PrimaryID primaries_ = PrimaryID::UNSPECIFIED;
@@ -172,15 +193,22 @@ class GFX_EXPORT ColorSpace {
   MatrixID matrix_ = MatrixID::UNSPECIFIED;
   RangeID range_ = RangeID::LIMITED;
 
-  // Only used if primaries_ == PrimaryID::CUSTOM
-  float custom_primary_matrix_[12];
+  // Only used if primaries_ is PrimaryID::CUSTOM.
+  float custom_primary_matrix_[9] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+  // Only used if transfer_ is TransferID::CUSTOM. This array consists of the A
+  // through G entries of the SkColorSpaceTransferFn structure in alphabetical
+  // order.
+  float custom_transfer_params_[7] = {0, 0, 0, 0, 0, 0, 0};
 
   // This is used to look up the ICCProfile from which this ColorSpace was
   // created, if possible.
   uint64_t icc_profile_id_ = 0;
+  sk_sp<SkColorSpace> icc_profile_sk_color_space_;
 
   friend class ICCProfile;
   friend class ColorSpaceToColorSpaceTransform;
+  friend class ColorSpaceWin;
   friend struct IPC::ParamTraits<gfx::ColorSpace>;
   FRIEND_TEST_ALL_PREFIXES(SimpleColorSpace, GetColorSpace);
 };

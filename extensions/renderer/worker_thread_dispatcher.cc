@@ -4,6 +4,7 @@
 
 #include "extensions/renderer/worker_thread_dispatcher.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_local.h"
 #include "base/values.h"
 #include "content/public/child/worker_thread.h"
@@ -51,6 +52,12 @@ void SendRequestIPC(ScriptContext* context,
   // lifetime.
   WorkerThreadDispatcher::Get()->Send(
       new ExtensionHostMsg_RequestWorker(params));
+}
+
+void SendEventListenersIPC(binding::EventListenersChanged changed,
+                           ScriptContext* context,
+                           const std::string& event_name) {
+  // TODO(devlin/lazyboy): Wire this up once extension workers support events.
 }
 
 }  // namespace
@@ -120,7 +127,7 @@ void WorkerThreadDispatcher::AddWorkerData(
     std::unique_ptr<ExtensionBindingsSystem> bindings_system;
     if (FeatureSwitch::native_crx_bindings()->IsEnabled()) {
       bindings_system = base::MakeUnique<NativeExtensionBindingsSystem>(
-          base::Bind(&SendRequestIPC));
+          base::Bind(&SendRequestIPC), base::Bind(&SendEventListenersIPC));
     } else {
       bindings_system = base::MakeUnique<JsExtensionBindingsSystem>(
           source_map, base::MakeUnique<ServiceWorkerRequestSender>(

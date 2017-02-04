@@ -7,13 +7,13 @@
 #include "ash/accelerators/accelerator_controller_delegate_aura.h"
 #include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/test/material_design_controller_test_api.h"
-#include "ash/common/test/test_new_window_client.h"
 #include "ash/common/test/test_session_state_delegate.h"
 #include "ash/common/test/test_system_tray_delegate.h"
 #include "ash/common/test/wm_shell_test_api.h"
 #include "ash/common/wm_shell.h"
 #include "ash/shell.h"
 #include "ash/shell_init_params.h"
+#include "ash/system/chromeos/screen_layout_observer.h"
 #include "ash/test/ash_test_environment.h"
 #include "ash/test/ash_test_views_delegate.h"
 #include "ash/test/shell_test_api.h"
@@ -21,6 +21,10 @@
 #include "ash/test/test_shell_delegate.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "chromeos/audio/cras_audio_handler.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "device/bluetooth/bluetooth_adapter_factory.h"
+#include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "ui/aura/env.h"
 #include "ui/aura/input_state_lookup.h"
 #include "ui/aura/test/env_test_helper.h"
@@ -37,18 +41,6 @@
 #include "ui/wm/core/cursor_manager.h"
 #include "ui/wm/core/wm_state.h"
 
-#if defined(OS_CHROMEOS)
-#include "ash/system/chromeos/screen_layout_observer.h"
-#include "chromeos/audio/cras_audio_handler.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "device/bluetooth/bluetooth_adapter_factory.h"
-#include "device/bluetooth/dbus/bluez_dbus_manager.h"
-#endif
-
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
-
 #if defined(USE_X11)
 #include "ui/aura/window_tree_host_x11.h"
 #endif
@@ -59,11 +51,9 @@ namespace test {
 AshTestHelper::AshTestHelper(AshTestEnvironment* ash_test_environment)
     : ash_test_environment_(ash_test_environment),
       test_shell_delegate_(nullptr),
-      test_screenshot_delegate_(nullptr) {
-#if defined(OS_CHROMEOS)
-  dbus_thread_manager_initialized_ = false;
-  bluez_dbus_manager_initialized_ = false;
-#endif
+      test_screenshot_delegate_(nullptr),
+      dbus_thread_manager_initialized_(false),
+      bluez_dbus_manager_initialized_(false) {
 #if defined(USE_X11)
   aura::test::SetUseOverrideRedirectWindowByDefault(true);
 #endif
@@ -84,8 +74,10 @@ void AshTestHelper::SetUp(bool start_session,
   ui::InitializeInputMethodForTesting();
 
   bool enable_pixel_output = false;
-  ui::ContextFactory* context_factory =
-      ui::InitializeContextFactoryForTests(enable_pixel_output);
+  ui::ContextFactory* context_factory = nullptr;
+  ui::ContextFactoryPrivate* context_factory_private = nullptr;
+  ui::InitializeContextFactoryForTests(enable_pixel_output, &context_factory,
+                                       &context_factory_private);
 
   // Creates Shell and hook with Desktop.
   if (!test_shell_delegate_)
@@ -95,7 +87,6 @@ void AshTestHelper::SetUp(bool start_session,
   // tests.
   message_center::MessageCenter::Initialize();
 
-#if defined(OS_CHROMEOS)
   // Create DBusThreadManager for testing.
   if (!chromeos::DBusThreadManager::IsInitialized()) {
     chromeos::DBusThreadManager::Initialize(
@@ -113,7 +104,7 @@ void AshTestHelper::SetUp(bool start_session,
   // Create CrasAudioHandler for testing since g_browser_process is not
   // created in AshTestBase tests.
   chromeos::CrasAudioHandler::InitializeForTesting();
-#endif
+
   ash_test_environment_->SetUp();
   // Reset the global state for the cursor manager. This includes the
   // last cursor visibility state, etc.
@@ -132,6 +123,7 @@ void AshTestHelper::SetUp(bool start_session,
   ShellInitParams init_params;
   init_params.delegate = test_shell_delegate_;
   init_params.context_factory = context_factory;
+  init_params.context_factory_private = context_factory_private;
   init_params.blocking_pool = ash_test_environment_->GetBlockingPool();
   Shell::CreateInstance(init_params);
   aura::test::EnvTestHelper(aura::Env::GetInstance())
@@ -143,11 +135,9 @@ void AshTestHelper::SetUp(bool start_session,
     GetTestSessionStateDelegate()->SetHasActiveUser(true);
   }
 
-#if defined(OS_CHROMEOS)
   // Tests that change the display configuration generally don't care about the
   // notifications and the popup UI can interfere with things like cursors.
   shell->screen_layout_observer()->set_show_notifications_for_testing(false);
-#endif
 
   display::test::DisplayManagerTestApi(Shell::GetInstance()->display_manager())
       .DisableChangeDisplayUponHostResize();
@@ -156,13 +146,15 @@ void AshTestHelper::SetUp(bool start_session,
   test_screenshot_delegate_ = new TestScreenshotDelegate();
   shell->accelerator_controller_delegate()->SetScreenshotDelegate(
       std::unique_ptr<ScreenshotDelegate>(test_screenshot_delegate_));
-
-  WmShellTestApi().SetNewWindowClient(base::MakeUnique<TestNewWindowClient>());
 }
 
 void AshTestHelper::TearDown() {
   // Tear down the shell.
   Shell::DeleteInstance();
+
+  // Suspend the tear down until all resources are returned via
+  // MojoCompositorFrameSinkClient::ReclaimResources()
+  RunAllPendingInMessageLoop();
   material_design_state_.reset();
   test::MaterialDesignControllerTestAPI::Uninitialize();
   ash_test_environment_->TearDown();
@@ -172,7 +164,6 @@ void AshTestHelper::TearDown() {
   // Remove global message center state.
   message_center::MessageCenter::Shutdown();
 
-#if defined(OS_CHROMEOS)
   chromeos::CrasAudioHandler::Shutdown();
   if (bluez_dbus_manager_initialized_) {
     device::BluetoothAdapterFactory::Shutdown();
@@ -183,7 +174,6 @@ void AshTestHelper::TearDown() {
     chromeos::DBusThreadManager::Shutdown();
     dbus_thread_manager_initialized_ = false;
   }
-#endif
 
   ui::TerminateContextFactoryForTests();
 
@@ -214,15 +204,6 @@ aura::Window* AshTestHelper::CurrentContext() {
     root_window = Shell::GetPrimaryRootWindow();
   DCHECK(root_window);
   return root_window;
-}
-
-// static
-bool AshTestHelper::SupportsMultipleDisplays() {
-#if defined(OS_WIN)
-  return false;
-#else
-  return true;
-#endif
 }
 
 }  // namespace test

@@ -71,6 +71,8 @@ MEDIA_EXPORT extern const char kForceVideoOverlays[];
 MEDIA_EXPORT extern const char kMSEAudioBufferSizeLimit[];
 MEDIA_EXPORT extern const char kMSEVideoBufferSizeLimit[];
 
+MEDIA_EXPORT extern const char kIgnoreMissingCdmHostFile[];
+
 }  // namespace switches
 
 namespace media {
@@ -79,6 +81,7 @@ namespace media {
 // alongside the definition of their values in the .cc file.
 
 #if defined(OS_WIN)
+MEDIA_EXPORT extern const base::Feature kD3D11VideoDecoding;
 MEDIA_EXPORT extern const base::Feature kMediaFoundationH264Encoding;
 #endif  // defined(OS_WIN)
 
@@ -87,11 +90,14 @@ MEDIA_EXPORT extern const base::Feature kOverlayFullscreenVideo;
 MEDIA_EXPORT extern const base::Feature kResumeBackgroundVideo;
 MEDIA_EXPORT extern const base::Feature kUseNewMediaCache;
 MEDIA_EXPORT extern const base::Feature kVideoColorManagement;
+MEDIA_EXPORT extern const base::Feature kVideoBlitColorAccuracy;
 MEDIA_EXPORT extern const base::Feature kExternalClearKeyForTesting;
 MEDIA_EXPORT extern const base::Feature kBackgroundVideoTrackOptimization;
+MEDIA_EXPORT extern const base::Feature kMemoryPressureBasedSourceBufferGC;
 
 #if defined(OS_ANDROID)
 MEDIA_EXPORT extern const base::Feature kAndroidMediaPlayerRenderer;
+MEDIA_EXPORT extern const base::Feature kVideoFullscreenOrientationLock;
 #endif  // defined(OS_ANDROID)
 }  // namespace media
 

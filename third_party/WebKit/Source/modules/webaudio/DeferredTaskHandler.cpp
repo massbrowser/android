@@ -65,7 +65,7 @@ void DeferredTaskHandler::offlineLock() {
   m_contextGraphMutex.lock();
 }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 bool DeferredTaskHandler::isGraphOwner() {
   return m_contextGraphMutex.locked();
 }
@@ -73,7 +73,7 @@ bool DeferredTaskHandler::isGraphOwner() {
 
 void DeferredTaskHandler::addDeferredBreakConnection(AudioHandler& node) {
   DCHECK(isAudioThread());
-  m_deferredBreakConnectionList.append(&node);
+  m_deferredBreakConnectionList.push_back(&node);
 }
 
 void DeferredTaskHandler::breakConnections() {
@@ -88,7 +88,7 @@ void DeferredTaskHandler::breakConnections() {
 void DeferredTaskHandler::markSummingJunctionDirty(
     AudioSummingJunction* summingJunction) {
   ASSERT(isGraphOwner());
-  m_dirtySummingJunctions.add(summingJunction);
+  m_dirtySummingJunctions.insert(summingJunction);
 }
 
 void DeferredTaskHandler::removeMarkedSummingJunction(
@@ -101,7 +101,7 @@ void DeferredTaskHandler::removeMarkedSummingJunction(
 void DeferredTaskHandler::markAudioNodeOutputDirty(AudioNodeOutput* output) {
   ASSERT(isGraphOwner());
   DCHECK(isMainThread());
-  m_dirtyAudioNodeOutputs.add(output);
+  m_dirtyAudioNodeOutputs.insert(output);
 }
 
 void DeferredTaskHandler::removeMarkedAudioNodeOutput(AudioNodeOutput* output) {
@@ -135,7 +135,7 @@ void DeferredTaskHandler::addAutomaticPullNode(AudioHandler* node) {
   ASSERT(isGraphOwner());
 
   if (!m_automaticPullNodes.contains(node)) {
-    m_automaticPullNodes.add(node);
+    m_automaticPullNodes.insert(node);
     m_automaticPullNodesNeedUpdating = true;
   }
 }
@@ -168,7 +168,7 @@ void DeferredTaskHandler::processAutomaticPullNodes(size_t framesToProcess) {
 void DeferredTaskHandler::addChangedChannelCountMode(AudioHandler* node) {
   ASSERT(isGraphOwner());
   DCHECK(isMainThread());
-  m_deferredCountModeChange.add(node);
+  m_deferredCountModeChange.insert(node);
 }
 
 void DeferredTaskHandler::removeChangedChannelCountMode(AudioHandler* node) {
@@ -180,7 +180,7 @@ void DeferredTaskHandler::removeChangedChannelCountMode(AudioHandler* node) {
 void DeferredTaskHandler::addChangedChannelInterpretation(AudioHandler* node) {
   ASSERT(isGraphOwner());
   DCHECK(isMainThread());
-  m_deferredChannelInterpretationChange.add(node);
+  m_deferredChannelInterpretationChange.insert(node);
 }
 
 void DeferredTaskHandler::removeChangedChannelInterpretation(
@@ -252,7 +252,7 @@ void DeferredTaskHandler::addRenderingOrphanHandler(
     PassRefPtr<AudioHandler> handler) {
   DCHECK(handler);
   DCHECK(!m_renderingOrphanHandlers.contains(handler));
-  m_renderingOrphanHandlers.append(handler);
+  m_renderingOrphanHandlers.push_back(handler);
 }
 
 void DeferredTaskHandler::requestToDeleteHandlersOnMainThread() {

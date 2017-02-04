@@ -120,21 +120,21 @@ void setMediaType(NFCRecordPtr& recordPtr,
 }
 
 template <>
-struct TypeConverter<mojo::WTFArray<uint8_t>, WTF::String> {
-  static mojo::WTFArray<uint8_t> Convert(const WTF::String& string) {
+struct TypeConverter<WTF::Vector<uint8_t>, WTF::String> {
+  static WTF::Vector<uint8_t> Convert(const WTF::String& string) {
     WTF::CString utf8String = string.utf8();
     WTF::Vector<uint8_t> array;
     array.append(utf8String.data(), utf8String.length());
-    return mojo::WTFArray<uint8_t>(std::move(array));
+    return array;
   }
 };
 
 template <>
-struct TypeConverter<mojo::WTFArray<uint8_t>, blink::DOMArrayBuffer*> {
-  static mojo::WTFArray<uint8_t> Convert(blink::DOMArrayBuffer* buffer) {
+struct TypeConverter<WTF::Vector<uint8_t>, blink::DOMArrayBuffer*> {
+  static WTF::Vector<uint8_t> Convert(blink::DOMArrayBuffer* buffer) {
     WTF::Vector<uint8_t> array;
     array.append(static_cast<uint8_t*>(buffer->data()), buffer->byteLength());
-    return mojo::WTFArray<uint8_t>(std::move(array));
+    return array;
   }
 };
 
@@ -145,7 +145,7 @@ struct TypeConverter<NFCRecordPtr, WTF::String> {
     record->record_type = NFCRecordType::TEXT;
     record->media_type = kPlainTextMimeType;
     record->media_type.append(kCharSetUTF8);
-    record->data = mojo::WTFArray<uint8_t>::From(string).PassStorage();
+    record->data = mojo::ConvertTo<WTF::Vector<uint8_t>>(string);
     return record;
   }
 };
@@ -156,7 +156,7 @@ struct TypeConverter<NFCRecordPtr, blink::DOMArrayBuffer*> {
     NFCRecordPtr record = NFCRecord::New();
     record->record_type = NFCRecordType::OPAQUE_RECORD;
     record->media_type = kOpaqueMimeType;
-    record->data = mojo::WTFArray<uint8_t>::From(buffer).PassStorage();
+    record->data = mojo::ConvertTo<WTF::Vector<uint8_t>>(buffer);
     return record;
   }
 };
@@ -165,25 +165,27 @@ template <>
 struct TypeConverter<NFCMessagePtr, WTF::String> {
   static NFCMessagePtr Convert(const WTF::String& string) {
     NFCMessagePtr message = NFCMessage::New();
-    message->data.append(NFCRecord::From(string));
+    message->data.push_back(NFCRecord::From(string));
     return message;
   }
 };
 
 template <>
-struct TypeConverter<mojo::WTFArray<uint8_t>, blink::ScriptValue> {
-  static mojo::WTFArray<uint8_t> Convert(
+struct TypeConverter<WTF::Optional<WTF::Vector<uint8_t>>, blink::ScriptValue> {
+  static WTF::Optional<WTF::Vector<uint8_t>> Convert(
       const blink::ScriptValue& scriptValue) {
     v8::Local<v8::Value> value = scriptValue.v8Value();
 
     if (value->IsNumber())
-      return mojo::WTFArray<uint8_t>::From(
+      return mojo::ConvertTo<WTF::Vector<uint8_t>>(
           WTF::String::number(value.As<v8::Number>()->Value()));
 
     if (value->IsString()) {
       blink::V8StringResource<> stringResource = value;
-      if (stringResource.prepare())
-        return mojo::WTFArray<uint8_t>::From<WTF::String>(stringResource);
+      if (stringResource.prepare()) {
+        return mojo::ConvertTo<WTF::Vector<uint8_t>>(
+            WTF::String(stringResource));
+      }
     }
 
     if (value->IsObject() && !value->IsArray() && !value->IsArrayBuffer()) {
@@ -192,15 +194,15 @@ struct TypeConverter<mojo::WTFArray<uint8_t>, blink::ScriptValue> {
               .ToLocal(&jsonString)) {
         WTF::String wtfString = blink::v8StringToWebCoreString<WTF::String>(
             jsonString, blink::DoNotExternalize);
-        return mojo::WTFArray<uint8_t>::From(wtfString);
+        return mojo::ConvertTo<WTF::Vector<uint8_t>>(wtfString);
       }
     }
 
     if (value->IsArrayBuffer())
-      return mojo::WTFArray<uint8_t>::From(
+      return mojo::ConvertTo<WTF::Vector<uint8_t>>(
           blink::V8ArrayBuffer::toImpl(value.As<v8::Object>()));
 
-    return nullptr;
+    return WTF::nullopt;
   }
 };
 
@@ -236,14 +238,15 @@ struct TypeConverter<NFCRecordPtr, blink::NFCRecord> {
         break;
     }
 
-    auto recordData = mojo::WTFArray<uint8_t>::From(record.data());
+    auto recordData =
+        mojo::ConvertTo<WTF::Optional<WTF::Vector<uint8_t>>>(record.data());
     // If JS object cannot be converted to uint8_t array, return null,
     // interrupt NFCMessage conversion algorithm and reject promise with
     // SyntaxError exception.
-    if (recordData.is_null())
+    if (!recordData)
       return nullptr;
 
-    recordPtr->data = recordData.PassStorage();
+    recordPtr->data = recordData.value();
     return recordPtr;
   }
 };
@@ -269,7 +272,7 @@ template <>
 struct TypeConverter<NFCMessagePtr, blink::DOMArrayBuffer*> {
   static NFCMessagePtr Convert(blink::DOMArrayBuffer* buffer) {
     NFCMessagePtr message = NFCMessage::New();
-    message->data.append(NFCRecord::From(buffer));
+    message->data.push_back(NFCRecord::From(buffer));
     return message;
   }
 };
@@ -486,7 +489,7 @@ String toNFCRecordType(const device::nfc::mojom::blink::NFCRecordType& type) {
   return String();
 }
 
-v8::Local<v8::Value> toV8(
+v8::Local<v8::Value> ToV8(
     ScriptState* scriptState,
     const device::nfc::mojom::blink::NFCRecordPtr& record) {
   switch (record->record_type) {
@@ -496,7 +499,7 @@ v8::Local<v8::Value> toV8(
       String stringData;
       if (!record->data.isEmpty()) {
         stringData = String::fromUTF8WithLatin1Fallback(
-            static_cast<unsigned char*>(&record->data.first()),
+            static_cast<unsigned char*>(&record->data.front()),
             record->data.size());
       }
 
@@ -521,8 +524,8 @@ v8::Local<v8::Value> toV8(
     case device::nfc::mojom::blink::NFCRecordType::OPAQUE_RECORD: {
       if (!record->data.isEmpty()) {
         DOMArrayBuffer* buffer = DOMArrayBuffer::create(
-            static_cast<void*>(&record->data.first()), record->data.size());
-        return toV8(buffer, scriptState->context()->Global(),
+            static_cast<void*>(&record->data.front()), record->data.size());
+        return ToV8(buffer, scriptState->context()->Global(),
                     scriptState->isolate());
       }
 
@@ -542,7 +545,7 @@ NFCRecord toNFCRecord(ScriptState* scriptState,
   NFCRecord nfcRecord;
   nfcRecord.setMediaType(record->media_type);
   nfcRecord.setRecordType(toNFCRecordType(record->record_type));
-  nfcRecord.setData(ScriptValue(scriptState, toV8(scriptState, record)));
+  nfcRecord.setData(ScriptValue(scriptState, ToV8(scriptState, record)));
   return nfcRecord;
 }
 
@@ -553,7 +556,7 @@ NFCMessage toNFCMessage(
   nfcMessage.setURL(message->url);
   blink::HeapVector<NFCRecord> records;
   for (size_t i = 0; i < message->data.size(); ++i)
-    records.append(toNFCRecord(scriptState, message->data[i]));
+    records.push_back(toNFCRecord(scriptState, message->data[i]));
   nfcMessage.setData(records);
   return nfcMessage;
 }
@@ -574,8 +577,7 @@ NFC::NFC(LocalFrame* frame)
     : PageVisibilityObserver(frame->page()),
       ContextLifecycleObserver(frame->document()),
       m_client(this) {
-  ThreadState::current()->registerPreFinalizer(this);
-  frame->interfaceProvider()->getInterface(mojo::GetProxy(&m_nfc));
+  frame->interfaceProvider()->getInterface(mojo::MakeRequest(&m_nfc));
   m_nfc.set_connection_error_handler(convertToBaseCallback(
       WTF::bind(&NFC::OnConnectionError, wrapWeakPersistent(this))));
   m_nfc->SetClient(m_client.CreateInterfacePtrAndBind());
@@ -596,7 +598,7 @@ void NFC::dispose() {
   m_client.Close();
 }
 
-void NFC::contextDestroyed() {
+void NFC::contextDestroyed(ExecutionContext*) {
   m_nfc.reset();
   m_requests.clear();
   m_callbacks.clear();
@@ -634,7 +636,7 @@ ScriptPromise NFC::push(ScriptState* scriptState,
   }
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  m_requests.add(resolver);
+  m_requests.insert(resolver);
   auto callback = convertToBaseCallback(WTF::bind(&NFC::OnRequestCompleted,
                                                   wrapPersistent(this),
                                                   wrapPersistent(resolver)));
@@ -652,7 +654,7 @@ ScriptPromise NFC::cancelPush(ScriptState* scriptState, const String& target) {
     return promise;
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  m_requests.add(resolver);
+  m_requests.insert(resolver);
   auto callback = convertToBaseCallback(WTF::bind(&NFC::OnRequestCompleted,
                                                   wrapPersistent(this),
                                                   wrapPersistent(resolver)));
@@ -672,7 +674,7 @@ ScriptPromise NFC::watch(ScriptState* scriptState,
 
   callback->setScriptState(scriptState);
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  m_requests.add(resolver);
+  m_requests.insert(resolver);
   auto watchCallback = convertToBaseCallback(
       WTF::bind(&NFC::OnWatchRegistered, wrapPersistent(this),
                 wrapPersistent(callback), wrapPersistent(resolver)));
@@ -688,14 +690,14 @@ ScriptPromise NFC::cancelWatch(ScriptState* scriptState, long id) {
     return promise;
 
   if (id) {
-    m_callbacks.remove(id);
+    m_callbacks.erase(id);
   } else {
     return ScriptPromise::rejectWithDOMException(
         scriptState, DOMException::create(NotFoundError));
   }
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  m_requests.add(resolver);
+  m_requests.insert(resolver);
   m_nfc->CancelWatch(id, convertToBaseCallback(WTF::bind(
                              &NFC::OnRequestCompleted, wrapPersistent(this),
                              wrapPersistent(resolver))));
@@ -711,7 +713,7 @@ ScriptPromise NFC::cancelWatch(ScriptState* scriptState) {
 
   m_callbacks.clear();
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  m_requests.add(resolver);
+  m_requests.insert(resolver);
   m_nfc->CancelAllWatches(convertToBaseCallback(
       WTF::bind(&NFC::OnRequestCompleted, wrapPersistent(this),
                 wrapPersistent(resolver))));
@@ -744,11 +746,6 @@ void NFC::OnRequestCompleted(ScriptPromiseResolver* resolver,
 }
 
 void NFC::OnConnectionError() {
-  if (!Platform::current()) {
-    // TODO(rockot): Clean this up once renderer shutdown sequence is fixed.
-    return;
-  }
-
   m_nfc.reset();
   m_callbacks.clear();
 
@@ -778,9 +775,20 @@ void NFC::OnWatch(const WTF::Vector<uint32_t>& ids,
 
 ScriptPromise NFC::rejectIfNotSupported(ScriptState* scriptState) {
   String errorMessage;
-  if (!scriptState->getExecutionContext()->isSecureContext(errorMessage)) {
+  ExecutionContext* context = scriptState->getExecutionContext();
+  if (!context->isSecureContext(errorMessage)) {
     return ScriptPromise::rejectWithDOMException(
         scriptState, DOMException::create(SecurityError, errorMessage));
+  }
+
+  // https://w3c.github.io/web-nfc/#security-policies
+  // WebNFC API must be only accessible from top level browsing context.
+  if (!toDocument(context)->domWindow()->frame() ||
+      !toDocument(context)->frame()->isMainFrame()) {
+    return ScriptPromise::rejectWithDOMException(
+        scriptState,
+        DOMException::create(SecurityError,
+                             "Must be in a top-level browsing context."));
   }
 
   if (!m_nfc) {

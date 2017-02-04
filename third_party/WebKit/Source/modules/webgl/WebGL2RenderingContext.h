@@ -42,8 +42,6 @@ class WebGL2RenderingContext : public WebGL2RenderingContextBase {
     void onError(HTMLCanvasElement*, const String& error) override;
   };
 
-  ~WebGL2RenderingContext() override;
-
   CanvasRenderingContext::ContextType getContextType() const override {
     return CanvasRenderingContext::ContextWebgl2;
   }
@@ -81,6 +79,7 @@ class WebGL2RenderingContext : public WebGL2RenderingContextBase {
   Member<WebGLCompressedTextureS3TCsRGB> m_webglCompressedTextureS3TCsRGB;
   Member<WebGLDebugRendererInfo> m_webglDebugRendererInfo;
   Member<WebGLDebugShaders> m_webglDebugShaders;
+  Member<WebGLGetBufferSubDataAsync> m_webglGetBufferSubDataAsync;
   Member<WebGLLoseContext> m_webglLoseContext;
 };
 

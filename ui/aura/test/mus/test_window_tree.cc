@@ -13,7 +13,19 @@ TestWindowTree::TestWindowTree() {}
 TestWindowTree::~TestWindowTree() {}
 
 bool TestWindowTree::WasEventAcked(uint32_t event_id) const {
-  return acked_events_.count(event_id);
+  for (const AckedEvent& acked_event : acked_events_) {
+    if (acked_event.event_id == event_id)
+      return true;
+  }
+  return false;
+}
+
+ui::mojom::EventResult TestWindowTree::GetEventResult(uint32_t event_id) const {
+  for (const AckedEvent& acked_event : acked_events_) {
+    if (acked_event.event_id == event_id)
+      return acked_event.result;
+  }
+  return ui::mojom::EventResult::UNHANDLED;
 }
 
 base::Optional<std::vector<uint8_t>> TestWindowTree::GetLastPropertyValue() {
@@ -165,7 +177,6 @@ void TestWindowTree::SetWindowOpacity(uint32_t change_id,
 
 void TestWindowTree::AttachCompositorFrameSink(
     uint32_t window_id,
-    ui::mojom::CompositorFrameSinkType type,
     mojo::InterfaceRequest<cc::mojom::MojoCompositorFrameSink> surface,
     cc::mojom::MojoCompositorFrameSinkClientPtr client) {}
 
@@ -233,8 +244,9 @@ void TestWindowTree::SetFocus(uint32_t change_id, uint32_t window_id) {
 
 void TestWindowTree::SetCanFocus(uint32_t window_id, bool can_focus) {}
 
-void TestWindowTree::SetCanAcceptEvents(uint32_t window_id,
-                                        bool can_accept_events) {}
+void TestWindowTree::SetEventTargetingPolicy(
+    uint32_t window_id,
+    ui::mojom::EventTargetingPolicy policy) {}
 
 void TestWindowTree::SetPredefinedCursor(uint32_t change_id,
                                          uint32_t window_id,
@@ -251,9 +263,16 @@ void TestWindowTree::SetImeVisibility(uint32_t window_id,
 
 void TestWindowTree::OnWindowInputEventAck(uint32_t event_id,
                                            ui::mojom::EventResult result) {
-  EXPECT_FALSE(acked_events_.count(event_id));
-  acked_events_.insert(event_id);
+  EXPECT_FALSE(WasEventAcked(event_id));
+  acked_events_.push_back({event_id, result});
 }
+
+void TestWindowTree::DeactivateWindow(uint32_t window_id) {}
+
+void TestWindowTree::StackAbove(uint32_t change_id, uint32_t above_id,
+                                uint32_t below_id) {}
+
+void TestWindowTree::StackAtTop(uint32_t change_id, uint32_t window_id) {}
 
 void TestWindowTree::GetWindowManagerClient(
     mojo::AssociatedInterfaceRequest<ui::mojom::WindowManagerClient> internal) {

@@ -12,7 +12,6 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.os.Bundle;
 import android.os.Handler;
-import android.support.design.widget.CoordinatorLayout;
 import android.support.v4.view.ViewCompat;
 import android.support.v4.view.accessibility.AccessibilityEventCompat;
 import android.support.v4.view.accessibility.AccessibilityNodeInfoCompat;
@@ -32,6 +31,7 @@ import org.chromium.base.TraceEvent;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.Invalidator.Client;
+import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerHost;
 import org.chromium.chrome.browser.compositor.layouts.LayoutRenderHost;
@@ -45,15 +45,15 @@ import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.FullscreenListener;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabContentViewParent;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.chrome.browser.widget.ControlContainer;
-import org.chromium.content.browser.ContentViewClient;
+import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.SPenSupport;
 import org.chromium.ui.UiUtils;
@@ -72,11 +72,11 @@ import java.util.List;
  * This class also holds the {@link LayoutManager} responsible to describe the items to be
  * drawn by the UI compositor on the native side.
  */
-public class CompositorViewHolder extends CoordinatorLayout
+public class CompositorViewHolder extends FrameLayout
         implements ContentOffsetProvider, LayoutManagerHost, LayoutRenderHost, Invalidator.Host,
                 FullscreenListener {
 
-    private boolean mIsKeyboardShowing = false;
+    private boolean mIsKeyboardShowing;
 
     private final Invalidator mInvalidator = new Invalidator();
     private LayoutManager mLayoutManager;
@@ -88,8 +88,8 @@ public class CompositorViewHolder extends CoordinatorLayout
     private int mPendingSwapBuffersCount;
 
     private final ArrayList<Invalidator.Client> mPendingInvalidations =
-            new ArrayList<Invalidator.Client>();
-    private boolean mSkipInvalidation = false;
+            new ArrayList<>();
+    private boolean mSkipInvalidation;
 
     /**
      * A task to be performed after a resize event.
@@ -100,9 +100,7 @@ public class CompositorViewHolder extends CoordinatorLayout
     private ChromeFullscreenManager mFullscreenManager;
     private View mAccessibilityView;
     private CompositorAccessibilityProvider mNodeProvider;
-    private boolean mFullscreenTouchEvent = false;
-    private float mLastContentOffset = 0;
-    private float mLastVisibleContentOffset = 0;
+    private float mLastContentOffset;
 
     /** The toolbar control container. **/
     private ControlContainer mControlContainer;
@@ -111,8 +109,9 @@ public class CompositorViewHolder extends CoordinatorLayout
     private Tab mTabVisible;
 
     /** The currently attached View. */
-    private TabContentViewParent mView;
+    private View mView;
 
+    private TabModelSelectorObserver mTabModelSelectorObserver;
     private TabObserver mTabObserver;
     private boolean mEnableCompositorTabStrip;
 
@@ -121,13 +120,21 @@ public class CompositorViewHolder extends CoordinatorLayout
     private DrawingInfo mProgressBarDrawingInfo;
 
     // If we've drawn at least one frame.
-    private boolean mHasDrawnOnce = false;
+    private boolean mHasDrawnOnce;
+
+    /**
+     * The information about {@link ContentView} for overlay panel. Used to adjust the backing
+     * size of the content accordingly.
+     */
+    private ContentView mOverlayContentView;
+    private int mOverlayContentWidthMeasureSpec = ContentView.DEFAULT_MEASURE_SPEC;
+    private int mOverlayContentHeightMeasureSpec = ContentView.DEFAULT_MEASURE_SPEC;
 
     /**
      * This view is created on demand to display debugging information.
      */
     private static class DebugOverlay extends View {
-        private final List<Pair<Rect, Integer>> mRectangles = new ArrayList<Pair<Rect, Integer>>();
+        private final List<Pair<Rect, Integer>> mRectangles = new ArrayList<>();
         private final Paint mPaint = new Paint();
         private boolean mFirstPush = true;
 
@@ -149,7 +156,7 @@ public class CompositorViewHolder extends CoordinatorLayout
                 mRectangles.clear();
                 mFirstPush = false;
             }
-            mRectangles.add(new Pair<Rect, Integer>(rect, color));
+            mRectangles.add(new Pair<>(rect, color));
             invalidate();
         }
 
@@ -197,6 +204,18 @@ public class CompositorViewHolder extends CoordinatorLayout
             }
         };
 
+        mTabModelSelectorObserver = new EmptyTabModelSelectorObserver() {
+            @Override
+            public void onChange() {
+                onContentChanged();
+            }
+
+            @Override
+            public void onNewTabCreated(Tab tab) {
+                initializeTab(tab);
+            }
+        };
+
         mEnableCompositorTabStrip = DeviceFormFactor.isTablet(getContext());
 
         addOnLayoutChangeListener(new OnLayoutChangeListener() {
@@ -237,6 +256,18 @@ public class CompositorViewHolder extends CoordinatorLayout
      */
     public void setRootView(View view) {
         mCompositorView.setRootView(view);
+    }
+
+    /**
+     * Set the desired size of the overlay content view.
+     * @param overlayContentView {@link ContentView} used for overlay panel.
+     * @param width The width of the content view in {@link MeasureSpec}.
+     * @param height The height of the content view in {@link MeasureSpec}.
+     */
+    public void setOverlayContentInfo(ContentView overlayContentView, int width, int height) {
+        mOverlayContentView = overlayContentView;
+        mOverlayContentWidthMeasureSpec = width;
+        mOverlayContentHeightMeasureSpec = height;
     }
 
     /**
@@ -329,18 +360,9 @@ public class CompositorViewHolder extends CoordinatorLayout
 
     @Override
     public boolean onInterceptTouchEvent(MotionEvent e) {
-        boolean consumedBySuper = super.onInterceptTouchEvent(e);
-        if (consumedBySuper) return true;
+        super.onInterceptTouchEvent(e);
 
         if (mLayoutManager == null) return false;
-
-        mFullscreenTouchEvent = false;
-        if (mFullscreenManager != null && mFullscreenManager.onInterceptMotionEvent(e)
-                && !mEnableCompositorTabStrip) {
-            // Don't eat the event if the new tab strip is enabled.
-            mFullscreenTouchEvent = true;
-            return true;
-        }
 
         setContentViewMotionEventOffsets(e, false);
         return mLayoutManager.onInterceptTouchEvent(e, mIsKeyboardShowing);
@@ -348,11 +370,9 @@ public class CompositorViewHolder extends CoordinatorLayout
 
     @Override
     public boolean onTouchEvent(MotionEvent e) {
-        boolean consumedBySuper = super.onTouchEvent(e);
-        if (consumedBySuper) return true;
+        super.onTouchEvent(e);
 
         if (mFullscreenManager != null) mFullscreenManager.onMotionEvent(e);
-        if (mFullscreenTouchEvent) return true;
         boolean consumed = mLayoutManager != null && mLayoutManager.onTouchEvent(e);
         setContentViewMotionEventOffsets(e, true);
         return consumed;
@@ -436,7 +456,6 @@ public class CompositorViewHolder extends CoordinatorLayout
     public void onStart() {
         if (mFullscreenManager != null) {
             mLastContentOffset = mFullscreenManager.getContentOffset();
-            mLastVisibleContentOffset = mFullscreenManager.getTopVisibleContentOffset();
             mFullscreenManager.addListener(this);
         }
         requestRender();
@@ -456,10 +475,15 @@ public class CompositorViewHolder extends CoordinatorLayout
     }
 
     @Override
-    public void onVisibleContentOffsetChanged(float offset, boolean needsAnimate) {
-        mLastVisibleContentOffset = offset;
+    public void onControlsOffsetChanged(float topOffset, float bottomOffset, boolean needsAnimate) {
         onViewportChanged();
         if (needsAnimate) requestRender();
+    }
+
+    @Override
+    public void onBottomControlsHeightChanged(int bottomControlsHeight) {
+        if (mTabVisible == null || mTabVisible.getContentViewCore() == null) return;
+        mTabVisible.getContentViewCore().setBottomControlsHeight(bottomControlsHeight);
     }
 
     @Override
@@ -531,17 +555,26 @@ public class CompositorViewHolder extends CoordinatorLayout
 
     @Override
     public void getVisibleViewport(RectF outRect) {
-        // All of these values are in pixels.
-        float viewportTop = 0;
+        getWindowViewport(outRect);
+
         float bottomControlOffset = 0;
         if (mFullscreenManager != null) {
-            viewportTop = mFullscreenManager.getTopVisibleContentOffset();
+            // All of these values are in pixels.
+            outRect.top += mFullscreenManager.getTopVisibleContentOffset();
             bottomControlOffset = mFullscreenManager.getBottomControlOffset();
         }
-        float viewportBottom =
-                getHeight() - (getBottomControlsHeightPixels() - bottomControlOffset);
+        outRect.bottom -= (getBottomControlsHeightPixels() - bottomControlOffset);
+    }
 
-        outRect.set(0, viewportTop, getWidth(), viewportBottom);
+    @Override
+    public void getViewportFullControls(RectF outRect) {
+        getWindowViewport(outRect);
+
+        if (mFullscreenManager != null) {
+            // All of these values are in pixels.
+            outRect.top += mFullscreenManager.getTopControlsHeight();
+            outRect.bottom -= mFullscreenManager.getBottomControlsHeight();
+        }
     }
 
     @Override
@@ -646,7 +679,6 @@ public class CompositorViewHolder extends CoordinatorLayout
         mFullscreenManager = fullscreen;
         if (mFullscreenManager != null) {
             mLastContentOffset = mFullscreenManager.getContentOffset();
-            mLastVisibleContentOffset = mFullscreenManager.getTopVisibleContentOffset();
             mFullscreenManager.addListener(this);
         }
         onViewportChanged();
@@ -688,7 +720,7 @@ public class CompositorViewHolder extends CoordinatorLayout
     public float getOverlayTranslateY() {
         return areBrowserControlsPermanentlyHidden()
                 ? getTopControlsHeightPixels()
-                : mLastVisibleContentOffset;
+                : mFullscreenManager.getTopVisibleContentOffset();
     }
 
     /**
@@ -769,20 +801,8 @@ public class CompositorViewHolder extends CoordinatorLayout
         mLayoutManager.init(tabModelSelector, tabCreatorManager, tabContentManager,
                 androidContentContainer, contextualSearchManager, readerModeManager,
                 mCompositorView.getResourceManager().getDynamicResourceLoader());
-        mTabModelSelector = tabModelSelector;
-        tabModelSelector.addObserver(new EmptyTabModelSelectorObserver() {
-            @Override
-            public void onChange() {
-                onContentChanged();
-            }
 
-            @Override
-            public void onNewTabCreated(Tab tab) {
-                initializeTab(tab);
-            }
-        });
-
-        mLayerTitleCache.setTabModelSelector(mTabModelSelector);
+        attachToTabModelSelector(tabModelSelector);
 
         onContentChanged();
     }
@@ -805,20 +825,8 @@ public class CompositorViewHolder extends CoordinatorLayout
                     }
                 }
 
-                CoordinatorLayout.LayoutParams layoutParams;
-                if (mView.getLayoutParams() instanceof CoordinatorLayout.LayoutParams) {
-                    layoutParams = (CoordinatorLayout.LayoutParams) mView.getLayoutParams();
-                } else {
-                    layoutParams = new CoordinatorLayout.LayoutParams(
-                            LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
-                }
-                layoutParams.setBehavior(mView.getBehavior());
-                // CompositorView has index of 0; TabContentViewParent has index of 1; omnibox
-                // result container (the scrim) has index of 2, Snackbar (if any) has index of 3.
-                // Setting index here explicitly to avoid TabContentViewParent hiding the scrim.
-                // TODO(ianwen): Use more advanced technologies to ensure z-order of the children of
-                // this class, instead of hard-coding.
-                addView(mView, 1, layoutParams);
+                // CompositorView always has index of 0.
+                addView(mView, 1);
 
                 setFocusable(false);
                 setFocusableInTouchMode(false);
@@ -851,7 +859,7 @@ public class CompositorViewHolder extends CoordinatorLayout
     }
 
     @Override
-    public void onContentViewCoreAdded(ContentViewCore content) {
+    public void onOverlayPanelContentViewCoreAdded(ContentViewCore content) {
         // TODO(dtrainor): Look into rolling this into onContentChanged().
         initializeContentViewCore(content);
         setSizeOfUnattachedView(content.getContainerView());
@@ -860,7 +868,7 @@ public class CompositorViewHolder extends CoordinatorLayout
     private void setTab(Tab tab) {
         if (tab != null) tab.loadIfNeeded();
 
-        TabContentViewParent newView = tab != null ? tab.getView() : null;
+        View newView = tab != null ? tab.getView() : null;
         if (mView == newView) return;
 
         // TODO(dtrainor): Look into changing this only if the views differ, but still parse the
@@ -909,30 +917,19 @@ public class CompositorViewHolder extends CoordinatorLayout
     }
 
     /**
-     * Adjusts the physical backing size of a given ContentViewCore. This method will first check
-     * if the ContentViewCore's client wants to override the size and, if so, it will use the
-     * values provided by the {@link ContentViewClient#getDesiredWidthMeasureSpec()} and
-     * {@link ContentViewClient#getDesiredHeightMeasureSpec()} methods. If no value is provided
-     * in one of these methods, the values from the |width| and |height| arguments will be
-     * used instead.
-     *
+     * Adjusts the physical backing size of a given ContentViewCore. This method checks
+     * the associated container view to see if the size needs to be overriden, such as when used for
+     * {@link OverlayPanel}.
      * @param contentViewCore The {@link ContentViewCore} to resize.
      * @param width The default width.
      * @param height The default height.
      */
     private void adjustPhysicalBackingSize(ContentViewCore contentViewCore, int width, int height) {
-        ContentViewClient client = contentViewCore.getContentViewClient();
-
-        int desiredWidthMeasureSpec = client.getDesiredWidthMeasureSpec();
-        if (MeasureSpec.getMode(desiredWidthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
-            width = MeasureSpec.getSize(desiredWidthMeasureSpec);
+        ContentView contentView = (ContentView) contentViewCore.getContainerView();
+        if (contentView == mOverlayContentView) {
+            width = MeasureSpec.getSize(mOverlayContentWidthMeasureSpec);
+            height = MeasureSpec.getSize(mOverlayContentHeightMeasureSpec);
         }
-
-        int desiredHeightMeasureSpec = client.getDesiredHeightMeasureSpec();
-        if (MeasureSpec.getMode(desiredHeightMeasureSpec) != MeasureSpec.UNSPECIFIED) {
-            height = MeasureSpec.getSize(desiredHeightMeasureSpec);
-        }
-
         contentViewCore.onPhysicalBackingSizeChanged(width, height);
     }
 
@@ -980,10 +977,43 @@ public class CompositorViewHolder extends CoordinatorLayout
         mPendingInvalidations.clear();
     }
 
+    /**
+     * Detach and return the {@link TabModelSelector} in order to disconnect this
+     * {@link CompositorViewHolder} so that VR can take ownership of Chrome's rendering.
+     * @return The detached {@link TabModelSelector}.
+     */
+    public TabModelSelector detachForVR() {
+        mTabModelSelector.removeObserver(mTabModelSelectorObserver);
+        TabModelSelector selector = mTabModelSelector;
+        mTabModelSelector = null;
+        mLayerTitleCache.setTabModelSelector(null);
+        setTab(null);
+        return selector;
+    }
+
+    /**
+     * Restores the {@link TabModelSelector} to this {@link CompositorViewHolder} after exiting VR
+     * so that it can take back ownership of Chrome's rendering.
+     * @param tabModelSelector
+     */
+    public void onExitVR(TabModelSelector tabModelSelector) {
+        attachToTabModelSelector(tabModelSelector);
+    }
+
+    private void attachToTabModelSelector(TabModelSelector tabModelSelector) {
+        assert mTabModelSelector == null;
+        mTabModelSelector = tabModelSelector;
+        mTabModelSelector.addObserver(mTabModelSelectorObserver);
+
+        mLayerTitleCache.setTabModelSelector(mTabModelSelector);
+        onContentChanged();
+    }
+
     @Override
     public void invalidateAccessibilityProvider() {
         if (mNodeProvider != null) {
-            mNodeProvider.sendEventForVirtualView(mNodeProvider.getFocusedVirtualView(),
+            mNodeProvider.sendEventForVirtualView(
+                    mNodeProvider.getAccessibilityFocusedVirtualViewId(),
                     AccessibilityEventCompat.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED);
             mNodeProvider.invalidateRoot();
         }
@@ -1016,7 +1046,7 @@ public class CompositorViewHolder extends CoordinatorLayout
      */
     private class CompositorAccessibilityProvider extends ExploreByTouchHelper {
         private final float mDpToPx;
-        List<VirtualView> mVirtualViews = new ArrayList<VirtualView>();
+        List<VirtualView> mVirtualViews = new ArrayList<>();
         private final Rect mPlaceHolderRect = new Rect(0, 0, 1, 1);
         private static final String PLACE_HOLDER_STRING = "";
         private final RectF mTouchTarget = new RectF();

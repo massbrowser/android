@@ -32,7 +32,9 @@
 
 #include "bindings/core/v8/V8Document.h"
 #include "core/dom/Document.h"
+#include "core/dom/DocumentUserGestureToken.h"
 #include "core/dom/Element.h"
+#include "core/dom/Fullscreen.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/InputMethodController.h"
 #include "core/editing/markers/DocumentMarkerController.h"
@@ -71,6 +73,7 @@
 #include "public/platform/WebDragOperation.h"
 #include "public/platform/WebFloatPoint.h"
 #include "public/platform/WebInputEvent.h"
+#include "public/platform/WebKeyboardEvent.h"
 #include "public/platform/WebLayerTreeView.h"
 #include "public/platform/WebMockClipboard.h"
 #include "public/platform/WebSize.h"
@@ -87,6 +90,7 @@
 #include "public/web/WebFrameContentDumper.h"
 #include "public/web/WebHitTestResult.h"
 #include "public/web/WebInputMethodController.h"
+#include "public/web/WebPrintParams.h"
 #include "public/web/WebScriptSource.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebTreeScopeType.h"
@@ -165,10 +169,10 @@ class TapHandlingWebViewClient : public FrameTestHelpers::TestWebViewClient {
   // WebViewClient methods
   void didHandleGestureEvent(const WebGestureEvent& event,
                              bool eventCancelled) override {
-    if (event.type == WebInputEvent::GestureTap) {
+    if (event.type() == WebInputEvent::GestureTap) {
       m_tapX = event.x;
       m_tapY = event.y;
-    } else if (event.type == WebInputEvent::GestureLongPress) {
+    } else if (event.type() == WebInputEvent::GestureLongPress) {
       m_longpressX = event.x;
       m_longpressY = event.y;
     }
@@ -392,11 +396,11 @@ TEST_P(WebViewTest, SetBaseBackgroundColor) {
                                    "style></head></html>",
                                    baseURL);
   // Expected: red (50% alpha) blended atop base of kBlue.
-  EXPECT_EQ(0xFF7F0080, webView->backgroundColor());
+  EXPECT_EQ(0xFF80007F, webView->backgroundColor());
 
   webView->setBaseBackgroundColor(kTranslucentPutty);
   // Expected: red (50% alpha) blended atop kTranslucentPutty. Note the alpha.
-  EXPECT_EQ(0xBFE93B32, webView->backgroundColor());
+  EXPECT_EQ(0xBFE93A31, webView->backgroundColor());
 
   webView->setBaseBackgroundColor(kTransparent);
   FrameTestHelpers::loadHTMLString(webView->mainFrame(),
@@ -434,8 +438,8 @@ TEST_P(WebViewTest, SetBaseBackgroundColorBeforeMainFrame) {
   webView->setBaseBackgroundColor(kBlue);
   EXPECT_EQ(kBlue, webView->backgroundColor());
   FrameTestHelpers::TestWebFrameClient webFrameClient;
-  WebLocalFrame* frame =
-      WebLocalFrame::create(WebTreeScopeType::Document, &webFrameClient);
+  WebLocalFrame* frame = WebLocalFrame::create(
+      WebTreeScopeType::Document, &webFrameClient, nullptr, nullptr);
   webView->setMainFrame(frame);
   webView->close();
 }
@@ -457,8 +461,10 @@ TEST_P(WebViewTest, SetBaseBackgroundColorAndBlendWithExistingContent) {
   // Set canvas background to red with alpha.
   SkBitmap bitmap;
   bitmap.allocN32Pixels(kWidth, kHeight);
-  SkCanvas canvas(bitmap);
-  canvas.clear(kAlphaRed);
+  SkCanvas bitmapCanvas(bitmap);
+  bitmapCanvas.clear(kAlphaRed);
+
+  PaintCanvasPassThrough canvas(&bitmapCanvas);
 
   SkPictureBuilder pictureBuilder(FloatRect(0, 0, kWidth, kHeight));
 
@@ -472,7 +478,6 @@ TEST_P(WebViewTest, SetBaseBackgroundColorAndBlendWithExistingContent) {
   PaintLayerPainter(*rootLayer)
       .paintLayerContents(pictureBuilder.context(), paintingInfo,
                           PaintLayerPaintingCompositingAllPhases);
-
   pictureBuilder.endRecording()->playback(&canvas);
 
   // The result should be a blend of red and green.
@@ -751,15 +756,18 @@ void WebViewTest::testTextInputType(WebTextInputType expectedType,
   URLTestHelpers::registerMockedURLFromBaseURL(
       WebString::fromUTF8(m_baseURL.c_str()),
       WebString::fromUTF8(htmlFile.c_str()));
-  WebView* webView = m_webViewHelper.initializeAndLoad(m_baseURL + htmlFile);
-  EXPECT_EQ(WebTextInputTypeNone, webView->textInputType());
-  EXPECT_EQ(WebTextInputTypeNone, webView->textInputInfo().type);
+  WebViewImpl* webView =
+      m_webViewHelper.initializeAndLoad(m_baseURL + htmlFile);
+  WebInputMethodControllerImpl* controller =
+      webView->mainFrameImpl()->inputMethodController();
+  EXPECT_EQ(WebTextInputTypeNone, controller->textInputType());
+  EXPECT_EQ(WebTextInputTypeNone, controller->textInputInfo().type);
   webView->setInitialFocus(false);
-  EXPECT_EQ(expectedType, webView->textInputType());
-  EXPECT_EQ(expectedType, webView->textInputInfo().type);
+  EXPECT_EQ(expectedType, controller->textInputType());
+  EXPECT_EQ(expectedType, controller->textInputInfo().type);
   webView->clearFocusedElement();
-  EXPECT_EQ(WebTextInputTypeNone, webView->textInputType());
-  EXPECT_EQ(WebTextInputTypeNone, webView->textInputInfo().type);
+  EXPECT_EQ(WebTextInputTypeNone, controller->textInputType());
+  EXPECT_EQ(WebTextInputTypeNone, controller->textInputInfo().type);
 }
 
 TEST_P(WebViewTest, TextInputType) {
@@ -801,7 +809,10 @@ TEST_P(WebViewTest, TextInputInfoUpdateStyleAndLayout) {
       ->setIdAttribute("foo");
 
   // This should not DCHECK.
-  EXPECT_EQ(WebTextInputTypeText, webViewImpl->textInputInfo().type);
+  EXPECT_EQ(WebTextInputTypeText, webViewImpl->mainFrameImpl()
+                                      ->inputMethodController()
+                                      ->textInputInfo()
+                                      .type);
 }
 
 void WebViewTest::testInputMode(WebTextInputMode expectedInputMode,
@@ -809,9 +820,13 @@ void WebViewTest::testInputMode(WebTextInputMode expectedInputMode,
   URLTestHelpers::registerMockedURLFromBaseURL(
       WebString::fromUTF8(m_baseURL.c_str()),
       WebString::fromUTF8(htmlFile.c_str()));
-  WebView* webView = m_webViewHelper.initializeAndLoad(m_baseURL + htmlFile);
-  webView->setInitialFocus(false);
-  EXPECT_EQ(expectedInputMode, webView->textInputInfo().inputMode);
+  WebViewImpl* webViewImpl =
+      m_webViewHelper.initializeAndLoad(m_baseURL + htmlFile);
+  webViewImpl->setInitialFocus(false);
+  EXPECT_EQ(expectedInputMode, webViewImpl->mainFrameImpl()
+                                   ->inputMethodController()
+                                   ->textInputInfo()
+                                   .inputMode);
 }
 
 TEST_P(WebViewTest, InputMode) {
@@ -856,9 +871,10 @@ TEST_P(WebViewTest, TextInputInfoWithReplacedElements) {
   URLTestHelpers::registerMockedURLLoad(toKURL(url), "div_with_image.html");
   URLTestHelpers::registerMockedURLLoad(toKURL("http://www.test.com/foo.png"),
                                         "white-1x1.png");
-  WebView* webView = m_webViewHelper.initializeAndLoad(url);
-  webView->setInitialFocus(false);
-  WebTextInputInfo info = webView->textInputInfo();
+  WebViewImpl* webViewImpl = m_webViewHelper.initializeAndLoad(url);
+  webViewImpl->setInitialFocus(false);
+  WebTextInputInfo info =
+      webViewImpl->mainFrameImpl()->inputMethodController()->textInputInfo();
 
   EXPECT_EQ("foo\xef\xbf\xbc", info.value.utf8());
 }
@@ -871,9 +887,11 @@ TEST_P(WebViewTest, SetEditableSelectionOffsetsAndTextInputInfo) {
       m_baseURL + "input_field_populated.html");
   webView->setInitialFocus(false);
   WebLocalFrameImpl* frame = webView->mainFrameImpl();
+  WebInputMethodControllerImpl* activeInputMethodController =
+      frame->inputMethodController();
   frame->setEditableSelectionOffsets(5, 13);
   EXPECT_EQ("56789abc", frame->selectionAsText());
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("0123456789abcdefghijklmnopqrstuvwxyz", info.value);
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(13, info.selectionEnd);
@@ -887,9 +905,10 @@ TEST_P(WebViewTest, SetEditableSelectionOffsetsAndTextInputInfo) {
       m_baseURL + "content_editable_populated.html");
   webView->setInitialFocus(false);
   frame = webView->mainFrameImpl();
+  activeInputMethodController = frame->inputMethodController();
   frame->setEditableSelectionOffsets(8, 19);
   EXPECT_EQ("89abcdefghi", frame->selectionAsText());
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("0123456789abcdefghijklmnopqrstuvwxyz", info.value);
   EXPECT_EQ(8, info.selectionStart);
   EXPECT_EQ(19, info.selectionEnd);
@@ -948,7 +967,7 @@ TEST_P(WebViewTest, FinishComposingTextCursorPositionChange) {
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 3, 3);
 
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello", std::string(info.value.utf8().data()));
   EXPECT_EQ(3, info.selectionStart);
   EXPECT_EQ(3, info.selectionEnd);
@@ -957,7 +976,7 @@ TEST_P(WebViewTest, FinishComposingTextCursorPositionChange) {
 
   activeInputMethodController->finishComposingText(
       WebInputMethodController::KeepSelection);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ(3, info.selectionStart);
   EXPECT_EQ(3, info.selectionEnd);
   EXPECT_EQ(-1, info.compositionStart);
@@ -965,7 +984,7 @@ TEST_P(WebViewTest, FinishComposingTextCursorPositionChange) {
 
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 3, 3);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helhellolo", std::string(info.value.utf8().data()));
   EXPECT_EQ(6, info.selectionStart);
   EXPECT_EQ(6, info.selectionEnd);
@@ -974,7 +993,7 @@ TEST_P(WebViewTest, FinishComposingTextCursorPositionChange) {
 
   activeInputMethodController->finishComposingText(
       WebInputMethodController::DoNotKeepSelection);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ(8, info.selectionStart);
   EXPECT_EQ(8, info.selectionEnd);
   EXPECT_EQ(-1, info.compositionStart);
@@ -993,23 +1012,25 @@ TEST_P(WebViewTest, SetCompositionForNewCaretPositions) {
           ->frameWidget()
           ->getActiveWebInputMethodController();
 
-  activeInputMethodController->commitText("hello", 0);
-  activeInputMethodController->commitText("world", -5);
-  WebTextInputInfo info = webView->textInputInfo();
+  WebVector<WebCompositionUnderline> emptyUnderlines;
+
+  activeInputMethodController->commitText("hello", emptyUnderlines, 0);
+  activeInputMethodController->commitText("world", emptyUnderlines, -5);
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
+
   EXPECT_EQ("helloworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(5, info.selectionEnd);
   EXPECT_EQ(-1, info.compositionStart);
   EXPECT_EQ(-1, info.compositionEnd);
 
-  WebVector<WebCompositionUnderline> emptyUnderlines;
   // Set up a composition that needs to be committed.
   std::string compositionText("ABC");
 
   // Caret is on the left of composing text.
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 0, 0);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloABCworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(5, info.selectionEnd);
@@ -1019,7 +1040,7 @@ TEST_P(WebViewTest, SetCompositionForNewCaretPositions) {
   // Caret is on the right of composing text.
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 3, 3);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloABCworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(8, info.selectionStart);
   EXPECT_EQ(8, info.selectionEnd);
@@ -1029,7 +1050,7 @@ TEST_P(WebViewTest, SetCompositionForNewCaretPositions) {
   // Caret is between composing text and left boundary.
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, -2, -2);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloABCworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(3, info.selectionStart);
   EXPECT_EQ(3, info.selectionEnd);
@@ -1039,7 +1060,7 @@ TEST_P(WebViewTest, SetCompositionForNewCaretPositions) {
   // Caret is between composing text and right boundary.
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 5, 5);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloABCworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(10, info.selectionStart);
   EXPECT_EQ(10, info.selectionEnd);
@@ -1049,7 +1070,7 @@ TEST_P(WebViewTest, SetCompositionForNewCaretPositions) {
   // Caret is on the left boundary.
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, -5, -5);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloABCworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
@@ -1059,7 +1080,7 @@ TEST_P(WebViewTest, SetCompositionForNewCaretPositions) {
   // Caret is on the right boundary.
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 8, 8);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloABCworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(13, info.selectionStart);
   EXPECT_EQ(13, info.selectionEnd);
@@ -1070,7 +1091,7 @@ TEST_P(WebViewTest, SetCompositionForNewCaretPositions) {
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, -100,
       -100);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloABCworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
@@ -1080,7 +1101,7 @@ TEST_P(WebViewTest, SetCompositionForNewCaretPositions) {
   // Caret exceeds the right boundary.
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 100, 100);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloABCworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(13, info.selectionStart);
   EXPECT_EQ(13, info.selectionEnd);
@@ -1100,19 +1121,20 @@ TEST_P(WebViewTest, SetCompositionWithEmptyText) {
           ->frameWidget()
           ->getActiveWebInputMethodController();
 
-  activeInputMethodController->commitText("hello", 0);
-  WebTextInputInfo info = webView->textInputInfo();
+  WebVector<WebCompositionUnderline> emptyUnderlines;
+
+  activeInputMethodController->commitText("hello", emptyUnderlines, 0);
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
+
   EXPECT_EQ("hello", std::string(info.value.utf8().data()));
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(5, info.selectionEnd);
   EXPECT_EQ(-1, info.compositionStart);
   EXPECT_EQ(-1, info.compositionEnd);
 
-  WebVector<WebCompositionUnderline> emptyUnderlines;
-
   activeInputMethodController->setComposition(WebString::fromUTF8(""),
                                               emptyUnderlines, 0, 0);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello", std::string(info.value.utf8().data()));
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(5, info.selectionEnd);
@@ -1121,7 +1143,7 @@ TEST_P(WebViewTest, SetCompositionWithEmptyText) {
 
   activeInputMethodController->setComposition(WebString::fromUTF8(""),
                                               emptyUnderlines, -2, -2);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello", std::string(info.value.utf8().data()));
   EXPECT_EQ(3, info.selectionStart);
   EXPECT_EQ(3, info.selectionEnd);
@@ -1141,9 +1163,11 @@ TEST_P(WebViewTest, CommitTextForNewCaretPositions) {
           ->frameWidget()
           ->getActiveWebInputMethodController();
 
+  WebVector<WebCompositionUnderline> emptyUnderlines;
+
   // Caret is on the left of composing text.
-  activeInputMethodController->commitText("ab", -2);
-  WebTextInputInfo info = webView->textInputInfo();
+  activeInputMethodController->commitText("ab", emptyUnderlines, -2);
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("ab", std::string(info.value.utf8().data()));
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
@@ -1151,8 +1175,8 @@ TEST_P(WebViewTest, CommitTextForNewCaretPositions) {
   EXPECT_EQ(-1, info.compositionEnd);
 
   // Caret is on the right of composing text.
-  activeInputMethodController->commitText("c", 1);
-  info = webView->textInputInfo();
+  activeInputMethodController->commitText("c", emptyUnderlines, 1);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("cab", std::string(info.value.utf8().data()));
   EXPECT_EQ(2, info.selectionStart);
   EXPECT_EQ(2, info.selectionEnd);
@@ -1160,8 +1184,8 @@ TEST_P(WebViewTest, CommitTextForNewCaretPositions) {
   EXPECT_EQ(-1, info.compositionEnd);
 
   // Caret is on the left boundary.
-  activeInputMethodController->commitText("def", -5);
-  info = webView->textInputInfo();
+  activeInputMethodController->commitText("def", emptyUnderlines, -5);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("cadefb", std::string(info.value.utf8().data()));
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
@@ -1169,8 +1193,8 @@ TEST_P(WebViewTest, CommitTextForNewCaretPositions) {
   EXPECT_EQ(-1, info.compositionEnd);
 
   // Caret is on the right boundary.
-  activeInputMethodController->commitText("g", 6);
-  info = webView->textInputInfo();
+  activeInputMethodController->commitText("g", emptyUnderlines, 6);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("gcadefb", std::string(info.value.utf8().data()));
   EXPECT_EQ(7, info.selectionStart);
   EXPECT_EQ(7, info.selectionEnd);
@@ -1178,8 +1202,8 @@ TEST_P(WebViewTest, CommitTextForNewCaretPositions) {
   EXPECT_EQ(-1, info.compositionEnd);
 
   // Caret exceeds the left boundary.
-  activeInputMethodController->commitText("hi", -100);
-  info = webView->textInputInfo();
+  activeInputMethodController->commitText("hi", emptyUnderlines, -100);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("gcadefbhi", std::string(info.value.utf8().data()));
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
@@ -1187,8 +1211,8 @@ TEST_P(WebViewTest, CommitTextForNewCaretPositions) {
   EXPECT_EQ(-1, info.compositionEnd);
 
   // Caret exceeds the right boundary.
-  activeInputMethodController->commitText("jk", 100);
-  info = webView->textInputInfo();
+  activeInputMethodController->commitText("jk", emptyUnderlines, 100);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("jkgcadefbhi", std::string(info.value.utf8().data()));
   EXPECT_EQ(11, info.selectionStart);
   EXPECT_EQ(11, info.selectionEnd);
@@ -1211,7 +1235,7 @@ TEST_P(WebViewTest, CommitTextWhileComposing) {
   WebVector<WebCompositionUnderline> emptyUnderlines;
   activeInputMethodController->setComposition(WebString::fromUTF8("abc"),
                                               emptyUnderlines, 0, 0);
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("abc", std::string(info.value.utf8().data()));
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
@@ -1220,8 +1244,8 @@ TEST_P(WebViewTest, CommitTextWhileComposing) {
 
   // Deletes ongoing composition, inserts the specified text and moves the
   // caret.
-  activeInputMethodController->commitText("hello", -2);
-  info = webView->textInputInfo();
+  activeInputMethodController->commitText("hello", emptyUnderlines, -2);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello", std::string(info.value.utf8().data()));
   EXPECT_EQ(3, info.selectionStart);
   EXPECT_EQ(3, info.selectionEnd);
@@ -1230,7 +1254,7 @@ TEST_P(WebViewTest, CommitTextWhileComposing) {
 
   activeInputMethodController->setComposition(WebString::fromUTF8("abc"),
                                               emptyUnderlines, 0, 0);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helabclo", std::string(info.value.utf8().data()));
   EXPECT_EQ(3, info.selectionStart);
   EXPECT_EQ(3, info.selectionEnd);
@@ -1238,8 +1262,8 @@ TEST_P(WebViewTest, CommitTextWhileComposing) {
   EXPECT_EQ(6, info.compositionEnd);
 
   // Deletes ongoing composition and moves the caret.
-  activeInputMethodController->commitText("", 2);
-  info = webView->textInputInfo();
+  activeInputMethodController->commitText("", emptyUnderlines, 2);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello", std::string(info.value.utf8().data()));
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(5, info.selectionEnd);
@@ -1247,8 +1271,8 @@ TEST_P(WebViewTest, CommitTextWhileComposing) {
   EXPECT_EQ(-1, info.compositionEnd);
 
   // Inserts the specified text and moves the caret.
-  activeInputMethodController->commitText("world", -5);
-  info = webView->textInputInfo();
+  activeInputMethodController->commitText("world", emptyUnderlines, -5);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(5, info.selectionEnd);
@@ -1256,8 +1280,8 @@ TEST_P(WebViewTest, CommitTextWhileComposing) {
   EXPECT_EQ(-1, info.compositionEnd);
 
   // Only moves the caret.
-  activeInputMethodController->commitText("", 5);
-  info = webView->textInputInfo();
+  activeInputMethodController->commitText("", emptyUnderlines, 5);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("helloworld", std::string(info.value.utf8().data()));
   EXPECT_EQ(10, info.selectionStart);
   EXPECT_EQ(10, info.selectionEnd);
@@ -1273,32 +1297,32 @@ TEST_P(WebViewTest, FinishCompositionDoesNotRevealSelection) {
       m_webViewHelper.initializeAndLoad(m_baseURL + "form_with_input.html");
   webView->resize(WebSize(800, 600));
   webView->setInitialFocus(false);
-  EXPECT_EQ(0, webView->mainFrame()->scrollOffset().width);
-  EXPECT_EQ(0, webView->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(0, webView->mainFrame()->getScrollOffset().width);
+  EXPECT_EQ(0, webView->mainFrame()->getScrollOffset().height);
 
   // Set up a composition from existing text that needs to be committed.
   Vector<CompositionUnderline> emptyUnderlines;
   WebLocalFrameImpl* frame = webView->mainFrameImpl();
   frame->frame()->inputMethodController().setCompositionFromExistingText(
-      emptyUnderlines, 3, 3);
+      emptyUnderlines, 0, 3);
 
   // Scroll the input field out of the viewport.
   Element* element = static_cast<Element*>(
       webView->mainFrame()->document().getElementById("btn"));
   element->scrollIntoView();
-  float offsetHeight = webView->mainFrame()->scrollOffset().height;
-  EXPECT_EQ(0, webView->mainFrame()->scrollOffset().width);
+  float offsetHeight = webView->mainFrame()->getScrollOffset().height;
+  EXPECT_EQ(0, webView->mainFrame()->getScrollOffset().width);
   EXPECT_LT(0, offsetHeight);
 
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = frame->inputMethodController()->textInputInfo();
   EXPECT_EQ("hello", std::string(info.value.utf8().data()));
 
   // Verify that the input field is not scrolled back into the viewport.
   frame->frameWidget()
       ->getActiveWebInputMethodController()
       ->finishComposingText(WebInputMethodController::DoNotKeepSelection);
-  EXPECT_EQ(0, webView->mainFrame()->scrollOffset().width);
-  EXPECT_EQ(offsetHeight, webView->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(0, webView->mainFrame()->getScrollOffset().width);
+  EXPECT_EQ(offsetHeight, webView->mainFrame()->getScrollOffset().height);
 }
 
 TEST_P(WebViewTest, InsertNewLinePlacementAfterFinishComposingText) {
@@ -1312,10 +1336,12 @@ TEST_P(WebViewTest, InsertNewLinePlacementAfterFinishComposingText) {
   WebVector<WebCompositionUnderline> emptyUnderlines;
 
   WebLocalFrameImpl* frame = webView->mainFrameImpl();
+  WebInputMethodController* activeInputMethodController =
+      frame->inputMethodController();
   frame->setEditableSelectionOffsets(4, 4);
   frame->setCompositionFromExistingText(8, 12, emptyUnderlines);
 
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("0123456789abcdefghijklmnopqrstuvwxyz",
             std::string(info.value.utf8().data()));
   EXPECT_EQ(4, info.selectionStart);
@@ -1323,11 +1349,9 @@ TEST_P(WebViewTest, InsertNewLinePlacementAfterFinishComposingText) {
   EXPECT_EQ(8, info.compositionStart);
   EXPECT_EQ(12, info.compositionEnd);
 
-  WebInputMethodController* activeInputMethodController =
-      frame->frameWidget()->getActiveWebInputMethodController();
   activeInputMethodController->finishComposingText(
       WebInputMethodController::KeepSelection);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ(4, info.selectionStart);
   EXPECT_EQ(4, info.selectionEnd);
   EXPECT_EQ(-1, info.compositionStart);
@@ -1335,8 +1359,8 @@ TEST_P(WebViewTest, InsertNewLinePlacementAfterFinishComposingText) {
 
   std::string compositionText("\n");
   activeInputMethodController->commitText(
-      WebString::fromUTF8(compositionText.c_str()), 0);
-  info = webView->textInputInfo();
+      WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 0);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(5, info.selectionEnd);
   EXPECT_EQ(-1, info.compositionStart);
@@ -1355,12 +1379,14 @@ TEST_P(WebViewTest, ExtendSelectionAndDelete) {
   webView->setInitialFocus(false);
   frame->setEditableSelectionOffsets(10, 10);
   frame->extendSelectionAndDelete(5, 8);
-  WebTextInputInfo info = webView->textInputInfo();
+  WebInputMethodController* activeInputMethodController =
+      frame->inputMethodController();
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("01234ijklmnopqrstuvwxyz", std::string(info.value.utf8().data()));
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(5, info.selectionEnd);
   frame->extendSelectionAndDelete(10, 0);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("ijklmnopqrstuvwxyz", std::string(info.value.utf8().data()));
 }
 
@@ -1371,37 +1397,39 @@ TEST_P(WebViewTest, DeleteSurroundingText) {
   WebView* webView = m_webViewHelper.initializeAndLoad(
       m_baseURL + "input_field_populated.html");
   WebLocalFrameImpl* frame = toWebLocalFrameImpl(webView->mainFrame());
+  WebInputMethodController* activeInputMethodController =
+      frame->inputMethodController();
   webView->setInitialFocus(false);
 
   frame->setEditableSelectionOffsets(10, 10);
   frame->deleteSurroundingText(5, 8);
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("01234ijklmnopqrstuvwxyz", std::string(info.value.utf8().data()));
   EXPECT_EQ(5, info.selectionStart);
   EXPECT_EQ(5, info.selectionEnd);
 
   frame->setEditableSelectionOffsets(5, 10);
   frame->deleteSurroundingText(3, 5);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("01ijklmstuvwxyz", std::string(info.value.utf8().data()));
   EXPECT_EQ(2, info.selectionStart);
   EXPECT_EQ(7, info.selectionEnd);
 
   frame->setEditableSelectionOffsets(5, 5);
   frame->deleteSurroundingText(10, 0);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("lmstuvwxyz", std::string(info.value.utf8().data()));
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
 
   frame->deleteSurroundingText(0, 20);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("", std::string(info.value.utf8().data()));
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
 
   frame->deleteSurroundingText(10, 10);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("", std::string(info.value.utf8().data()));
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ(0, info.selectionEnd);
@@ -1417,16 +1445,18 @@ TEST_P(WebViewTest, SetCompositionFromExistingText) {
   WebVector<WebCompositionUnderline> underlines(static_cast<size_t>(1));
   underlines[0] = WebCompositionUnderline(0, 4, 0, false, 0);
   WebLocalFrameImpl* frame = webView->mainFrameImpl();
+  WebInputMethodController* activeInputMethodController =
+      frame->inputMethodController();
   frame->setEditableSelectionOffsets(4, 10);
   frame->setCompositionFromExistingText(8, 12, underlines);
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ(4, info.selectionStart);
   EXPECT_EQ(10, info.selectionEnd);
   EXPECT_EQ(8, info.compositionStart);
   EXPECT_EQ(12, info.compositionEnd);
   WebVector<WebCompositionUnderline> emptyUnderlines;
   frame->setCompositionFromExistingText(0, 0, emptyUnderlines);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ(4, info.selectionStart);
   EXPECT_EQ(10, info.selectionEnd);
   EXPECT_EQ(-1, info.compositionStart);
@@ -1447,15 +1477,16 @@ TEST_P(WebViewTest, SetCompositionFromExistingTextInTextArea) {
       frame->frameWidget()->getActiveWebInputMethodController();
   frame->setEditableSelectionOffsets(27, 27);
   std::string newLineText("\n");
+  WebVector<WebCompositionUnderline> emptyUnderlines;
   activeInputMethodController->commitText(
-      WebString::fromUTF8(newLineText.c_str()), 0);
-  WebTextInputInfo info = webView->textInputInfo();
+      WebString::fromUTF8(newLineText.c_str()), emptyUnderlines, 0);
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("0123456789abcdefghijklmnopq\nrstuvwxyz",
             std::string(info.value.utf8().data()));
 
   frame->setEditableSelectionOffsets(31, 31);
   frame->setCompositionFromExistingText(30, 34, underlines);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("0123456789abcdefghijklmnopq\nrstuvwxyz",
             std::string(info.value.utf8().data()));
   EXPECT_EQ(31, info.selectionStart);
@@ -1465,8 +1496,8 @@ TEST_P(WebViewTest, SetCompositionFromExistingTextInTextArea) {
 
   std::string compositionText("yolo");
   activeInputMethodController->commitText(
-      WebString::fromUTF8(compositionText.c_str()), 0);
-  info = webView->textInputInfo();
+      WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 0);
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("0123456789abcdefghijklmnopq\nrsyoloxyz",
             std::string(info.value.utf8().data()));
   EXPECT_EQ(34, info.selectionStart);
@@ -1508,12 +1539,12 @@ TEST_P(WebViewTest, SetEditableSelectionOffsetsKeepsComposition) {
           ->frameWidget()
           ->getActiveWebInputMethodController();
   activeInputMethodController->commitText(
-      WebString::fromUTF8(compositionTextFirst.c_str()), 0);
+      WebString::fromUTF8(compositionTextFirst.c_str()), emptyUnderlines, 0);
   activeInputMethodController->setComposition(
       WebString::fromUTF8(compositionTextSecond.c_str()), emptyUnderlines, 5,
       5);
 
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello world", std::string(info.value.utf8().data()));
   EXPECT_EQ(11, info.selectionStart);
   EXPECT_EQ(11, info.selectionEnd);
@@ -1522,7 +1553,7 @@ TEST_P(WebViewTest, SetEditableSelectionOffsetsKeepsComposition) {
 
   WebLocalFrameImpl* frame = webView->mainFrameImpl();
   frame->setEditableSelectionOffsets(6, 6);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello world", std::string(info.value.utf8().data()));
   EXPECT_EQ(6, info.selectionStart);
   EXPECT_EQ(6, info.selectionEnd);
@@ -1530,7 +1561,7 @@ TEST_P(WebViewTest, SetEditableSelectionOffsetsKeepsComposition) {
   EXPECT_EQ(11, info.compositionEnd);
 
   frame->setEditableSelectionOffsets(8, 8);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello world", std::string(info.value.utf8().data()));
   EXPECT_EQ(8, info.selectionStart);
   EXPECT_EQ(8, info.selectionEnd);
@@ -1538,7 +1569,7 @@ TEST_P(WebViewTest, SetEditableSelectionOffsetsKeepsComposition) {
   EXPECT_EQ(11, info.compositionEnd);
 
   frame->setEditableSelectionOffsets(11, 11);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello world", std::string(info.value.utf8().data()));
   EXPECT_EQ(11, info.selectionStart);
   EXPECT_EQ(11, info.selectionEnd);
@@ -1546,7 +1577,7 @@ TEST_P(WebViewTest, SetEditableSelectionOffsetsKeepsComposition) {
   EXPECT_EQ(11, info.compositionEnd);
 
   frame->setEditableSelectionOffsets(6, 11);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello world", std::string(info.value.utf8().data()));
   EXPECT_EQ(6, info.selectionStart);
   EXPECT_EQ(11, info.selectionEnd);
@@ -1554,7 +1585,7 @@ TEST_P(WebViewTest, SetEditableSelectionOffsetsKeepsComposition) {
   EXPECT_EQ(11, info.compositionEnd);
 
   frame->setEditableSelectionOffsets(2, 2);
-  info = webView->textInputInfo();
+  info = activeInputMethodController->textInputInfo();
   EXPECT_EQ("hello world", std::string(info.value.utf8().data()));
   EXPECT_EQ(2, info.selectionStart);
   EXPECT_EQ(2, info.selectionEnd);
@@ -1614,30 +1645,33 @@ TEST_P(WebViewTest, HistoryResetScrollAndScaleState) {
       m_webViewHelper.initializeAndLoad(m_baseURL + "200-by-300.html");
   webViewImpl->resize(WebSize(100, 150));
   webViewImpl->updateAllLifecyclePhases();
-  EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().width);
-  EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().width);
+  EXPECT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().height);
 
   // Make the page scale and scroll with the given paremeters.
   webViewImpl->setPageScaleFactor(2.0f);
   webViewImpl->mainFrame()->setScrollOffset(WebSize(94, 111));
   EXPECT_EQ(2.0f, webViewImpl->pageScaleFactor());
-  EXPECT_EQ(94, webViewImpl->mainFrame()->scrollOffset().width);
-  EXPECT_EQ(111, webViewImpl->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(94, webViewImpl->mainFrame()->getScrollOffset().width);
+  EXPECT_EQ(111, webViewImpl->mainFrame()->getScrollOffset().height);
   LocalFrame* mainFrameLocal = toLocalFrame(webViewImpl->page()->mainFrame());
   mainFrameLocal->loader().saveScrollState();
   EXPECT_EQ(2.0f, mainFrameLocal->loader().currentItem()->pageScaleFactor());
-  EXPECT_EQ(94, mainFrameLocal->loader().currentItem()->scrollOffset().width());
+  EXPECT_EQ(94,
+            mainFrameLocal->loader().currentItem()->getScrollOffset().width());
   EXPECT_EQ(111,
-            mainFrameLocal->loader().currentItem()->scrollOffset().height());
+            mainFrameLocal->loader().currentItem()->getScrollOffset().height());
 
   // Confirm that resetting the page state resets the saved scroll position.
   webViewImpl->resetScrollAndScaleState();
   EXPECT_EQ(1.0f, webViewImpl->pageScaleFactor());
-  EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().width);
-  EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().width);
+  EXPECT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().height);
   EXPECT_EQ(1.0f, mainFrameLocal->loader().currentItem()->pageScaleFactor());
-  EXPECT_EQ(0, mainFrameLocal->loader().currentItem()->scrollOffset().width());
-  EXPECT_EQ(0, mainFrameLocal->loader().currentItem()->scrollOffset().height());
+  EXPECT_EQ(0,
+            mainFrameLocal->loader().currentItem()->getScrollOffset().width());
+  EXPECT_EQ(0,
+            mainFrameLocal->loader().currentItem()->getScrollOffset().height());
 }
 
 TEST_P(WebViewTest, BackForwardRestoreScroll) {
@@ -1695,8 +1729,8 @@ TEST_P(WebViewTest, BackForwardRestoreScroll) {
           nullptr, FrameLoader::resourceRequestFromHistoryItem(
                        item3.get(), WebCachePolicy::UseProtocolCachePolicy)),
       FrameLoadTypeBackForward, item3.get(), HistorySameDocumentLoad);
-  EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().width);
-  EXPECT_GT(webViewImpl->mainFrame()->scrollOffset().height, 2000);
+  EXPECT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().width);
+  EXPECT_GT(webViewImpl->mainFrame()->getScrollOffset().height, 2000);
 }
 
 // Tests that we restore scroll and scale *after* the fullscreen styles are
@@ -1712,17 +1746,18 @@ TEST_P(WebViewTest, FullscreenResetScrollAndScaleFullscreenStyles) {
 
   // Scroll the page down.
   webViewImpl->mainFrame()->setScrollOffset(WebSize(0, 2000));
-  ASSERT_EQ(2000, webViewImpl->mainFrame()->scrollOffset().height);
+  ASSERT_EQ(2000, webViewImpl->mainFrame()->getScrollOffset().height);
 
   // Enter fullscreen.
-  Element* element = static_cast<Element*>(
-      webViewImpl->mainFrame()->document().getElementById("fullscreenElement"));
-  webViewImpl->enterFullscreenForElement(element);
+  Document* document = webViewImpl->mainFrameImpl()->frame()->document();
+  Element* element = document->getElementById("fullscreenElement");
+  UserGestureIndicator gesture(DocumentUserGestureToken::create(document));
+  Fullscreen::requestFullscreen(*element);
   webViewImpl->didEnterFullscreen();
   webViewImpl->updateAllLifecyclePhases();
 
   // Sanity-check. There should be no scrolling possible.
-  ASSERT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
+  ASSERT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().height);
   ASSERT_EQ(0, webViewImpl->mainFrameImpl()
                    ->frameView()
                    ->maximumScrollOffset()
@@ -1736,7 +1771,7 @@ TEST_P(WebViewTest, FullscreenResetScrollAndScaleFullscreenStyles) {
   EXPECT_TRUE(webViewImpl->mainFrameImpl()->frameView()->needsLayout());
   webViewImpl->updateAllLifecyclePhases();
 
-  EXPECT_EQ(2000, webViewImpl->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(2000, webViewImpl->mainFrame()->getScrollOffset().height);
 }
 
 // Tests that exiting and immediately reentering fullscreen doesn't cause the
@@ -1752,17 +1787,18 @@ TEST_P(WebViewTest, FullscreenResetScrollAndScaleExitAndReenter) {
 
   // Scroll the page down.
   webViewImpl->mainFrame()->setScrollOffset(WebSize(0, 2000));
-  ASSERT_EQ(2000, webViewImpl->mainFrame()->scrollOffset().height);
+  ASSERT_EQ(2000, webViewImpl->mainFrame()->getScrollOffset().height);
 
   // Enter fullscreen.
-  Element* element = static_cast<Element*>(
-      webViewImpl->mainFrame()->document().getElementById("fullscreenElement"));
-  webViewImpl->enterFullscreenForElement(element);
+  Document* document = webViewImpl->mainFrameImpl()->frame()->document();
+  Element* element = document->getElementById("fullscreenElement");
+  UserGestureIndicator gesture(DocumentUserGestureToken::create(document));
+  Fullscreen::requestFullscreen(*element);
   webViewImpl->didEnterFullscreen();
   webViewImpl->updateAllLifecyclePhases();
 
   // Sanity-check. There should be no scrolling possible.
-  ASSERT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
+  ASSERT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().height);
   ASSERT_EQ(0, webViewImpl->mainFrameImpl()
                    ->frameView()
                    ->maximumScrollOffset()
@@ -1771,25 +1807,23 @@ TEST_P(WebViewTest, FullscreenResetScrollAndScaleExitAndReenter) {
   // Exit and, without performing a layout, reenter fullscreen again. We
   // shouldn't try to restore the scroll and scale values when we layout to
   // enter fullscreen.
-  webViewImpl->exitFullscreen(element->document().frame());
   webViewImpl->didExitFullscreen();
-  webViewImpl->enterFullscreenForElement(element);
+  Fullscreen::requestFullscreen(*element);
   webViewImpl->didEnterFullscreen();
   webViewImpl->updateAllLifecyclePhases();
 
   // Sanity-check. There should be no scrolling possible.
-  ASSERT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
+  ASSERT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().height);
   ASSERT_EQ(0, webViewImpl->mainFrameImpl()
                    ->frameView()
                    ->maximumScrollOffset()
                    .height());
 
   // When we exit now, we should restore the original scroll value.
-  webViewImpl->exitFullscreen(element->document().frame());
   webViewImpl->didExitFullscreen();
   webViewImpl->updateAllLifecyclePhases();
 
-  EXPECT_EQ(2000, webViewImpl->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(2000, webViewImpl->mainFrame()->getScrollOffset().height);
 }
 
 TEST_P(WebViewTest, EnterFullscreenResetScrollAndScaleState) {
@@ -1800,22 +1834,23 @@ TEST_P(WebViewTest, EnterFullscreenResetScrollAndScaleState) {
       m_webViewHelper.initializeAndLoad(m_baseURL + "200-by-300.html");
   webViewImpl->resize(WebSize(100, 150));
   webViewImpl->updateAllLifecyclePhases();
-  EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().width);
-  EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().width);
+  EXPECT_EQ(0, webViewImpl->mainFrame()->getScrollOffset().height);
 
   // Make the page scale and scroll with the given paremeters.
   webViewImpl->setPageScaleFactor(2.0f);
   webViewImpl->mainFrame()->setScrollOffset(WebSize(94, 111));
   webViewImpl->setVisualViewportOffset(WebFloatPoint(12, 20));
   EXPECT_EQ(2.0f, webViewImpl->pageScaleFactor());
-  EXPECT_EQ(94, webViewImpl->mainFrame()->scrollOffset().width);
-  EXPECT_EQ(111, webViewImpl->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(94, webViewImpl->mainFrame()->getScrollOffset().width);
+  EXPECT_EQ(111, webViewImpl->mainFrame()->getScrollOffset().height);
   EXPECT_EQ(12, webViewImpl->visualViewportOffset().x);
   EXPECT_EQ(20, webViewImpl->visualViewportOffset().y);
 
-  Element* element =
-      static_cast<Element*>(webViewImpl->mainFrame()->document().body());
-  webViewImpl->enterFullscreenForElement(element);
+  Document* document = webViewImpl->mainFrameImpl()->frame()->document();
+  Element* element = document->body();
+  UserGestureIndicator gesture(DocumentUserGestureToken::create(document));
+  Fullscreen::requestFullscreen(*element);
   webViewImpl->didEnterFullscreen();
 
   // Page scale factor must be 1.0 during fullscreen for elements to be sized
@@ -1823,18 +1858,16 @@ TEST_P(WebViewTest, EnterFullscreenResetScrollAndScaleState) {
   EXPECT_EQ(1.0f, webViewImpl->pageScaleFactor());
 
   // Make sure fullscreen nesting doesn't disrupt scroll/scale saving.
-  Element* otherElement =
-      static_cast<Element*>(webViewImpl->mainFrame()->document().head());
-  webViewImpl->enterFullscreenForElement(otherElement);
+  Element* otherElement = document->getElementById("content");
+  Fullscreen::requestFullscreen(*otherElement);
 
   // Confirm that exiting fullscreen restores the parameters.
-  webViewImpl->exitFullscreen(element->document().frame());
   webViewImpl->didExitFullscreen();
   webViewImpl->updateAllLifecyclePhases();
 
   EXPECT_EQ(2.0f, webViewImpl->pageScaleFactor());
-  EXPECT_EQ(94, webViewImpl->mainFrame()->scrollOffset().width);
-  EXPECT_EQ(111, webViewImpl->mainFrame()->scrollOffset().height);
+  EXPECT_EQ(94, webViewImpl->mainFrame()->getScrollOffset().width);
+  EXPECT_EQ(111, webViewImpl->mainFrame()->getScrollOffset().height);
   EXPECT_EQ(12, webViewImpl->visualViewportOffset().x);
   EXPECT_EQ(20, webViewImpl->visualViewportOffset().y);
 }
@@ -1974,13 +2007,14 @@ bool WebViewTest::tapElement(WebInputEvent::Type type, Element* element) {
           ->contentsToScreen(element->layoutObject()->absoluteBoundingBoxRect())
           .center();
 
-  WebGestureEvent event;
-  event.type = type;
+  WebGestureEvent event(type, WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
+
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = center.x();
   event.y = center.y();
 
-  m_webViewHelper.webView()->handleInputEvent(event);
+  m_webViewHelper.webView()->handleInputEvent(WebCoalescedInputEvent(event));
   runPendingTasks();
   return true;
 }
@@ -2038,10 +2072,10 @@ TEST_P(WebViewTest, DetectContentAroundPosition) {
   EXPECT_TRUE(client.wasInMainFrame());
 
   // Tapping elsewhere should cancel the scheduled intent.
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureTap;
+  WebGestureEvent event(WebInputEvent::GestureTap, WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
-  webView->handleInputEvent(event);
+  webView->handleInputEvent(WebCoalescedInputEvent(event));
   runPendingTasks();
   EXPECT_TRUE(client.pendingIntentsCancelled());
 
@@ -2082,20 +2116,20 @@ TEST_P(WebViewTest, ClientTapHandling) {
   client.reset();
   WebView* webView =
       m_webViewHelper.initializeAndLoad("about:blank", true, 0, &client);
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureTap;
+  WebGestureEvent event(WebInputEvent::GestureTap, WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 3;
   event.y = 8;
-  webView->handleInputEvent(event);
+  webView->handleInputEvent(WebCoalescedInputEvent(event));
   runPendingTasks();
   EXPECT_EQ(3, client.tapX());
   EXPECT_EQ(8, client.tapY());
   client.reset();
-  event.type = WebInputEvent::GestureLongPress;
+  event.setType(WebInputEvent::GestureLongPress);
   event.x = 25;
   event.y = 7;
-  webView->handleInputEvent(event);
+  webView->handleInputEvent(WebCoalescedInputEvent(event));
   runPendingTasks();
   EXPECT_EQ(25, client.longpressX());
   EXPECT_EQ(7, client.longpressY());
@@ -2109,20 +2143,21 @@ TEST_P(WebViewTest, ClientTapHandlingNullWebViewClient) {
       WebViewImpl::create(nullptr, WebPageVisibilityStateVisible);
   FrameTestHelpers::TestWebFrameClient webFrameClient;
   FrameTestHelpers::TestWebWidgetClient webWidgetClient;
-  WebLocalFrame* localFrame =
-      WebLocalFrame::create(WebTreeScopeType::Document, &webFrameClient);
+  WebLocalFrame* localFrame = WebLocalFrame::create(
+      WebTreeScopeType::Document, &webFrameClient, nullptr, nullptr);
   webView->setMainFrame(localFrame);
 
   // TODO(dcheng): The main frame widget currently has a special case.
   // Eliminate this once WebView is no longer a WebWidget.
   blink::WebFrameWidget::create(&webWidgetClient, webView, localFrame);
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureTap;
+  WebGestureEvent event(WebInputEvent::GestureTap, WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 3;
   event.y = 8;
-  EXPECT_EQ(WebInputEventResult::NotHandled, webView->handleInputEvent(event));
+  EXPECT_EQ(WebInputEventResult::NotHandled,
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
   webView->close();
 }
 
@@ -2138,13 +2173,15 @@ TEST_P(WebViewTest, LongPressEmptyDiv) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureLongPress;
+  WebGestureEvent event(WebInputEvent::GestureLongPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 250;
   event.y = 150;
 
-  EXPECT_EQ(WebInputEventResult::NotHandled, webView->handleInputEvent(event));
+  EXPECT_EQ(WebInputEventResult::NotHandled,
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
 }
 
 TEST_P(WebViewTest, LongPressEmptyDivAlwaysShow) {
@@ -2159,14 +2196,15 @@ TEST_P(WebViewTest, LongPressEmptyDivAlwaysShow) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureLongPress;
+  WebGestureEvent event(WebInputEvent::GestureLongPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 250;
   event.y = 150;
 
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(event));
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
 }
 
 TEST_P(WebViewTest, LongPressObject) {
@@ -2181,14 +2219,15 @@ TEST_P(WebViewTest, LongPressObject) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureLongPress;
+  WebGestureEvent event(WebInputEvent::GestureLongPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 10;
   event.y = 10;
 
   EXPECT_NE(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(event));
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
 
   HTMLElement* element =
       toHTMLElement(webView->mainFrame()->document().getElementById("obj"));
@@ -2207,14 +2246,15 @@ TEST_P(WebViewTest, LongPressObjectFallback) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureLongPress;
+  WebGestureEvent event(WebInputEvent::GestureLongPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 10;
   event.y = 10;
 
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(event));
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
 
   HTMLElement* element =
       toHTMLElement(webView->mainFrame()->document().getElementById("obj"));
@@ -2233,14 +2273,15 @@ TEST_P(WebViewTest, LongPressImage) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureLongPress;
+  WebGestureEvent event(WebInputEvent::GestureLongPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 10;
   event.y = 10;
 
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(event));
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
 }
 
 TEST_P(WebViewTest, LongPressVideo) {
@@ -2255,14 +2296,15 @@ TEST_P(WebViewTest, LongPressVideo) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureLongPress;
+  WebGestureEvent event(WebInputEvent::GestureLongPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 10;
   event.y = 10;
 
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(event));
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
 }
 
 TEST_P(WebViewTest, LongPressLink) {
@@ -2277,14 +2319,15 @@ TEST_P(WebViewTest, LongPressLink) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureLongPress;
+  WebGestureEvent event(WebInputEvent::GestureLongPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 500;
   event.y = 300;
 
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(event));
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
 }
 
 TEST_P(WebViewTest, showContextMenuOnLongPressingLinks) {
@@ -2326,14 +2369,15 @@ TEST_P(WebViewTest, LongPressEmptyEditableSelection) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureLongPress;
+  WebGestureEvent event(WebInputEvent::GestureLongPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 10;
   event.y = 10;
 
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(event));
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
 }
 
 TEST_P(WebViewTest, LongPressEmptyNonEditableSelection) {
@@ -2347,15 +2391,16 @@ TEST_P(WebViewTest, LongPressEmptyNonEditableSelection) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureLongPress;
+  WebGestureEvent event(WebInputEvent::GestureLongPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 300;
   event.y = 300;
   WebLocalFrameImpl* frame = webView->mainFrameImpl();
 
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(event));
+            webView->handleInputEvent(WebCoalescedInputEvent(event)));
   EXPECT_TRUE(frame->selectionAsText().isEmpty());
 }
 
@@ -2402,14 +2447,14 @@ TEST_P(WebViewTest, TouchDoesntSelectEmptyTextarea) {
   EXPECT_TRUE(frame->selectionAsText().isEmpty());
 
   // Double-tap on carriage returns.
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureTap;
+  WebGestureEvent event(WebInputEvent::GestureTap, WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 100;
   event.y = 25;
   event.data.tap.tapCount = 2;
 
-  webView->handleInputEvent(event);
+  webView->handleInputEvent(WebCoalescedInputEvent(event));
   EXPECT_TRUE(frame->selectionAsText().isEmpty());
 
   HTMLTextAreaElement* textAreaElement = toHTMLTextAreaElement(
@@ -2422,7 +2467,7 @@ TEST_P(WebViewTest, TouchDoesntSelectEmptyTextarea) {
   EXPECT_TRUE(frame->selectionAsText().isEmpty());
 
   // Double-tap past last word of textbox.
-  webView->handleInputEvent(event);
+  webView->handleInputEvent(WebCoalescedInputEvent(event));
   EXPECT_TRUE(frame->selectionAsText().isEmpty());
 }
 #endif
@@ -2477,13 +2522,14 @@ TEST_P(WebViewTest, BlinkCaretOnClosingContextMenu) {
   // We suspend caret blinking when pressing with mouse right button.
   // Note that we do not send MouseUp event here since it will be consumed
   // by the context menu once it shows up.
-  WebMouseEvent mouseEvent;
+  WebMouseEvent mouseEvent(WebInputEvent::MouseDown, WebInputEvent::NoModifiers,
+                           WebInputEvent::TimeStampForTesting);
+
   mouseEvent.button = WebMouseEvent::Button::Right;
   mouseEvent.x = 1;
   mouseEvent.y = 1;
   mouseEvent.clickCount = 1;
-  mouseEvent.type = WebInputEvent::MouseDown;
-  webView->handleInputEvent(mouseEvent);
+  webView->handleInputEvent(WebCoalescedInputEvent(mouseEvent));
   runPendingTasks();
 
   WebLocalFrameImpl* mainFrame = webView->mainFrameImpl();
@@ -2531,87 +2577,88 @@ TEST_P(WebViewTest, KeyDownScrollsHandled) {
   webView->updateAllLifecyclePhases();
   runPendingTasks();
 
-  WebKeyboardEvent keyEvent;
+  WebKeyboardEvent keyEvent(WebInputEvent::RawKeyDown,
+                            WebInputEvent::NoModifiers,
+                            WebInputEvent::TimeStampForTesting);
 
   // RawKeyDown pagedown should be handled.
   keyEvent.windowsKeyCode = VKEY_NEXT;
-  keyEvent.type = WebInputEvent::RawKeyDown;
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(keyEvent));
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+            webView->handleInputEvent(WebCoalescedInputEvent(keyEvent)));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
   // Coalesced KeyDown arrow-down should be handled.
   keyEvent.windowsKeyCode = VKEY_DOWN;
-  keyEvent.type = WebInputEvent::KeyDown;
+  keyEvent.setType(WebInputEvent::KeyDown);
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(keyEvent));
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+            webView->handleInputEvent(WebCoalescedInputEvent(keyEvent)));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
   // Ctrl-Home should be handled...
   keyEvent.windowsKeyCode = VKEY_HOME;
-  keyEvent.modifiers = WebInputEvent::ControlKey;
-  keyEvent.type = WebInputEvent::RawKeyDown;
+  keyEvent.setModifiers(WebInputEvent::ControlKey);
+  keyEvent.setType(WebInputEvent::RawKeyDown);
   EXPECT_EQ(WebInputEventResult::NotHandled,
-            webView->handleInputEvent(keyEvent));
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+            webView->handleInputEvent(WebCoalescedInputEvent(keyEvent)));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
   // But Ctrl-Down should not.
   keyEvent.windowsKeyCode = VKEY_DOWN;
-  keyEvent.modifiers = WebInputEvent::ControlKey;
-  keyEvent.type = WebInputEvent::RawKeyDown;
+  keyEvent.setModifiers(WebInputEvent::ControlKey);
+  keyEvent.setType(WebInputEvent::RawKeyDown);
   EXPECT_EQ(WebInputEventResult::NotHandled,
-            webView->handleInputEvent(keyEvent));
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+            webView->handleInputEvent(WebCoalescedInputEvent(keyEvent)));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
   // Shift, meta, and alt should not be handled.
   keyEvent.windowsKeyCode = VKEY_NEXT;
-  keyEvent.modifiers = WebInputEvent::ShiftKey;
-  keyEvent.type = WebInputEvent::RawKeyDown;
+  keyEvent.setModifiers(WebInputEvent::ShiftKey);
+  keyEvent.setType(WebInputEvent::RawKeyDown);
   EXPECT_EQ(WebInputEventResult::NotHandled,
-            webView->handleInputEvent(keyEvent));
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+            webView->handleInputEvent(WebCoalescedInputEvent(keyEvent)));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
   keyEvent.windowsKeyCode = VKEY_NEXT;
-  keyEvent.modifiers = WebInputEvent::MetaKey;
-  keyEvent.type = WebInputEvent::RawKeyDown;
+  keyEvent.setModifiers(WebInputEvent::MetaKey);
+  keyEvent.setType(WebInputEvent::RawKeyDown);
   EXPECT_EQ(WebInputEventResult::NotHandled,
-            webView->handleInputEvent(keyEvent));
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+            webView->handleInputEvent(WebCoalescedInputEvent(keyEvent)));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
   keyEvent.windowsKeyCode = VKEY_NEXT;
-  keyEvent.modifiers = WebInputEvent::AltKey;
-  keyEvent.type = WebInputEvent::RawKeyDown;
+  keyEvent.setModifiers(WebInputEvent::AltKey);
+  keyEvent.setType(WebInputEvent::RawKeyDown);
   EXPECT_EQ(WebInputEventResult::NotHandled,
-            webView->handleInputEvent(keyEvent));
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+            webView->handleInputEvent(WebCoalescedInputEvent(keyEvent)));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
   // System-key labeled Alt-Down (as in Windows) should do nothing,
   // but non-system-key labeled Alt-Down (as in Mac) should be handled
   // as a page-down.
   keyEvent.windowsKeyCode = VKEY_DOWN;
-  keyEvent.modifiers = WebInputEvent::AltKey;
+  keyEvent.setModifiers(WebInputEvent::AltKey);
   keyEvent.isSystemKey = true;
-  keyEvent.type = WebInputEvent::RawKeyDown;
+  keyEvent.setType(WebInputEvent::RawKeyDown);
   EXPECT_EQ(WebInputEventResult::NotHandled,
-            webView->handleInputEvent(keyEvent));
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+            webView->handleInputEvent(WebCoalescedInputEvent(keyEvent)));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
   keyEvent.windowsKeyCode = VKEY_DOWN;
-  keyEvent.modifiers = WebInputEvent::AltKey;
+  keyEvent.setModifiers(WebInputEvent::AltKey);
   keyEvent.isSystemKey = false;
-  keyEvent.type = WebInputEvent::RawKeyDown;
+  keyEvent.setType(WebInputEvent::RawKeyDown);
   EXPECT_EQ(WebInputEventResult::HandledSystem,
-            webView->handleInputEvent(keyEvent));
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+            webView->handleInputEvent(WebCoalescedInputEvent(keyEvent)));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 }
 
 static void configueCompositingWebView(WebSettings* settings) {
@@ -2622,7 +2669,7 @@ static void configueCompositingWebView(WebSettings* settings) {
 TEST_P(WebViewTest, ShowPressOnTransformedLink) {
   std::unique_ptr<FrameTestHelpers::TestWebViewClient>
       fakeCompositingWebViewClient =
-          makeUnique<FrameTestHelpers::TestWebViewClient>();
+          WTF::makeUnique<FrameTestHelpers::TestWebViewClient>();
   FrameTestHelpers::WebViewHelper webViewHelper;
   WebViewImpl* webViewImpl = webViewHelper.initialize(
       true, nullptr, fakeCompositingWebViewClient.get(), nullptr,
@@ -2640,14 +2687,15 @@ TEST_P(WebViewTest, ShowPressOnTransformedLink) {
       "highlight</a>",
       baseURL);
 
-  WebGestureEvent event;
-  event.type = WebInputEvent::GestureShowPress;
+  WebGestureEvent event(WebInputEvent::GestureShowPress,
+                        WebInputEvent::NoModifiers,
+                        WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
   event.x = 20;
   event.y = 20;
 
   // Just make sure we don't hit any asserts.
-  webViewImpl->handleInputEvent(event);
+  webViewImpl->handleInputEvent(WebCoalescedInputEvent(event));
 }
 
 class MockAutofillClient : public WebAutofillClient {
@@ -2712,7 +2760,7 @@ TEST_P(WebViewTest, LosingFocusDoesNotTriggerAutofillTextChange) {
   WebVector<WebCompositionUnderline> emptyUnderlines;
   frame->setEditableSelectionOffsets(4, 10);
   frame->setCompositionFromExistingText(8, 12, emptyUnderlines);
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = frame->inputMethodController()->textInputInfo();
   EXPECT_EQ(4, info.selectionStart);
   EXPECT_EQ(10, info.selectionEnd);
   EXPECT_EQ(8, info.compositionStart);
@@ -2727,13 +2775,14 @@ TEST_P(WebViewTest, LosingFocusDoesNotTriggerAutofillTextChange) {
   frame->setAutofillClient(0);
 }
 
-static void verifySelectionAndComposition(WebView* webView,
+static void verifySelectionAndComposition(WebViewImpl* webView,
                                           int selectionStart,
                                           int selectionEnd,
                                           int compositionStart,
                                           int compositionEnd,
                                           const char* failMessage) {
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info =
+      webView->mainFrameImpl()->inputMethodController()->textInputInfo();
   EXPECT_EQ(selectionStart, info.selectionStart) << failMessage;
   EXPECT_EQ(selectionEnd, info.selectionEnd) << failMessage;
   EXPECT_EQ(compositionStart, info.compositionStart) << failMessage;
@@ -2765,11 +2814,12 @@ TEST_P(WebViewTest, CompositionNotCancelledByBackspace) {
 
     // Press Backspace and verify composition didn't get cancelled. This is to
     // verify the fix for crbug.com/429916.
-    WebKeyboardEvent keyEvent;
+    WebKeyboardEvent keyEvent(WebInputEvent::RawKeyDown,
+                              WebInputEvent::NoModifiers,
+                              WebInputEvent::TimeStampForTesting);
     keyEvent.domKey = Platform::current()->domKeyEnumFromString("\b");
     keyEvent.windowsKeyCode = VKEY_BACK;
-    keyEvent.type = WebInputEvent::RawKeyDown;
-    webView->handleInputEvent(keyEvent);
+    webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
     frame->setEditableSelectionOffsets(6, 6);
     EXPECT_TRUE(activeInputMethodController->setComposition(
@@ -2778,8 +2828,8 @@ TEST_P(WebViewTest, CompositionNotCancelledByBackspace) {
     verifySelectionAndComposition(webView, 10, 10, 6, 10,
                                   "after pressing Backspace");
 
-    keyEvent.type = WebInputEvent::KeyUp;
-    webView->handleInputEvent(keyEvent);
+    keyEvent.setType(WebInputEvent::KeyUp);
+    webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
     webView->advanceFocus(false);
   }
@@ -2807,7 +2857,7 @@ TEST_P(WebViewTest, FinishComposingTextTriggersAutofillTextChange) {
       WebString::fromUTF8(compositionText.c_str()), emptyUnderlines, 0,
       compositionText.length());
 
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = activeInputMethodController->textInputInfo();
   EXPECT_EQ(0, info.selectionStart);
   EXPECT_EQ((int)compositionText.length(), info.selectionEnd);
   EXPECT_EQ(0, info.compositionStart);
@@ -2838,7 +2888,7 @@ TEST_P(WebViewTest, SetCompositionFromExistingTextTriggersAutofillTextChange) {
   client.clearChangeCounts();
   frame->setCompositionFromExistingText(8, 12, emptyUnderlines);
 
-  WebTextInputInfo info = webView->textInputInfo();
+  WebTextInputInfo info = frame->inputMethodController()->textInputInfo();
   EXPECT_EQ("0123456789abcdefghijklmnopqrstuvwxyz",
             std::string(info.value.utf8().data()));
   EXPECT_EQ(8, info.compositionStart);
@@ -2969,14 +3019,15 @@ static void openDateTimeChooser(WebView* webView,
                                 HTMLInputElement* inputElement) {
   inputElement->focus();
 
-  WebKeyboardEvent keyEvent;
+  WebKeyboardEvent keyEvent(WebInputEvent::RawKeyDown,
+                            WebInputEvent::NoModifiers,
+                            WebInputEvent::TimeStampForTesting);
   keyEvent.domKey = Platform::current()->domKeyEnumFromString(" ");
   keyEvent.windowsKeyCode = VKEY_SPACE;
-  keyEvent.type = WebInputEvent::RawKeyDown;
-  webView->handleInputEvent(keyEvent);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 }
 
 // TODO(crbug.com/605112) This test is crashing on Android (Nexus 4) bot.
@@ -3093,16 +3144,15 @@ TEST_P(WebViewTest, SmartClipData) {
       "text-indent: 0px; text-transform: none; white-space: normal; widows: "
       "2; word-spacing: 0px; -webkit-text-stroke-width: 0px; "
       "text-decoration-style: initial; text-decoration-color: initial;\">Air "
-      "conditioner</div><div id=\"div5\" style=\"padding: 10px; margin: "
-      "10px; border: 2px solid skyblue; float: left; width: "
-      "190px; height: 30px; color: rgb(0, 0, 0); font-family: myahem; "
-      "font-size: 8px; font-style: normal; font-variant-ligatures: normal; "
-      "font-variant-caps: normal; font-weight: normal; "
-      "letter-spacing: normal; orphans: 2; "
-      "text-align: start; text-indent: 0px; text-transform: "
-      "none; white-space: normal; widows: 2; word-spacing: 0px; "
-      "-webkit-text-stroke-width: 0px; text-decoration-style: initial; "
-      "text-decoration-color: initial;\">Price 10,000,000won</div>";
+      "conditioner</div><div id=\"div5\" style=\"padding: 10px; margin: 10px; "
+      "border: 2px solid skyblue; float: left; width: 190px; height: 30px; "
+      "color: rgb(0, 0, 0); font-family: myahem; font-size: 8px; font-style: "
+      "normal; font-variant-ligatures: normal; font-variant-caps: normal; "
+      "font-weight: normal; letter-spacing: normal; orphans: 2; text-align: "
+      "start; text-indent: 0px; text-transform: none; white-space: normal; "
+      "widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; "
+      "text-decoration-style: initial; text-decoration-color: initial;\">Price "
+      "10,000,000won</div>";
   WebString clipText;
   WebString clipHtml;
   WebRect clipRect;
@@ -3133,16 +3183,15 @@ TEST_P(WebViewTest, SmartClipDataWithPinchZoom) {
       "text-indent: 0px; text-transform: none; white-space: normal; widows: "
       "2; word-spacing: 0px; -webkit-text-stroke-width: 0px; "
       "text-decoration-style: initial; text-decoration-color: initial;\">Air "
-      "conditioner</div><div id=\"div5\" style=\"padding: 10px; margin: "
-      "10px; border: 2px solid skyblue; float: left; width: "
-      "190px; height: 30px; color: rgb(0, 0, 0); font-family: myahem; "
-      "font-size: 8px; font-style: normal; font-variant-ligatures: normal; "
-      "font-variant-caps: normal; font-weight: normal; letter-spacing: normal; "
-      "orphans: 2; text-align: start; text-indent: 0px; "
-      "text-transform: none; white-space: normal; widows: 2; "
-      "word-spacing: 0px; -webkit-text-stroke-width: 0px;"
-      " text-decoration-style: initial; text-decoration-color: initial;\">"
-      "Price 10,000,000won</div>";
+      "conditioner</div><div id=\"div5\" style=\"padding: 10px; margin: 10px; "
+      "border: 2px solid skyblue; float: left; width: 190px; height: 30px; "
+      "color: rgb(0, 0, 0); font-family: myahem; font-size: 8px; font-style: "
+      "normal; font-variant-ligatures: normal; font-variant-caps: normal; "
+      "font-weight: normal; letter-spacing: normal; orphans: 2; text-align: "
+      "start; text-indent: 0px; text-transform: none; white-space: normal; "
+      "widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; "
+      "text-decoration-style: initial; text-decoration-color: initial;\">Price "
+      "10,000,000won</div>";
   WebString clipText;
   WebString clipHtml;
   WebRect clipRect;
@@ -3299,8 +3348,8 @@ TEST_P(WebViewTest, AddFrameInChildInNavigateUnload) {
   m_webViewHelper.reset();
 }
 
-class TouchEventHandlerWebViewClient
-    : public FrameTestHelpers::TestWebViewClient {
+class TouchEventHandlerWebWidgetClient
+    : public FrameTestHelpers::TestWebWidgetClient {
  public:
   // WebWidgetClient methods
   void hasTouchEventHandlers(bool state) override {
@@ -3308,7 +3357,7 @@ class TouchEventHandlerWebViewClient
   }
 
   // Local methods
-  TouchEventHandlerWebViewClient() : m_hasTouchEventHandlerCount() {}
+  TouchEventHandlerWebWidgetClient() : m_hasTouchEventHandlerCount() {}
 
   int getAndResetHasTouchEventHandlerCallCount(bool state) {
     int value = m_hasTouchEventHandlerCount[state];
@@ -3325,20 +3374,24 @@ class TouchEventHandlerWebViewClient
 // RemoveAll}EventHandler(..., TouchEvent). Verifying that those calls are made
 // correctly is the job of LayoutTests/fast/events/event-handler-count.html.
 TEST_P(WebViewTest, HasTouchEventHandlers) {
-  TouchEventHandlerWebViewClient client;
+  TouchEventHandlerWebWidgetClient client;
+  // We need to create a LayerTreeView for the client before loading the page,
+  // otherwise ChromeClient will default to assuming there are touch handlers.
+  WebLayerTreeView* layerTreeView = client.initializeLayerTreeView();
   std::string url = m_baseURL + "has_touch_event_handlers.html";
   URLTestHelpers::registerMockedURLLoad(toKURL(url),
                                         "has_touch_event_handlers.html");
   WebViewImpl* webViewImpl =
-      m_webViewHelper.initializeAndLoad(url, true, 0, &client);
+      m_webViewHelper.initializeAndLoad(url, true, 0, 0, &client);
+  ASSERT_TRUE(layerTreeView);
   const EventHandlerRegistry::EventHandlerClass touchEvent =
       EventHandlerRegistry::TouchStartOrMoveEventBlocking;
 
   // The page is initialized with at least one no-handlers call.
   // In practice we get two such calls because WebViewHelper::initializeAndLoad
-  // first initializes and empty frame, and then loads a document into it, so
+  // first initializes an empty frame, and then loads a document into it, so
   // there are two FrameLoader::commitProvisionalLoad calls.
-  EXPECT_GE(client.getAndResetHasTouchEventHandlerCallCount(false), 1);
+  EXPECT_LT(0, client.getAndResetHasTouchEventHandlerCallCount(false));
   EXPECT_EQ(0, client.getAndResetHasTouchEventHandlerCallCount(true));
 
   // Adding the first document handler results in a has-handlers call.
@@ -3466,7 +3519,7 @@ TEST_P(WebViewTest, DeleteElementWithRegisteredHandler) {
   registry.didAddEventHandler(*div, EventHandlerRegistry::ScrollEvent);
   EXPECT_TRUE(registry.hasEventHandlers(EventHandlerRegistry::ScrollEvent));
 
-  TrackExceptionState exceptionState;
+  DummyExceptionStateForTesting exceptionState;
   div->remove(exceptionState);
 
   // For oilpan we have to force a GC to ensure the event handlers have been
@@ -3478,24 +3531,6 @@ TEST_P(WebViewTest, DeleteElementWithRegisteredHandler) {
   EXPECT_FALSE(registry.hasEventHandlers(EventHandlerRegistry::ScrollEvent));
 }
 
-class NonUserInputTextUpdateWebWidgetClient
-    : public FrameTestHelpers::TestWebWidgetClient {
- public:
-  NonUserInputTextUpdateWebWidgetClient() : m_textIsUpdated(false) {}
-
-  // WebWidgetClient methods
-  void didUpdateTextOfFocusedElementByNonUserInput() override {
-    m_textIsUpdated = true;
-  }
-
-  void reset() { m_textIsUpdated = false; }
-
-  bool textIsUpdated() const { return m_textIsUpdated; }
-
- private:
-  int m_textIsUpdated;
-};
-
 // This test verifies the text input flags are correctly exposed to script.
 TEST_P(WebViewTest, TextInputFlags) {
   std::string url = m_baseURL + "text_input_flags.html";
@@ -3504,6 +3539,8 @@ TEST_P(WebViewTest, TextInputFlags) {
   webViewImpl->setInitialFocus(false);
 
   WebLocalFrameImpl* frame = webViewImpl->mainFrameImpl();
+  WebInputMethodControllerImpl* activeInputMethodController =
+      frame->inputMethodController();
   Document* document = frame->frame()->document();
 
   // (A) <input>
@@ -3515,7 +3552,7 @@ TEST_P(WebViewTest, TextInputFlags) {
       inputElement,
       FocusParams(SelectionBehaviorOnFocus::None, WebFocusTypeNone, nullptr));
   webViewImpl->setFocus(true);
-  WebTextInputInfo info1 = webViewImpl->textInputInfo();
+  WebTextInputInfo info1 = activeInputMethodController->textInputInfo();
   EXPECT_EQ(WebTextInputFlagAutocompleteOff | WebTextInputFlagAutocorrectOff |
                 WebTextInputFlagSpellcheckOff |
                 WebTextInputFlagAutocapitalizeNone,
@@ -3528,7 +3565,7 @@ TEST_P(WebViewTest, TextInputFlags) {
       inputElement,
       FocusParams(SelectionBehaviorOnFocus::None, WebFocusTypeNone, nullptr));
   webViewImpl->setFocus(true);
-  WebTextInputInfo info2 = webViewImpl->textInputInfo();
+  WebTextInputInfo info2 = activeInputMethodController->textInputInfo();
   EXPECT_EQ(WebTextInputFlagAutocompleteOn | WebTextInputFlagAutocorrectOn |
                 WebTextInputFlagSpellcheckOn |
                 WebTextInputFlagAutocapitalizeSentences,
@@ -3542,109 +3579,12 @@ TEST_P(WebViewTest, TextInputFlags) {
       textAreaElement,
       FocusParams(SelectionBehaviorOnFocus::None, WebFocusTypeNone, nullptr));
   webViewImpl->setFocus(true);
-  WebTextInputInfo info3 = webViewImpl->textInputInfo();
+  WebTextInputInfo info3 = activeInputMethodController->textInputInfo();
   EXPECT_EQ(WebTextInputFlagAutocapitalizeSentences, info3.flags);
 
   // (C) Verifies the WebTextInputInfo's don't equal.
   EXPECT_FALSE(info1.equals(info2));
   EXPECT_FALSE(info2.equals(info3));
-
-  // Free the webView before freeing the NonUserInputTextUpdateWebViewClient.
-  m_webViewHelper.reset();
-}
-
-// This test verifies that
-// WebWidgetClient::didUpdateTextOfFocusedElementByNonUserInput is called iff
-// value of a focused element is modified via script.
-TEST_P(WebViewTest, NonUserInputTextUpdate) {
-  NonUserInputTextUpdateWebWidgetClient client;
-  std::string url = m_baseURL + "non_user_input_text_update.html";
-  URLTestHelpers::registerMockedURLLoad(toKURL(url),
-                                        "non_user_input_text_update.html");
-  WebViewImpl* webViewImpl =
-      m_webViewHelper.initializeAndLoad(url, true, nullptr, nullptr, &client);
-  webViewImpl->setInitialFocus(false);
-
-  WebLocalFrameImpl* frame = webViewImpl->mainFrameImpl();
-  Document* document = frame->frame()->document();
-  WebInputMethodController* activeInputMethodController =
-      frame->frameWidget()->getActiveWebInputMethodController();
-
-  // (A) <input>
-  // (A.1) Focused and value is changed by script.
-  client.reset();
-  EXPECT_FALSE(client.textIsUpdated());
-
-  HTMLInputElement* inputElement =
-      toHTMLInputElement(document->getElementById("input"));
-  document->setFocusedElement(
-      inputElement,
-      FocusParams(SelectionBehaviorOnFocus::None, WebFocusTypeNone, nullptr));
-  webViewImpl->setFocus(true);
-  EXPECT_EQ(document->focusedElement(), static_cast<Element*>(inputElement));
-
-  // Emulate value change from script.
-  inputElement->setValue("testA");
-  EXPECT_TRUE(client.textIsUpdated());
-  WebTextInputInfo info = webViewImpl->textInputInfo();
-  EXPECT_EQ("testA", std::string(info.value.utf8().data()));
-
-  // (A.2) Focused and user input modifies value.
-  client.reset();
-  EXPECT_FALSE(client.textIsUpdated());
-
-  WebVector<WebCompositionUnderline> emptyUnderlines;
-  activeInputMethodController->setComposition(WebString::fromUTF8("2"),
-                                              emptyUnderlines, 1, 1);
-  activeInputMethodController->finishComposingText(
-      WebInputMethodController::KeepSelection);
-  EXPECT_FALSE(client.textIsUpdated());
-  info = webViewImpl->textInputInfo();
-  EXPECT_EQ("testA2", std::string(info.value.utf8().data()));
-
-  // (A.3) Unfocused and value is changed by script.
-  client.reset();
-  EXPECT_FALSE(client.textIsUpdated());
-  document->clearFocusedElement();
-  webViewImpl->setFocus(false);
-  EXPECT_NE(document->focusedElement(), static_cast<Element*>(inputElement));
-  inputElement->setValue("testA3");
-  EXPECT_FALSE(client.textIsUpdated());
-
-  // (B) <textarea>
-  // (B.1) Focused and value is changed by script.
-  client.reset();
-  EXPECT_FALSE(client.textIsUpdated());
-  HTMLTextAreaElement* textAreaElement =
-      toHTMLTextAreaElement(document->getElementById("textarea"));
-  document->setFocusedElement(
-      textAreaElement,
-      FocusParams(SelectionBehaviorOnFocus::None, WebFocusTypeNone, nullptr));
-  webViewImpl->setFocus(true);
-  EXPECT_EQ(document->focusedElement(), static_cast<Element*>(textAreaElement));
-  textAreaElement->setValue("testB");
-  EXPECT_TRUE(client.textIsUpdated());
-  info = webViewImpl->textInputInfo();
-  EXPECT_EQ("testB", std::string(info.value.utf8().data()));
-
-  // (B.2) Focused and user input modifies value.
-  client.reset();
-  EXPECT_FALSE(client.textIsUpdated());
-  activeInputMethodController->setComposition(WebString::fromUTF8("2"),
-                                              emptyUnderlines, 1, 1);
-  activeInputMethodController->finishComposingText(
-      WebInputMethodController::KeepSelection);
-  info = webViewImpl->textInputInfo();
-  EXPECT_EQ("testB2", std::string(info.value.utf8().data()));
-
-  // (B.3) Unfocused and value is changed by script.
-  client.reset();
-  EXPECT_FALSE(client.textIsUpdated());
-  document->clearFocusedElement();
-  webViewImpl->setFocus(false);
-  EXPECT_NE(document->focusedElement(), static_cast<Element*>(textAreaElement));
-  inputElement->setValue("testB3");
-  EXPECT_FALSE(client.textIsUpdated());
 
   // Free the webView before freeing the NonUserInputTextUpdateWebViewClient.
   m_webViewHelper.reset();
@@ -3664,13 +3604,14 @@ TEST_P(WebViewTest, FirstUserGestureObservedKeyEvent) {
 
   EXPECT_EQ(0, client.getUserGestureNotificationsCount());
 
-  WebKeyboardEvent keyEvent;
+  WebKeyboardEvent keyEvent(WebInputEvent::RawKeyDown,
+                            WebInputEvent::NoModifiers,
+                            WebInputEvent::TimeStampForTesting);
   keyEvent.domKey = Platform::current()->domKeyEnumFromString(" ");
   keyEvent.windowsKeyCode = VKEY_SPACE;
-  keyEvent.type = WebInputEvent::RawKeyDown;
-  webView->handleInputEvent(keyEvent);
-  keyEvent.type = WebInputEvent::KeyUp;
-  webView->handleInputEvent(keyEvent);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
+  keyEvent.setType(WebInputEvent::KeyUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(keyEvent));
 
   EXPECT_EQ(1, client.getUserGestureNotificationsCount());
   frame->setAutofillClient(0);
@@ -3688,15 +3629,15 @@ TEST_P(WebViewTest, FirstUserGestureObservedMouseEvent) {
 
   EXPECT_EQ(0, client.getUserGestureNotificationsCount());
 
-  WebMouseEvent mouseEvent;
+  WebMouseEvent mouseEvent(WebInputEvent::MouseDown, WebInputEvent::NoModifiers,
+                           WebInputEvent::TimeStampForTesting);
   mouseEvent.button = WebMouseEvent::Button::Left;
   mouseEvent.x = 1;
   mouseEvent.y = 1;
   mouseEvent.clickCount = 1;
-  mouseEvent.type = WebInputEvent::MouseDown;
-  webView->handleInputEvent(mouseEvent);
-  mouseEvent.type = WebInputEvent::MouseUp;
-  webView->handleInputEvent(mouseEvent);
+  webView->handleInputEvent(WebCoalescedInputEvent(mouseEvent));
+  mouseEvent.setType(WebInputEvent::MouseUp);
+  webView->handleInputEvent(WebCoalescedInputEvent(mouseEvent));
 
   EXPECT_EQ(1, client.getUserGestureNotificationsCount());
   frame->setAutofillClient(0);
@@ -4134,9 +4075,12 @@ TEST_P(WebViewTest, PasswordFieldEditingIsUserGesture) {
   frame->setAutofillClient(&client);
   webView->setInitialFocus(false);
 
+  WebVector<WebCompositionUnderline> emptyUnderlines;
+
   EXPECT_TRUE(
       frame->frameWidget()->getActiveWebInputMethodController()->commitText(
-          WebString::fromUTF8(std::string("hello").c_str()), 0));
+          WebString::fromUTF8(std::string("hello").c_str()), emptyUnderlines,
+          0));
   EXPECT_EQ(1, client.textChangesFromUserGesture());
   EXPECT_FALSE(UserGestureIndicator::processingUserGesture());
   frame->setAutofillClient(0);
@@ -4218,6 +4162,29 @@ TEST_P(WebViewTest, NestedPageSuspensions) {
   }
 
   EXPECT_FALSE(webView->page()->suspended());
+}
+
+TEST_P(WebViewTest, ClosingPageIsSuspended) {
+  WebViewImpl* webView = m_webViewHelper.initialize();
+  Page* page = m_webViewHelper.webView()->page();
+  EXPECT_FALSE(page->suspended());
+
+  webView->setOpenedByDOM();
+
+  LocalFrame* mainFrame = toLocalFrame(page->mainFrame());
+  EXPECT_FALSE(mainFrame->domWindow()->closed());
+
+  mainFrame->domWindow()->close(nullptr);
+  // The window should be marked closed...
+  EXPECT_TRUE(mainFrame->domWindow()->closed());
+  // EXPECT_TRUE(page->isClosing());
+  // ...but not yet detached.
+  EXPECT_TRUE(mainFrame->host());
+
+  {
+    ScopedPageSuspender suspender;
+    EXPECT_TRUE(page->suspended());
+  }
 }
 
 TEST_P(WebViewTest, ForceAndResetViewport) {
@@ -4359,6 +4326,58 @@ TEST_P(WebViewTest, ViewportOverrideAdaptsToScaleAndScroll) {
   // visibleContentRect doesn't change.
   EXPECT_EQ(IntRect(50, 55, 50, 75),
             *devToolsEmulator->visibleContentRectForPainting());
+}
+
+TEST_P(WebViewTest, ResizeForPrintingViewportUnits) {
+  WebViewImpl* webView = m_webViewHelper.initialize();
+  webView->resize(WebSize(800, 600));
+
+  WebURL baseURL = URLTestHelpers::toKURL("http://example.com/");
+  FrameTestHelpers::loadHTMLString(webView->mainFrame(),
+                                   "<style>"
+                                   "  body { margin: 0px; }"
+                                   "  #vw { width: 100vw; height: 100vh; }"
+                                   "</style>"
+                                   "<div id=vw></div>",
+                                   baseURL);
+
+  WebLocalFrameImpl* frame = webView->mainFrameImpl();
+  Document* document = frame->frame()->document();
+  Element* vwElement = document->getElementById("vw");
+
+  EXPECT_EQ(800, vwElement->offsetWidth());
+
+  FloatSize pageSize(300, 360);
+
+  WebPrintParams printParams;
+  printParams.printContentArea.width = pageSize.width();
+  printParams.printContentArea.height = pageSize.height();
+
+  // This needs to match printingMinimumShrinkFactor in PrintContext.cpp. The
+  // layout is scaled by this factor for printing.
+  constexpr float minimumShrinkFactor = 1.333f;
+
+  // The expected layout size comes from the calculation done in
+  // resizePageRectsKeepingRatio which is used from PrintContext::begin to
+  // scale the page size.
+  const float ratio = pageSize.height() / (float)pageSize.width();
+  const int expectedWidth = floor(pageSize.width() * minimumShrinkFactor);
+  const int expectedHeight = floor(expectedWidth * ratio);
+
+  frame->printBegin(printParams, WebNode());
+
+  EXPECT_EQ(expectedWidth, vwElement->offsetWidth());
+  EXPECT_EQ(expectedHeight, vwElement->offsetHeight());
+
+  webView->resize(flooredIntSize(pageSize));
+
+  EXPECT_EQ(expectedWidth, vwElement->offsetWidth());
+  EXPECT_EQ(expectedHeight, vwElement->offsetHeight());
+
+  webView->resize(WebSize(800, 600));
+  frame->printEnd();
+
+  EXPECT_EQ(800, vwElement->offsetWidth());
 }
 
 }  // namespace blink

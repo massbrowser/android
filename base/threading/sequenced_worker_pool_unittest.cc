@@ -19,7 +19,6 @@
 #include "base/synchronization/lock.h"
 #include "base/task_scheduler/scheduler_worker_pool_params.h"
 #include "base/task_scheduler/task_scheduler.h"
-#include "base/task_scheduler/task_scheduler_impl.h"
 #include "base/test/sequenced_task_runner_test_template.h"
 #include "base/test/sequenced_worker_pool_owner.h"
 #include "base/test/task_runner_test_template.h"
@@ -248,7 +247,6 @@ class SequencedWorkerPoolTest
       std::vector<SchedulerWorkerPoolParams> worker_pool_params;
       worker_pool_params.emplace_back(
           "SchedulerWorkerPoolName", ThreadPriority::NORMAL,
-          SchedulerWorkerPoolParams::IORestriction::ALLOWED,
           SchedulerWorkerPoolParams::StandbyThreadPolicy::LAZY,
           kNumWorkerThreads, TimeDelta::Max());
       TaskScheduler::CreateAndSetDefaultTaskScheduler(

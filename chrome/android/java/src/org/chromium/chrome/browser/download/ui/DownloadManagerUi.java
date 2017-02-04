@@ -9,9 +9,12 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.res.Resources;
 import android.os.AsyncTask;
+import android.support.graphics.drawable.VectorDrawableCompat;
 import android.support.v4.view.GravityCompat;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v4.widget.DrawerLayout.DrawerListener;
+import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.RecyclerView.ItemAnimator;
 import android.support.v7.widget.Toolbar.OnMenuItemClickListener;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -37,6 +40,7 @@ import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.chrome.browser.widget.selection.SelectableListLayout;
+import org.chromium.chrome.browser.widget.selection.SelectableListToolbar.SearchDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -51,7 +55,7 @@ import java.util.Set;
  * Displays and manages the UI for the download manager.
  */
 
-public class DownloadManagerUi implements OnMenuItemClickListener {
+public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegate {
 
     /**
      * Interface to observe the changes in the download manager ui. This should be implemented by
@@ -169,13 +173,16 @@ public class DownloadManagerUi implements OnMenuItemClickListener {
     private final SpaceDisplay mSpaceDisplay;
     private final ListView mFilterView;
     private final UndoDeletionSnackbarController mUndoDeletionSnackbarController;
+    private final RecyclerView mRecyclerView;
+    private final ItemAnimator mItemAnimator;
 
     private BasicNativePage mNativePage;
     private Activity mActivity;
     private ViewGroup mMainView;
     private DownloadManagerToolbar mToolbar;
-    private SelectableListLayout mSelectableListLayout;
+    private SelectableListLayout<DownloadHistoryItemWrapper> mSelectableListLayout;
 
+    @SuppressWarnings("unchecked")  // mSelectableListLayout
     public DownloadManagerUi(
             Activity activity, boolean isOffTheRecord, ComponentName parentComponent) {
         mActivity = activity;
@@ -190,14 +197,21 @@ public class DownloadManagerUi implements OnMenuItemClickListener {
             addDrawerListener(drawerLayout);
         }
 
-        mSelectableListLayout =
-                (SelectableListLayout) mMainView.findViewById(R.id.selectable_list);
+        mSelectableListLayout = (SelectableListLayout<DownloadHistoryItemWrapper>)
+                mMainView.findViewById(R.id.selectable_list);
 
-        mSelectableListLayout.initializeEmptyView(R.drawable.downloads_big,
+        mSelectableListLayout.initializeEmptyView(
+                VectorDrawableCompat.create(mActivity.getResources(),
+                        R.drawable.downloads_big, mActivity.getTheme()),
                 R.string.download_manager_ui_empty);
 
         mHistoryAdapter = new DownloadHistoryAdapter(isOffTheRecord, parentComponent);
-        mSelectableListLayout.initializeRecyclerView(mHistoryAdapter);
+        mRecyclerView = mSelectableListLayout.initializeRecyclerView(mHistoryAdapter);
+        mItemAnimator = mRecyclerView.getItemAnimator();
+
+        // Prevent every progress update from causing a transition animation.
+        mItemAnimator.setChangeDuration(0);
+
         mHistoryAdapter.initialize(mBackendProvider);
         addObserver(mHistoryAdapter);
 
@@ -211,8 +225,10 @@ public class DownloadManagerUi implements OnMenuItemClickListener {
 
         mToolbar = (DownloadManagerToolbar) mSelectableListLayout.initializeToolbar(
                 R.layout.download_manager_toolbar, mBackendProvider.getSelectionDelegate(),
-                0, drawerLayout, R.id.normal_menu_group, R.id.selection_mode_menu_group, this);
+                0, drawerLayout, R.id.normal_menu_group, R.id.selection_mode_menu_group, null, true,
+                this);
         mToolbar.setTitle(R.string.menu_downloads);
+        mToolbar.initializeSearchView(this, R.string.download_manager_search, R.id.search_menu_id);
         addObserver(mToolbar);
 
         mFilterView = (ListView) mMainView.findViewById(R.id.section_list);
@@ -293,6 +309,12 @@ public class DownloadManagerUi implements OnMenuItemClickListener {
         } else if (item.getItemId() == R.id.selection_mode_share_menu_id) {
             shareSelectedItems();
             return true;
+        } else if (item.getItemId() == R.id.search_menu_id) {
+            mRecyclerView.setItemAnimator(null);
+            mToolbar.showSearchView();
+            mSelectableListLayout.setEmptyViewText(R.string.download_manager_no_results);
+            RecordUserAction.record("Android.DownloadManager.Search");
+            return true;
         }
         return false;
     }
@@ -348,6 +370,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener {
     /** Called when the filter has been changed by the user. */
     void onFilterChanged(int filter) {
         mBackendProvider.getSelectionDelegate().clearSelection();
+        mToolbar.hideSearchView();
 
         for (DownloadUiObserver observer : mObservers) {
             observer.onFilterChanged(filter);
@@ -359,6 +382,18 @@ public class DownloadManagerUi implements OnMenuItemClickListener {
 
         RecordHistogram.recordEnumeratedHistogram("Android.DownloadManager.Filter", filter,
                 DownloadFilter.FILTER_BOUNDARY);
+    }
+
+    @Override
+    public void onSearchTextChanged(String query) {
+        mHistoryAdapter.search(query);
+    }
+
+    @Override
+    public void onEndSearch() {
+        mSelectableListLayout.setEmptyViewText(R.string.download_manager_ui_empty);
+        mHistoryAdapter.onEndSearch();
+        mRecyclerView.setItemAnimator(mItemAnimator);
     }
 
     private void shareSelectedItems() {
@@ -420,7 +455,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener {
 
         for (DownloadHistoryItemWrapper item : selectedItems) {
             if (!filePathsToRemove.contains(item.getFilePath())) {
-                List<DownloadHistoryItemWrapper> itemsForFilePath =
+                Set<DownloadHistoryItemWrapper> itemsForFilePath =
                         mHistoryAdapter.getItemsForFilePath(item.getFilePath());
                 if (itemsForFilePath != null) {
                     itemsToRemove.addAll(itemsForFilePath);

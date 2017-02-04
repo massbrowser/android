@@ -294,7 +294,7 @@ void AudioParamHandler::connect(AudioNodeOutput& output) {
     return;
 
   output.addParam(*this);
-  m_outputs.add(&output);
+  m_outputs.insert(&output);
   changedOutputs();
 }
 
@@ -514,6 +514,12 @@ AudioParam* AudioParam::setValueCurveAtTime(DOMFloat32Array* curve,
 AudioParam* AudioParam::cancelScheduledValues(double startTime,
                                               ExceptionState& exceptionState) {
   handler().timeline().cancelScheduledValues(startTime, exceptionState);
+  return this;
+}
+
+AudioParam* AudioParam::cancelAndHoldAtTime(double startTime,
+                                            ExceptionState& exceptionState) {
+  handler().timeline().cancelAndHoldAtTime(startTime, exceptionState);
   return this;
 }
 

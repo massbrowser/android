@@ -12,9 +12,6 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -38,11 +35,8 @@ import android.util.AttributeSet;
 import android.util.Log;
 import android.util.Pair;
 import android.util.SparseArray;
-import android.view.ActionMode;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
-import android.view.Menu;
-import android.view.MenuItem;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
@@ -62,6 +56,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.NativePage;
+import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.WindowDelegate;
 import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.ntp.NativePageFactory;
@@ -79,8 +74,6 @@ import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.toolbar.ActionModeController;
-import org.chromium.chrome.browser.toolbar.ActionModeController.ActionBarDelegate;
 import org.chromium.chrome.browser.toolbar.ToolbarActionModeCallback;
 import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
 import org.chromium.chrome.browser.toolbar.ToolbarPhone;
@@ -88,8 +81,8 @@ import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.KeyNavigationUtil;
 import org.chromium.chrome.browser.util.ViewUtils;
+import org.chromium.chrome.browser.widget.BottomSheet;
 import org.chromium.chrome.browser.widget.TintedImageButton;
-import org.chromium.chrome.browser.widget.animation.AnimatorProperties;
 import org.chromium.chrome.browser.widget.animation.CancelAwareAnimatorListener;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -128,7 +121,6 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
     // response (as opposed to treating it like a typed string in the Omnibox).
     private static final float VOICE_SEARCH_CONFIDENCE_NAVIGATE_THRESHOLD = 0.9f;
 
-    private static final int CONTENT_OVERLAY_COLOR = 0xA6000000;
     private static final int OMNIBOX_RESULTS_BG_COLOR = 0xFFF5F5F6;
     private static final int OMNIBOX_INCOGNITO_RESULTS_BG_COLOR = 0xFF323232;
 
@@ -141,9 +133,14 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
      * The following additions have been made: "chrome", "ftp".
      */
     private static final HashSet<String> ACCEPTED_SCHEMES = CollectionUtil.newHashSet(
-            "about", "data", "file", "ftp", "http", "https", "inline", "javascript", "chrome");
+            UrlConstants.ABOUT_SCHEME, UrlConstants.DATA_SCHEME,
+            UrlConstants.FILE_SCHEME, UrlConstants.FTP_SCHEME,
+            UrlConstants.HTTP_SCHEME, UrlConstants.HTTPS_SCHEME,
+            UrlConstants.INLINE_SCHEME, UrlConstants.JAVASCRIPT_SCHEME,
+            UrlConstants.CHROME_SCHEME);
     private static final HashSet<String> UNSUPPORTED_SCHEMES_TO_SPLIT =
-            CollectionUtil.newHashSet("file", "javascript", "data");
+            CollectionUtil.newHashSet(UrlConstants.FILE_SCHEME,
+                    UrlConstants.JAVASCRIPT_SCHEME, UrlConstants.DATA_SCHEME);
 
     protected ImageView mNavigationButton;
     protected TintedImageButton mSecurityButton;
@@ -151,7 +148,9 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
     protected TintedImageButton mDeleteButton;
     protected TintedImageButton mMicButton;
     protected UrlBar mUrlBar;
-    private ActionModeController mActionModeController = null;
+
+    /** A handle to the bottom sheet for chrome home. */
+    private BottomSheet mBottomSheet;
 
     private AutocompleteController mAutocomplete;
 
@@ -190,9 +189,10 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
     private Runnable mRequestSuggestions;
 
     private ViewGroup mOmniboxResultsContainer;
-    private ObjectAnimator mFadeInOmniboxBackgroundAnimator;
-    private ObjectAnimator mFadeOutOmniboxBackgroundAnimator;
-    private Animator mOmniboxBackgroundAnimator;
+    private View mFadingView;
+    private ObjectAnimator mOverlayFadeInAnimator;
+    private ObjectAnimator mOverlayFadeOutAnimator;
+    private Animator mOverlayAnimator;
 
     private boolean mSuggestionsShown;
     private boolean mUrlHasFocus;
@@ -227,8 +227,6 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
     // instead of a parameter to hideSuggestions because that method is often called from multiple
     // code paths in a not necessarily obvious or even deterministic order.
     private boolean mSuggestionSelectionInProgress;
-
-    private ToolbarActionModeCallback mDefaultActionModeCallbackForTextEdit;
 
     private Runnable mShowSuggestions;
 
@@ -767,35 +765,8 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
 
     @Override
     public void initializeControls(WindowDelegate windowDelegate,
-            ActionBarDelegate actionBarDelegate, WindowAndroid windowAndroid) {
+            WindowAndroid windowAndroid) {
         mWindowDelegate = windowDelegate;
-
-        mActionModeController = new ActionModeController(getContext(), actionBarDelegate);
-        mActionModeController.setCustomSelectionActionModeCallback(
-                new ToolbarActionModeCallback() {
-                    @Override
-                    public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-                        boolean retVal = super.onCreateActionMode(mode, menu);
-                        mode.getMenuInflater().inflate(R.menu.textselectionmenu, menu);
-                        return retVal;
-                    }
-
-                    @Override
-                    public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
-                        if (item.getItemId() == R.id.copy_url) {
-                            ClipboardManager clipboard =
-                                    (ClipboardManager) getContext().getSystemService(
-                                            Context.CLIPBOARD_SERVICE);
-                            ClipData clip = ClipData.newPlainText("url", mOriginalUrl);
-                            clipboard.setPrimaryClip(clip);
-                            mode.finish();
-                            return true;
-                        } else {
-                            return super.onActionItemClicked(mode, item);
-                        }
-                    }
-                });
-
         mWindowAndroid = windowAndroid;
 
         // If the user focused the omnibox prior to the native libraries being initialized,
@@ -844,8 +815,6 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
         mDeferredNativeRunnables.clear();
 
         mUrlBar.onOmniboxFullyFunctional();
-
-        updateCustomSelectionActionModeCallback();
         updateVisualsForState();
     }
 
@@ -1031,13 +1000,13 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
         if (hasFocus && currentTab != null && !currentTab.isIncognito()) {
             if (mNativeInitialized
                     && TemplateUrlService.getInstance().isDefaultSearchEngineGoogle()) {
-                GeolocationHeader.primeLocationForGeoHeader(getContext());
+                GeolocationHeader.primeLocationForGeoHeader();
             } else {
                 mDeferredNativeRunnables.add(new Runnable() {
                     @Override
                     public void run() {
                         if (TemplateUrlService.getInstance().isDefaultSearchEngineGoogle()) {
-                            GeolocationHeader.primeLocationForGeoHeader(getContext());
+                            GeolocationHeader.primeLocationForGeoHeader();
                         }
                     }
                 });
@@ -1081,7 +1050,7 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
         if (mUrlFocusChangeListener != null) mUrlFocusChangeListener.onUrlFocusChange(hasFocus);
 
         updateOmniboxResultsContainer();
-        if (hasFocus) updateOmniboxResultsContainerBackground(true);
+        if (hasFocus) updateFadingBackgroundView(true);
     }
 
     /**
@@ -1155,15 +1124,7 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
 
     @Override
     public void setDefaultTextEditActionModeCallback(ToolbarActionModeCallback callback) {
-        mDefaultActionModeCallbackForTextEdit = callback;
-    }
-
-    /**
-     * If query in the omnibox, sets UrlBar's ActionModeCallback to show copy url button. Else,
-     * it is set to the default one.
-     */
-    private void updateCustomSelectionActionModeCallback() {
-        mUrlBar.setCustomSelectionActionModeCallback(mDefaultActionModeCallbackForTextEdit);
+        mUrlBar.setCustomSelectionActionModeCallback(callback);
     }
 
     @Override
@@ -1209,6 +1170,11 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
                 onUrlFocusChange(hasFocus);
             }
         });
+    }
+
+    @Override
+    public void setBottomSheet(BottomSheet sheet) {
+        mBottomSheet = sheet;
     }
 
     @Override
@@ -1275,7 +1241,10 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
     public static int getSecurityIconResource(
             int securityLevel, boolean isSmallDevice, boolean isOfflinePage) {
         // Both conditions should be met, because isOfflinePage might take longer to be cleared.
-        if (securityLevel == ConnectionSecurityLevel.NONE && isOfflinePage) {
+        // HTTP_SHOW_WARNING added because of field trail causing http://crbug.com/671453.
+        if ((securityLevel == ConnectionSecurityLevel.NONE
+                    || securityLevel == ConnectionSecurityLevel.HTTP_SHOW_WARNING)
+                && isOfflinePage) {
             return R.drawable.offline_pin_round;
         }
         switch (securityLevel) {
@@ -1425,10 +1394,11 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
      */
     private void updateVerboseStatusVisibility() {
         // Because is offline page is cleared a bit slower, we also ensure that connection security
-        // level is NONE.
+        // level is NONE or HTTP_SHOW_WARNING (http://crbug.com/671453).
         boolean verboseStatusVisible = !mUrlHasFocus && getCurrentTab() != null
                 && getCurrentTab().isOfflinePage()
-                && getSecurityLevel() == ConnectionSecurityLevel.NONE;
+                && (getSecurityLevel() == ConnectionSecurityLevel.NONE
+                           || getSecurityLevel() == ConnectionSecurityLevel.HTTP_SHOW_WARNING);
 
         int verboseStatusVisibility = verboseStatusVisible ? VISIBLE : GONE;
 
@@ -1923,10 +1893,10 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
         } else if (v == mMicButton) {
             RecordUserAction.record("MobileOmniboxVoiceSearch");
             startVoiceRecognition();
-        } else if (v == mOmniboxResultsContainer) {
+        } else if (v == mFadingView) {
             // This will only be triggered when no suggestion items are selected in the container.
             setUrlBarFocus(false);
-            updateOmniboxResultsContainerBackground(false);
+            updateFadingBackgroundView(false);
         }
     }
 
@@ -2136,7 +2106,6 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
             mUrlBar.deEmphasizeUrl();
             emphasizeUrl();
         }
-        updateCustomSelectionActionModeCallback();
     }
 
     /** Gets the URL of the web page in the tab. */
@@ -2193,8 +2162,7 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
         // Loads the |url| in the current ContentView and gives focus to the ContentView.
         if (currentTab != null && !url.isEmpty()) {
             LoadUrlParams loadUrlParams = new LoadUrlParams(url);
-            loadUrlParams.setVerbatimHeaders(
-                    GeolocationHeader.getGeoHeader(getContext(), url, currentTab.isIncognito()));
+            loadUrlParams.setVerbatimHeaders(GeolocationHeader.getGeoHeader(url, currentTab));
             loadUrlParams.setTransitionType(transition | PageTransition.FROM_ADDRESS_BAR);
             currentTab.loadUrl(loadUrlParams);
 
@@ -2235,11 +2203,14 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
     private void initOmniboxResultsContainer() {
         if (mOmniboxResultsContainer != null) return;
 
-        ViewStub overlayStub =
-                (ViewStub) getRootView().findViewById(R.id.omnibox_results_container_stub);
+        // Use the omnibox results container in the bottom sheet if it exists.
+        int omniboxResultsContainerId = R.id.omnibox_results_container_stub;
+        if (mBottomSheet != null) {
+            omniboxResultsContainerId = R.id.bottom_omnibox_results_container_stub;
+        }
+
+        ViewStub overlayStub = (ViewStub) getRootView().findViewById(omniboxResultsContainerId);
         mOmniboxResultsContainer = (ViewGroup) overlayStub.inflate();
-        mOmniboxResultsContainer.setBackgroundColor(CONTENT_OVERLAY_COLOR);
-        mOmniboxResultsContainer.setOnClickListener(this);
     }
 
     private void updateOmniboxResultsContainer() {
@@ -2247,7 +2218,7 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
             initOmniboxResultsContainer();
             updateOmniboxResultsContainerVisibility(true);
         } else if (mOmniboxResultsContainer != null) {
-            updateOmniboxResultsContainerBackground(false);
+            updateFadingBackgroundView(false);
         }
     }
 
@@ -2259,79 +2230,94 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
 
         if (visible) {
             mOmniboxResultsContainer.setVisibility(VISIBLE);
-            if (activity != null) activity.addViewObscuringAllTabs(mOmniboxResultsContainer);
+            if (activity != null) activity.addViewObscuringAllTabs(mFadingView);
         } else {
             mOmniboxResultsContainer.setVisibility(INVISIBLE);
-            if (activity != null) activity.removeViewObscuringAllTabs(mOmniboxResultsContainer);
+            if (activity != null) activity.removeViewObscuringAllTabs(mFadingView);
         }
     }
 
     /**
-     * Set the background of the omnibox results container.
+     * Initialize the fading background for when the omnibox is focused.
+     */
+    private void initFadingOverlayView() {
+        mFadingView = getRootView().findViewById(R.id.fading_focus_target);
+        mFadingView.setAlpha(0.0f);
+        mFadingView.setOnClickListener(this);
+    }
+
+    /**
+     * Update the fading background view that shows when the omnibox is focused.
      * @param visible Whether the background should be made visible.
      */
-    private void updateOmniboxResultsContainerBackground(boolean visible) {
+    private void updateFadingBackgroundView(boolean visible) {
         if (getToolbarDataProvider() == null) return;
+
+        if (mFadingView == null) initFadingOverlayView();
 
         NewTabPage ntp = getToolbarDataProvider().getNewTabPageForCurrentTab();
         boolean locationBarShownInNTP = ntp != null && ntp.isLocationBarShownInNTP();
-        if (visible) {
-            if (locationBarShownInNTP) {
-                mOmniboxResultsContainer.getBackground().setAlpha(0);
-            } else {
-                fadeInOmniboxResultsContainerBackground();
-            }
+
+        if (visible && !locationBarShownInNTP) {
+            // If the location bar is shown in the NTP, the toolbar will eventually trigger a
+            // fade in.
+            showFadingOverlay();
         } else {
-            if (locationBarShownInNTP) {
-                updateOmniboxResultsContainerVisibility(false);
-            } else {
-                fadeOutOmniboxResultsContainerBackground();
-            }
+            hideFadingOverlay(!locationBarShownInNTP);
         }
     }
 
     /**
-     * Trigger a fade in of the omnibox results background.
+     * Trigger a fade in of the omnibox results background creating a new animation if necessary.
      */
-    protected void fadeInOmniboxResultsContainerBackground() {
-        if (mFadeInOmniboxBackgroundAnimator == null) {
-            mFadeInOmniboxBackgroundAnimator = ObjectAnimator.ofInt(
-                    getRootView().findViewById(R.id.omnibox_results_container).getBackground(),
-                    AnimatorProperties.DRAWABLE_ALPHA_PROPERTY, 0, 255);
-            mFadeInOmniboxBackgroundAnimator.setDuration(OMNIBOX_CONTAINER_BACKGROUND_FADE_MS);
-            mFadeInOmniboxBackgroundAnimator.setInterpolator(
+    protected void showFadingOverlay() {
+        if (mOverlayFadeInAnimator == null) {
+            mOverlayFadeInAnimator = ObjectAnimator.ofFloat(mFadingView, ALPHA, 1f);
+            mOverlayFadeInAnimator.setDuration(OMNIBOX_CONTAINER_BACKGROUND_FADE_MS);
+            mOverlayFadeInAnimator.setInterpolator(
                     BakedBezierInterpolator.FADE_IN_CURVE);
         }
-        runOmniboxResultsFadeAnimation(mFadeInOmniboxBackgroundAnimator);
+
+        mFadingView.setVisibility(View.VISIBLE);
+        runFadeOverlayAnimation(mOverlayFadeInAnimator);
     }
 
-    private void fadeOutOmniboxResultsContainerBackground() {
-        if (mFadeOutOmniboxBackgroundAnimator == null) {
-            mFadeOutOmniboxBackgroundAnimator = ObjectAnimator.ofInt(
-                    getRootView().findViewById(R.id.omnibox_results_container).getBackground(),
-                    AnimatorProperties.DRAWABLE_ALPHA_PROPERTY, 255, 0);
-            mFadeOutOmniboxBackgroundAnimator.setDuration(OMNIBOX_CONTAINER_BACKGROUND_FADE_MS);
-            mFadeOutOmniboxBackgroundAnimator.setInterpolator(
-                    BakedBezierInterpolator.FADE_OUT_CURVE);
-            mFadeOutOmniboxBackgroundAnimator.addListener(new CancelAwareAnimatorListener() {
+    /**
+     * Trigger a fade out of the omnibox results background creating a new animation if necessary.
+     */
+    private void hideFadingOverlay(boolean fadeOut) {
+        if (mOverlayFadeOutAnimator == null) {
+            mOverlayFadeOutAnimator = ObjectAnimator.ofFloat(mFadingView, ALPHA, 0f);
+            mOverlayFadeOutAnimator.setDuration(OMNIBOX_CONTAINER_BACKGROUND_FADE_MS);
+            mOverlayFadeOutAnimator.setInterpolator(BakedBezierInterpolator.FADE_OUT_CURVE);
+            mOverlayFadeOutAnimator.addListener(new CancelAwareAnimatorListener() {
                 @Override
                 public void onEnd(Animator animator) {
-                    updateOmniboxResultsContainerVisibility(false);
+                    mFadingView.setVisibility(View.GONE);
+                    onFadingOverlayHidden();
                 }
             });
         }
-        runOmniboxResultsFadeAnimation(mFadeOutOmniboxBackgroundAnimator);
+
+        runFadeOverlayAnimation(mOverlayFadeOutAnimator);
+        if (!fadeOut) mOverlayFadeOutAnimator.end();
     }
 
-    private void runOmniboxResultsFadeAnimation(Animator fadeAnimation) {
-        if (mOmniboxBackgroundAnimator == fadeAnimation
-                && mOmniboxBackgroundAnimator.isRunning()) {
+    /**
+     * A notification that the fading overlay view is completely hidden.
+     */
+    private void onFadingOverlayHidden() {
+        updateOmniboxResultsContainerVisibility(false);
+    }
+
+    private void runFadeOverlayAnimation(Animator fadeAnimation) {
+        if (mOverlayAnimator == fadeAnimation && mOverlayAnimator.isRunning()) {
             return;
-        } else if (mOmniboxBackgroundAnimator != null) {
-            mOmniboxBackgroundAnimator.cancel();
+        } else if (mOverlayAnimator != null) {
+            mOverlayAnimator.cancel();
         }
-        mOmniboxBackgroundAnimator = fadeAnimation;
-        mOmniboxBackgroundAnimator.start();
+        mOverlayAnimator = fadeAnimation;
+        mOverlayAnimator.start();
     }
 
     @Override
@@ -2473,8 +2459,7 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
 
     // WindowAndroid.IntentCallback implementation:
     @Override
-    public void onIntentCompleted(WindowAndroid window, int resultCode,
-            ContentResolver contentResolver, Intent data) {
+    public void onIntentCompleted(WindowAndroid window, int resultCode, Intent data) {
         if (resultCode != Activity.RESULT_OK) return;
         if (data.getExtras() == null) return;
 

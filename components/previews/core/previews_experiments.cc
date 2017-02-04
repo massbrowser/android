@@ -59,6 +59,17 @@ const char kHostIndifferentBlackListDurationInDays[] =
 const char kSingleOptOutDurationInSeconds[] =
     "single_opt_out_duration_in_seconds";
 
+// The amount of time that an offline page is considered fresh enough to be
+// shown as a preview.
+const char kOfflinePreviewFreshnessDurationInDays[] =
+    "offline_preview_freshness_duration_in_days";
+
+// The threshold of EffectiveConnectionType above which previews will not be
+// served.
+// See net/nqe/effective_connection_type.h for mapping from string to value.
+const char kEffectiveConnectionTypeThreshold[] =
+    "max_allowed_effective_connection_type";
+
 // The string that corresponds to enabled for the variation param experiments.
 const char kExperimentEnabled[] = "true";
 
@@ -84,73 +95,83 @@ namespace params {
 size_t MaxStoredHistoryLengthForPerHostBlackList() {
   std::string param_value = ParamValue(kMaxStoredHistoryLengthPerHost);
   size_t history_length;
-  if (!base::StringToSizeT(param_value, &history_length)) {
-    return 4;
-  }
+  if (!base::StringToSizeT(param_value, &history_length))
+    history_length = 4;
   return history_length;
 }
 
 size_t MaxStoredHistoryLengthForHostIndifferentBlackList() {
   std::string param_value = ParamValue(kMaxStoredHistoryLengthHostIndifferent);
   size_t history_length;
-  if (!base::StringToSizeT(param_value, &history_length)) {
-    return 10;
-  }
+  if (!base::StringToSizeT(param_value, &history_length))
+    history_length = 10;
   return history_length;
 }
 
 size_t MaxInMemoryHostsInBlackList() {
   std::string param_value = ParamValue(kMaxHostsInBlackList);
   size_t max_hosts;
-  if (!base::StringToSizeT(param_value, &max_hosts)) {
-    return 100;
-  }
+  if (!base::StringToSizeT(param_value, &max_hosts))
+    max_hosts = 100;
   return max_hosts;
 }
 
 int PerHostBlackListOptOutThreshold() {
   std::string param_value = ParamValue(kPerHostOptOutThreshold);
   int opt_out_threshold;
-  if (!base::StringToInt(param_value, &opt_out_threshold)) {
-    return 2;
-  }
+  if (!base::StringToInt(param_value, &opt_out_threshold))
+    opt_out_threshold = 2;
   return opt_out_threshold;
 }
 
 int HostIndifferentBlackListOptOutThreshold() {
   std::string param_value = ParamValue(kHostIndifferentOptOutThreshold);
   int opt_out_threshold;
-  if (!base::StringToInt(param_value, &opt_out_threshold)) {
-    return 4;
-  }
+  if (!base::StringToInt(param_value, &opt_out_threshold))
+    opt_out_threshold = 4;
   return opt_out_threshold;
 }
 
 base::TimeDelta PerHostBlackListDuration() {
   std::string param_value = ParamValue(kPerHostBlackListDurationInDays);
   int duration;
-  if (!base::StringToInt(param_value, &duration)) {
-    return base::TimeDelta::FromDays(30);
-  }
+  if (!base::StringToInt(param_value, &duration))
+    duration = 30;
   return base::TimeDelta::FromDays(duration);
 }
 
 base::TimeDelta HostIndifferentBlackListPerHostDuration() {
   std::string param_value = ParamValue(kHostIndifferentBlackListDurationInDays);
   int duration;
-  if (!base::StringToInt(param_value, &duration)) {
-    return base::TimeDelta::FromDays(365 * 100);
-  }
+  if (!base::StringToInt(param_value, &duration))
+    duration = 365 * 100;
   return base::TimeDelta::FromDays(duration);
 }
 
 base::TimeDelta SingleOptOutDuration() {
   std::string param_value = ParamValue(kSingleOptOutDurationInSeconds);
   int duration;
-  if (!base::StringToInt(param_value, &duration)) {
-    return base::TimeDelta::FromSeconds(60 * 5);
-  }
+  if (!base::StringToInt(param_value, &duration))
+    duration = 60 * 5;
   return base::TimeDelta::FromSeconds(duration);
+}
+
+base::TimeDelta OfflinePreviewFreshnessDuration() {
+  std::string param_value = ParamValue(kOfflinePreviewFreshnessDurationInDays);
+  int duration;
+  if (!base::StringToInt(param_value, &duration))
+    duration = 7;
+  return base::TimeDelta::FromDays(duration);
+}
+
+net::EffectiveConnectionType EffectiveConnectionTypeThreshold() {
+  std::string param_value = ParamValue(kEffectiveConnectionTypeThreshold);
+  net::EffectiveConnectionType effective_connection_type;
+  if (!net::GetEffectiveConnectionTypeForName(param_value,
+                                              &effective_connection_type)) {
+    effective_connection_type = net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G;
+  }
+  return effective_connection_type;
 }
 
 }  // namespace params

@@ -147,4 +147,33 @@ TEST_F(DisplayInfoTest, InputDevicesTest) {
   EXPECT_EQ(0u, copy_info.input_devices().size());
 }
 
+TEST_F(DisplayInfoTest, TouchCalibrationTest) {
+  ManagedDisplayInfo info =
+      ManagedDisplayInfo::CreateFromSpecWithID("200x100", 10);
+
+  EXPECT_FALSE(info.has_touch_calibration_data());
+
+  TouchCalibrationData::CalibrationPointPairQuad points = {{
+    std::make_pair(gfx::Point(10, 10), gfx::Point(11, 12)),
+    std::make_pair(gfx::Point(190, 10), gfx::Point(195, 8)),
+    std::make_pair(gfx::Point(10, 90), gfx::Point(12, 94)),
+    std::make_pair(gfx::Point(190, 90), gfx::Point(189, 88))
+  }};
+
+  gfx::Size size(200, 100);
+
+  TouchCalibrationData expected_data(points, size);
+
+  // Add touch data for the display.
+  info.SetTouchCalibrationData(expected_data);
+
+  EXPECT_TRUE(info.has_touch_calibration_data());
+  EXPECT_EQ(expected_data, info.GetTouchCalibrationData());
+
+  // Clear all touch calibration data for the display.
+  info.clear_touch_calibration_data();
+
+  EXPECT_FALSE(info.has_touch_calibration_data());
+}
+
 }  // namespace display

@@ -175,8 +175,6 @@ void Label::SetMultiLine(bool multi_line) {
   if (render_text_->MultilineSupported())
     render_text_->SetMultiline(multi_line);
   render_text_->SetReplaceNewlineCharsWithSymbols(!multi_line);
-  if (multi_line)
-    SetSelectable(false);
   ResetLayout();
 }
 
@@ -250,7 +248,7 @@ base::string16 Label::GetDisplayTextForTesting() {
 }
 
 bool Label::IsSelectionSupported() const {
-  return !multi_line() && !obscured() && render_text_->IsSelectionSupported();
+  return !obscured() && render_text_->IsSelectionSupported();
 }
 
 bool Label::SetSelectable(bool value) {
@@ -397,6 +395,10 @@ bool Label::CanProcessEventsWithinSubtree() const {
   return !!GetRenderTextForSelectionController();
 }
 
+WordLookupClient* Label::GetWordLookupClient() {
+  return this;
+}
+
 void Label::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ui::AX_ROLE_STATIC_TEXT;
   node_data->AddStateFlag(ui::AX_STATE_READ_ONLY);
@@ -511,6 +513,8 @@ bool Label::OnMousePressed(const ui::MouseEvent& event) {
   if (!GetRenderTextForSelectionController())
     return false;
 
+  const bool had_focus = HasFocus();
+
   // RequestFocus() won't work when the label has FocusBehavior::NEVER. Hence
   // explicitly set the focused view.
   // TODO(karandeepb): If a widget with a label having FocusBehavior::NEVER as
@@ -519,16 +523,18 @@ bool Label::OnMousePressed(const ui::MouseEvent& event) {
   // when the widget gets focus again. Fix this.
   // Tracked in https://crbug.com/630365.
   if ((event.IsOnlyLeftMouseButton() || event.IsOnlyRightMouseButton()) &&
-      GetFocusManager()) {
+      GetFocusManager() && !had_focus) {
     GetFocusManager()->SetFocusedView(this);
   }
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-  if (event.IsOnlyMiddleMouseButton() && GetFocusManager())
+  if (event.IsOnlyMiddleMouseButton() && GetFocusManager() && !had_focus)
     GetFocusManager()->SetFocusedView(this);
 #endif
 
-  return selection_controller_->OnMousePressed(event, false);
+  return selection_controller_->OnMousePressed(
+      event, false, had_focus ? SelectionController::FOCUSED
+                              : SelectionController::UNFOCUSED);
 }
 
 bool Label::OnMouseDragged(const ui::MouseEvent& event) {
@@ -633,6 +639,16 @@ void Label::ShowContextMenuForView(View* source,
   ignore_result(context_menu_runner_->RunMenuAt(
       GetWidget(), nullptr, gfx::Rect(point, gfx::Size()), MENU_ANCHOR_TOPLEFT,
       source_type));
+}
+
+bool Label::GetDecoratedWordAtPoint(const gfx::Point& point,
+                                    gfx::DecoratedText* decorated_word,
+                                    gfx::Point* baseline_point) {
+  gfx::RenderText* render_text = GetRenderTextForSelectionController();
+  return render_text
+             ? render_text->GetDecoratedWordAtPoint(point, decorated_word,
+                                                    baseline_point)
+             : false;
 }
 
 gfx::RenderText* Label::GetRenderTextForSelectionController() {

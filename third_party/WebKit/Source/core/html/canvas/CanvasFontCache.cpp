@@ -88,7 +88,7 @@ MutableStylePropertySet* CanvasFontCache::parseFont(const String& fontString) {
     m_fontLRUList.add(fontString);
   } else {
     parsedStyle = MutableStylePropertySet::create(HTMLStandardMode);
-    CSSParser::parseValue(parsedStyle, CSSPropertyFont, fontString, true, 0);
+    CSSParser::parseValue(parsedStyle, CSSPropertyFont, fontString, true);
     if (parsedStyle->isEmpty())
       return nullptr;
     // According to
@@ -106,8 +106,8 @@ MutableStylePropertySet* CanvasFontCache::parseFont(const String& fontString) {
     if (m_fetchedFonts.size() > hardMaxFonts()) {
       ASSERT(m_fetchedFonts.size() == hardMaxFonts() + 1);
       ASSERT(m_fontLRUList.size() == hardMaxFonts() + 1);
-      m_fetchedFonts.remove(m_fontLRUList.first());
-      m_fontsResolvedUsingDefaultStyle.remove(m_fontLRUList.first());
+      m_fetchedFonts.erase(m_fontLRUList.first());
+      m_fontsResolvedUsingDefaultStyle.erase(m_fontLRUList.first());
       m_fontLRUList.removeFirst();
     }
   }
@@ -120,8 +120,8 @@ void CanvasFontCache::didProcessTask() {
   ASSERT(m_pruningScheduled);
   ASSERT(m_mainCachePurgePreventer);
   while (m_fetchedFonts.size() > maxFonts()) {
-    m_fetchedFonts.remove(m_fontLRUList.first());
-    m_fontsResolvedUsingDefaultStyle.remove(m_fontLRUList.first());
+    m_fetchedFonts.erase(m_fontLRUList.first());
+    m_fontsResolvedUsingDefaultStyle.erase(m_fontLRUList.first());
     m_fontLRUList.removeFirst();
   }
   m_mainCachePurgePreventer.reset();
@@ -133,7 +133,7 @@ void CanvasFontCache::schedulePruningIfNeeded() {
   if (m_pruningScheduled)
     return;
   ASSERT(!m_mainCachePurgePreventer);
-  m_mainCachePurgePreventer = wrapUnique(new FontCachePurgePreventer);
+  m_mainCachePurgePreventer = WTF::wrapUnique(new FontCachePurgePreventer);
   Platform::current()->currentThread()->addTaskObserver(this);
   m_pruningScheduled = true;
 }

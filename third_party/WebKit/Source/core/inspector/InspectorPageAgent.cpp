@@ -36,12 +36,6 @@
 #include "core/HTMLNames.h"
 #include "core/dom/DOMImplementation.h"
 #include "core/dom/Document.h"
-#include "core/fetch/CSSStyleSheetResource.h"
-#include "core/fetch/FontResource.h"
-#include "core/fetch/ImageResource.h"
-#include "core/fetch/MemoryCache.h"
-#include "core/fetch/Resource.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
@@ -61,10 +55,14 @@
 #include "core/inspector/V8InspectorString.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoader.h"
+#include "core/loader/resource/CSSStyleSheetResource.h"
 #include "core/loader/resource/ScriptResource.h"
-#include "platform/MIMETypeRegistry.h"
 #include "platform/PlatformResourceLoader.h"
 #include "platform/UserGestureIndicator.h"
+#include "platform/loader/fetch/MemoryCache.h"
+#include "platform/loader/fetch/Resource.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
+#include "platform/network/mime/MIMETypeRegistry.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/ListHashSet.h"
@@ -447,13 +445,9 @@ Response InspectorPageAgent::reload(
       optionalScriptToEvaluateOnLoad.fromMaybe("");
   m_v8Session->setSkipAllPauses(true);
   m_reloading = true;
-  FrameLoadType reloadType = FrameLoadTypeReload;
-  if (optionalBypassCache.fromMaybe(false))
-    reloadType = FrameLoadTypeReloadBypassingCache;
-  else if (RuntimeEnabledFeatures::
-               reloadwithoutSubResourceCacheRevalidationEnabled())
-    reloadType = FrameLoadTypeReloadMainResource;
-  m_inspectedFrames->root()->reload(reloadType,
+  m_inspectedFrames->root()->reload(optionalBypassCache.fromMaybe(false)
+                                        ? FrameLoadTypeReloadBypassingCache
+                                        : FrameLoadTypeReloadMainResource,
                                     ClientRedirectPolicy::NotClientRedirect);
   return Response::OK();
 }
@@ -483,7 +477,7 @@ static void cachedResourcesForDocument(Document* document,
       continue;
     if (cachedResource->getType() == Resource::Raw && skipXHRs)
       continue;
-    result.append(cachedResource);
+    result.push_back(cachedResource);
   }
 }
 
@@ -496,7 +490,7 @@ HeapVector<Member<Document>> InspectorPageAgent::importsForFrame(
   if (HTMLImportsController* controller = rootDocument->importsController()) {
     for (size_t i = 0; i < controller->loaderCount(); ++i) {
       if (Document* document = controller->loaderAt(i)->document())
-        result.append(document);
+        result.push_back(document);
     }
   }
 
@@ -561,7 +555,8 @@ void InspectorPageAgent::getResourceContent(
       m_resourceContentLoaderClientId,
       WTF::bind(
           &InspectorPageAgent::getResourceContentAfterResourcesContentLoaded,
-          wrapPersistent(this), frameId, url, passed(std::move(callback))));
+          wrapPersistent(this), frameId, url,
+          WTF::passed(std::move(callback))));
 }
 
 void InspectorPageAgent::searchContentAfterResourcesContentLoaded(
@@ -611,7 +606,8 @@ void InspectorPageAgent::searchInResource(
       WTF::bind(&InspectorPageAgent::searchContentAfterResourcesContentLoaded,
                 wrapPersistent(this), frameId, url, query,
                 optionalCaseSensitive.fromMaybe(false),
-                optionalIsRegex.fromMaybe(false), passed(std::move(callback))));
+                optionalIsRegex.fromMaybe(false),
+                WTF::passed(std::move(callback))));
 }
 
 Response InspectorPageAgent::setDocumentContent(const String& frameId,
@@ -682,7 +678,7 @@ bool InspectorPageAgent::screencastEnabled() {
          m_state->booleanProperty(PageAgentState::screencastEnabled, false);
 }
 
-void InspectorPageAgent::frameStartedLoading(LocalFrame* frame) {
+void InspectorPageAgent::frameStartedLoading(LocalFrame* frame, FrameLoadType) {
   frontend()->frameStartedLoading(frameId(frame));
 }
 
@@ -784,7 +780,7 @@ InspectorPageAgent::buildObjectForFrameTree(LocalFrame* frame) {
             .build();
     if (cachedResource->wasCanceled())
       resourceObject->setCanceled(true);
-    else if (cachedResource->getStatus() == Resource::LoadError)
+    else if (cachedResource->getStatus() == ResourceStatus::LoadError)
       resourceObject->setFailed(true);
     subresources->addItem(std::move(resourceObject));
   }
@@ -865,7 +861,7 @@ Response InspectorPageAgent::getLayoutMetrics(
                            .build();
 
   FrameView* frameView = mainFrame->view();
-  ScrollOffset pageOffset = frameView->getScrollableArea()->scrollOffset();
+  ScrollOffset pageOffset = frameView->getScrollableArea()->getScrollOffset();
   float pageZoom = mainFrame->pageZoomFactor();
   FloatRect visibleRect = visualViewport.visibleRect();
   float scale = visualViewport.scale();

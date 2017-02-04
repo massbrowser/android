@@ -24,6 +24,7 @@ import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.ServiceWorkerController;
 import android.webkit.TokenBindingService;
+import android.webkit.ValueCallback;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewDatabase;
@@ -40,13 +41,16 @@ import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwCookieManager;
 import org.chromium.android_webview.AwDevToolsServer;
+import org.chromium.android_webview.AwMetricsServiceClient;
 import org.chromium.android_webview.AwNetworkChangeNotifierRegistrationPolicy;
 import org.chromium.android_webview.AwQuotaManagerBridge;
 import org.chromium.android_webview.AwResource;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.HttpAuthDatabase;
+import org.chromium.android_webview.PlatformServiceBridge;
 import org.chromium.android_webview.ResourcesContextWrapperFactory;
 import org.chromium.base.BuildConfig;
+import org.chromium.base.BuildInfo;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.MemoryPressureListener;
@@ -61,6 +65,7 @@ import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.NativeLibraries;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.browser.ContentViewStatics;
+import org.chromium.content.browser.input.LGEmailActionModeWorkaround;
 import org.chromium.net.NetworkChangeNotifier;
 
 import java.io.File;
@@ -82,6 +87,9 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     private static final String VERSION_CODE_PREF = "lastVersionCodeUsed";
     private static final String COMMAND_LINE_FILE = "/data/local/tmp/webview-command-line";
     private static final String HTTP_AUTH_DATABASE_FILE = "http_auth.db";
+    // same switch as kEnableCrashReporterForTesting in //base/base_switches.h
+    public static final String CRASH_UPLOADS_ENABLED_FOR_TESTING_SWITCH =
+            "enable-crash-reporter-for-testing";
 
     private class WebViewChromiumRunQueue {
         public WebViewChromiumRunQueue() {
@@ -171,7 +179,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     private SharedPreferences mWebViewPrefs;
     private WebViewDelegate mWebViewDelegate;
 
-    private boolean mShouldDisableThreadChecking;
+    boolean mShouldDisableThreadChecking;
 
     /**
      * Entry point for newer versions of Android.
@@ -192,6 +200,13 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
      */
     public WebViewChromiumFactoryProvider(android.webkit.WebViewDelegate delegate) {
         initialize(WebViewDelegateFactory.createProxyDelegate(delegate));
+    }
+
+    /**
+     * Constructor for internal use when a proxy delegate has already been created.
+     */
+    WebViewChromiumFactoryProvider(WebViewDelegate delegate) {
+        initialize(delegate);
     }
 
     @SuppressFBWarnings("DMI_HARDCODED_ABSOLUTE_FILENAME")
@@ -221,9 +236,17 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
             CommandLine.init(null);
         }
 
-        if (Settings.Global.getInt(ContextUtils.getApplicationContext().getContentResolver(),
-                    Settings.Global.WEBVIEW_MULTIPROCESS, 0)
-                == 1) {
+        boolean multiProcess = false;
+        if (BuildInfo.isAtLeastO()) {
+            // Ask the system if multiprocess should be enabled on O+.
+            multiProcess = mWebViewDelegate.isMultiProcessEnabled();
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // Check the multiprocess developer setting directly on N.
+            multiProcess = Settings.Global.getInt(
+                    ContextUtils.getApplicationContext().getContentResolver(),
+                    Settings.Global.WEBVIEW_MULTIPROCESS, 0) == 1;
+        }
+        if (multiProcess) {
             CommandLine cl = CommandLine.getInstance();
             cl.appendSwitch("webview-sandboxed-renderer");
         }
@@ -396,13 +419,32 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
         // Make sure that ResourceProvider is initialized before starting the browser process.
         final String webViewPackageName = WebViewFactory.getLoadedPackageInfo().packageName;
-        Context context = ContextUtils.getApplicationContext();
+        final Context context = ContextUtils.getApplicationContext();
         setUpResources(webViewPackageName, context);
         initPlatSupportLibrary();
         initNetworkChangeNotifier(context);
         final boolean isExternalService = true;
         AwBrowserProcess.configureChildProcessLauncher(webViewPackageName, isExternalService);
         AwBrowserProcess.start();
+
+        final boolean enableMinidumpUploadingForTesting = CommandLine.getInstance().hasSwitch(
+                CRASH_UPLOADS_ENABLED_FOR_TESTING_SWITCH);
+        if (enableMinidumpUploadingForTesting) {
+            AwBrowserProcess.handleMinidumps(webViewPackageName, true /* enabled */);
+        }
+
+        // Actions conditioned on whether the Android Checkbox is toggled on
+        PlatformServiceBridge.getInstance(context)
+                .queryMetricsSetting(new ValueCallback<Boolean>() {
+                    public void onReceiveValue(Boolean enabled) {
+                        ThreadUtils.assertOnUiThread();
+                        AwMetricsServiceClient.setConsentSetting(context, enabled);
+
+                        if (!enableMinidumpUploadingForTesting) {
+                            AwBrowserProcess.handleMinidumps(webViewPackageName, enabled);
+                        }
+                    }
+                });
 
         if (isBuildDebuggable()) {
             setWebContentsDebuggingEnabled(true);
@@ -544,14 +586,16 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         String appName = context.getPackageName();
         int versionCode = PackageUtils.getPackageVersion(context, appName);
         int appTargetSdkVersion = context.getApplicationInfo().targetSdkVersion;
+        if (versionCode == -1) return false;
 
         boolean shouldDisable = false;
 
         // crbug.com/651706
         final String lgeMailPackageId = "com.lge.email";
         if (lgeMailPackageId.equals(appName)) {
-            // The version code is provided by LGE.
-            if (versionCode == -1 || versionCode >= 67700000) return false;
+            if (appTargetSdkVersion > Build.VERSION_CODES.N) return false;
+            // This is the last broken version shipped on LG V20/NRD90M.
+            if (versionCode > LGEmailActionModeWorkaround.LGEmailWorkaroundMaxVersion) return false;
             shouldDisable = true;
         }
 
@@ -560,7 +604,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         final String yahooMailPackageId = "com.yahoo.mobile.client.android.mail";
         if (appName.startsWith(yahooMailPackageId)) {
             if (appTargetSdkVersion > Build.VERSION_CODES.M) return false;
-            if (versionCode == -1 || versionCode > 1315849) return false;
+            if (versionCode > 1315849) return false;
             shouldDisable = true;
         }
 
@@ -568,7 +612,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         final String htcMailPackageId = "com.htc.android.mail";
         if (htcMailPackageId.equals(appName)) {
             if (appTargetSdkVersion > Build.VERSION_CODES.M) return false;
-            if (versionCode == -1) return false;
             // This value is provided by HTC.
             if (versionCode >= 866001861) return false;
             shouldDisable = true;
@@ -656,5 +699,11 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
     WebViewDelegate getWebViewDelegate() {
         return mWebViewDelegate;
+    }
+
+    // The method to support unreleased Android.
+    WebViewContentsClientAdapter createWebViewContentsClientAdapter(WebView webView,
+            Context context) {
+        return new WebViewContentsClientAdapter(webView, context, mWebViewDelegate);
     }
 }

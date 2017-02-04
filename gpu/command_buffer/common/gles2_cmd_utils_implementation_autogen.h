@@ -4249,6 +4249,7 @@ std::string GLES2Util::GetStringQueryParameter(uint32_t value) {
 
 std::string GLES2Util::GetStringQueryTarget(uint32_t value) {
   static const EnumToString string_table[] = {
+      {GL_SAMPLES_PASSED_ARB, "GL_SAMPLES_PASSED_ARB"},
       {GL_ANY_SAMPLES_PASSED_EXT, "GL_ANY_SAMPLES_PASSED_EXT"},
       {GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT,
        "GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT"},
@@ -4823,6 +4824,15 @@ std::string GLES2Util::GetStringTextureSizedTextureFilterableInternalFormat(
       {GL_RGB_YCRCB_420_CHROMIUM, "GL_RGB_YCRCB_420_CHROMIUM"},
       {GL_RGB_YCBCR_422_CHROMIUM, "GL_RGB_YCBCR_422_CHROMIUM"},
       {GL_RGB_YCBCR_420V_CHROMIUM, "GL_RGB_YCBCR_420V_CHROMIUM"},
+  };
+  return GLES2Util::GetQualifiedEnumString(string_table,
+                                           arraysize(string_table), value);
+}
+
+std::string GLES2Util::GetStringTextureSrgbDecodeExt(uint32_t value) {
+  static const EnumToString string_table[] = {
+      {GL_DECODE_EXT, "GL_DECODE_EXT"},
+      {GL_SKIP_DECODE_EXT, "GL_SKIP_DECODE_EXT"},
   };
   return GLES2Util::GetQualifiedEnumString(string_table,
                                            arraysize(string_table), value);

@@ -23,6 +23,7 @@
 
 #include "core/html/HTMLFrameElementBase.h"
 
+#include "bindings/core/v8/BindingSecurity.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptEventListener.h"
 #include "core/HTMLNames.h"
@@ -56,10 +57,18 @@ bool HTMLFrameElementBase::isURLAllowed() const {
 
   const KURL& completeURL = document().completeURL(m_URL);
 
-  if (protocolIsJavaScript(completeURL)) {
-    if (contentFrame() &&
-        !ScriptController::canAccessFromCurrentOrigin(toIsolate(&document()),
-                                                      contentFrame()))
+  if (contentFrame() && completeURL.protocolIsJavaScript()) {
+    // Check if the caller can execute script in the context of the content
+    // frame. NB: This check can be invoked without any JS on the stack for some
+    // parser operations. In such case, we use the origin of the frame element's
+    // containing document as the caller context.
+    v8::Isolate* isolate = toIsolate(&document());
+    LocalDOMWindow* accessingWindow = isolate->InContext()
+                                          ? currentDOMWindow(isolate)
+                                          : document().domWindow();
+    if (!BindingSecurity::shouldAllowAccessToFrame(
+            accessingWindow, contentFrame(),
+            BindingSecurity::ErrorReportOption::Report))
       return false;
   }
 
@@ -84,7 +93,7 @@ void HTMLFrameElementBase::openURL(bool replaceCurrentItem) {
   // Support for <frame src="javascript:string">
   KURL scriptURL;
   KURL url = document().completeURL(m_URL);
-  if (protocolIsJavaScript(m_URL)) {
+  if (url.protocolIsJavaScript()) {
     // We'll set/execute |scriptURL| iff CSP allows us to execute inline
     // JavaScript. If CSP blocks inline JavaScript, then exit early if
     // we're trying to execute script in an existing document. If we're
@@ -121,9 +130,10 @@ void HTMLFrameElementBase::frameOwnerPropertiesChanged() {
     document().frame()->loader().client()->didChangeFrameOwnerProperties(this);
 }
 
-void HTMLFrameElementBase::parseAttribute(const QualifiedName& name,
-                                          const AtomicString& oldValue,
-                                          const AtomicString& value) {
+void HTMLFrameElementBase::parseAttribute(
+    const AttributeModificationParams& params) {
+  const QualifiedName& name = params.name;
+  const AtomicString& value = params.newValue;
   if (name == srcdocAttr) {
     if (!value.isNull()) {
       setLocation(srcdocURL().getString());
@@ -137,7 +147,7 @@ void HTMLFrameElementBase::parseAttribute(const QualifiedName& name,
   } else if (name == idAttr) {
     // Important to call through to base for the id attribute so the hasID bit
     // gets set.
-    HTMLFrameOwnerElement::parseAttribute(name, oldValue, value);
+    HTMLFrameOwnerElement::parseAttribute(params);
     m_frameName = value;
   } else if (name == nameAttr) {
     m_frameName = value;
@@ -158,7 +168,7 @@ void HTMLFrameElementBase::parseAttribute(const QualifiedName& name,
         EventTypeNames::beforeunload,
         createAttributeEventListener(this, name, value, eventParameterName()));
   } else {
-    HTMLFrameOwnerElement::parseAttribute(name, oldValue, value);
+    HTMLFrameOwnerElement::parseAttribute(params);
   }
 }
 
@@ -179,6 +189,10 @@ void HTMLFrameElementBase::didNotifySubtreeInsertionsToDocument() {
 
   if (!SubframeLoadingDisabler::canLoadFrame(*this))
     return;
+
+  // We should never have a content frame at the point where we got inserted
+  // into a tree.
+  SECURITY_CHECK(!contentFrame());
 
   setNameAndOpenURL();
 }

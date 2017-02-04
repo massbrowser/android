@@ -22,26 +22,22 @@ VRController::VRController(NavigatorVR* navigatorVR)
       m_displaySynced(false),
       m_binding(this) {
   navigatorVR->document()->frame()->interfaceProvider()->getInterface(
-      mojo::GetProxy(&m_service));
+      mojo::MakeRequest(&m_service));
+  m_service.set_connection_error_handler(convertToBaseCallback(
+      WTF::bind(&VRController::dispose, wrapWeakPersistent(this))));
   m_service->SetClient(
       m_binding.CreateInterfacePtrAndBind(),
       convertToBaseCallback(
           WTF::bind(&VRController::onDisplaysSynced, wrapPersistent(this))));
-  ThreadState::current()->registerPreFinalizer(this);
 }
 
 VRController::~VRController() {}
 
 void VRController::getDisplays(ScriptPromiseResolver* resolver) {
-  if (!m_service) {
-    DOMException* exception = DOMException::create(
-        InvalidStateError, "The service is no longer active.");
-    resolver->reject(exception);
-    return;
-  }
-
-  // If we've previously synced the VRDisplays just return the current list.
-  if (m_displaySynced) {
+  // If we've previously synced the VRDisplays or no longer have a valid service
+  // connection just return the current list. In the case of the service being
+  // disconnected this will be an empty array.
+  if (!m_service || m_displaySynced) {
     resolver->resolve(m_displays);
     return;
   }
@@ -49,7 +45,7 @@ void VRController::getDisplays(ScriptPromiseResolver* resolver) {
   // Otherwise we're still waiting for the full list of displays to be populated
   // so queue up the promise for resolution when onDisplaysSynced is called.
   m_pendingGetDevicesCallbacks.append(
-      makeUnique<VRGetDevicesCallback>(resolver));
+      WTF::makeUnique<VRGetDevicesCallback>(resolver));
 }
 
 void VRController::setListeningForActivate(bool listening) {
@@ -68,7 +64,7 @@ void VRController::OnDisplayConnected(
       new VRDisplay(m_navigatorVR, std::move(display), std::move(request));
   vrDisplay->update(displayInfo);
   vrDisplay->onConnected();
-  m_displays.append(vrDisplay);
+  m_displays.push_back(vrDisplay);
 
   if (m_displays.size() == m_numberOfSyncedDisplays) {
     m_displaySynced = true;
@@ -94,10 +90,8 @@ void VRController::onGetDisplays() {
   }
 }
 
-void VRController::contextDestroyed() {
+void VRController::contextDestroyed(ExecutionContext*) {
   dispose();
-  // The context is not automatically cleared, so do it manually.
-  ContextLifecycleObserver::clearContext();
 }
 
 void VRController::dispose() {
@@ -109,6 +103,11 @@ void VRController::dispose() {
   // Shutdown all displays' message pipe
   for (size_t i = 0; i < m_displays.size(); ++i)
     m_displays[i]->dispose();
+
+  m_displays.clear();
+
+  // Ensure that any outstanding getDisplays promises are resolved.
+  onGetDisplays();
 }
 
 DEFINE_TRACE(VRController) {

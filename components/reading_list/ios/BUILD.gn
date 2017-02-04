@@ -4,6 +4,7 @@
 
 source_set("ios") {
   sources = [
+    "favicon_web_state_dispatcher.h",
     "offline_url_utils.cc",
     "offline_url_utils.h",
     "reading_list_entry.cc",
@@ -15,6 +16,7 @@ source_set("ios") {
     "reading_list_model_impl.cc",
     "reading_list_model_impl.h",
     "reading_list_model_observer.h",
+    "reading_list_model_storage.cc",
     "reading_list_model_storage.h",
     "reading_list_pref_names.cc",
     "reading_list_pref_names.h",

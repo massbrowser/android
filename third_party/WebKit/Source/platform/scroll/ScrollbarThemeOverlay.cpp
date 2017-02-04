@@ -25,7 +25,6 @@
 
 #include "platform/scroll/ScrollbarThemeOverlay.h"
 
-#include "platform/PlatformMouseEvent.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/scroll/Scrollbar.h"
@@ -58,6 +57,21 @@ ScrollbarThemeOverlay::ScrollbarThemeOverlay(int thumbThickness,
       m_scrollbarMargin(scrollbarMargin),
       m_allowHitTest(allowHitTest),
       m_useSolidColor(false) {}
+
+bool ScrollbarThemeOverlay::shouldRepaintAllPartsOnInvalidation() const {
+  return false;
+}
+
+ScrollbarPart ScrollbarThemeOverlay::invalidateOnThumbPositionChange(
+    const ScrollbarThemeClient&,
+    float oldPosition,
+    float newPosition) const {
+  return NoPart;
+}
+
+ScrollbarPart ScrollbarThemeOverlay::invalidateOnEnabledChange() const {
+  return NoPart;
+}
 
 int ScrollbarThemeOverlay::scrollbarThickness(
     ScrollbarControlSize controlSize) {

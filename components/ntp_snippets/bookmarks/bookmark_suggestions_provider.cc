@@ -15,7 +15,7 @@
 #include "base/time/time.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/ntp_snippets/bookmarks/bookmark_last_visit_utils.h"
-#include "components/ntp_snippets/category_factory.h"
+#include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/content_suggestion.h"
 #include "components/ntp_snippets/features.h"
 #include "components/ntp_snippets/pref_names.h"
@@ -49,33 +49,34 @@ const char kDeprecatedBookmarksFirstM54StartPref[] =
 // Note that bookmarks can be shown that do not meet this threshold.
 base::Time GetThresholdTime() {
   return base::Time::Now() -
-         base::TimeDelta::FromDays(GetParamAsInt(
+         base::TimeDelta::FromDays(variations::GetVariationParamByFeatureAsInt(
              ntp_snippets::kBookmarkSuggestionsFeature,
              kMaxBookmarkAgeInDaysParamName, kMaxBookmarkAgeInDays));
 }
 
 // The maximum number of suggestions ever provided.
 int GetMaxCount() {
-  return GetParamAsInt(ntp_snippets::kBookmarkSuggestionsFeature,
-                       kMaxBookmarksParamName, kMaxBookmarks);
+  return variations::GetVariationParamByFeatureAsInt(
+      ntp_snippets::kBookmarkSuggestionsFeature, kMaxBookmarksParamName,
+      kMaxBookmarks);
 }
 
 bool AreDesktopVisitsConsidered() {
-  return GetParamAsBool(ntp_snippets::kBookmarkSuggestionsFeature,
-                        kConsiderDesktopVisitsParamName, false);
+  return variations::GetVariationParamByFeatureAsBool(
+      ntp_snippets::kBookmarkSuggestionsFeature,
+      kConsiderDesktopVisitsParamName, false);
 }
 
 }  // namespace
 
 BookmarkSuggestionsProvider::BookmarkSuggestionsProvider(
     ContentSuggestionsProvider::Observer* observer,
-    CategoryFactory* category_factory,
     bookmarks::BookmarkModel* bookmark_model,
     PrefService* pref_service)
-    : ContentSuggestionsProvider(observer, category_factory),
+    : ContentSuggestionsProvider(observer),
       category_status_(CategoryStatus::AVAILABLE_LOADING),
       provided_category_(
-          category_factory->FromKnownCategory(KnownCategories::BOOKMARKS)),
+          Category::FromKnownCategory(KnownCategories::BOOKMARKS)),
       bookmark_model_(bookmark_model),
       fetch_requested_(false),
       end_of_list_last_visit_date_(GetThresholdTime()),
@@ -109,8 +110,7 @@ CategoryInfo BookmarkSuggestionsProvider::GetCategoryInfo(Category category) {
   return CategoryInfo(
       l10n_util::GetStringUTF16(IDS_NTP_BOOKMARK_SUGGESTIONS_SECTION_HEADER),
       ContentSuggestionsCardLayout::MINIMAL_CARD,
-      /*has_more_action=*/false,
-      /*has_reload_action=*/false,
+      /*has_fetch_action=*/false,
       /*has_view_all_action=*/true,
       /*show_if_empty=*/false,
       l10n_util::GetStringUTF16(IDS_NTP_BOOKMARK_SUGGESTIONS_SECTION_EMPTY));
@@ -148,18 +148,15 @@ void BookmarkSuggestionsProvider::ClearHistory(
     base::Time begin,
     base::Time end,
     const base::Callback<bool(const GURL& url)>& filter) {
-  // TODO(vitaliii): Do not remove all dates, but only the ones matched by the
-  // time range and the filter.
-  RemoveAllLastVisitDates(bookmark_model_);
+  // To avoid race conditions with the history-removal of the last-visited
+  // timestamps we also trigger a deletion here. The problem is that we need to
+  // update the bookmarks data here and otherwise (depending on the order in
+  // which the code runs) could pick up to-be-deleted data again.
+  if (bookmark_model_->loaded()) {
+    RemoveLastVisitedDatesBetween(begin, end, filter, bookmark_model_);
+  }
   ClearDismissedSuggestionsForDebugging(provided_category_);
   FetchBookmarks();
-  // Temporarily enter an "explicitly disabled" state, so that any open UIs
-  // will clear the suggestions too.
-  if (category_status_ != CategoryStatus::CATEGORY_EXPLICITLY_DISABLED) {
-    CategoryStatus old_category_status = category_status_;
-    NotifyStatusChanged(CategoryStatus::CATEGORY_EXPLICITLY_DISABLED);
-    NotifyStatusChanged(old_category_status);
-  }
 }
 
 void BookmarkSuggestionsProvider::ClearCachedSuggestions(Category category) {
@@ -176,7 +173,7 @@ void BookmarkSuggestionsProvider::GetDismissedSuggestionsForDebugging(
 
   std::vector<ContentSuggestion> suggestions;
   for (const BookmarkNode* bookmark : bookmarks) {
-    ConvertBookmark(bookmark, &suggestions);
+    ConvertBookmark(*bookmark, &suggestions);
   }
   callback.Run(std::move(suggestions));
 }
@@ -204,7 +201,7 @@ void BookmarkSuggestionsProvider::OnWillChangeBookmarkMetaInfo(
     BookmarkModel* model,
     const BookmarkNode* node) {
   // Store the last visit date of the node that is about to change.
-  if (!GetLastVisitDateForNTPBookmark(node,
+  if (!GetLastVisitDateForNTPBookmark(*node,
                                       consider_bookmark_visits_from_desktop_,
                                       &node_to_change_last_visit_date_)) {
     node_to_change_last_visit_date_ = base::Time::UnixEpoch();
@@ -216,7 +213,7 @@ void BookmarkSuggestionsProvider::BookmarkMetaInfoChanged(
     const BookmarkNode* node) {
   base::Time time;
   if (!GetLastVisitDateForNTPBookmark(
-          node, consider_bookmark_visits_from_desktop_, &time)) {
+          *node, consider_bookmark_visits_from_desktop_, &time)) {
     // Error in loading the last visit date after the change. This happens when
     // the bookmark just got dismissed. We must not update the suggestion in
     // such a case.
@@ -241,7 +238,7 @@ void BookmarkSuggestionsProvider::BookmarkNodeRemoved(
       const std::set<GURL>& no_longer_bookmarked) {
   base::Time time;
   if (GetLastVisitDateForNTPBookmark(
-          node, consider_bookmark_visits_from_desktop_, &time) &&
+          *node, consider_bookmark_visits_from_desktop_, &time) &&
       time < end_of_list_last_visit_date_) {
     // We know the node is too old to influence the list.
     return;
@@ -256,7 +253,7 @@ void BookmarkSuggestionsProvider::BookmarkNodeAdded(
     const bookmarks::BookmarkNode* parent,
     int index) {
   base::Time time;
-  if (!GetLastVisitDateForNTPBookmark(parent->GetChild(index),
+  if (!GetLastVisitDateForNTPBookmark(*parent->GetChild(index),
                                       consider_bookmark_visits_from_desktop_,
                                       &time) ||
       time < end_of_list_last_visit_date_) {
@@ -269,7 +266,7 @@ void BookmarkSuggestionsProvider::BookmarkNodeAdded(
 }
 
 void BookmarkSuggestionsProvider::ConvertBookmark(
-    const BookmarkNode* bookmark,
+    const BookmarkNode& bookmark,
     std::vector<ContentSuggestion>* suggestions) {
   base::Time publish_date;
   if (!GetLastVisitDateForNTPBookmark(
@@ -277,12 +274,12 @@ void BookmarkSuggestionsProvider::ConvertBookmark(
     return;
   }
 
-  ContentSuggestion suggestion(provided_category_, bookmark->url().spec(),
-                               bookmark->url());
-  suggestion.set_title(bookmark->GetTitle());
+  ContentSuggestion suggestion(provided_category_, bookmark.url().spec(),
+                               bookmark.url());
+  suggestion.set_title(bookmark.GetTitle());
   suggestion.set_snippet_text(base::string16());
   suggestion.set_publish_date(publish_date);
-  suggestion.set_publisher_name(base::UTF8ToUTF16(bookmark->url().host()));
+  suggestion.set_publisher_name(base::UTF8ToUTF16(bookmark.url().host()));
 
   suggestions->emplace_back(std::move(suggestion));
 }
@@ -299,7 +296,7 @@ void BookmarkSuggestionsProvider::FetchBookmarksInternal() {
 
   std::vector<ContentSuggestion> suggestions;
   for (const BookmarkNode* bookmark : bookmarks) {
-    ConvertBookmark(bookmark, &suggestions);
+    ConvertBookmark(*bookmark, &suggestions);
   }
 
   if (suggestions.empty()) {
@@ -307,7 +304,6 @@ void BookmarkSuggestionsProvider::FetchBookmarksInternal() {
   } else {
     end_of_list_last_visit_date_ = suggestions.back().publish_date();
   }
-
   observer()->OnNewSuggestions(this, provided_category_,
                                std::move(suggestions));
 }

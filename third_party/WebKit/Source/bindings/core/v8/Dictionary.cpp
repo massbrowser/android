@@ -100,7 +100,7 @@ bool Dictionary::get(const StringView& key, Dictionary& value) const {
     ASSERT(m_isolate == v8::Isolate::GetCurrent());
     // TODO(bashi,yukishiino): Should rethrow the exception.
     // http://crbug.com/666661
-    TrackExceptionState exceptionState;
+    DummyExceptionStateForTesting exceptionState;
     value = Dictionary(m_isolate, v8Value, exceptionState);
   }
 
@@ -196,7 +196,7 @@ Vector<String> Dictionary::getPropertyNames(
     if (!stringKey.prepare(isolate(), exceptionState))
       return Vector<String>();
 
-    names.append(stringKey);
+    names.push_back(stringKey);
   }
 
   return names;

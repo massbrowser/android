@@ -96,6 +96,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   void Init(aura::Window* content_window,
             const Widget::InitParams& params) override;
   void OnNativeWidgetCreated(const Widget::InitParams& params) override;
+  void OnWidgetInitDone() override;
+  void OnNativeWidgetActivationChanged(bool active) override;
   std::unique_ptr<corewm::Tooltip> CreateTooltip() override;
   std::unique_ptr<aura::client::DragDropClient> CreateDragDropClient(
       DesktopNativeCursorManager* cursor_manager) override;
@@ -152,6 +154,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   bool IsAnimatingClosed() const override;
   bool IsTranslucentWindowOpacitySupported() const override;
   void SizeConstraintsChanged() override;
+  bool ShouldUpdateWindowTransparency() const override;
+  bool ShouldUseDesktopNativeCursorManager() const override;
 
   // Overridden from aura::WindowTreeHost:
   gfx::Transform GetRootTransform() const override;
@@ -159,13 +163,14 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   gfx::AcceleratedWidget GetAcceleratedWidget() override;
   void ShowImpl() override;
   void HideImpl() override;
-  gfx::Rect GetBounds() const override;
-  void SetBounds(const gfx::Rect& requested_bounds_in_pixels) override;
-  gfx::Point GetLocationOnNativeScreen() const override;
+  gfx::Rect GetBoundsInPixels() const override;
+  void SetBoundsInPixels(const gfx::Rect& requested_bounds_in_pixels) override;
+  gfx::Point GetLocationOnScreenInPixels() const override;
   void SetCapture() override;
   void ReleaseCapture() override;
   void SetCursorNative(gfx::NativeCursor cursor) override;
-  void MoveCursorToNative(const gfx::Point& location) override;
+  void MoveCursorToScreenLocationInPixels(
+      const gfx::Point& location_in_pixels) override;
   void OnCursorVisibilityChangedNative(bool show) override;
 
  private:
@@ -267,6 +272,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   uint32_t DispatchEvent(const ui::PlatformEvent& event) override;
 
   void DelayedResize(const gfx::Size& size_in_pixels);
+  void DelayedChangeFrameType(Widget::FrameType new_type);
 
   gfx::Rect GetWorkAreaBoundsInPixels() const;
   gfx::Rect ToDIPRect(const gfx::Rect& rect_in_pixels) const;

@@ -43,17 +43,14 @@ class AppWindowLauncherItemController : public LauncherItemController,
   ui::BaseWindow* GetAppWindow(aura::Window* window);
 
   // LauncherItemController overrides:
-  bool IsVisible() const override;
   void Launch(ash::LaunchSource source, int event_flags) override;
   ash::ShelfItemDelegate::PerformedAction Activate(
       ash::LaunchSource source) override;
   ChromeLauncherAppMenuItems GetApplicationList(int event_flags) override;
+  AppWindowLauncherItemController* AsAppWindowLauncherItemController() override;
   ash::ShelfItemDelegate::PerformedAction ItemSelected(
       const ui::Event& event) override;
-  base::string16 GetTitle() override;
-  bool IsDraggable() override;
-  bool CanPin() const override;
-  bool ShouldShowTooltip() override;
+  ui::SimpleMenuModel* CreateApplicationMenu(int event_flags) override;
   void Close() override;
 
   // aura::WindowObserver overrides:
@@ -70,8 +67,7 @@ class AppWindowLauncherItemController : public LauncherItemController,
   const WindowList& windows() const { return windows_; }
 
  protected:
-  AppWindowLauncherItemController(Type type,
-                                  const std::string& app_id,
+  AppWindowLauncherItemController(const std::string& app_id,
                                   const std::string& launch_id,
                                   ChromeLauncherController* controller);
 

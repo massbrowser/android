@@ -39,8 +39,6 @@ using ::chromeos::system::TimezoneSettings;
 
 namespace {
 
-constexpr uint32_t kMinVersionForSendBroadcast = 1;
-
 bool GetHttpProxyServer(const ProxyConfigDictionary* proxy_config_dict,
                         std::string* host,
                         int* port) {
@@ -102,7 +100,7 @@ class ArcSettingsServiceImpl
                              bool powered) override;
 
   // ArcSessionManager::Observer:
-  void OnInitialStart() override;
+  void OnArcInitialStart() override;
 
   // NetworkStateHandlerObserver:
   void DefaultNetworkChanged(const chromeos::NetworkState* network) override;
@@ -120,6 +118,7 @@ class ArcSettingsServiceImpl
   // Send settings that need to be synced only on Android first start to
   // Android.
   void SyncInitialSettings() const;
+  void SyncFocusHighlightEnabled() const;
   void SyncFontSize() const;
   void SyncLocale() const;
   void SyncProxySettings() const;
@@ -187,16 +186,18 @@ void ArcSettingsServiceImpl::StartObservingSettingsChanges() {
   Profile* profile = ProfileManager::GetActiveUserProfile();
   registrar_.Init(profile->GetPrefs());
 
+  // Keep these lines ordered lexicographically.
+  AddPrefToObserve(prefs::kAccessibilityFocusHighlightEnabled);
+  AddPrefToObserve(prefs::kAccessibilitySpokenFeedbackEnabled);
+  AddPrefToObserve(prefs::kAccessibilityVirtualKeyboardEnabled);
+  AddPrefToObserve(prefs::kArcBackupRestoreEnabled);
+  AddPrefToObserve(prefs::kUse24HourClock);
   AddPrefToObserve(prefs::kWebKitDefaultFixedFontSize);
   AddPrefToObserve(prefs::kWebKitDefaultFontSize);
   AddPrefToObserve(prefs::kWebKitMinimumFontSize);
-  AddPrefToObserve(prefs::kAccessibilitySpokenFeedbackEnabled);
-  AddPrefToObserve(prefs::kUse24HourClock);
-  AddPrefToObserve(prefs::kArcBackupRestoreEnabled);
   AddPrefToObserve(proxy_config::prefs::kProxy);
   AddPrefToObserve(onc::prefs::kDeviceOpenNetworkConfiguration);
   AddPrefToObserve(onc::prefs::kOpenNetworkConfiguration);
-  AddPrefToObserve(prefs::kAccessibilityVirtualKeyboardEnabled);
 
   reporting_consent_subscription_ = CrosSettings::Get()->AddSettingsObserver(
       chromeos::kStatsReportingPref,
@@ -224,11 +225,14 @@ void ArcSettingsServiceImpl::OnBluetoothAdapterInitialized(
   AdapterPoweredChanged(adapter.get(), adapter->IsPowered());
 }
 
-void ArcSettingsServiceImpl::OnInitialStart() {
+void ArcSettingsServiceImpl::OnArcInitialStart() {
   SyncInitialSettings();
 }
 
 void ArcSettingsServiceImpl::SyncRuntimeSettings() const {
+  // Keep these lines ordered lexicographically.
+  SyncAccessibilityVirtualKeyboardEnabled();
+  SyncFocusHighlightEnabled();
   SyncFontSize();
   SyncLocale();
   SyncProxySettings();
@@ -236,7 +240,6 @@ void ArcSettingsServiceImpl::SyncRuntimeSettings() const {
   SyncSpokenFeedbackEnabled();
   SyncTimeZone();
   SyncUse24HourClock();
-  SyncAccessibilityVirtualKeyboardEnabled();
 
   const PrefService* const prefs =
       ProfileManager::GetActiveUserProfile()->GetPrefs();
@@ -275,7 +278,9 @@ void ArcSettingsServiceImpl::AdapterPoweredChanged(
 }
 
 void ArcSettingsServiceImpl::OnPrefChanged(const std::string& pref_name) const {
-  if (pref_name == prefs::kAccessibilitySpokenFeedbackEnabled) {
+  if (pref_name == prefs::kAccessibilityFocusHighlightEnabled) {
+    SyncFocusHighlightEnabled();
+  } else if (pref_name == prefs::kAccessibilitySpokenFeedbackEnabled) {
     SyncSpokenFeedbackEnabled();
   } else if (pref_name == prefs::kWebKitDefaultFixedFontSize ||
              pref_name == prefs::kWebKitDefaultFontSize ||
@@ -342,6 +347,12 @@ void ArcSettingsServiceImpl::SendBoolPrefSettingsBroadcast(
   extras.SetBoolean("enabled", enabled);
   extras.SetBoolean("managed", !pref->IsUserModifiable());
   SendSettingsBroadcast(action, extras);
+}
+
+void ArcSettingsServiceImpl::SyncFocusHighlightEnabled() const {
+  SendBoolPrefSettingsBroadcast(
+      prefs::kAccessibilityFocusHighlightEnabled,
+      "org.chromium.arc.intent_helper.SET_FOCUS_HIGHLIGHT_ENABLED");
 }
 
 void ArcSettingsServiceImpl::SyncSpokenFeedbackEnabled() const {
@@ -471,8 +482,8 @@ void ArcSettingsServiceImpl::SyncAccessibilityVirtualKeyboardEnabled() const {
 void ArcSettingsServiceImpl::SendSettingsBroadcast(
     const std::string& action,
     const base::DictionaryValue& extras) const {
-  auto* instance = arc_bridge_service_->intent_helper()->GetInstanceForMethod(
-      "SendBroadcast", kMinVersionForSendBroadcast);
+  auto* instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service_->intent_helper(), SendBroadcast);
   if (!instance)
     return;
   std::string extras_json;

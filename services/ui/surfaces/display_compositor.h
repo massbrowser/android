@@ -7,82 +7,107 @@
 
 #include <stdint.h>
 
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
 #include "base/macros.h"
+#include "base/threading/thread_checker.h"
 #include "cc/ipc/display_compositor.mojom.h"
 #include "cc/surfaces/frame_sink_id.h"
-#include "cc/surfaces/local_frame_id.h"
+#include "cc/surfaces/local_surface_id.h"
 #include "cc/surfaces/surface_id.h"
 #include "cc/surfaces/surface_manager.h"
 #include "cc/surfaces/surface_observer.h"
+#include "components/display_compositor/gpu_compositor_frame_sink_delegate.h"
+#include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "gpu/ipc/in_process_command_buffer.h"
 #include "ipc/ipc_channel_handle.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/ui/surfaces/mus_gpu_memory_buffer_manager.h"
 
 namespace gpu {
+class GpuMemoryBufferManager;
 class ImageFactory;
 }
 
 namespace cc {
-class SurfaceHittest;
-class SurfaceManager;
-}  // namespace cc
+class Display;
+class SyntheticBeginFrameSource;
+}
+
+namespace display_compositor {
+class GpuCompositorFrameSink;
+}
 
 namespace ui {
-
-class DisplayCompositorClient;
-class GpuCompositorFrameSink;
-class MusGpuMemoryBufferManager;
 
 // The DisplayCompositor object is an object global to the Window Server app
 // that holds the SurfaceServer and allocates new Surfaces namespaces.
 // This object lives on the main thread of the Window Server.
 // TODO(rjkroege, fsamuel): This object will need to change to support multiple
 // displays.
-class DisplayCompositor : public cc::SurfaceObserver,
-                          public cc::mojom::DisplayCompositor {
+class DisplayCompositor
+    : public cc::SurfaceObserver,
+      public display_compositor::GpuCompositorFrameSinkDelegate,
+      public cc::mojom::DisplayCompositor {
  public:
   DisplayCompositor(
       scoped_refptr<gpu::InProcessCommandBuffer::Service> gpu_service,
-      std::unique_ptr<MusGpuMemoryBufferManager> gpu_memory_buffer_manager,
+      std::unique_ptr<gpu::GpuMemoryBufferManager> gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
       cc::mojom::DisplayCompositorRequest request,
       cc::mojom::DisplayCompositorClientPtr client);
   ~DisplayCompositor() override;
 
+  cc::SurfaceManager* manager() { return &manager_; }
+
+  // display_compositor::GpuCompositorFrameSinkDelegate implementation.
+  void OnClientConnectionLost(const cc::FrameSinkId& frame_sink_id,
+                              bool destroy_compositor_frame_sink) override;
+  void OnPrivateConnectionLost(const cc::FrameSinkId& frame_sink_id,
+                               bool destroy_compositor_frame_sink) override;
+
   // cc::mojom::DisplayCompositor implementation:
-  void CreateCompositorFrameSink(
+  void CreateDisplayCompositorFrameSink(
       const cc::FrameSinkId& frame_sink_id,
       gpu::SurfaceHandle surface_handle,
+      cc::mojom::MojoCompositorFrameSinkAssociatedRequest request,
+      cc::mojom::MojoCompositorFrameSinkPrivateRequest private_request,
+      cc::mojom::MojoCompositorFrameSinkClientPtr client,
+      cc::mojom::DisplayPrivateAssociatedRequest display_private_request)
+      override;
+  void CreateOffscreenCompositorFrameSink(
+      const cc::FrameSinkId& frame_sink_id,
       cc::mojom::MojoCompositorFrameSinkRequest request,
       cc::mojom::MojoCompositorFrameSinkPrivateRequest private_request,
       cc::mojom::MojoCompositorFrameSinkClientPtr client) override;
-  void AddRootSurfaceReference(const cc::SurfaceId& child_id) override;
-  void AddSurfaceReference(const cc::SurfaceId& parent_id,
-                           const cc::SurfaceId& child_id) override;
-  void RemoveRootSurfaceReference(const cc::SurfaceId& child_id) override;
-  void RemoveSurfaceReference(const cc::SurfaceId& parent_id,
-                              const cc::SurfaceId& child_id) override;
-
-  cc::SurfaceManager* manager() { return &manager_; }
-
-  // We must avoid destroying a GpuCompositorFrameSink until both the display
-  // compositor host and the client drop their connection to avoid getting into
-  // a state where surfaces references are inconsistent.
-  void OnCompositorFrameSinkClientConnectionLost(
-      const cc::FrameSinkId& frame_sink_id,
-      bool destroy_compositor_frame_sink);
-  void OnCompositorFrameSinkPrivateConnectionLost(
-      const cc::FrameSinkId& frame_sink_id,
-      bool destroy_compositor_frame_sink);
 
  private:
+  std::unique_ptr<cc::Display> CreateDisplay(
+      const cc::FrameSinkId& frame_sink_id,
+      gpu::SurfaceHandle surface_handle,
+      cc::SyntheticBeginFrameSource* begin_frame_source);
+
+  void CreateCompositorFrameSinkInternal(
+      const cc::FrameSinkId& frame_sink_id,
+      gpu::SurfaceHandle surface_handle,
+      std::unique_ptr<cc::Display> display,
+      std::unique_ptr<cc::SyntheticBeginFrameSource> begin_frame_source,
+      cc::mojom::MojoCompositorFrameSinkRequest request,
+      cc::mojom::MojoCompositorFrameSinkPrivateRequest private_request,
+      cc::mojom::MojoCompositorFrameSinkClientPtr client,
+      cc::mojom::DisplayPrivateRequest display_private_request);
+
+  // It is necessary to pass |frame_sink_id| by value because the id
+  // is owned by the GpuCompositorFrameSink in the map. When the sink is
+  // removed from the map, |frame_sink_id| would also be destroyed if it were a
+  // reference. But the map can continue to iterate and try to use it. Passing
+  // by value avoids this.
+  void DestroyCompositorFrameSink(cc::FrameSinkId frame_sink_id);
 
   // cc::SurfaceObserver implementation.
-  void OnSurfaceCreated(const cc::SurfaceId& surface_id,
-                        const gfx::Size& frame_size,
-                        float device_scale_factor) override;
+  void OnSurfaceCreated(const cc::SurfaceInfo& surface_info) override;
   void OnSurfaceDamaged(const cc::SurfaceId& surface_id,
                         bool* changed) override;
 
@@ -90,25 +115,22 @@ class DisplayCompositor : public cc::SurfaceObserver,
   // destroyed in order to ensure that all other objects that depend on it have
   // access to a valid pointer for the entirety of their liftimes.
   cc::SurfaceManager manager_;
+
   scoped_refptr<gpu::InProcessCommandBuffer::Service> gpu_service_;
-  std::unordered_map<cc::FrameSinkId,
-                     std::unique_ptr<GpuCompositorFrameSink>,
-                     cc::FrameSinkIdHash>
-      compositor_frame_sinks_;
-  std::unique_ptr<MusGpuMemoryBufferManager> gpu_memory_buffer_manager_;
+  std::unique_ptr<gpu::GpuMemoryBufferManager> gpu_memory_buffer_manager_;
   gpu::ImageFactory* image_factory_;
+
+  std::unordered_map<
+      cc::FrameSinkId,
+      std::unique_ptr<display_compositor::GpuCompositorFrameSink>,
+      cc::FrameSinkIdHash>
+      compositor_frame_sinks_;
+
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  base::ThreadChecker thread_checker_;
+
   cc::mojom::DisplayCompositorClientPtr client_;
-
-  // SurfaceIds that have temporary references from top level root so they
-  // aren't GC'd before DisplayCompositorClient can add a real reference. This
-  // is basically a collection of surface ids, for example:
-  //   cc::SurfaceId surface_id(key, value[index]);
-  // The LocalFrameIds are stored in the order the surfaces are created in.
-  std::unordered_map<cc::FrameSinkId,
-                     std::vector<cc::LocalFrameId>,
-                     cc::FrameSinkIdHash>
-      temp_references_;
-
   mojo::Binding<cc::mojom::DisplayCompositor> binding_;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayCompositor);

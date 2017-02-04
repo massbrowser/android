@@ -28,6 +28,10 @@
 #include "gpu/ipc/common/surface_handle.h"
 #include "ipc/ipc_sender.h"
 #include "ipc/message_filter.h"
+#include "mojo/public/cpp/bindings/binding.h"
+#include "services/ui/gpu/interfaces/gpu_host.mojom.h"
+#include "services/ui/gpu/interfaces/gpu_main.mojom.h"
+#include "services/ui/gpu/interfaces/gpu_service.mojom.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "url/gurl.h"
@@ -42,6 +46,7 @@ struct ChannelHandle;
 
 namespace gpu {
 struct GpuPreferences;
+class ShaderDiskCache;
 struct SyncToken;
 }
 
@@ -51,15 +56,14 @@ class InterfaceProvider;
 
 namespace content {
 class BrowserChildProcessHostImpl;
-class GpuMainThread;
 class InProcessChildThreadParams;
-class ShaderDiskCache;
 
 typedef base::Thread* (*GpuMainThreadFactoryFunction)(
     const InProcessChildThreadParams&, const gpu::GpuPreferences&);
 
 class GpuProcessHost : public BrowserChildProcessHostDelegate,
                        public IPC::Sender,
+                       public ui::mojom::GpuHost,
                        public base::NonThreadSafe {
  public:
   enum GpuProcessKind {
@@ -184,6 +188,20 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   void OnProcessLaunchFailed(int error_code) override;
   void OnProcessCrashed(int exit_code) override;
 
+  // ui::mojom::GpuHost:
+  void DidInitialize(const gpu::GPUInfo& gpu_info) override;
+  void DidCreateOffscreenContext(const GURL& url) override;
+  void DidDestroyOffscreenContext(const GURL& url) override;
+  void DidDestroyChannel(int32_t client_id) override;
+  void DidLoseContext(bool offscreen,
+                      gpu::error::ContextLostReason reason,
+                      const GURL& active_url) override;
+  void SetChildSurface(gpu::SurfaceHandle parent,
+                       gpu::SurfaceHandle child) override;
+  void StoreShaderToDisk(int32_t client_id,
+                         const std::string& key,
+                         const std::string& shader) override;
+
   // Message handlers.
   void OnInitialized(bool result, const gpu::GPUInfo& gpu_info);
   void OnChannelEstablished(const IPC::ChannelHandle& channel_handle);
@@ -219,7 +237,7 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   // Update GPU crash counters.  Disable GPU if crash limit is reached.
   void RecordProcessCrash();
 
-  std::string GetShaderPrefixKey();
+  std::string GetShaderPrefixKey(const std::string& shader);
 
   // The serial number of the GpuProcessHost / GpuProcessHostUIShim pair.
   int host_id_;
@@ -283,11 +301,15 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   // automatic execution of 3D content from those domains.
   std::multiset<GURL> urls_with_live_offscreen_contexts_;
 
-  typedef std::map<int32_t, scoped_refptr<ShaderDiskCache>>
+  typedef std::map<int32_t, scoped_refptr<gpu::ShaderDiskCache>>
       ClientIdToShaderCacheMap;
   ClientIdToShaderCacheMap client_id_to_shader_cache_;
 
-  std::string shader_prefix_key_;
+  std::string shader_prefix_key_info_;
+
+  ui::mojom::GpuMainAssociatedPtr gpu_main_ptr_;
+  ui::mojom::GpuServicePtr gpu_service_ptr_;
+  mojo::Binding<ui::mojom::GpuHost> gpu_host_binding_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuProcessHost);
 };

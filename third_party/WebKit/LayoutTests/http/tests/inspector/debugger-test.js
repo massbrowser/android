@@ -104,12 +104,14 @@ InspectorTest.runTestFunctionAndWaitUntilPausedPromise = function()
 
 InspectorTest.runAsyncCallStacksTest = function(totalDebuggerStatements, maxAsyncCallStackDepth)
 {
+    var defaultMaxAsyncCallStackDepth = 8;
+
     InspectorTest.setQuiet(true);
     InspectorTest.startDebuggerTest(step1);
 
     function step1()
     {
-        InspectorTest.DebuggerAgent.setAsyncCallStackDepth(maxAsyncCallStackDepth, step2);
+        InspectorTest.DebuggerAgent.setAsyncCallStackDepth(maxAsyncCallStackDepth || defaultMaxAsyncCallStackDepth, step2);
     }
 
     function step2()
@@ -134,6 +136,20 @@ InspectorTest.runAsyncCallStacksTest = function(totalDebuggerStatements, maxAsyn
     }
 };
 
+InspectorTest.dumpSourceFrameMessages = function(sourceFrame, dumpFullURL)
+{
+    var messages = [];
+    for (var bucket of sourceFrame._rowMessageBuckets.values()) {
+        for (var rowMessage of bucket._messages) {
+            var message = rowMessage.message();
+            messages.push(String.sprintf("  %d:%d [%s] %s", message.lineNumber(), message.columnNumber(), message.level(), message.text()));
+        }
+    }
+    var name = dumpFullURL ? sourceFrame.uiSourceCode().url() : sourceFrame.uiSourceCode().displayName();
+    InspectorTest.addResult("SourceFrame " + name + ": " + messages.length + " message(s)");
+    InspectorTest.addResult(messages.join("\n"));
+}
+
 InspectorTest.waitUntilPausedNextTime = function(callback)
 {
     InspectorTest._waitUntilPausedCallback = InspectorTest.safeWrap(callback);
@@ -148,6 +164,11 @@ InspectorTest.waitUntilPaused = function(callback)
     else
         InspectorTest._waitUntilPausedCallback = callback;
 };
+
+InspectorTest.waitUntilPausedPromise = function()
+{
+    return new Promise(resolve => InspectorTest.waitUntilPaused(resolve));
+}
 
 InspectorTest.waitUntilResumedNextTime = function(callback)
 {
@@ -438,9 +459,18 @@ InspectorTest.toggleBreakpoint = function(sourceFrame, lineNumber, disableOnly)
         sourceFrame._toggleBreakpoint(lineNumber, disableOnly);
 };
 
-InspectorTest.waitBreakpointSidebarPane = function()
+InspectorTest.waitBreakpointSidebarPane = function(waitUntilResolved)
 {
-    return new Promise(resolve => InspectorTest.addSniffer(Sources.JavaScriptBreakpointsSidebarPane.prototype, "_didUpdateForTest", resolve));
+    return new Promise(resolve => InspectorTest.addSniffer(Sources.JavaScriptBreakpointsSidebarPane.prototype, "_didUpdateForTest", resolve)).then(checkIfReady);
+    function checkIfReady()
+    {
+        if (!waitUntilResolved)
+            return;
+        for (var breakpoint of Bindings.breakpointManager._allBreakpoints()) {
+            if (breakpoint._fakePrimaryLocation && breakpoint.enabled())
+                return InspectorTest.waitBreakpointSidebarPane();
+        }
+    }
 }
 
 InspectorTest.breakpointsSidebarPaneContent = function()
@@ -620,8 +650,8 @@ InspectorTest.waitForExecutionContextInTarget = function(target, callback)
 InspectorTest.selectThread = function(target)
 {
     var threadsPane = self.runtime.sharedInstance(Sources.ThreadsSidebarPane);
-    var listItem = threadsPane._listItemForTarget(target);
-    threadsPane._onListItemClick(listItem);
+    var listItem = threadsPane._targetToListItem.get(target);
+    threadsPane._onListItemClick(listItem, target);
 }
 
 InspectorTest.evaluateOnCurrentCallFrame = function(code)
@@ -629,19 +659,40 @@ InspectorTest.evaluateOnCurrentCallFrame = function(code)
     return new Promise(succ => InspectorTest.debuggerModel.evaluateOnSelectedCallFrame(code, "console", false, true, false, false, InspectorTest.safeWrap(succ)));
 }
 
-InspectorTest.waitJavaScriptSourceFrameBreakpoints = function(sourceFrame)
+InspectorTest.prepareSourceFrameForBreakpointTest = function(sourceFrame)
 {
-    return new Promise(resolve => InspectorTest.addSniffer(sourceFrame.__proto__, "_breakpointDecorationsUpdatedForTest", resolveIfAllBreakpointsResolved.bind(null, resolve)));
+    var symbol = Symbol('waitedDecorations');
+    sourceFrame[symbol] = 0;
+    InspectorTest.addSniffer(sourceFrame.__proto__, "_willAddInlineDecorationsForTest", () => sourceFrame[symbol]++, true);
+    InspectorTest.addSniffer(sourceFrame.__proto__, "_didAddInlineDecorationsForTest", (updateWasScheduled) => {
+        sourceFrame[symbol]--;
+        if (!updateWasScheduled)
+            sourceFrame._breakpointDecorationsUpdatedForTest();
+    }, true);
+    sourceFrame._waitingForPossibleLocationsForTest = () => !!sourceFrame[symbol];
+}
 
-    function resolveIfAllBreakpointsResolved(resolve)
+InspectorTest.waitJavaScriptSourceFrameBreakpoints = function(sourceFrame, inline)
+{
+    if (!sourceFrame._waitingForPossibleLocationsForTest) {
+        InspectorTest.addResult("Error: source frame should be prepared with InspectorTest.prepareSourceFrameForBreakpointTest function.");
+        InspectorTest.completeTest();
+        return;
+    }
+    return waitUpdate().then(checkIfReady);
+    function waitUpdate()
     {
+        return new Promise(resolve => InspectorTest.addSniffer(sourceFrame.__proto__, "_breakpointDecorationsUpdatedForTest", resolve));
+    }
+    function checkIfReady()
+    {
+        if (sourceFrame._waitingForPossibleLocationsForTest())
+            return waitUpdate().then(checkIfReady);
         for (var breakpoint of Bindings.breakpointManager._allBreakpoints()) {
-            if (breakpoint._fakePrimaryLocation && breakpoint.enabled()) {
-                InspectorTest.addSniffer(sourceFrame.__proto__, "_breakpointDecorationsUpdatedForTest", resolveIfAllBreakpointsResolved.bind(null, resolve));
-                return;
-            }
+            if (breakpoint._fakePrimaryLocation && breakpoint.enabled())
+                return waitUpdate().then(checkIfReady);
         }
-        resolve();
+        return Promise.resolve();
     }
 }
 
@@ -654,6 +705,34 @@ InspectorTest.dumpJavaScriptSourceFrameBreakpoints = function(sourceFrame)
         var disabled = textEditor.hasLineClass(lineNumber, "cm-breakpoint-disabled");
         var conditional = textEditor.hasLineClass(lineNumber, "cm-breakpoint-conditional")
         InspectorTest.addResult("breakpoint at " + lineNumber + (disabled ? " disabled" : "") + (conditional ? " conditional" : ""));
+
+        var range = new Common.TextRange(lineNumber, 0, lineNumber, textEditor.line(lineNumber).length);
+        var bookmarks = textEditor.bookmarks(range, Sources.JavaScriptSourceFrame.BreakpointDecoration._bookmarkSymbol);
+        bookmarks = bookmarks.filter(bookmark => !!bookmark.position());
+        bookmarks.sort((bookmark1, bookmark2) => bookmark1.position().startColumn - bookmark2.position().startColumn);
+        for (var bookmark of bookmarks) {
+            var position = bookmark.position();
+            var element = bookmark[Sources.JavaScriptSourceFrame.BreakpointDecoration._elementSymbolForTest];
+            var disabled = element.classList.contains("cm-inline-disabled");
+            var conditional = element.classList.contains("cm-inline-conditional");
+            InspectorTest.addResult("  inline breakpoint at (" + position.startLine + ", " + position.startColumn + ")" + (disabled ? " disabled" : "") + (conditional ? " conditional" : ""));
+        }
+    }
+}
+
+InspectorTest.clickJavaScriptSourceFrameBreakpoint = function(sourceFrame, lineNumber, index, next)
+{
+    var textEditor = sourceFrame._textEditor;
+    var lineLength = textEditor.line(lineNumber).length;
+    var lineRange = new Common.TextRange(lineNumber, 0, lineNumber, lineLength);
+    var bookmarks = textEditor.bookmarks(lineRange, Sources.JavaScriptSourceFrame.BreakpointDecoration._bookmarkSymbol);
+    bookmarks.sort((bookmark1, bookmark2) => bookmark1.position().startColumn - bookmark2.position().startColumn);
+    var bookmark = bookmarks[index];
+    if (bookmark) {
+        bookmark[Sources.JavaScriptSourceFrame.BreakpointDecoration._elementSymbolForTest].click();
+    } else {
+        InspectorTest.addResult(`Could not click on Javascript breakpoint - lineNumber: ${lineNumber}, index: ${index}`);
+        next();
     }
 }
 

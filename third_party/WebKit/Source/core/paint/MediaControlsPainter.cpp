@@ -27,7 +27,7 @@
 
 #include "core/paint/MediaControlsPainter.h"
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/TimeRanges.h"
 #include "core/html/shadow/MediaControlElementTypes.h"
@@ -253,7 +253,7 @@ static void paintSliderRangeHighlight(const IntRect& rect,
 
   // Fill highlight rectangle with gradient, potentially rounded if on left or
   // right edge.
-  SkPaint gradientPaint(context.fillPaint());
+  PaintFlags gradientPaint(context.fillPaint());
   gradient->applyToPaint(gradientPaint, SkMatrix::I());
 
   if (startOffset < borderRadius && endOffset < borderRadius)

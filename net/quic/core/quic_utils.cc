@@ -4,17 +4,12 @@
 
 #include "net/quic/core/quic_utils.h"
 
-#include <ctype.h>
-#include <stdint.h>
-
 #include <algorithm>
+#include <cstdint>
 #include <vector>
 
 #include "base/containers/adapters.h"
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/stringprintf.h"
 #include "net/quic/core/quic_constants.h"
 #include "net/quic/core/quic_flags.h"
 
@@ -34,7 +29,7 @@ namespace {
 #endif
 
 #ifdef QUIC_UTIL_HAS_UINT128
-uint128 IncrementalHashFast(uint128 uhash, const char* data, size_t len) {
+uint128 IncrementalHashFast(uint128 uhash, StringPiece data) {
   // This code ends up faster than the naive implementation for 2 reasons:
   // 1. uint128 from base/int128.h is sufficiently complicated that the compiler
   //    cannot transform the multiplication by kPrime into a shift-multiply-add;
@@ -46,49 +41,50 @@ uint128 IncrementalHashFast(uint128 uhash, const char* data, size_t len) {
       (static_cast<__uint128_t>(16777216) << 64) + 315;
   __uint128_t xhash = (static_cast<__uint128_t>(Uint128High64(uhash)) << 64) +
                       Uint128Low64(uhash);
-  const uint8_t* octets = reinterpret_cast<const uint8_t*>(data);
-  for (size_t i = 0; i < len; ++i) {
+  const uint8_t* octets = reinterpret_cast<const uint8_t*>(data.data());
+  for (size_t i = 0; i < data.length(); ++i) {
     xhash = (xhash ^ octets[i]) * kPrime;
   }
-  return uint128(static_cast<uint64_t>(xhash >> 64),
-                 static_cast<uint64_t>(xhash & UINT64_C(0xFFFFFFFFFFFFFFFF)));
+  return MakeUint128(
+      static_cast<uint64_t>(xhash >> 64),
+      static_cast<uint64_t>(xhash & UINT64_C(0xFFFFFFFFFFFFFFFF)));
 }
 #endif
 
 #ifndef QUIC_UTIL_HAS_UINT128
 // Slow implementation of IncrementalHash. In practice, only used by Chromium.
-uint128 IncrementalHashSlow(uint128 hash, const char* data, size_t len) {
+uint128 IncrementalHashSlow(uint128 hash, StringPiece data) {
   // kPrime = 309485009821345068724781371
-  static const uint128 kPrime(16777216, 315);
-  const uint8_t* octets = reinterpret_cast<const uint8_t*>(data);
-  for (size_t i = 0; i < len; ++i) {
-    hash = hash ^ uint128(0, octets[i]);
+  static const uint128 kPrime = MakeUint128(16777216, 315);
+  const uint8_t* octets = reinterpret_cast<const uint8_t*>(data.data());
+  for (size_t i = 0; i < data.length(); ++i) {
+    hash = hash ^ MakeUint128(0, octets[i]);
     hash = hash * kPrime;
   }
   return hash;
 }
 #endif
 
-uint128 IncrementalHash(uint128 hash, const char* data, size_t len) {
+uint128 IncrementalHash(uint128 hash, StringPiece data) {
 #ifdef QUIC_UTIL_HAS_UINT128
-  return IncrementalHashFast(hash, data, len);
+  return IncrementalHashFast(hash, data);
 #else
-  return IncrementalHashSlow(hash, data, len);
+  return IncrementalHashSlow(hash, data);
 #endif
 }
 
 }  // namespace
 
 // static
-uint64_t QuicUtils::FNV1a_64_Hash(const char* data, int len) {
+uint64_t QuicUtils::FNV1a_64_Hash(StringPiece data) {
   static const uint64_t kOffset = UINT64_C(14695981039346656037);
   static const uint64_t kPrime = UINT64_C(1099511628211);
 
-  const uint8_t* octets = reinterpret_cast<const uint8_t*>(data);
+  const uint8_t* octets = reinterpret_cast<const uint8_t*>(data.data());
 
   uint64_t hash = kOffset;
 
-  for (int i = 0; i < len; ++i) {
+  for (size_t i = 0; i < data.length(); ++i) {
     hash = hash ^ octets[i];
     hash = hash * kPrime;
   }
@@ -97,26 +93,35 @@ uint64_t QuicUtils::FNV1a_64_Hash(const char* data, int len) {
 }
 
 // static
-uint128 QuicUtils::FNV1a_128_Hash(const char* data, int len) {
-  return FNV1a_128_Hash_Two(data, len, nullptr, 0);
+uint128 QuicUtils::FNV1a_128_Hash(StringPiece data) {
+  return FNV1a_128_Hash_Three(data, StringPiece(), StringPiece());
 }
 
 // static
-uint128 QuicUtils::FNV1a_128_Hash_Two(const char* data1,
-                                      int len1,
-                                      const char* data2,
-                                      int len2) {
+uint128 QuicUtils::FNV1a_128_Hash_Two(StringPiece data1, StringPiece data2) {
+  return FNV1a_128_Hash_Three(data1, data2, StringPiece());
+}
+
+// static
+uint128 QuicUtils::FNV1a_128_Hash_Three(StringPiece data1,
+                                        StringPiece data2,
+                                        StringPiece data3) {
   // The two constants are defined as part of the hash algorithm.
   // see http://www.isthe.com/chongo/tech/comp/fnv/
   // kOffset = 144066263297769815596495629667062367629
-  const uint128 kOffset(UINT64_C(7809847782465536322),
-                        UINT64_C(7113472399480571277));
+  const uint128 kOffset =
+      MakeUint128(UINT64_C(7809847782465536322), UINT64_C(7113472399480571277));
 
-  uint128 hash = IncrementalHash(kOffset, data1, len1);
-  if (data2 == nullptr) {
+  uint128 hash = IncrementalHash(kOffset, data1);
+  if (data2.empty()) {
     return hash;
   }
-  return IncrementalHash(hash, data2, len2);
+
+  hash = IncrementalHash(hash, data2);
+  if (data3.empty()) {
+    return hash;
+  }
+  return IncrementalHash(hash, data3);
 }
 
 // static
@@ -155,25 +160,6 @@ const char* QuicUtils::TransmissionTypeToString(TransmissionType type) {
     RETURN_STRING_LITERAL(TLP_RETRANSMISSION);
   }
   return "INVALID_TRANSMISSION_TYPE";
-}
-
-// static
-QuicTagVector QuicUtils::ParseQuicConnectionOptions(
-    const std::string& connection_options) {
-  QuicTagVector options;
-  // Tokens are expected to be no more than 4 characters long, but we
-  // handle overflow gracefully.
-  for (const base::StringPiece& token :
-       base::SplitStringPiece(connection_options, ",", base::TRIM_WHITESPACE,
-                              base::SPLIT_WANT_ALL)) {
-    uint32_t option = 0;
-    for (char token_char : base::Reversed(token)) {
-      option <<= 8;
-      option |= static_cast<unsigned char>(token_char);
-    }
-    options.push_back(option);
-  }
-  return options;
 }
 
 string QuicUtils::PeerAddressChangeTypeToString(PeerAddressChangeType type) {
@@ -235,58 +221,6 @@ PeerAddressChangeType QuicUtils::DetermineAddressChangeType(
   }
 
   return IPV4_TO_IPV4_CHANGE;
-}
-
-string QuicUtils::HexEncode(const char* data, size_t length) {
-  return HexEncode(StringPiece(data, length));
-}
-
-string QuicUtils::HexEncode(StringPiece data) {
-  return ::base::HexEncode(data.data(), data.size());
-}
-
-string QuicUtils::HexDecode(StringPiece data) {
-  if (data.empty())
-    return "";
-  std::vector<uint8_t> v;
-  if (!base::HexStringToBytes(data.as_string(), &v))
-    return "";
-  string out;
-  if (!v.empty())
-    out.assign(reinterpret_cast<const char*>(&v[0]), v.size());
-  return out;
-}
-
-string QuicUtils::HexDump(StringPiece binary_input) {
-  int offset = 0;
-  const int kBytesPerLine = 16;  // Max bytes dumped per line
-  const char* buf = binary_input.data();
-  int bytes_remaining = binary_input.size();
-  string s;  // our output
-  const char* p = buf;
-  while (bytes_remaining > 0) {
-    const int line_bytes = std::min(bytes_remaining, kBytesPerLine);
-    base::StringAppendF(&s, "0x%04x:  ", offset);  // Do the line header
-    for (int i = 0; i < kBytesPerLine; ++i) {
-      if (i < line_bytes) {
-        base::StringAppendF(&s, "%02x", static_cast<unsigned char>(p[i]));
-      } else {
-        s += "  ";  // two-space filler instead of two-space hex digits
-      }
-      if (i % 2)
-        s += ' ';
-    }
-    s += ' ';
-    for (int i = 0; i < line_bytes; ++i) {  // Do the ASCII dump
-      s += (p[i] > 32 && p[i] < 127) ? p[i] : '.';
-    }
-
-    bytes_remaining -= line_bytes;
-    offset += line_bytes;
-    p += line_bytes;
-    s += '\n';
-  }
-  return s;
 }
 
 }  // namespace net

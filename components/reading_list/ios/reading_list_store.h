@@ -5,11 +5,14 @@
 #ifndef COMPONENTS_READING_LIST_IOS_READING_LIST_STORE_H_
 #define COMPONENTS_READING_LIST_IOS_READING_LIST_STORE_H_
 
+#include <memory>
+#include <string>
+
 #include "base/threading/non_thread_safe.h"
 #include "components/reading_list/ios/reading_list_model_storage.h"
 #include "components/reading_list/ios/reading_list_store_delegate.h"
+#include "components/sync/model/model_error.h"
 #include "components/sync/model/model_type_store.h"
-#include "components/sync/model/model_type_sync_bridge.h"
 
 namespace syncer {
 class MutableDataBatch;
@@ -18,8 +21,7 @@ class MutableDataBatch;
 class ReadingListModel;
 
 // A ReadingListModelStorage storing and syncing data in protobufs.
-class ReadingListStore : public syncer::ModelTypeSyncBridge,
-                         public ReadingListModelStorage,
+class ReadingListStore : public ReadingListModelStorage,
                          public base::NonThreadSafe {
   using StoreFactoryFunction = base::Callback<void(
       const syncer::ModelTypeStore::InitCallback& callback)>;
@@ -35,11 +37,8 @@ class ReadingListStore : public syncer::ModelTypeSyncBridge,
   void SetReadingListModel(ReadingListModel* model,
                            ReadingListStoreDelegate* delegate) override;
 
-  void SaveEntry(const ReadingListEntry& entry, bool read) override;
+  void SaveEntry(const ReadingListEntry& entry) override;
   void RemoveEntry(const ReadingListEntry& entry) override;
-
-  // ReadingListModelStorage implementation.
-  syncer::ModelTypeSyncBridge* GetModelTypeSyncBridge() override;
 
   // Creates an object used to communicate changes in the sync metadata to the
   // model type store.
@@ -59,7 +58,7 @@ class ReadingListStore : public syncer::ModelTypeSyncBridge,
   // combine all change atomically, should save the metadata after the data
   // changes, so that this merge will be re-driven by sync if is not completely
   // saved during the current run.
-  syncer::SyncError MergeSyncData(
+  base::Optional<syncer::ModelError> MergeSyncData(
       std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
       syncer::EntityDataMap entity_data_map) override;
 
@@ -68,9 +67,42 @@ class ReadingListStore : public syncer::ModelTypeSyncBridge,
   // |metadata_change_list| in case when some of the data changes are filtered
   // out, or even be empty in case when a commit confirmation is processed and
   // only the metadata needs to persisted.
-  syncer::SyncError ApplySyncChanges(
+  base::Optional<syncer::ModelError> ApplySyncChanges(
       std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
       syncer::EntityChangeList entity_changes) override;
+
+  // Returns whether entries respect a strict order for sync and if |rhs| can be
+  // submitted to sync after |lhs| has been received.
+  // The order should ensure that there is no sync loop in sync and should be
+  // submitted to sync in strictly increasing order.
+  // Entries are in increasing order if all the fields respect increasing order.
+  // - URL must be the same.
+  // - update_title_time_us:
+  //       rhs.update_title_time_us >= lhs.update_title_time_us
+  // - title:
+  //       if rhs.update_title_time_us > lhs.update_title_time_us
+  //         title can be anything
+  //       if rhs.update_title_time_us == lhs.update_title_time_us
+  //         title must verify rhs.title.compare(lhs.title) >= 0
+  // - creation_time_us:
+  //       rhs.creation_time_us >= lhs.creation_time_us
+  // - rhs.first_read_time_us:
+  //       if rhs.creation_time_us > lhs.creation_time_us,
+  //         rhs.first_read_time_us can be anything.
+  //       if rhs.creation_time_us == lhs.creation_time_us
+  //           and rhs.first_read_time_us == 0
+  //         rhs.first_read_time_us can be anything.
+  //       if rhs.creation_time_us == lhs.creation_time_us,
+  //         rhs.first_read_time_us <= lhs.first_read_time_us
+  // - update_time_us:
+  //       rhs.update_time_us >= lhs.update_time_us
+  // - state:
+  //       if rhs.update_time_us > lhs.update_time_us
+  //         rhs.state can be anything.
+  //       if rhs.update_time_us == lhs.update_time_us
+  //         rhs.state >= lhs.state in the order UNSEEN, UNREAD, READ.
+  static bool CompareEntriesForSync(const sync_pb::ReadingListSpecifics& lhs,
+                                    const sync_pb::ReadingListSpecifics& rhs);
 
   // Asynchronously retrieve the corresponding sync data for |storage_keys|.
   void GetData(StorageKeyList storage_keys, DataCallback callback) override;
@@ -119,12 +151,11 @@ class ReadingListStore : public syncer::ModelTypeSyncBridge,
       syncer::ModelTypeStore::Result result,
       std::unique_ptr<syncer::ModelTypeStore::RecordList> entries);
   void OnDatabaseSave(syncer::ModelTypeStore::Result result);
-  void OnReadAllMetadata(syncer::SyncError sync_error,
+  void OnReadAllMetadata(base::Optional<syncer::ModelError> error,
                          std::unique_ptr<syncer::MetadataBatch> metadata_batch);
 
   void AddEntryToBatch(syncer::MutableDataBatch* batch,
-                       const ReadingListEntry& entry,
-                       bool read);
+                       const ReadingListEntry& entry);
 
   std::unique_ptr<syncer::ModelTypeStore> store_;
   ReadingListModel* model_;

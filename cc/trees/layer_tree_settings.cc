@@ -4,7 +4,6 @@
 
 #include "cc/trees/layer_tree_settings.h"
 
-#include "cc/proto/gfx_conversions.h"
 #include "third_party/khronos/GLES2/gl2.h"
 
 namespace cc {
@@ -80,8 +79,7 @@ bool LayerTreeSettings::operator==(const LayerTreeSettings& other) const {
          gpu_memory_policy == other.gpu_memory_policy &&
          software_memory_policy == other.software_memory_policy &&
          LayerTreeDebugState::Equal(initial_debug_state,
-                                    other.initial_debug_state) &&
-         use_cached_picture_raster == other.use_cached_picture_raster;
+                                    other.initial_debug_state);
 }
 
 SchedulerSettings LayerTreeSettings::ToSchedulerSettings() const {
@@ -95,8 +93,6 @@ SchedulerSettings LayerTreeSettings::ToSchedulerSettings() const {
   scheduler_settings.enable_latency_recovery = enable_latency_recovery;
   scheduler_settings.background_frame_interval =
       base::TimeDelta::FromSecondsD(1.0 / background_animation_rate);
-  scheduler_settings.abort_commit_before_compositor_frame_sink_creation =
-      abort_commit_before_compositor_frame_sink_creation;
   return scheduler_settings;
 }
 

@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include "base/compiler_specific.h"
-#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/threading/thread_local_storage.h"
 #include "base/timer/timer.h"
 #include "base/trace_event/trace_event.h"
@@ -73,13 +72,11 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const blink::WebSecurityOrigin& origin) override;
   bool databaseSetFileSize(const blink::WebString& vfs_file_name,
                            long long size) override;
-  blink::WebString signedPublicKeyAndChallengeString(
-      unsigned key_size_index,
-      const blink::WebString& challenge,
-      const blink::WebURL& url,
-      const blink::WebURL& top_origin) override;
   size_t actualMemoryUsageMB() override;
   size_t numberOfProcessors() override;
+
+  void bindServiceConnector(
+      mojo::ScopedMessagePipeHandle remote_handle) override;
 
   size_t maxDecodedImageBytes() override;
   uint32_t getUniqueIdForProcess() override;

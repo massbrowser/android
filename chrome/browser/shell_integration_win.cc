@@ -283,6 +283,21 @@ class DefaultBrowserActionRecorder : public win::SettingsAppMonitor::Delegate {
     }
   }
 
+  void OnPromoFocused() override {
+    base::RecordAction(
+        base::UserMetricsAction("SettingsAppMonitor.PromoFocused"));
+  }
+
+  void OnPromoChoiceMade(bool accept_promo) override {
+    if (accept_promo) {
+      base::RecordAction(
+          base::UserMetricsAction("SettingsAppMonitor.CheckItOut"));
+    } else {
+      base::RecordAction(
+          base::UserMetricsAction("SettingsAppMonitor.SwitchAnyway"));
+    }
+  }
+
   // A closure to be run once initialization completes.
   base::Closure continuation_;
 
@@ -472,6 +487,9 @@ IsPinnedToTaskbarHelper::IsPinnedToTaskbarHelper(
           l10n_util::GetStringUTF16(IDS_UTILITY_PROCESS_SHELL_HANDLER_NAME)),
       error_callback_(error_callback),
       result_callback_(result_callback) {
+  DCHECK(error_callback_);
+  DCHECK(result_callback_);
+
   // |shell_handler_| owns the callbacks and is guaranteed to be destroyed
   // before |this|, therefore making base::Unretained() safe to use.
   shell_handler_.set_error_callback(base::Bind(

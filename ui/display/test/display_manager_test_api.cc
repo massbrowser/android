@@ -9,7 +9,7 @@
 
 #include "base/strings/string_split.h"
 #include "ui/display/display.h"
-#include "ui/display/manager/display_layout_builder.h"
+#include "ui/display/display_layout_builder.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/display_manager_utilities.h"
 #include "ui/display/manager/managed_display_info.h"
@@ -114,7 +114,7 @@ void DisplayManagerTestApi::DisableChangeDisplayUponHostResize() {
 
 void DisplayManagerTestApi::SetAvailableColorProfiles(
     int64_t display_id,
-    const std::vector<ui::ColorCalibrationProfile>& profiles) {
+    const std::vector<ColorCalibrationProfile>& profiles) {
   display_manager_->display_info_[display_id].set_available_color_profiles(
       profiles);
 }
@@ -140,7 +140,7 @@ bool DisplayManagerTestApi::SetDisplayUIScale(int64_t id, float ui_scale) {
 
 void DisplayManagerTestApi::SetTouchSupport(
     int64_t display_id,
-    display::Display::TouchSupport touch_support) {
+    Display::TouchSupport touch_support) {
   display_manager_->FindDisplayForId(display_id)
       ->set_touch_support(touch_support);
 }

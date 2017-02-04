@@ -95,6 +95,7 @@ namespace ppapi {
 class Resource;
 struct InputEventData;
 struct PPP_Instance_Combined;
+struct URLResponseInfoData;
 class ScopedPPVar;
 }
 
@@ -265,7 +266,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   base::string16 GetSelectedText(bool html);
   base::string16 GetLinkAtPosition(const gfx::Point& point);
   void RequestSurroundingText(size_t desired_number_of_characters);
-  bool StartFind(const base::string16& search_text,
+  bool StartFind(const std::string& search_text,
                  bool case_sensitive,
                  int identifier);
   void SelectFindResult(bool forward, int identifier);
@@ -633,9 +634,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   void SendFocusChangeNotification();
 
   void UpdateTouchEventRequest();
-
-  // Returns true if the plugin has registered to accept wheel events.
-  bool IsAcceptingWheelEvents() const;
+  void UpdateWheelEventRequest();
 
   void ScheduleAsyncDidChangeView();
   void SendAsyncDidChangeView();
@@ -648,7 +647,8 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   // Queries the plugin for supported print formats and sets |format| to the
   // best format to use. Returns false if the plugin does not support any
   // print format that we can handle (we can handle only PDF).
-  bool GetPreferredPrintOutputFormat(PP_PrintOutputFormat_Dev* format);
+  bool GetPreferredPrintOutputFormat(PP_PrintOutputFormat_Dev* format,
+                                     const blink::WebPrintParams& params);
   bool PrintPDFOutput(PP_Resource print_output,
                       printing::PdfMetafileSkia* metafile);
 

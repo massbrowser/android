@@ -55,6 +55,10 @@ class WebUIScreenLocker : public WebUILoginView,
                           public display::DisplayObserver,
                           public content::WebContentsObserver {
  public:
+  // Request lock screen preload when the user is idle. Does nothing if
+  // preloading is disabled or if the preload hueristics return false.
+  static void RequestPreload();
+
   explicit WebUIScreenLocker(ScreenLocker* screen_locker);
   ~WebUIScreenLocker() override;
 
@@ -90,6 +94,11 @@ class WebUIScreenLocker : public WebUILoginView,
 
  private:
   friend class test::WebUIScreenLockerTester;
+
+  // Returns true if the lock screen should be preloaded.
+  static bool ShouldPreloadLockScreen();
+  // Helper function that creates and preloads a views::WebView.
+  static std::unique_ptr<views::WebView> DoPreload(Profile* profile);
 
   // LoginDisplay::Delegate:
   void CancelPasswordChangedFlow() override;
@@ -153,6 +162,9 @@ class WebUIScreenLocker : public WebUILoginView,
 
   // Reset user pod and ensures that user pod is focused.
   void ResetAndFocusUserPod();
+
+  // Configuration settings.
+  WebViewSettings BuildConfigSettings();
 
   // The ScreenLocker that owns this instance.
   ScreenLocker* screen_locker_ = nullptr;

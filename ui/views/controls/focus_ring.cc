@@ -36,7 +36,6 @@ const char FocusRing::kViewClassName[] = "FocusRing";
 // static
 views::View* FocusRing::Install(views::View* parent,
                                 ui::NativeTheme::ColorId override_color_id) {
-  DCHECK(parent->HasFocus());
   FocusRing* ring = GetFocusRing(parent);
   if (!ring) {
     ring = new FocusRing();
@@ -70,7 +69,7 @@ void FocusRing::Layout() {
 }
 
 void FocusRing::OnPaint(gfx::Canvas* canvas) {
-  SkPaint paint;
+  cc::PaintFlags paint;
   paint.setAntiAlias(true);
   paint.setColor(
       SkColorSetA(GetNativeTheme()->GetSystemColor(
@@ -78,7 +77,7 @@ void FocusRing::OnPaint(gfx::Canvas* canvas) {
                           ? override_color_id_
                           : ui::NativeTheme::kColorId_FocusedBorderColor),
                   0x66));
-  paint.setStyle(SkPaint::kStroke_Style);
+  paint.setStyle(cc::PaintFlags::kStroke_Style);
   paint.setStrokeWidth(kFocusHaloThicknessDp);
   gfx::RectF rect(GetLocalBounds());
   rect.Inset(gfx::InsetsF(kFocusHaloThicknessDp / 2.f));
@@ -88,7 +87,7 @@ void FocusRing::OnPaint(gfx::Canvas* canvas) {
 FocusRing::FocusRing()
     : override_color_id_(ui::NativeTheme::kColorId_NumColors) {
   // A layer is necessary to paint beyond the parent's bounds.
-  SetPaintToLayer(true);
+  SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
 }
 

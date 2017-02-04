@@ -53,9 +53,8 @@ class PopupBlockerTabHelper
   PopupIdMap GetBlockedPopupRequests();
 
   // content::WebContentsObserver overrides:
-  void DidNavigateMainFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
  private:
   struct BlockedRequest;
@@ -69,7 +68,7 @@ class PopupBlockerTabHelper
   // Called when the blocked popup notification is shown or hidden.
   void PopupNotificationVisibilityChanged(bool visible);
 
-  IDMap<BlockedRequest, IDMapOwnPointer> blocked_popups_;
+  IDMap<std::unique_ptr<BlockedRequest>> blocked_popups_;
 
   DISALLOW_COPY_AND_ASSIGN(PopupBlockerTabHelper);
 };

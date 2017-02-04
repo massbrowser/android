@@ -37,8 +37,6 @@ class SingleThreadTaskRunner;
 
 namespace mojo {
 
-class AssociatedGroup;
-
 namespace internal {
 
 // MultiplexRouter supports routing messages for multiple interfaces over a
@@ -81,7 +79,8 @@ class MOJO_CPP_BINDINGS_EXPORT MultiplexRouter
 
   // Sets the master interface name for this router. Only used when reporting
   // message header or control message validation errors.
-  void SetMasterInterfaceName(const std::string& name);
+  // |name| must be a string literal.
+  void SetMasterInterfaceName(const char* name);
 
   // ---------------------------------------------------------------------------
   // The following public methods are safe to call from any threads.
@@ -92,7 +91,10 @@ class MOJO_CPP_BINDINGS_EXPORT MultiplexRouter
       ScopedInterfaceEndpointHandle* remote_endpoint) override;
   ScopedInterfaceEndpointHandle CreateLocalEndpointHandle(
       InterfaceId id) override;
-  void CloseEndpointHandle(InterfaceId id, bool is_local) override;
+  void CloseEndpointHandle(
+      InterfaceId id,
+      bool is_local,
+      const base::Optional<DisconnectReason>& reason) override;
   InterfaceEndpointController* AttachEndpointClient(
       const ScopedInterfaceEndpointHandle& handle,
       InterfaceEndpointClient* endpoint_client,
@@ -152,6 +154,7 @@ class MOJO_CPP_BINDINGS_EXPORT MultiplexRouter
 
  private:
   class InterfaceEndpoint;
+  class MessageWrapper;
   struct Task;
 
   ~MultiplexRouter() override;
@@ -160,7 +163,9 @@ class MOJO_CPP_BINDINGS_EXPORT MultiplexRouter
   bool Accept(Message* message) override;
 
   // PipeControlMessageHandlerDelegate implementation:
-  bool OnPeerAssociatedEndpointClosed(InterfaceId id) override;
+  bool OnPeerAssociatedEndpointClosed(
+      InterfaceId id,
+      const base::Optional<DisconnectReason>& reason) override;
   bool OnAssociatedEndpointClosedBeforeSent(InterfaceId id) override;
 
   void OnPipeConnectionError();
@@ -221,6 +226,7 @@ class MOJO_CPP_BINDINGS_EXPORT MultiplexRouter
   void RaiseErrorInNonTestingMode();
 
   InterfaceEndpoint* FindOrInsertEndpoint(InterfaceId id, bool* inserted);
+  InterfaceEndpoint* FindEndpoint(InterfaceId id);
 
   void AssertLockAcquired();
 

@@ -7,10 +7,12 @@
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "content/public/common/appcache_info.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/url_constants.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
+#include "url/url_util.h"
 
 namespace content {
 
@@ -22,7 +24,7 @@ bool ShouldMakeNetworkRequestForURL(const GURL& url) {
   // to the network stack.
   // TODO(clamy): same document navigations should not send requests to the
   // network stack. Neither should pushState/popState.
-  return url != url::kAboutBlankURL && !url.SchemeIs(url::kJavaScriptScheme) &&
+  return !url::IsAboutBlank(url) && !url.SchemeIs(url::kJavaScriptScheme) &&
          !url.is_empty() && !url.SchemeIs(url::kContentIDScheme) &&
          url != content::kAboutSrcDocURL;
 }
@@ -33,7 +35,7 @@ CommonNavigationParams::CommonNavigationParams()
       allow_download(true),
       should_replace_current_entry(false),
       report_type(FrameMsg_UILoadMetricsReportType::NO_REPORT),
-      lofi_state(LOFI_UNSPECIFIED),
+      previews_state(PREVIEWS_UNSPECIFIED),
       navigation_start(base::TimeTicks::Now()),
       method("GET") {}
 
@@ -48,7 +50,7 @@ CommonNavigationParams::CommonNavigationParams(
     FrameMsg_UILoadMetricsReportType::Value report_type,
     const GURL& base_url_for_data_url,
     const GURL& history_url_for_data_url,
-    LoFiState lofi_state,
+    PreviewsState previews_state,
     const base::TimeTicks& navigation_start,
     std::string method,
     const scoped_refptr<ResourceRequestBodyImpl>& post_data)
@@ -62,7 +64,7 @@ CommonNavigationParams::CommonNavigationParams(
       report_type(report_type),
       base_url_for_data_url(base_url_for_data_url),
       history_url_for_data_url(history_url_for_data_url),
-      lofi_state(lofi_state),
+      previews_state(previews_state),
       navigation_start(navigation_start),
       method(method),
       post_data(post_data) {
@@ -83,22 +85,30 @@ BeginNavigationParams::BeginNavigationParams()
     : load_flags(0),
       has_user_gesture(false),
       skip_service_worker(false),
-      request_context_type(REQUEST_CONTEXT_TYPE_LOCATION) {}
+      request_context_type(REQUEST_CONTEXT_TYPE_LOCATION),
+      mixed_content_context_type(blink::WebMixedContentContextType::Blockable) {
+}
 
 BeginNavigationParams::BeginNavigationParams(
     std::string headers,
     int load_flags,
     bool has_user_gesture,
     bool skip_service_worker,
-    RequestContextType request_context_type)
+    RequestContextType request_context_type,
+    blink::WebMixedContentContextType mixed_content_context_type,
+    const base::Optional<url::Origin>& initiator_origin)
     : headers(headers),
       load_flags(load_flags),
       has_user_gesture(has_user_gesture),
       skip_service_worker(skip_service_worker),
-      request_context_type(request_context_type) {}
+      request_context_type(request_context_type),
+      mixed_content_context_type(mixed_content_context_type),
+      initiator_origin(initiator_origin) {}
 
 BeginNavigationParams::BeginNavigationParams(
     const BeginNavigationParams& other) = default;
+
+BeginNavigationParams::~BeginNavigationParams() {}
 
 StartNavigationParams::StartNavigationParams()
     : transferred_request_child_id(-1),
@@ -135,7 +145,9 @@ RequestNavigationParams::RequestNavigationParams()
       should_clear_history_list(false),
       should_create_service_worker(false),
       service_worker_provider_id(kInvalidServiceWorkerProviderId),
-      has_user_gesture(false) {}
+      appcache_host_id(kAppCacheNoHostId),
+      has_user_gesture(false) {
+}
 
 RequestNavigationParams::RequestNavigationParams(
     bool is_overriding_user_agent,
@@ -171,7 +183,9 @@ RequestNavigationParams::RequestNavigationParams(
       should_clear_history_list(should_clear_history_list),
       should_create_service_worker(false),
       service_worker_provider_id(kInvalidServiceWorkerProviderId),
-      has_user_gesture(has_user_gesture) {}
+      appcache_host_id(kAppCacheNoHostId),
+      has_user_gesture(has_user_gesture) {
+}
 
 RequestNavigationParams::RequestNavigationParams(
     const RequestNavigationParams& other) = default;

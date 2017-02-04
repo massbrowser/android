@@ -13,6 +13,7 @@
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/display/screen.h"
 #include "ui/views/widget/widget.h"
 
 namespace app_list {
@@ -31,9 +32,9 @@ ui::Layer* GetLayer(views::Widget* widget) {
 }  // namespace
 
 AppListPresenterImpl::AppListPresenterImpl(
-    AppListPresenterDelegateFactory* factory)
-    : factory_(factory) {
-  DCHECK(factory);
+    std::unique_ptr<AppListPresenterDelegateFactory> factory)
+    : factory_(std::move(factory)) {
+  DCHECK(factory_);
 }
 
 AppListPresenterImpl::~AppListPresenterImpl() {
@@ -57,6 +58,9 @@ void AppListPresenterImpl::Show(int64_t display_id) {
     return;
 
   is_visible_ = true;
+  if (app_list_)
+    app_list_->OnTargetVisibilityChanged(GetTargetVisibility());
+
   if (view_) {
     ScheduleAnimation();
   } else {
@@ -80,6 +84,8 @@ void AppListPresenterImpl::Dismiss() {
   DCHECK(view_);
 
   is_visible_ = false;
+  if (app_list_)
+    app_list_->OnTargetVisibilityChanged(GetTargetVisibility());
 
   // The dismissal may have occurred in response to the app list losing
   // activation. Otherwise, our widget is currently active. When the animation
@@ -108,6 +114,14 @@ bool AppListPresenterImpl::IsVisible() const {
 
 bool AppListPresenterImpl::GetTargetVisibility() const {
   return is_visible_;
+}
+
+void AppListPresenterImpl::SetAppList(mojom::AppListPtr app_list) {
+  DCHECK(app_list);
+  app_list_ = std::move(app_list);
+  // Notify the app list interface of the current [target] visibility.
+  app_list_->OnTargetVisibilityChanged(GetTargetVisibility());
+  app_list_->OnVisibilityChanged(IsVisible(), GetDisplayId());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -172,6 +186,15 @@ void AppListPresenterImpl::ScheduleAnimation() {
   widget->SetBounds(target_bounds);
 }
 
+int64_t AppListPresenterImpl::GetDisplayId() {
+  views::Widget* widget = view_ ? view_->GetWidget() : nullptr;
+  if (!widget)
+    return display::kInvalidDisplayId;
+  return display::Screen::GetScreen()
+      ->GetDisplayNearestWindow(widget->GetNativeView())
+      .id();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // AppListPresenterImpl,  aura::client::FocusChangeObserver implementation:
 
@@ -211,10 +234,17 @@ void AppListPresenterImpl::OnImplicitAnimationsCompleted() {
 // AppListPresenterImpl, views::WidgetObserver implementation:
 
 void AppListPresenterImpl::OnWidgetDestroying(views::Widget* widget) {
-  DCHECK(view_->GetWidget() == widget);
+  DCHECK_EQ(view_->GetWidget(), widget);
   if (is_visible_)
     Dismiss();
   ResetView();
+}
+
+void AppListPresenterImpl::OnWidgetVisibilityChanged(views::Widget* widget,
+                                                     bool visible) {
+  DCHECK_EQ(view_->GetWidget(), widget);
+  if (app_list_)
+    app_list_->OnVisibilityChanged(visible, GetDisplayId());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -501,7 +501,7 @@ void Verify206Response(const std::string& response, int start, int end) {
 
   int64_t range_start, range_end, object_size;
   ASSERT_TRUE(
-      headers->GetContentRange(&range_start, &range_end, &object_size));
+      headers->GetContentRangeFor206(&range_start, &range_end, &object_size));
   int64_t content_length = headers->GetContentLength();
 
   int length = end - start + 1;
@@ -6788,6 +6788,70 @@ TEST(HttpCache, WriteMetadata_Fail) {
   EXPECT_EQ(1, cache.disk_cache()->create_count());
 }
 
+// Tests that we ignore VARY checks when writing metadata since the request
+// headers for the WriteMetadata transaction are made up.
+TEST(HttpCache, WriteMetadata_IgnoreVary) {
+  MockHttpCache cache;
+
+  // Write to the cache
+  HttpResponseInfo response;
+  ScopedMockTransaction transaction(kSimpleGET_Transaction);
+  transaction.request_headers = "accept-encoding: gzip\r\n";
+  transaction.response_headers =
+      "Vary: accept-encoding\n"
+      "Cache-Control: max-age=10000\n";
+
+  RunTransactionTestWithResponseInfo(cache.http_cache(), transaction,
+                                     &response);
+  EXPECT_FALSE(response.metadata);
+
+  // Attempt to write meta data to the same entry.
+  scoped_refptr<IOBufferWithSize> buf(new IOBufferWithSize(50));
+  memset(buf->data(), 0, buf->size());
+  base::strlcpy(buf->data(), "Hi there", buf->size());
+  cache.http_cache()->WriteMetadata(GURL(transaction.url), DEFAULT_PRIORITY,
+                                    response.response_time, buf.get(),
+                                    buf->size());
+
+  // Makes sure we finish pending operations.
+  base::RunLoop().RunUntilIdle();
+
+  RunTransactionTestWithResponseInfo(cache.http_cache(), transaction,
+                                     &response);
+  ASSERT_TRUE(response.metadata);
+  EXPECT_EQ(50, response.metadata->size());
+  EXPECT_EQ(0, strcmp(response.metadata->data(), "Hi there"));
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+}
+
+TEST(HttpCache, SkipVaryCheck) {
+  MockHttpCache cache;
+
+  // Write a simple vary transaction to the cache.
+  HttpResponseInfo response;
+  ScopedMockTransaction transaction(kSimpleGET_Transaction);
+  transaction.request_headers = "accept-encoding: gzip\r\n";
+  transaction.response_headers =
+      "Vary: accept-encoding\n"
+      "Cache-Control: max-age=10000\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  // Change the request headers so that the request doesn't match due to vary.
+  // The request should fail.
+  transaction.load_flags = LOAD_ONLY_FROM_CACHE;
+  transaction.request_headers = "accept-encoding: foo\r\n";
+  transaction.return_code = ERR_CACHE_MISS;
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  // Change the load flags to ignore vary checks, the request should now hit.
+  transaction.load_flags = LOAD_ONLY_FROM_CACHE | LOAD_SKIP_VARY_CHECK;
+  transaction.return_code = OK;
+  RunTransactionTest(cache.http_cache(), transaction);
+}
+
 // Tests that we only return valid entries with LOAD_ONLY_FROM_CACHE
 // transactions unless LOAD_SKIP_CACHE_VALIDATION is set.
 TEST(HttpCache, ValidLoadOnlyFromCache) {
@@ -7674,6 +7738,7 @@ TEST(HttpCache, NetworkBytesRange) {
 
 class HttpCachePrefetchValidationTest : public ::testing::Test {
  protected:
+  static const int kNumSecondsPerMinute = 60;
   static const int kMaxAgeSecs = 100;
   static const int kRequireValidationSecs = kMaxAgeSecs + 1;
 

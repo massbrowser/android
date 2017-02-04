@@ -8,12 +8,17 @@
 #include <string>
 
 #include "net/base/ip_address.h"
+#include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_ip_address_family.h"
 
 namespace net {
 
-class NET_EXPORT_PRIVATE QuicIpAddressImpl {
+class QUIC_EXPORT_PRIVATE QuicIpAddressImpl {
  public:
+  enum : size_t {
+    kIPv4AddressSize = IPAddress::kIPv4AddressSize,
+    kIPv6AddressSize = IPAddress::kIPv6AddressSize
+  };
   static QuicIpAddressImpl Loopback4();
   static QuicIpAddressImpl Loopback6();
   static QuicIpAddressImpl Any4();

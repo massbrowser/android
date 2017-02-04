@@ -8,6 +8,8 @@
 #include "core/dom/Element.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/PageScaleConstraintsSet.h"
+#include "core/frame/VisualViewport.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/PaintLayerCompositor.h"
@@ -43,11 +45,9 @@ void TopDocumentRootScrollerController::didChangeRootScroller() {
 
 void TopDocumentRootScrollerController::mainFrameViewResized() {
   Element* rootScroller = globalRootScroller();
-  if (!rootScroller)
-    return;
 
   ScrollableArea* area =
-      RootScrollerUtil::scrollableAreaForRootScroller(*rootScroller);
+      RootScrollerUtil::scrollableAreaForRootScroller(rootScroller);
 
   if (!area)
     return;
@@ -62,13 +62,36 @@ void TopDocumentRootScrollerController::mainFrameViewResized() {
   }
 }
 
+ScrollableArea* TopDocumentRootScrollerController::rootScrollerArea() const {
+  return RootScrollerUtil::scrollableAreaForRootScroller(globalRootScroller());
+}
+
+IntSize TopDocumentRootScrollerController::rootScrollerVisibleArea() const {
+  if (!topDocument() || !topDocument()->view())
+    return IntSize();
+
+  float minimumPageScale =
+      m_frameHost->pageScaleConstraintsSet().finalConstraints().minimumScale;
+  int browserControlsAdjustment =
+      ceilf(m_frameHost->visualViewport().browserControlsAdjustment() /
+            minimumPageScale);
+
+  return topDocument()->view()->visibleContentSize(ExcludeScrollbars) +
+         IntSize(0, browserControlsAdjustment);
+}
+
 Element* TopDocumentRootScrollerController::findGlobalRootScrollerElement() {
   if (!topDocument())
     return nullptr;
 
-  DCHECK(topDocument()->rootScrollerController());
-  Element* element =
-      topDocument()->rootScrollerController()->effectiveRootScroller();
+  Node* effectiveRootScroller =
+      &topDocument()->rootScrollerController().effectiveRootScroller();
+
+  if (effectiveRootScroller->isDocumentNode())
+    return topDocument()->documentElement();
+
+  DCHECK(effectiveRootScroller->isElementNode());
+  Element* element = toElement(effectiveRootScroller);
 
   while (element && element->isFrameOwnerElement()) {
     HTMLFrameOwnerElement* frameOwner = toHTMLFrameOwnerElement(element);
@@ -78,8 +101,12 @@ Element* TopDocumentRootScrollerController::findGlobalRootScrollerElement() {
     if (!iframeDocument)
       return element;
 
-    DCHECK(iframeDocument->rootScrollerController());
-    element = iframeDocument->rootScrollerController()->effectiveRootScroller();
+    effectiveRootScroller =
+        &iframeDocument->rootScrollerController().effectiveRootScroller();
+    if (effectiveRootScroller->isDocumentNode())
+      return iframeDocument->documentElement();
+
+    element = toElement(effectiveRootScroller);
   }
 
   return element;
@@ -90,11 +117,11 @@ void TopDocumentRootScrollerController::recomputeGlobalRootScroller() {
     return;
 
   Element* target = findGlobalRootScrollerElement();
-  if (!target || target == m_globalRootScroller)
+  if (target == m_globalRootScroller)
     return;
 
   ScrollableArea* targetScroller =
-      RootScrollerUtil::scrollableAreaForRootScroller(*target);
+      RootScrollerUtil::scrollableAreaForRootScroller(target);
 
   if (!targetScroller)
     return;
@@ -117,9 +144,7 @@ void TopDocumentRootScrollerController::recomputeGlobalRootScroller() {
   setNeedsCompositingInputsUpdateOnGlobalRootScroller();
 
   ScrollableArea* oldRootScrollerArea =
-      m_globalRootScroller ? RootScrollerUtil::scrollableAreaForRootScroller(
-                                 *m_globalRootScroller.get())
-                           : nullptr;
+      RootScrollerUtil::scrollableAreaForRootScroller(m_globalRootScroller);
 
   m_globalRootScroller = target;
 
@@ -158,7 +183,7 @@ void TopDocumentRootScrollerController::
 
   PaintLayer* layer = m_globalRootScroller->document()
                           .rootScrollerController()
-                          ->rootScrollerPaintLayer();
+                          .rootScrollerPaintLayer();
 
   if (layer)
     layer->setNeedsCompositingInputsUpdate();
@@ -174,6 +199,26 @@ void TopDocumentRootScrollerController::didUpdateCompositing() {
 
   // Let the compositor-side counterpart know about this change.
   m_frameHost->chromeClient().registerViewportLayers();
+}
+
+void TopDocumentRootScrollerController::didDisposeScrollableArea(
+    ScrollableArea& area) {
+  if (!topDocument() || !topDocument()->view())
+    return;
+
+  // If the document is tearing down, we may no longer have a layoutViewport to
+  // fallback to.
+  if (topDocument()->lifecycle().state() >= DocumentLifecycle::Stopping)
+    return;
+
+  FrameView* frameView = topDocument()->view();
+
+  RootFrameViewport* rfv = frameView->getRootFrameViewport();
+
+  if (&area == &rfv->layoutViewport()) {
+    DCHECK(frameView->layoutViewportScrollableArea());
+    rfv->setLayoutViewport(*frameView->layoutViewportScrollableArea());
+  }
 }
 
 void TopDocumentRootScrollerController::initializeViewportScrollCallback(
@@ -195,11 +240,8 @@ bool TopDocumentRootScrollerController::isViewportScrollCallback(
 }
 
 GraphicsLayer* TopDocumentRootScrollerController::rootScrollerLayer() const {
-  if (!m_globalRootScroller)
-    return nullptr;
-
   ScrollableArea* area =
-      RootScrollerUtil::scrollableAreaForRootScroller(*m_globalRootScroller);
+      RootScrollerUtil::scrollableAreaForRootScroller(m_globalRootScroller);
 
   if (!area)
     return nullptr;

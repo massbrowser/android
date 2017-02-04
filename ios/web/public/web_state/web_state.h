@@ -24,6 +24,7 @@ class GURL;
 class SkBitmap;
 
 @class CRWJSInjectionReceiver;
+@class CRWNavigationManagerStorage;
 @protocol CRWScrollableContent;
 @protocol CRWWebViewProxy;
 typedef id<CRWWebViewProxy> CRWWebViewProxyType;
@@ -98,6 +99,10 @@ class WebState : public base::SupportsUserData {
 
   // Creates a new WebState.
   static std::unique_ptr<WebState> Create(const CreateParams& params);
+  // Creates a new WebState from a serialized NavigationManager.
+  static std::unique_ptr<WebState> Create(
+      const CreateParams& params,
+      CRWNavigationManagerStorage* session_storage);
 
   ~WebState() override {}
 
@@ -135,13 +140,17 @@ class WebState : public base::SupportsUserData {
   virtual const NavigationManager* GetNavigationManager() const = 0;
   virtual NavigationManager* GetNavigationManager() = 0;
 
+  // Creates a serialized version of the NavigationManager. The returned value
+  // is autoreleased.
+  virtual CRWNavigationManagerStorage* BuildSerializedNavigationManager() = 0;
+
   // Gets the CRWJSInjectionReceiver associated with this WebState.
   virtual CRWJSInjectionReceiver* GetJSInjectionReceiver() const = 0;
 
   // Runs JavaScript in the main frame's context. If a callback is provided, it
   // will be used to return the result, when the result is available or script
   // execution has failed due to an error.
-  // NOTE: Integer values will be returned as TYPE_DOUBLE because of underlying
+  // NOTE: Integer values will be returned as Type::DOUBLE because of underlying
   // library limitation.
   typedef base::Callback<void(const base::Value*)> JavaScriptResultCallback;
   virtual void ExecuteJavaScript(const base::string16& javascript) = 0;
@@ -199,6 +208,10 @@ class WebState : public base::SupportsUserData {
 
   // Returns the currently visible WebInterstitial if one is shown.
   virtual WebInterstitial* GetWebInterstitial() const = 0;
+
+  // Tells the WebState that the current page is an HTTP page
+  // containing a password field.
+  virtual void OnPasswordInputShownOnHttp() = 0;
 
   // Callback used to handle script commands.
   // The callback must return true if the command was handled, and false

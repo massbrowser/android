@@ -282,7 +282,7 @@ class Manager(object):
                 test_expectations.NEEDS_MANUAL_REBASELINE in expectations)
 
     def _test_is_slow(self, test_file):
-        return test_expectations.SLOW in self._expectations.model().get_expectations(test_file)
+        return test_expectations.SLOW in self._expectations.model().get_expectations(test_file) or self._port.is_slow_wpt_test(test_file)
 
     def _needs_servers(self, test_names):
         return any(self._test_requires_lock(test_name) for test_name in test_names)
@@ -292,12 +292,12 @@ class Manager(object):
             timestamp = time.strftime(
                 "%Y-%m-%d-%H-%M-%S", time.localtime(
                     self._filesystem.mtime(self._filesystem.join(self._results_directory, "results.html"))))
-        except (IOError, OSError) as e:
+        except (IOError, OSError) as error:
             # It might be possible that results.html was not generated in previous run, because the test
             # run was interrupted even before testing started. In those cases, don't archive the folder.
             # Simply override the current folder contents with new results.
             import errno
-            if e.errno == errno.EEXIST or e.errno == errno.ENOENT:
+            if error.errno in (errno.EEXIST, errno.ENOENT):
                 self._printer.write_update("No results.html file found in previous run, skipping it.")
             return None
         archived_name = ''.join((self._filesystem.basename(self._results_directory), "_", timestamp))
@@ -360,7 +360,7 @@ class Manager(object):
                                       tests_to_skip, num_workers, retry_attempt)
 
     def _start_servers(self, tests_to_run):
-        if self._port.is_wptserve_enabled() and any(self._port.is_wptserve_test(test) for test in tests_to_run):
+        if any(self._port.is_wptserve_test(test) for test in tests_to_run):
             self._printer.write_update('Starting WPTServe ...')
             self._port.start_wptserve()
             self._wptserve_started = True
@@ -508,7 +508,7 @@ class Manager(object):
         files = [(file, self._filesystem.join(self._results_directory, file))
                  for file in ["failing_results.json", "full_results.json", "times_ms.json"]]
 
-        url = "http://%s/testfile/upload" % self._options.test_results_server
+        url = "https://%s/testfile/upload" % self._options.test_results_server
         # Set uploading timeout in case appengine server is having problems.
         # 120 seconds are more than enough to upload test results.
         uploader = FileUploader(url, 120)

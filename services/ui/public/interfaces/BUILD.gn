@@ -8,13 +8,11 @@ import("//testing/test.gni")
 mojom("interfaces") {
   sources = [
     "accessibility_manager.mojom",
-    "animations.mojom",
     "clipboard.mojom",
     "cursor.mojom",
     "display_manager.mojom",
     "event_matcher.mojom",
-    "gpu_service.mojom",
-    "ime.mojom",
+    "gpu.mojom",
     "mus_constants.mojom",
     "user_access_manager.mojom",
     "user_activity_monitor.mojom",
@@ -37,6 +35,8 @@ mojom("interfaces") {
     "//cc/ipc:interfaces",
     "//gpu/ipc/common:interfaces",
     "//services/ui/public/interfaces/display",
+    "//services/ui/public/interfaces/ime",
+    "//ui/display/mojo:interfaces",
     "//ui/events/mojo:interfaces",
     "//ui/gfx/geometry/mojo",
     "//ui/gfx/mojo",
@@ -54,14 +54,14 @@ test("ui_struct_traits_unittests") {
   testonly = true
 
   sources = [
-    "display/display_struct_traits_unittest.cc",
+    "ime/ime_struct_traits_unittest.cc",
   ]
 
   deps = [
     "//base",
     "//base/test:test_support",
     "//mojo/edk/test:run_all_unittests",
-    "//services/ui/public/interfaces/display:test_interfaces",
+    "//services/ui/public/interfaces/ime:test_interfaces",
     "//testing/gtest",
     "//ui/display/types",
     "//ui/gfx:test_support",

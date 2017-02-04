@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_ERROR_CODES_H_
-#define NET_QUIC_QUIC_ERROR_CODES_H_
+#ifndef NET_QUIC_CORE_QUIC_ERROR_CODES_H_
+#define NET_QUIC_CORE_QUIC_ERROR_CODES_H_
 
-#include <stdint.h>
-
+#include <cstdint>
 #include <limits>
 
-#include "net/base/net_export.h"
+#include "net/quic/platform/api/quic_export.h"
 
 namespace net {
 
@@ -181,7 +180,7 @@ enum QuicErrorCode {
 
   // Crypto errors.
 
-  // Hanshake failed.
+  // Handshake failed.
   QUIC_HANDSHAKE_FAILED = 28,
   // Handshake message contained out of order tags.
   QUIC_CRYPTO_TAGS_OUT_OF_ORDER = 29,
@@ -207,7 +206,7 @@ enum QuicErrorCode {
   QUIC_CRYPTO_MESSAGE_INDEX_NOT_FOUND = 37,
   // A demand for an unsupport proof type was received.
   QUIC_UNSUPPORTED_PROOF_DEMAND = 94,
-  // An internal error occured in crypto processing.
+  // An internal error occurred in crypto processing.
   QUIC_CRYPTO_INTERNAL_ERROR = 38,
   // A crypto handshake message specified an unsupported version.
   QUIC_CRYPTO_VERSION_NOT_SUPPORTED = 39,
@@ -271,7 +270,6 @@ enum QuicErrorCode {
   QUIC_STREAM_SEQUENCER_INVALID_STATE = 95,
 
   // Connection closed because of server hits max number of sessions allowed.
-  // TODO(fayang): Add monitoring for QUIC_TOO_MANY_SESSIONS_ON_SERVER.
   QUIC_TOO_MANY_SESSIONS_ON_SERVER = 96,
 
   // No error. Used as bound while iterating.
@@ -283,12 +281,12 @@ static_assert(static_cast<int>(QUIC_LAST_ERROR) <=
               "QuicErrorCode exceeds single octet");
 
 // Returns the name of the QuicRstStreamErrorCode as a char*
-NET_EXPORT_PRIVATE const char* QuicRstStreamErrorCodeToString(
+QUIC_EXPORT_PRIVATE const char* QuicRstStreamErrorCodeToString(
     QuicRstStreamErrorCode error);
 
 // Returns the name of the QuicErrorCode as a char*
-NET_EXPORT_PRIVATE const char* QuicErrorCodeToString(QuicErrorCode error);
+QUIC_EXPORT_PRIVATE const char* QuicErrorCodeToString(QuicErrorCode error);
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_ERROR_CODES_H_
+#endif  // NET_QUIC_CORE_QUIC_ERROR_CODES_H_

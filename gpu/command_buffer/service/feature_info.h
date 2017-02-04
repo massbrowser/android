@@ -56,6 +56,7 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool angle_pack_reverse_row_order;
     bool arb_texture_rectangle;
     bool angle_instanced_arrays;
+    bool occlusion_query;
     bool occlusion_query_boolean;
     bool use_arb_occlusion_query2_for_occlusion_query_boolean;
     bool use_arb_occlusion_query_for_occlusion_query_boolean;
@@ -98,6 +99,8 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool khr_debug = false;
     bool chromium_bind_generates_resource = false;
     bool angle_webgl_compatibility = false;
+    bool ext_srgb_write_control = false;
+    bool ext_srgb = false;
   };
 
   FeatureInfo();

@@ -61,6 +61,7 @@ import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
 import org.chromium.chrome.browser.preferences.website.ContentSettingsResources;
 import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
+import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ssl.SecurityStateModel;
 import org.chromium.chrome.browser.tab.Tab;
@@ -137,7 +138,7 @@ public class WebsiteSettingsPopup implements OnClickListener {
         private boolean mIsShowingTruncatedText = true;
 
         // The profile to use when getting the end index for the origin.
-        private Profile mProfile = null;
+        private Profile mProfile;
 
         // The maximum number of lines currently shown in the view
         private int mCurrentMaxLines = Integer.MAX_VALUE;
@@ -242,8 +243,6 @@ public class WebsiteSettingsPopup implements OnClickListener {
     private static final int MAX_TABLET_DIALOG_WIDTH_DP = 400;
 
     private final Context mContext;
-    private final Profile mProfile;
-    private final WebContents mWebContents;
     private final WindowAndroid mWindowAndroid;
     private final Tab mTab;
 
@@ -266,7 +265,7 @@ public class WebsiteSettingsPopup implements OnClickListener {
     private final Dialog mDialog;
 
     // Animation which is currently running, if there is one.
-    private AnimatorSet mCurrentAnimation = null;
+    private AnimatorSet mCurrentAnimation;
 
     private boolean mDismissWithoutAnimation;
 
@@ -308,13 +307,11 @@ public class WebsiteSettingsPopup implements OnClickListener {
     private WebsiteSettingsPopup(Activity activity, Tab tab, String offlinePageCreationDate,
             String publisher) {
         mContext = activity;
-        mProfile = tab.getProfile();
-        mWebContents = tab.getWebContents();
         mTab = tab;
         if (offlinePageCreationDate != null) {
             mOfflinePageCreationDate = offlinePageCreationDate;
         }
-        mWindowAndroid = ContentViewCore.fromWebContents(mWebContents).getWindowAndroid();
+        mWindowAndroid = ContentViewCore.fromWebContents(mTab.getWebContents()).getWindowAndroid();
         mContentPublisher = publisher;
 
         // Find the container and all it's important subviews.
@@ -334,7 +331,7 @@ public class WebsiteSettingsPopup implements OnClickListener {
         });
 
         mUrlTitle = (ElidedUrlTextView) mContainer.findViewById(R.id.website_settings_url);
-        mUrlTitle.setProfile(mProfile);
+        mUrlTitle.setProfile(mTab.getProfile());
         mUrlTitle.setOnClickListener(this);
         // Long press the url text to copy it to the clipboard.
         mUrlTitle.setOnLongClickListener(new OnLongClickListener() {
@@ -374,7 +371,7 @@ public class WebsiteSettingsPopup implements OnClickListener {
         setVisibilityOfPermissionsList(false);
 
         // Work out the URL and connection message and status visibility.
-        mFullUrl = mWebContents.getVisibleUrl();
+        mFullUrl = mTab.getWebContents().getVisibleUrl();
         if (isShowingOfflinePage()) {
             mFullUrl = OfflinePageUtils.stripSchemeFromOnlineUrl(mFullUrl);
         }
@@ -386,10 +383,10 @@ public class WebsiteSettingsPopup implements OnClickListener {
             mParsedUrl = null;
             mIsInternalPage = false;
         }
-        mSecurityLevel = SecurityStateModel.getSecurityLevelForWebContents(mWebContents);
+        mSecurityLevel = SecurityStateModel.getSecurityLevelForWebContents(mTab.getWebContents());
 
         SpannableStringBuilder urlBuilder = new SpannableStringBuilder(mFullUrl);
-        OmniboxUrlEmphasizer.emphasizeUrl(urlBuilder, mContext.getResources(), mProfile,
+        OmniboxUrlEmphasizer.emphasizeUrl(urlBuilder, mContext.getResources(), mTab.getProfile(),
                 mSecurityLevel, mIsInternalPage, true, true);
         mUrlTitle.setText(urlBuilder);
 
@@ -408,7 +405,7 @@ public class WebsiteSettingsPopup implements OnClickListener {
             mOpenOnlineButton.setVisibility(View.GONE);
         }
 
-        mInstantAppIntent = mIsInternalPage ? null
+        mInstantAppIntent = (mIsInternalPage || isShowingOfflinePage()) ? null
                 : InstantAppsHandler.getInstance().getInstantAppIntentForUrl(mFullUrl);
         if (mInstantAppIntent == null) mInstantAppButton.setVisibility(View.GONE);
 
@@ -454,8 +451,9 @@ public class WebsiteSettingsPopup implements OnClickListener {
         }
 
         // This needs to come after other member initialization.
-        mNativeWebsiteSettingsPopup = nativeInit(this, mWebContents);
-        final WebContentsObserver webContentsObserver = new WebContentsObserver(mWebContents) {
+        mNativeWebsiteSettingsPopup = nativeInit(this, mTab.getWebContents());
+        final WebContentsObserver webContentsObserver =
+                new WebContentsObserver(mTab.getWebContents()) {
             @Override
             public void navigationEntryCommitted() {
                 // If a navigation is committed (e.g. from in-page redirect), the data we're showing
@@ -617,9 +615,24 @@ public class WebsiteSettingsPopup implements OnClickListener {
                 assert false : "Invalid setting " + permission.setting + " for permission "
                         + permission.type;
         }
+        if (permission.type == ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION
+                && WebsitePreferenceBridge.shouldUseDSEGeolocationSetting(mFullUrl, false)) {
+            status_text = statusTextForDSEPermission(permission);
+        }
         builder.append(status_text);
         permissionStatus.setText(builder);
         mPermissionsList.addView(permissionRow);
+    }
+
+    /**
+     * Update the permission string for the Default Search Engine.
+     */
+    private String statusTextForDSEPermission(PageInfoPermissionEntry permission) {
+        if (permission.setting == ContentSetting.ALLOW) {
+            return mContext.getString(R.string.page_info_dse_permission_allowed);
+        }
+
+        return mContext.getString(R.string.page_info_dse_permission_blocked);
     }
 
     /**
@@ -723,7 +736,7 @@ public class WebsiteSettingsPopup implements OnClickListener {
                     Bundle fragmentArguments =
                             SingleWebsitePreferences.createFragmentArgsForSite(mFullUrl);
                     fragmentArguments.putParcelable(SingleWebsitePreferences.EXTRA_WEB_CONTENTS,
-                            mWebContents);
+                            mTab.getWebContents());
                     Intent preferencesIntent = PreferencesLauncher.createIntentForSettingsPage(
                             mContext, SingleWebsitePreferences.class.getName());
                     preferencesIntent.putExtra(
@@ -745,10 +758,10 @@ public class WebsiteSettingsPopup implements OnClickListener {
             runAfterDismiss(new Runnable() {
                 @Override
                 public void run() {
-                    if (!mWebContents.isDestroyed()) {
+                    if (!mTab.getWebContents().isDestroyed()) {
                         recordAction(
                                 WebsiteSettingsAction.WEBSITE_SETTINGS_SECURITY_DETAILS_OPENED);
-                        ConnectionInfoPopup.show(mContext, mWebContents);
+                        ConnectionInfoPopup.show(mContext, mTab.getWebContents());
                     }
                 }
             });

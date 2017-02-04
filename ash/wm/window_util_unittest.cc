@@ -4,9 +4,9 @@
 
 #include "ash/wm/window_util.h"
 
-#include "ash/aura/wm_window_aura.h"
 #include "ash/common/wm/window_positioning_utils.h"
 #include "ash/common/wm/window_state.h"
+#include "ash/common/wm_window.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_state_aura.h"
 #include "ui/aura/window.h"
@@ -27,9 +27,6 @@ std::string GetAdjustedBounds(const gfx::Rect& visible,
 typedef test::AshTestBase WindowUtilTest;
 
 TEST_F(WindowUtilTest, CenterWindow) {
-  if (!SupportsMultipleDisplays())
-    return;
-
   UpdateDisplay("500x400, 600x400");
   std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(12, 20, 100, 100)));
@@ -37,14 +34,14 @@ TEST_F(WindowUtilTest, CenterWindow) {
   wm::WindowState* window_state = wm::GetWindowState(window.get());
   EXPECT_FALSE(window_state->bounds_changed_by_user());
 
-  wm::CenterWindow(WmWindowAura::Get(window.get()));
+  wm::CenterWindow(WmWindow::Get(window.get()));
   // Centring window is considered as a user's action.
   EXPECT_TRUE(window_state->bounds_changed_by_user());
   EXPECT_EQ("200,126 100x100", window->bounds().ToString());
   EXPECT_EQ("200,126 100x100", window->GetBoundsInScreen().ToString());
   window->SetBoundsInScreen(gfx::Rect(600, 0, 100, 100),
                             display_manager()->GetSecondaryDisplay());
-  wm::CenterWindow(WmWindowAura::Get(window.get()));
+  wm::CenterWindow(WmWindow::Get(window.get()));
   EXPECT_EQ("250,126 100x100", window->bounds().ToString());
   EXPECT_EQ("750,126 100x100", window->GetBoundsInScreen().ToString());
 }

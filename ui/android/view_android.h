@@ -61,6 +61,16 @@ class UI_ANDROID_EXPORT ViewAndroid {
   ViewAndroid();
   virtual ~ViewAndroid();
 
+  // The content offset is in CSS pixels, and is used to translate
+  // snapshots to the correct part of the view.
+  void set_content_offset(const gfx::Vector2dF& content_offset) {
+    content_offset_ = content_offset;
+  }
+
+  gfx::Vector2dF content_offset() const {
+    return content_offset_;
+  }
+
   // Returns the window at the root of this hierarchy, or |null|
   // if disconnected.
   virtual WindowAndroid* GetWindowAndroid() const;
@@ -84,6 +94,9 @@ class UI_ANDROID_EXPORT ViewAndroid {
   void SetAnchorRect(const base::android::JavaRef<jobject>& anchor,
                      const gfx::RectF& bounds);
 
+  // This may return null.
+  base::android::ScopedJavaLocalRef<jobject> GetContainerView();
+
  protected:
   ViewAndroid* parent_;
 
@@ -99,6 +112,7 @@ class UI_ANDROID_EXPORT ViewAndroid {
   std::list<ViewAndroid*> children_;
   scoped_refptr<cc::Layer> layer_;
   JavaObjectWeakGlobalRef delegate_;
+  gfx::Vector2dF content_offset_;  // in CSS pixel
 
   DISALLOW_COPY_AND_ASSIGN(ViewAndroid);
 };

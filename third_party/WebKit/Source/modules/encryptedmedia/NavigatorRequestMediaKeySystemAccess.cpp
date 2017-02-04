@@ -208,7 +208,7 @@ void MediaKeySystemAccessInitializer::requestSucceeded(
     return;
 
   m_resolver->resolve(
-      new MediaKeySystemAccess(m_keySystem, wrapUnique(access)));
+      new MediaKeySystemAccess(m_keySystem, WTF::wrapUnique(access)));
   m_resolver.clear();
 }
 
@@ -222,11 +222,11 @@ void MediaKeySystemAccessInitializer::requestNotSupported(
 }
 
 bool MediaKeySystemAccessInitializer::isExecutionContextValid() const {
-  // activeDOMObjectsAreStopped() is called to see if the context is in the
+  // isContextDestroyed() is called to see if the context is in the
   // process of being destroyed. If it is true, assume the context is no
   // longer valid as it is about to be destroyed anyway.
   ExecutionContext* context = m_resolver->getExecutionContext();
-  return context && !context->activeDOMObjectsAreStopped();
+  return context && !context->isContextDestroyed();
 }
 
 void MediaKeySystemAccessInitializer::checkVideoCapabilityRobustness() const {
@@ -314,10 +314,9 @@ void MediaKeySystemAccessInitializer::checkCapabilities(
     UseCounter::count(m_resolver->getExecutionContext(),
                       UseCounter::EncryptedMediaCapabilityProvided);
   } else {
-    // TODO(jrummell): Switch to deprecation message once we understand
-    // current usage. http://crbug.com/616233.
-    UseCounter::count(m_resolver->getExecutionContext(),
-                      UseCounter::EncryptedMediaCapabilityNotProvided);
+    Deprecation::countDeprecation(
+        m_resolver->getExecutionContext(),
+        UseCounter::EncryptedMediaCapabilityNotProvided);
   }
 }
 
@@ -355,8 +354,7 @@ ScriptPromise NavigatorRequestMediaKeySystemAccess::requestMediaKeySystemAccess(
   // sites, we simply keep track of sites that aren't secure and output a
   // deprecation message.
   ExecutionContext* executionContext = scriptState->getExecutionContext();
-  String errorMessage;
-  if (executionContext->isSecureContext(errorMessage)) {
+  if (executionContext->isSecureContext()) {
     UseCounter::count(executionContext, UseCounter::EncryptedMediaSecureOrigin);
   } else {
     Deprecation::countDeprecation(executionContext,

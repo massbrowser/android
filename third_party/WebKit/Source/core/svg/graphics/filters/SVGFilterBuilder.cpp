@@ -80,7 +80,7 @@ void SVGFilterGraphNodeMap::addPrimitive(LayoutObject* object,
   // allow determining what effects needs to be invalidated when a certain
   // effect changes.
   for (unsigned i = 0; i < numberOfInputEffects; ++i)
-    effectReferences(effect->inputEffect(i)).add(effect);
+    effectReferences(effect->inputEffect(i)).insert(effect);
 
   // If object is null, that means the element isn't attached for some
   // reason, which in turn mean that certain types of invalidation will not
@@ -107,8 +107,8 @@ DEFINE_TRACE(SVGFilterGraphNodeMap) {
 
 SVGFilterBuilder::SVGFilterBuilder(FilterEffect* sourceGraphic,
                                    SVGFilterGraphNodeMap* nodeMap,
-                                   const SkPaint* fillPaint,
-                                   const SkPaint* strokePaint)
+                                   const PaintFlags* fillPaint,
+                                   const PaintFlags* strokePaint)
     : m_nodeMap(nodeMap) {
   FilterEffect* sourceGraphicRef = sourceGraphic;
   m_builtinEffects.add(FilterInputKeywords::getSourceGraphic(),

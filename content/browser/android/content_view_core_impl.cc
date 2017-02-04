@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "cc/layers/layer.h"
@@ -41,6 +42,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/screen_orientation_provider.h"
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/browser/web_contents.h"
@@ -76,6 +78,7 @@ using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 using blink::WebGestureEvent;
 using blink::WebInputEvent;
+using ui::MotionEventAndroid;
 
 namespace content {
 
@@ -157,6 +160,17 @@ int ToGestureEventType(WebInputEvent::Type type) {
       NOTREACHED() << "Invalid source gesture type: "
                    << WebInputEvent::GetName(type);
       return -1;
+  }
+}
+
+void RecordToolTypeForActionDown(MotionEventAndroid& event) {
+  MotionEventAndroid::Action action = event.GetAction();
+  if (action == MotionEventAndroid::ACTION_DOWN ||
+      action == MotionEventAndroid::ACTION_POINTER_DOWN ||
+      action == MotionEventAndroid::ACTION_BUTTON_PRESS) {
+    UMA_HISTOGRAM_ENUMERATION("Event.AndroidActionDown.ToolType",
+                              event.GetToolType(0),
+                              MotionEventAndroid::TOOL_TYPE_LAST + 1);
   }
 }
 
@@ -414,7 +428,7 @@ void ContentViewCoreImpl::UpdateFrameInfo(
   if (obj.is_null() || !GetWindowAndroid())
     return;
 
-  GetWindowAndroid()->set_content_offset(
+  GetViewAndroid()->set_content_offset(
       gfx::Vector2dF(0.0f, top_controls_height * top_controls_shown_ratio));
 
   page_scale_ = page_scale_factor;
@@ -524,7 +538,7 @@ void ContentViewCoreImpl::OnGestureEventAck(const blink::WebGestureEvent& event,
   if (j_obj.is_null())
     return;
 
-  switch (event.type) {
+  switch (event.type()) {
     case WebInputEvent::GestureFlingStart:
       if (ack_result == INPUT_EVENT_ACK_STATE_CONSUMED) {
         // The view expects the fling velocity in pixels/s.
@@ -569,10 +583,10 @@ void ContentViewCoreImpl::OnGestureEventAck(const blink::WebGestureEvent& event,
 }
 
 bool ContentViewCoreImpl::FilterInputEvent(const blink::WebInputEvent& event) {
-  if (event.type != WebInputEvent::GestureTap &&
-      event.type != WebInputEvent::GestureDoubleTap &&
-      event.type != WebInputEvent::GestureLongTap &&
-      event.type != WebInputEvent::GestureLongPress)
+  if (event.type() != WebInputEvent::GestureTap &&
+      event.type() != WebInputEvent::GestureDoubleTap &&
+      event.type() != WebInputEvent::GestureLongTap &&
+      event.type() != WebInputEvent::GestureLongPress)
     return false;
 
   JNIEnv* env = AttachCurrentThread();
@@ -582,7 +596,7 @@ bool ContentViewCoreImpl::FilterInputEvent(const blink::WebInputEvent& event) {
 
   const blink::WebGestureEvent& gesture =
       static_cast<const blink::WebGestureEvent&>(event);
-  int gesture_type = ToGestureEventType(event.type);
+  int gesture_type = ToGestureEventType(event.type());
   return Java_ContentViewCore_filterTapOrPressEvent(env, j_obj, gesture_type,
                                                     gesture.x * dpi_scale(),
                                                     gesture.y * dpi_scale());
@@ -875,6 +889,7 @@ void ContentViewCoreImpl::SendOrientationChangeEvent(
     const JavaParamRef<jobject>& obj,
     jint orientation) {
   if (device_orientation_ != orientation) {
+    base::RecordAction(base::UserMetricsAction("ScreenOrientationChange"));
     device_orientation_ = orientation;
     SendOrientationChangeEventInternal();
   }
@@ -915,7 +930,7 @@ jboolean ContentViewCoreImpl::OnTouchEvent(
   if (!rwhv)
     return false;
 
-  ui::MotionEventAndroid::Pointer pointer0(pointer_id_0,
+  MotionEventAndroid::Pointer pointer0(pointer_id_0,
                                        pos_x_0,
                                        pos_y_0,
                                        touch_major_0,
@@ -923,7 +938,7 @@ jboolean ContentViewCoreImpl::OnTouchEvent(
                                        orientation_0,
                                        tilt_0,
                                        android_tool_type_0);
-  ui::MotionEventAndroid::Pointer pointer1(pointer_id_1,
+  MotionEventAndroid::Pointer pointer1(pointer_id_1,
                                        pos_x_1,
                                        pos_y_1,
                                        touch_major_1,
@@ -931,7 +946,7 @@ jboolean ContentViewCoreImpl::OnTouchEvent(
                                        orientation_1,
                                        tilt_1,
                                        android_tool_type_1);
-  ui::MotionEventAndroid event(1.f / dpi_scale(),
+  MotionEventAndroid event(1.f / dpi_scale(),
                            env,
                            motion_event,
                            time_ms,
@@ -945,6 +960,8 @@ jboolean ContentViewCoreImpl::OnTouchEvent(
                            raw_pos_y - pos_y_0,
                            &pointer0,
                            &pointer1);
+
+  RecordToolTypeForActionDown(event);
 
   return is_touch_handle_event ? rwhv->OnTouchHandleEvent(event)
                                : rwhv->OnTouchEvent(event);
@@ -973,11 +990,11 @@ jboolean ContentViewCoreImpl::SendMouseEvent(
   // Construct a motion_event object minimally, only to convert the raw
   // parameters to ui::MotionEvent values. Since we used only the cached values
   // at index=0, it is okay to even pass a null event to the constructor.
-  ui::MotionEventAndroid::Pointer pointer0(
+  MotionEventAndroid::Pointer pointer0(
       pointer_id, x, y, 0.0f /* touch_major */, 0.0f /* touch_minor */,
       orientation, tilt, android_tool_type);
 
-  ui::MotionEventAndroid motion_event(1.f / dpi_scale(),
+  MotionEventAndroid motion_event(1.f / dpi_scale(),
       env,
       nullptr /* event */,
       time_ms,
@@ -991,6 +1008,8 @@ jboolean ContentViewCoreImpl::SendMouseEvent(
       0 /* raw_offset_y_pixels */,
       &pointer0,
       nullptr);
+
+  RecordToolTypeForActionDown(motion_event);
 
   // Note: This relies on identical button enum values in MotionEvent and
   // MotionEventAndroid.
@@ -1277,13 +1296,14 @@ void ContentViewCoreImpl::ForceUpdateImeAdapter(long native_ime_adapter) {
 void ContentViewCoreImpl::UpdateImeAdapter(long native_ime_adapter,
                                            int text_input_type,
                                            int text_input_flags,
+                                           int text_input_mode,
                                            const std::string& text,
                                            int selection_start,
                                            int selection_end,
                                            int composition_start,
                                            int composition_end,
                                            bool show_ime_if_needed,
-                                           bool is_non_ime_change) {
+                                           bool reply_to_request) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
@@ -1292,8 +1312,8 @@ void ContentViewCoreImpl::UpdateImeAdapter(long native_ime_adapter,
   ScopedJavaLocalRef<jstring> jstring_text = ConvertUTF8ToJavaString(env, text);
   Java_ContentViewCore_updateImeAdapter(
       env, obj, native_ime_adapter, text_input_type, text_input_flags,
-      jstring_text, selection_start, selection_end, composition_start,
-      composition_end, show_ime_if_needed, is_non_ime_change);
+      text_input_mode, jstring_text, selection_start, selection_end,
+      composition_start, composition_end, show_ime_if_needed, reply_to_request);
 }
 
 void ContentViewCoreImpl::SetAccessibilityEnabled(
@@ -1363,7 +1383,7 @@ void ContentViewCoreImpl::SetAccessibilityEnabledInternal(bool enabled) {
     // this WebContents if that succeeded.
     accessibility_state->OnScreenReaderDetected();
     if (accessibility_state->IsAccessibleBrowser() && web_contents_)
-      web_contents_->AddAccessibilityMode(AccessibilityModeComplete);
+      web_contents_->AddAccessibilityMode(ACCESSIBILITY_MODE_COMPLETE);
   } else {
     accessibility_state->ResetAccessibilityMode();
     if (web_contents_) {
@@ -1397,7 +1417,7 @@ void ContentViewCoreImpl::ExtractSmartClipData(JNIEnv* env,
       static_cast<int>((height > 0 && height < dpi_scale()) ?
           1 : (int)(height / dpi_scale())));
   GetWebContents()->Send(new ViewMsg_ExtractSmartClipData(
-      GetWebContents()->GetRoutingID(), rect));
+      GetWebContents()->GetRenderViewHost()->GetRoutingID(), rect));
 }
 
 jint ContentViewCoreImpl::GetCurrentRenderProcessId(
@@ -1525,36 +1545,6 @@ void ContentViewCoreImpl::WebContentsDestroyed() {
       static_cast<WebContentsImpl*>(web_contents())->GetView());
   DCHECK(wcva);
   wcva->SetContentViewCore(NULL);
-}
-
-bool ContentViewCoreImpl::PullStart() {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (!obj.is_null())
-    return Java_ContentViewCore_onOverscrollRefreshStart(env, obj);
-  return false;
-}
-
-void ContentViewCoreImpl::PullUpdate(float delta) {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (!obj.is_null())
-    Java_ContentViewCore_onOverscrollRefreshUpdate(env, obj, delta);
-}
-
-void ContentViewCoreImpl::PullRelease(bool allow_refresh) {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (!obj.is_null()) {
-    Java_ContentViewCore_onOverscrollRefreshRelease(env, obj, allow_refresh);
-  }
-}
-
-void ContentViewCoreImpl::PullReset() {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (!obj.is_null())
-    Java_ContentViewCore_onOverscrollRefreshReset(env, obj);
 }
 
 // This is called for each ContentView.

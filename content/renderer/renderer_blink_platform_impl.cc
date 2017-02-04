@@ -4,6 +4,7 @@
 
 #include "content/renderer/renderer_blink_platform_impl.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
@@ -23,7 +24,6 @@
 #include "build/build_config.h"
 #include "components/url_formatter/url_formatter.h"
 #include "content/child/blob_storage/webblobregistry_impl.h"
-#include "content/child/child_gpu_memory_buffer_manager.h"
 #include "content/child/child_shared_bitmap_manager.h"
 #include "content/child/database_util.h"
 #include "content/child/file_info_util.h"
@@ -39,7 +39,6 @@
 #include "content/child/webmessageportchannel_impl.h"
 #include "content/common/file_utilities_messages.h"
 #include "content/common/frame_messages.h"
-#include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/common/render_process_messages.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/webplugininfo.h"
@@ -78,10 +77,10 @@
 #include "media/audio/audio_output_device.h"
 #include "media/blink/webcontentdecryptionmodule_impl.h"
 #include "media/filters/stream_parser_factory.h"
-#include "mojo/common/common_type_converters.h"
 #include "mojo/public/cpp/bindings/associated_group.h"
 #include "ppapi/features/features.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
 #include "storage/common/database/database_identifier.h"
 #include "storage/common/quota/quota_types.h"
 #include "third_party/WebKit/public/platform/BlameContext.h"
@@ -181,6 +180,9 @@ media::AudioParameters GetAudioHardwareParams() {
   blink::WebLocalFrame* const web_frame =
       blink::WebLocalFrame::frameForCurrentContext();
   RenderFrame* const render_frame = RenderFrame::FromWebFrame(web_frame);
+  if (!render_frame)
+    return media::AudioParameters::UnavailableDeviceParams();
+
   return AudioDeviceFactory::GetOutputDeviceInfo(render_frame->GetRoutingID(),
                                                  0, std::string(),
                                                  web_frame->getSecurityOrigin())
@@ -256,13 +258,13 @@ RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
   }
 #endif
 
-  // ChildThread may not exist in some tests.
-  if (ChildThreadImpl::current()) {
-    sync_message_filter_ = ChildThreadImpl::current()->sync_message_filter();
-    thread_safe_sender_ = ChildThreadImpl::current()->thread_safe_sender();
-    quota_message_filter_ = ChildThreadImpl::current()->quota_message_filter();
+  // RenderThread may not exist in some tests.
+  if (RenderThreadImpl::current()) {
+    sync_message_filter_ = RenderThreadImpl::current()->sync_message_filter();
+    thread_safe_sender_ = RenderThreadImpl::current()->thread_safe_sender();
+    quota_message_filter_ = RenderThreadImpl::current()->quota_message_filter();
     shared_bitmap_manager_ =
-        ChildThreadImpl::current()->shared_bitmap_manager();
+        RenderThreadImpl::current()->shared_bitmap_manager();
     blob_registry_.reset(new WebBlobRegistryImpl(
         RenderThreadImpl::current()->GetIOTaskRunner().get(),
         base::ThreadTaskRunnerHandle::Get(), thread_safe_sender_.get()));
@@ -707,8 +709,7 @@ WebAudioDevice* RendererBlinkPlatformImpl::createAudioDevice(
 
   int session_id = 0;
   if (input_device_id.isNull() ||
-      !base::StringToInt(base::UTF16ToUTF8(
-          base::StringPiece16(input_device_id)), &session_id)) {
+      !base::StringToInt(input_device_id.utf8(), &session_id)) {
     if (input_channels > 0)
       DLOG(WARNING) << "createAudioDevice(): request for audio input ignored";
 
@@ -757,13 +758,14 @@ void RendererBlinkPlatformImpl::getPluginList(
   RenderThread::Get()->Send(
       new FrameHostMsg_GetPlugins(refresh, mainFrameOrigin, &plugins));
   for (const WebPluginInfo& plugin : plugins) {
-    builder->addPlugin(
-        plugin.name, plugin.desc,
-        plugin.path.BaseName().AsUTF16Unsafe());
+    builder->addPlugin(WebString::fromUTF16(plugin.name),
+                       WebString::fromUTF16(plugin.desc),
+                       blink::FilePathToWebString(plugin.path.BaseName()));
 
     for (const WebPluginMimeType& mime_type : plugin.mime_types) {
       builder->addMediaTypeToLastPlugin(
-          WebString::fromUTF8(mime_type.mime_type), mime_type.description);
+          WebString::fromUTF8(mime_type.mime_type),
+          WebString::fromUTF16(mime_type.description));
 
       for (const auto& extension : mime_type.file_extensions) {
         builder->addFileExtensionToLastMediaType(
@@ -778,20 +780,6 @@ void RendererBlinkPlatformImpl::getPluginList(
 
 blink::WebPublicSuffixList* RendererBlinkPlatformImpl::publicSuffixList() {
   return &public_suffix_list_;
-}
-
-//------------------------------------------------------------------------------
-
-blink::WebString RendererBlinkPlatformImpl::signedPublicKeyAndChallengeString(
-    unsigned key_size_index,
-    const blink::WebString& challenge,
-    const blink::WebURL& url,
-    const blink::WebURL& top_origin) {
-  std::string signed_public_key;
-  RenderThread::Get()->Send(new RenderProcessHostMsg_Keygen(
-      static_cast<uint32_t>(key_size_index), challenge.utf8(), GURL(url),
-      GURL(top_origin), &signed_public_key));
-  return WebString::fromUTF8(signed_public_key);
 }
 
 //------------------------------------------------------------------------------
@@ -1015,7 +1003,7 @@ RendererBlinkPlatformImpl::createOffscreenGraphicsContext3DProvider(
 
   content::WebGraphicsContext3DProviderImpl* share_provider_impl =
       static_cast<content::WebGraphicsContext3DProviderImpl*>(share_provider);
-  ContextProviderCommandBuffer* share_context = nullptr;
+  ui::ContextProviderCommandBuffer* share_context = nullptr;
 
   // WebGL contexts must fail creation if the share group is lost.
   if (share_provider_impl) {
@@ -1055,13 +1043,13 @@ RendererBlinkPlatformImpl::createOffscreenGraphicsContext3DProvider(
   constexpr bool automatic_flushes = true;
   constexpr bool support_locking = false;
 
-  scoped_refptr<ContextProviderCommandBuffer> provider(
-      new ContextProviderCommandBuffer(
+  scoped_refptr<ui::ContextProviderCommandBuffer> provider(
+      new ui::ContextProviderCommandBuffer(
           std::move(gpu_channel_host), gpu::GPU_STREAM_DEFAULT,
           gpu::GpuStreamPriority::NORMAL, gpu::kNullSurfaceHandle,
           GURL(top_document_web_url), automatic_flushes, support_locking,
           gpu::SharedMemoryLimits(), attributes, share_context,
-          command_buffer_metrics::OFFSCREEN_CONTEXT_FOR_WEBGL));
+          ui::command_buffer_metrics::OFFSCREEN_CONTEXT_FOR_WEBGL));
   return new WebGraphicsContext3DProviderImpl(std::move(provider),
                                               is_software_rendering);
 }
@@ -1072,7 +1060,7 @@ blink::WebGraphicsContext3DProvider*
 RendererBlinkPlatformImpl::createSharedOffscreenGraphicsContext3DProvider() {
   auto* thread = RenderThreadImpl::current();
 
-  scoped_refptr<ContextProviderCommandBuffer> provider =
+  scoped_refptr<ui::ContextProviderCommandBuffer> provider =
       thread->SharedMainThreadContextProvider();
   if (!provider)
     return nullptr;
@@ -1097,7 +1085,8 @@ RendererBlinkPlatformImpl::createSharedOffscreenGraphicsContext3DProvider() {
 
 gpu::GpuMemoryBufferManager*
 RendererBlinkPlatformImpl::getGpuMemoryBufferManager() {
-  return RenderThreadImpl::current()->GetGpuMemoryBufferManager();
+  RenderThreadImpl* thread = RenderThreadImpl::current();
+  return thread ? thread->GetGpuMemoryBufferManager() : nullptr;
 }
 
 //------------------------------------------------------------------------------
@@ -1118,7 +1107,7 @@ blink::WebCompositorSupport* RendererBlinkPlatformImpl::compositorSupport() {
 
 blink::WebString RendererBlinkPlatformImpl::convertIDNToUnicode(
     const blink::WebString& host) {
-  return url_formatter::IDNToUnicode(host.utf8());
+  return WebString::fromUTF16(url_formatter::IDNToUnicode(host.utf8()));
 }
 
 //------------------------------------------------------------------------------
@@ -1159,7 +1148,7 @@ void RendererBlinkPlatformImpl::SetMockDeviceOrientationDataForTesting(
 //------------------------------------------------------------------------------
 
 // static
-PlatformEventObserverBase*
+std::unique_ptr<PlatformEventObserverBase>
 RendererBlinkPlatformImpl::CreatePlatformEventObserverFromType(
     blink::WebPlatformEventType type) {
   RenderThread* thread = RenderThreadImpl::current();
@@ -1172,17 +1161,17 @@ RendererBlinkPlatformImpl::CreatePlatformEventObserverFromType(
 
   switch (type) {
     case blink::WebPlatformEventTypeDeviceMotion:
-      return new DeviceMotionEventPump(thread);
+      return base::MakeUnique<DeviceMotionEventPump>(thread);
     case blink::WebPlatformEventTypeDeviceOrientation:
-      return new DeviceOrientationEventPump(thread);
+      return base::MakeUnique<DeviceOrientationEventPump>(thread);
     case blink::WebPlatformEventTypeDeviceOrientationAbsolute:
-      return new DeviceOrientationAbsoluteEventPump(thread);
+      return base::MakeUnique<DeviceOrientationAbsoluteEventPump>(thread);
     case blink::WebPlatformEventTypeDeviceLight:
-      return new DeviceLightEventPump(thread);
+      return base::MakeUnique<DeviceLightEventPump>(thread);
     case blink::WebPlatformEventTypeGamepad:
-      return new GamepadSharedMemoryReader(thread);
+      return base::MakeUnique<GamepadSharedMemoryReader>(thread);
     case blink::WebPlatformEventTypeScreenOrientation:
-      return new ScreenOrientationObserver();
+      return base::MakeUnique<ScreenOrientationObserver>();
     default:
       // A default statement is required to prevent compilation errors when
       // Blink adds a new type.
@@ -1198,7 +1187,7 @@ void RendererBlinkPlatformImpl::SetPlatformEventObserverForTesting(
     std::unique_ptr<PlatformEventObserverBase> observer) {
   if (platform_event_observers_.Lookup(type))
     platform_event_observers_.Remove(type);
-  platform_event_observers_.AddWithID(observer.release(), type);
+  platform_event_observers_.AddWithID(std::move(observer), type);
 }
 
 blink::InterfaceProvider* RendererBlinkPlatformImpl::interfaceProvider() {
@@ -1210,10 +1199,13 @@ void RendererBlinkPlatformImpl::startListening(
     blink::WebPlatformEventListener* listener) {
   PlatformEventObserverBase* observer = platform_event_observers_.Lookup(type);
   if (!observer) {
-    observer = CreatePlatformEventObserverFromType(type);
-    if (!observer)
+    std::unique_ptr<PlatformEventObserverBase> new_observer =
+        CreatePlatformEventObserverFromType(type);
+    if (!new_observer)
       return;
-    platform_event_observers_.AddWithID(observer, static_cast<int32_t>(type));
+    observer = new_observer.get();
+    platform_event_observers_.AddWithID(std::move(new_observer),
+                                        static_cast<int32_t>(type));
   }
   observer->Start(listener);
 

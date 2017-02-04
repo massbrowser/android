@@ -362,31 +362,40 @@ typedef void (GL_APIENTRYP PFNGLBLITFRAMEBUFFERCHROMIUMPROC) (GLint srcX0, GLint
 #endif
 
 #ifdef GL_GLEXT_PROTOTYPES
-GL_APICALL void GL_APIENTRY glCopyTextureCHROMIUM(
-    GLenum source_id,
-    GLenum dest_id,
-    GLint internalformat,
-    GLenum dest_type,
-    GLboolean unpack_flip_y,
-    GLboolean unpack_premultiply_alpha,
-    GLboolean unpack_unmultiply_alpha);
+GL_APICALL void GL_APIENTRY
+glCopyTextureCHROMIUM(GLenum source_id,
+                      GLint source_level,
+                      GLenum dest_target,
+                      GLenum dest_id,
+                      GLint dest_level,
+                      GLint internalformat,
+                      GLenum dest_type,
+                      GLboolean unpack_flip_y,
+                      GLboolean unpack_premultiply_alpha,
+                      GLboolean unpack_unmultiply_alpha);
 
-GL_APICALL void GL_APIENTRY glCopySubTextureCHROMIUM(
-    GLenum source_id,
-    GLenum dest_id,
-    GLint xoffset,
-    GLint yoffset,
-    GLint x,
-    GLint y,
-    GLsizei width,
-    GLsizei height,
-    GLboolean unpack_flip_y,
-    GLboolean unpack_premultiply_alpha,
-    GLboolean unpack_unmultiply_alpha);
+GL_APICALL void GL_APIENTRY
+glCopySubTextureCHROMIUM(GLenum source_id,
+                         GLint source_level,
+                         GLenum dest_target,
+                         GLenum dest_id,
+                         GLint dest_level,
+                         GLint xoffset,
+                         GLint yoffset,
+                         GLint x,
+                         GLint y,
+                         GLsizei width,
+                         GLsizei height,
+                         GLboolean unpack_flip_y,
+                         GLboolean unpack_premultiply_alpha,
+                         GLboolean unpack_unmultiply_alpha);
 #endif
 typedef void(GL_APIENTRYP PFNGLCOPYTEXTURECHROMIUMPROC)(
     GLenum source_id,
+    GLint source_level,
+    GLenum dest_target,
     GLenum dest_id,
+    GLint dest_level,
     GLint internalformat,
     GLenum dest_type,
     GLboolean unpack_flip_y,
@@ -395,7 +404,10 @@ typedef void(GL_APIENTRYP PFNGLCOPYTEXTURECHROMIUMPROC)(
 
 typedef void(GL_APIENTRYP PFNGLCOPYSUBTEXTURECHROMIUMPROC)(
     GLenum source_id,
+    GLint source_level,
+    GLenum dest_target,
     GLenum dest_id,
+    GLint dest_level,
     GLint xoffset,
     GLint yoffset,
     GLint x,
@@ -1202,6 +1214,11 @@ GL_APICALL void GL_APIENTRY glCoverageModulationCHROMIUM(GLenum components);
 #endif
 #define GL_COVERAGE_MODULATION_CHROMIUM 0x9332
 #endif /* GL_CHROMIUM_framebuffer_mixed_samples */
+
+#ifndef GL_ARB_occlusion_query
+#define GL_ARB_occlusion_query 1
+#define GL_SAMPLES_PASSED_ARB 0x8914
+#endif /* GL_ARB_occlusion_query */
 
 #ifdef __cplusplus
 }

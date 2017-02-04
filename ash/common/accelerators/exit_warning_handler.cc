@@ -5,10 +5,10 @@
 #include "ash/common/accelerators/exit_warning_handler.h"
 
 #include "ash/common/shell_delegate.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/root_window_controller.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -73,8 +73,8 @@ class ExitWarningWidgetDelegateView : public views::WidgetDelegateView {
   }
 
   void OnPaint(gfx::Canvas* canvas) override {
-    SkPaint paint;
-    paint.setStyle(SkPaint::kFill_Style);
+    cc::PaintFlags paint;
+    paint.setStyle(cc::PaintFlags::kFill_Style);
     paint.setColor(kWindowBackgroundColor);
     canvas->DrawRoundRect(GetLocalBounds(), kWindowCornerRadius, paint);
     views::WidgetDelegateView::OnPaint(canvas);

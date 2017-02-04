@@ -9,11 +9,19 @@
 #include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_launcher.h"
 #include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_manager.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
+#include "components/arc/kiosk/arc_kiosk_bridge.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
-#include "content/public/browser/browser_context.h"
+
+class Profile;
+
+namespace content {
+class BrowserContext;
+}  // namespace content
 
 namespace chromeos {
+
+class ArcKioskNotificationBlocker;
 
 // Keeps track of ARC session state and auto-launches kiosk app when it's ready.
 // App is started when the following conditions are satisfied:
@@ -24,10 +32,14 @@ namespace chromeos {
 class ArcKioskAppService
     : public KeyedService,
       public ArcAppListPrefs::Observer,
-      public ArcKioskAppManager::ArcKioskAppManagerObserver {
+      public ArcKioskAppManager::ArcKioskAppManagerObserver,
+      public arc::ArcKioskBridge::Delegate {
  public:
-  static ArcKioskAppService* Create(Profile* profile, ArcAppListPrefs* prefs);
+  static ArcKioskAppService* Create(Profile* profile);
   static ArcKioskAppService* Get(content::BrowserContext* context);
+
+  // KeyedService overrides
+  void Shutdown() override;
 
   // ArcAppListPrefs::Observer overrides
   void OnAppRegistered(const std::string& app_id,
@@ -35,15 +47,20 @@ class ArcKioskAppService
   void OnAppReadyChanged(const std::string& id, bool ready) override;
   void OnTaskCreated(int32_t task_id,
                      const std::string& package_name,
-                     const std::string& activity) override;
+                     const std::string& activity,
+                     const std::string& intent) override;
   void OnTaskDestroyed(int32_t task_id) override;
   void OnPackageListInitialRefreshed() override;
 
   // ArcKioskAppManager::Observer overrides
   void OnArcKioskAppsChanged() override;
 
+  // ArcKioskBridge::Delegate overrides
+  void OnMaintenanceSessionCreated() override;
+  void OnMaintenanceSessionFinished() override;
+
  private:
-  ArcKioskAppService(Profile* profile, ArcAppListPrefs* prefs);
+  explicit ArcKioskAppService(Profile* profile);
   ~ArcKioskAppService() override;
 
   std::string GetAppId();
@@ -51,7 +68,7 @@ class ArcKioskAppService
   void PreconditionsChanged();
 
   Profile* const profile_;
-  ArcAppListPrefs* const prefs_;
+  bool maintenance_session_running_ = false;
   ArcKioskAppManager* app_manager_;
   std::string app_id_;
   std::unique_ptr<ArcAppListPrefs::AppInfo> app_info_;
@@ -59,6 +76,7 @@ class ArcKioskAppService
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
   // Keeps track whether the app is already launched
   std::unique_ptr<ArcKioskAppLauncher> app_launcher_;
+  std::unique_ptr<ArcKioskNotificationBlocker> notification_blocker_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcKioskAppService);
 };

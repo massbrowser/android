@@ -9,6 +9,7 @@
 // and database that holds the downloaded updates.
 
 #include <memory>
+#include <unordered_set>
 
 #include "base/memory/weak_ptr.h"
 #include "components/safe_browsing_db/database_manager.h"
@@ -18,8 +19,6 @@
 #include "components/safe_browsing_db/v4_protocol_manager_util.h"
 #include "components/safe_browsing_db/v4_update_protocol_manager.h"
 #include "url/gurl.h"
-
-using content::ResourceType;
 
 namespace safe_browsing {
 
@@ -32,7 +31,8 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
   // Create and return an instance of V4LocalDatabaseManager, if Finch trial
   // allows it; nullptr otherwise.
   static scoped_refptr<V4LocalDatabaseManager> Create(
-      const base::FilePath& base_path);
+      const base::FilePath& base_path,
+      ExtendedReportingLevelCallback extended_reporting_level_callback);
 
   //
   // SafeBrowsingDatabaseManager implementation
@@ -73,7 +73,9 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
  protected:
   // Construct V4LocalDatabaseManager.
   // Must be initialized by calling StartOnIOThread() before using.
-  V4LocalDatabaseManager(const base::FilePath& base_path);
+  V4LocalDatabaseManager(
+      const base::FilePath& base_path,
+      ExtendedReportingLevelCallback extended_reporting_level_callback);
 
   ~V4LocalDatabaseManager() override;
 
@@ -149,6 +151,10 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
     // The metadata associated with the full hash of the severest match found
     // for that URL.
     ThreatMetadata url_metadata;
+
+    // The full hash that matched for a blacklisted resource URL. Used only for
+    // |CheckResourceUrl| case.
+    FullHash matching_full_hash;
   };
 
   typedef std::vector<std::unique_ptr<PendingCheck>> QueuedChecks;
@@ -162,9 +168,8 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
   FRIEND_TEST_ALL_PREFIXES(V4LocalDatabaseManagerTest,
                            TestGetSeverestThreatTypeAndMetadata);
 
-  // The set of clients awaiting a full hash response. It is used for tracking
-  // which clients have cancelled their outstanding request.
-  typedef std::unordered_set<const Client*> PendingClients;
+  // The checks awaiting a full hash response from SafeBrowsing service.
+  typedef std::unordered_set<const PendingCheck*> PendingChecks;
 
   // Called when all the stores managed by the database have been read from
   // disk after startup and the database is ready for checking resource
@@ -186,11 +191,12 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
       const std::unique_ptr<PendingCheck>& check,
       FullHashToStoreAndHashPrefixesMap* full_hash_to_store_and_hash_prefixes);
 
-  // Finds the most severe |SBThreatType| and the corresponding |metadata| from
-  // |full_hash_infos|.
+  // Finds the most severe |SBThreatType| and the corresponding |metadata|, and
+  // |matching_full_hash| from |full_hash_infos|.
   void GetSeverestThreatTypeAndMetadata(
       SBThreatType* result_threat_type,
       ThreatMetadata* metadata,
+      FullHash* matching_full_hash,
       const std::vector<FullHashInfo>& full_hash_infos);
 
   // Returns the SBThreatType for a given ListIdentifier.
@@ -203,9 +209,8 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
   bool HandleCheck(std::unique_ptr<PendingCheck> check);
 
   // Checks |stores_to_check| in database synchronously for hash prefixes
-  // matching |hash|. Returns false if the database isn't ready or if there's no
-  // match; true otherwise. This is used for lists that have full hash
-  // information in the database.
+  // matching |hash|. Returns true if there's a match; false otherwise. This is
+  // used for lists that have full hash information in the database.
   bool HandleHashSynchronously(const FullHash& hash,
                                const StoresToCheck& stores_to_check);
 
@@ -252,6 +257,10 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
   void UpdateRequestCompleted(
       std::unique_ptr<ParsedServerResponse> parsed_server_response);
 
+  // Return true if we're enabled and have loaded real data for all of
+  // these stores.
+  bool AreStoresAvailableNow(const StoresToCheck& stores_to_check) const;
+
   // The base directory under which to create the files that contain hashes.
   const base::FilePath base_path_;
 
@@ -259,8 +268,9 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
   // ready to process next update.
   DatabaseUpdatedCallback db_updated_callback_;
 
-  // Whether the service is running.
-  bool enabled_;
+  // Callback to get the current extended reporting level. Needed by the update
+  // manager.
+  ExtendedReportingLevelCallback extended_reporting_level_callback_;
 
   // The list of stores to manage (for hash prefixes and full hashes). Each
   // element contains the identifier for the store, the corresponding
@@ -268,9 +278,8 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
   // name of the file on disk that would contain the prefixes, if applicable.
   ListInfos list_infos_;
 
-  // The set of clients that are waiting for a full hash response from the
-  // SafeBrowsing service.
-  PendingClients pending_clients_;
+  // The checks awaiting for a full hash response from the SafeBrowsing service.
+  PendingChecks pending_checks_;
 
   // The checks that need to be scheduled when the database becomes ready for
   // use.

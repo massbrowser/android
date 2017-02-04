@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/debug/activity_analyzer.h"
 #include "base/debug/activity_tracker.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
@@ -22,6 +23,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/persistent_memory_allocator.h"
 #include "base/process/process_handle.h"
+#include "base/stl_util.h"
 #include "base/threading/platform_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,6 +32,8 @@
 namespace browser_watcher {
 
 using base::debug::ActivityData;
+using base::debug::ActivityTrackerMemoryAllocator;
+using base::debug::ActivityUserData;
 using base::debug::GlobalActivityTracker;
 using base::debug::ThreadActivityTracker;
 using base::File;
@@ -178,8 +182,9 @@ class PostmortemReportCollectorCollectAndSubmitTest : public testing::Test {
     base::FilePath minidump_path = temp_dir_.GetPath().AppendASCII("foo-1.dmp");
     base::File minidump_file(
         minidump_path, base::File::FLAG_CREATE | base::File::File::FLAG_WRITE);
-    crashpad_report_ = {minidump_file.GetPlatformFile(),
-                        crashpad::UUID(UUID::InitializeWithNewTag{}),
+    crashpad::UUID new_report_uuid;
+    new_report_uuid.InitializeWithNew();
+    crashpad_report_ = {minidump_file.GetPlatformFile(), new_report_uuid,
                         minidump_path};
     EXPECT_CALL(database_, PrepareNewCrashReport(_))
         .Times(1)
@@ -339,6 +344,9 @@ const int kAnotherThreadId = 45;
 
 }  // namespace
 
+// Sets up a file backed thread tracker for direct access. A
+// GlobalActivityTracker is not created, meaning there is no risk of
+// the instrumentation interfering with the file's content.
 class PostmortemReportCollectorCollectionTest : public testing::Test {
  public:
   // Create a proper debug file.
@@ -419,7 +427,7 @@ TEST_F(PostmortemReportCollectorCollectionTest, CollectSuccess) {
   tracker_->PushActivity(
       nullptr, base::debug::Activity::ACT_LOCK_ACQUIRE,
       ActivityData::ForLock(reinterpret_cast<void*>(kLockAddress)));
-  tracker_->PushActivity(
+  ThreadActivityTracker::ActivityId activity_id = tracker_->PushActivity(
       nullptr, base::debug::Activity::ACT_EVENT_WAIT,
       ActivityData::ForEvent(reinterpret_cast<void*>(kEventAddress)));
   tracker_->PushActivity(nullptr, base::debug::Activity::ACT_THREAD_JOIN,
@@ -429,6 +437,14 @@ TEST_F(PostmortemReportCollectorCollectionTest, CollectSuccess) {
   // Note: this exceeds the activity stack's capacity.
   tracker_->PushActivity(nullptr, base::debug::Activity::ACT_THREAD_JOIN,
                          ActivityData::ForThread(kAnotherThreadId));
+
+  // Add some user data.
+  ActivityTrackerMemoryAllocator user_data_allocator(
+      allocator_.get(), GlobalActivityTracker::kTypeIdUserDataRecord,
+      GlobalActivityTracker::kTypeIdUserDataRecordFree, 1024U, 10U, false);
+  std::unique_ptr<ActivityUserData> user_data =
+      tracker_->GetUserData(activity_id, &user_data_allocator);
+  user_data->SetInt("some_int", 42);
 
   // Validate collection returns the expected report.
   PostmortemReportCollector collector(kProductName, kVersionNumber,
@@ -460,27 +476,204 @@ TEST_F(PostmortemReportCollectorCollectionTest, CollectSuccess) {
     EXPECT_EQ(Activity::ACT_TASK_RUN, activity.type());
     EXPECT_EQ(kTaskOrigin, activity.origin_address());
     EXPECT_EQ(kTaskSequenceNum, activity.task_sequence_id());
+    EXPECT_EQ(0U, activity.user_data().size());
   }
   {
     const Activity& activity = thread_state.activities(1);
     EXPECT_EQ(Activity::ACT_LOCK_ACQUIRE, activity.type());
     EXPECT_EQ(kLockAddress, activity.lock_address());
+    EXPECT_EQ(0U, activity.user_data().size());
   }
   {
     const Activity& activity = thread_state.activities(2);
     EXPECT_EQ(Activity::ACT_EVENT_WAIT, activity.type());
     EXPECT_EQ(kEventAddress, activity.event_address());
+    ASSERT_EQ(1U, activity.user_data().size());
+    ASSERT_TRUE(base::ContainsKey(activity.user_data(), "some_int"));
+    EXPECT_EQ(TypedValue::kSignedValue,
+              activity.user_data().at("some_int").value_case());
+    EXPECT_EQ(42, activity.user_data().at("some_int").signed_value());
   }
   {
     const Activity& activity = thread_state.activities(3);
     EXPECT_EQ(Activity::ACT_THREAD_JOIN, activity.type());
     EXPECT_EQ(kThreadId, activity.thread_id());
+    EXPECT_EQ(0U, activity.user_data().size());
   }
   {
     const Activity& activity = thread_state.activities(4);
     EXPECT_EQ(Activity::ACT_PROCESS_WAIT, activity.type());
     EXPECT_EQ(kProcessId, activity.process_id());
+    EXPECT_EQ(0U, activity.user_data().size());
   }
+}
+
+class PostmortemReportCollectorCollectionFromGlobalTrackerTest
+    : public testing::Test {
+ public:
+  const int kMemorySize = 1 << 20;  // 1MiB
+
+  PostmortemReportCollectorCollectionFromGlobalTrackerTest() {}
+  ~PostmortemReportCollectorCollectionFromGlobalTrackerTest() override {
+    GlobalActivityTracker* global_tracker = GlobalActivityTracker::Get();
+    if (global_tracker) {
+      global_tracker->ReleaseTrackerForCurrentThreadForTesting();
+      delete global_tracker;
+    }
+  }
+
+  void SetUp() override {
+    testing::Test::SetUp();
+
+    // Set up a debug file path.
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+    debug_file_path_ = temp_dir_.GetPath().AppendASCII("debug.pma");
+  }
+
+  const base::FilePath& debug_file_path() { return debug_file_path_; }
+
+ protected:
+  base::ScopedTempDir temp_dir_;
+  base::FilePath debug_file_path_;
+};
+
+TEST_F(PostmortemReportCollectorCollectionFromGlobalTrackerTest,
+       LogCollection) {
+  // Record some log messages.
+  GlobalActivityTracker::CreateWithFile(debug_file_path(), kMemorySize, 0ULL,
+                                        "", 3);
+  GlobalActivityTracker::Get()->RecordLogMessage("hello world");
+  GlobalActivityTracker::Get()->RecordLogMessage("foo bar");
+
+  // Collect the stability report.
+  PostmortemReportCollector collector(kProductName, kVersionNumber,
+                                      kChannelName);
+  std::unique_ptr<StabilityReport> report;
+  ASSERT_EQ(PostmortemReportCollector::SUCCESS,
+            collector.Collect(debug_file_path(), &report));
+  ASSERT_NE(nullptr, report);
+
+  // Validate the report's log content.
+  ASSERT_EQ(2, report->log_messages_size());
+  ASSERT_EQ("hello world", report->log_messages(0));
+  ASSERT_EQ("foo bar", report->log_messages(1));
+}
+
+TEST_F(PostmortemReportCollectorCollectionFromGlobalTrackerTest,
+       GlobalUserDataCollection) {
+  const char string1[] = "foo";
+  const char string2[] = "bar";
+
+  // Record some global user data.
+  GlobalActivityTracker::CreateWithFile(debug_file_path(), kMemorySize, 0ULL,
+                                        "", 3);
+  ActivityUserData& global_data = GlobalActivityTracker::Get()->user_data();
+  global_data.Set("raw", "foo", 3);
+  global_data.SetString("string", "bar");
+  global_data.SetChar("char", '9');
+  global_data.SetInt("int", -9999);
+  global_data.SetUint("uint", 9999);
+  global_data.SetBool("bool", true);
+  global_data.SetReference("ref", string1, strlen(string1));
+  global_data.SetStringReference("sref", string2);
+
+  // Collect the stability report.
+  PostmortemReportCollector collector(kProductName, kVersionNumber,
+                                      kChannelName);
+  std::unique_ptr<StabilityReport> report;
+  ASSERT_EQ(PostmortemReportCollector::SUCCESS,
+            collector.Collect(debug_file_path(), &report));
+  ASSERT_NE(nullptr, report);
+
+  // Validate the report's user data.
+  const auto& collected_data = report->global_data();
+  ASSERT_EQ(8U, collected_data.size());
+
+  ASSERT_TRUE(base::ContainsKey(collected_data, "raw"));
+  EXPECT_EQ(TypedValue::kBytesValue, collected_data.at("raw").value_case());
+  EXPECT_EQ("foo", collected_data.at("raw").bytes_value());
+
+  ASSERT_TRUE(base::ContainsKey(collected_data, "string"));
+  EXPECT_EQ(TypedValue::kStringValue, collected_data.at("string").value_case());
+  EXPECT_EQ("bar", collected_data.at("string").string_value());
+
+  ASSERT_TRUE(base::ContainsKey(collected_data, "char"));
+  EXPECT_EQ(TypedValue::kCharValue, collected_data.at("char").value_case());
+  EXPECT_EQ("9", collected_data.at("char").char_value());
+
+  ASSERT_TRUE(base::ContainsKey(collected_data, "int"));
+  EXPECT_EQ(TypedValue::kSignedValue, collected_data.at("int").value_case());
+  EXPECT_EQ(-9999, collected_data.at("int").signed_value());
+
+  ASSERT_TRUE(base::ContainsKey(collected_data, "uint"));
+  EXPECT_EQ(TypedValue::kUnsignedValue, collected_data.at("uint").value_case());
+  EXPECT_EQ(9999U, collected_data.at("uint").unsigned_value());
+
+  ASSERT_TRUE(base::ContainsKey(collected_data, "bool"));
+  EXPECT_EQ(TypedValue::kBoolValue, collected_data.at("bool").value_case());
+  EXPECT_TRUE(collected_data.at("bool").bool_value());
+
+  ASSERT_TRUE(base::ContainsKey(collected_data, "ref"));
+  EXPECT_EQ(TypedValue::kBytesReference, collected_data.at("ref").value_case());
+  const TypedValue::Reference& ref = collected_data.at("ref").bytes_reference();
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(string1), ref.address());
+  EXPECT_EQ(strlen(string1), static_cast<uint64_t>(ref.size()));
+
+  ASSERT_TRUE(base::ContainsKey(collected_data, "sref"));
+  EXPECT_EQ(TypedValue::kStringReference,
+            collected_data.at("sref").value_case());
+  const TypedValue::Reference& sref =
+      collected_data.at("sref").string_reference();
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(string2), sref.address());
+  EXPECT_EQ(strlen(string2), static_cast<uint64_t>(sref.size()));
+}
+
+TEST_F(PostmortemReportCollectorCollectionFromGlobalTrackerTest,
+       ModuleCollection) {
+  // Record some module information.
+  GlobalActivityTracker::CreateWithFile(debug_file_path(), kMemorySize, 0ULL,
+                                        "", 3);
+
+  base::debug::GlobalActivityTracker::ModuleInfo module_info = {};
+  module_info.is_loaded = true;
+  module_info.address = 0x123456;
+  module_info.load_time = 1111LL;
+  module_info.size = 0x2d000;
+  module_info.timestamp = 0xCAFECAFE;
+  module_info.age = 1;
+  crashpad::UUID debug_uuid;
+  debug_uuid.InitializeFromString("11223344-5566-7788-abcd-0123456789ab");
+  memcpy(module_info.identifier, &debug_uuid, sizeof(module_info.identifier));
+  module_info.file = "foo";
+  module_info.debug_file = "bar";
+
+  GlobalActivityTracker::Get()->RecordModuleInfo(module_info);
+
+  // Collect the stability report.
+  PostmortemReportCollector collector(kProductName, kVersionNumber,
+                                      kChannelName);
+  std::unique_ptr<StabilityReport> report;
+  ASSERT_EQ(PostmortemReportCollector::SUCCESS,
+            collector.Collect(debug_file_path(), &report));
+  ASSERT_NE(nullptr, report);
+
+  // Validate the report's modules content.
+  ASSERT_EQ(1, report->process_states_size());
+  const ProcessState& process_state = report->process_states(0);
+  ASSERT_EQ(1, process_state.modules_size());
+
+  const CodeModule collected_module = process_state.modules(0);
+  EXPECT_EQ(module_info.address,
+            static_cast<uintptr_t>(collected_module.base_address()));
+  EXPECT_EQ(module_info.size, static_cast<size_t>(collected_module.size()));
+  EXPECT_EQ(module_info.file, collected_module.code_file());
+  EXPECT_EQ("CAFECAFE2d000", collected_module.code_identifier());
+  EXPECT_EQ(module_info.debug_file, collected_module.debug_file());
+  EXPECT_EQ("1122334455667788ABCD0123456789AB1",
+            collected_module.debug_identifier());
+  EXPECT_EQ("", collected_module.version());
+  EXPECT_EQ(0LL, collected_module.shrink_down_delta());
+  EXPECT_EQ(!module_info.is_loaded, collected_module.is_unloaded());
 }
 
 }  // namespace browser_watcher

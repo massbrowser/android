@@ -37,7 +37,6 @@
 class ChromeRenderViewTest;
 class GURL;
 class ModuleSystem;
-class URLPattern;
 struct ExtensionMsg_DispatchEvent_Params;
 struct ExtensionMsg_ExternalConnectionInfo;
 struct ExtensionMsg_Loaded_Params;
@@ -45,29 +44,22 @@ struct ExtensionMsg_TabConnectionInfo;
 struct ExtensionMsg_UpdatePermissions_Params;
 
 namespace blink {
-class WebFrame;
 class WebLocalFrame;
-class WebSecurityOrigin;
 }
 
 namespace base {
 class ListValue;
 }
 
-namespace content {
-class RenderThread;
-}
-
 namespace extensions {
 class ContentWatcher;
 class DispatcherDelegate;
-class FilteredEventRouter;
 class ExtensionBindingsSystem;
-class ManifestPermissionSet;
 class RequestSender;
 class ScriptContext;
 class ScriptInjectionManager;
 struct Message;
+struct PortId;
 
 // Dispatches extension control messages sent to the renderer and stores
 // renderer extension related state.
@@ -95,7 +87,6 @@ class Dispatcher : public content::RenderThreadObserver,
 
   void DidCreateScriptContext(blink::WebLocalFrame* frame,
                               const v8::Local<v8::Context>& context,
-                              int extension_group,
                               int world_id);
 
   // Runs on a different thread and should only use thread safe member
@@ -164,15 +155,14 @@ class Dispatcher : public content::RenderThreadObserver,
 
   void OnActivateExtension(const std::string& extension_id);
   void OnCancelSuspend(const std::string& extension_id);
-  void OnDeliverMessage(int target_port_id,
-                        int source_tab_id,
-                        const Message& message);
-  void OnDispatchOnConnect(int target_port_id,
+  void OnDeliverMessage(const PortId& target_port_id, const Message& message);
+  void OnDispatchOnConnect(const PortId& target_port_id,
                            const std::string& channel_name,
                            const ExtensionMsg_TabConnectionInfo& source,
                            const ExtensionMsg_ExternalConnectionInfo& info,
                            const std::string& tls_channel_id);
-  void OnDispatchOnDisconnect(int port_id, const std::string& error_message);
+  void OnDispatchOnDisconnect(const PortId& port_id,
+                              const std::string& error_message);
   void OnLoaded(
       const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions);
   void OnMessageInvoke(const std::string& extension_id,

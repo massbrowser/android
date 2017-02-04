@@ -50,6 +50,7 @@
 #include "public/platform/BlameContext.h"
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebEffectiveConnectionType.h"
+#include "public/platform/WebFeaturePolicy.h"
 #include "public/platform/WebFileSystem.h"
 #include "public/platform/WebFileSystemType.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
@@ -67,16 +68,12 @@
 namespace blink {
 
 enum class WebTreeScopeType;
-class InterfaceProvider;
-class InterfaceRegistry;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
-class WebBluetooth;
 class WebColorChooser;
 class WebColorChooserClient;
 class WebContentDecryptionModule;
 class WebCookieJar;
-class WebCString;
 class WebDataSource;
 class WebEncryptedMediaClient;
 class WebExternalPopupMenu;
@@ -89,7 +86,6 @@ class WebMediaPlayerClient;
 class WebMediaPlayerEncryptedMediaClient;
 class WebMediaPlayerSource;
 class WebMediaSession;
-class WebMediaStream;
 class WebServiceWorkerProvider;
 class WebPlugin;
 class WebPresentationClient;
@@ -231,7 +227,8 @@ class BLINK_EXPORT WebFrameClient {
 
   // Called when a Feature-Policy HTTP header is encountered while loading the
   // frame's document.
-  virtual void didSetFeaturePolicyHeader(const WebString& headerValue) {}
+  virtual void didSetFeaturePolicyHeader(
+      const WebParsedFeaturePolicyHeader& parsedHeader) {}
 
   // Called when a new Content Security Policy is added to the frame's
   // document.  This can be triggered by handling of HTTP headers, handling
@@ -252,6 +249,9 @@ class BLINK_EXPORT WebFrameClient {
       WebLocalFrame*,
       const WebVector<WebString>& newlyMatchingSelectors,
       const WebVector<WebString>& stoppedMatchingSelectors) {}
+
+  // Called the first time this frame is the target of a user gesture.
+  virtual void setHasReceivedUserGesture() {}
 
   // Console messages ----------------------------------------------------
 
@@ -297,6 +297,7 @@ class BLINK_EXPORT WebFrameClient {
     bool isHistoryNavigationInNewChildFrame;
     bool isClientRedirect;
     WebFormElement form;
+    bool isCacheDisabled;
 
     NavigationPolicyInfo(WebURLRequest& urlRequest)
         : extraData(nullptr),
@@ -305,7 +306,8 @@ class BLINK_EXPORT WebFrameClient {
           defaultPolicy(WebNavigationPolicyIgnore),
           replacesCurrentHistoryItem(false),
           isHistoryNavigationInNewChildFrame(false),
-          isClientRedirect(false) {}
+          isClientRedirect(false),
+          isCacheDisabled(false) {}
   };
 
   virtual WebNavigationPolicy decidePolicyForNavigation(
@@ -574,7 +576,6 @@ class BLINK_EXPORT WebFrameClient {
   // frame context.
   virtual void didCreateScriptContext(WebLocalFrame*,
                                       v8::Local<v8::Context>,
-                                      int extensionGroup,
                                       int worldId) {}
 
   // WebKit is about to release its reference to a v8 context for a frame.
@@ -726,9 +727,6 @@ class BLINK_EXPORT WebFrameClient {
     return WebCustomHandlersNew;
   }
 
-  // Bluetooth -----------------------------------------------------------
-  virtual WebBluetooth* bluetooth() { return 0; }
-
   // Audio Output Devices API --------------------------------------------
 
   // Checks that the given audio sink exists and is authorized. The result is
@@ -743,10 +741,6 @@ class BLINK_EXPORT WebFrameClient {
       delete callbacks;
     }
   }
-
-  // Mojo ----------------------------------------------------------------
-  virtual InterfaceProvider* interfaceProvider() { return nullptr; }
-  virtual InterfaceRegistry* interfaceRegistry() { return nullptr; }
 
   // Visibility ----------------------------------------------------------
 

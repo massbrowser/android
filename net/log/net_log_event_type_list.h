@@ -670,6 +670,18 @@ EVENT_TYPE(CERT_CT_COMPLIANCE_CHECKED)
 // }
 EVENT_TYPE(EV_CERT_CT_COMPLIANCE_CHECKED)
 
+// A Certificate Transparency log entry was audited for inclusion in the
+// log.
+//
+// The following parameters are attached to the event:
+// {
+//  "log_entry": <hex-encoded hash of the log entry>
+//  "log_id": <hex-encoded hash of the CT log>
+//  "success": <boolean>
+// }
+
+EVENT_TYPE(CT_LOG_ENTRY_AUDITED)
+
 // ------------------------------------------------------------------------
 // DatagramSocket
 // ------------------------------------------------------------------------
@@ -850,7 +862,7 @@ EVENT_TYPE(URL_REQUEST_DELEGATE)
 // Logged when a delegate informs the URL_REQUEST of what's currently blocking
 // the request. The parameters attached to the begin event are:
 //   {
-//     "delegate_info": <Information about what's blocking the request>,
+//     "delegate_blocked_by": <Information about what's blocking the request>,
 //   }
 EVENT_TYPE(DELEGATE_INFO)
 
@@ -1050,6 +1062,12 @@ EVENT_TYPE(HTTP_STREAM_JOB)
 //   }
 EVENT_TYPE(HTTP_STREAM_REQUEST_STARTED_JOB)
 
+// Logs the proxy server resolved for the job. The event parameters are:
+//   {
+//      "proxy_server": The proxy server resolved for the Job,
+//   }
+EVENT_TYPE(HTTP_STREAM_JOB_PROXY_SERVER_RESOLVED)
+
 // Identifies the NetLogSource() for the Job that fulfilled the Request.
 // The event parameters are:
 //   {
@@ -1082,6 +1100,23 @@ EVENT_TYPE(HTTP_STREAM_JOB_ORPHANED)
 //     "resume_after_ms": <Number of milliseconds until job will be unblocked>
 //   }
 EVENT_TYPE(HTTP_STREAM_JOB_DELAYED)
+
+// Marks the start/end of a HttpStreamFactoryImpl::JobController.
+// The following parameters are attached:
+//   {
+//      "url": <String of request URL>,
+//      "is_preconnect": <True if controller is created for a preconnect.>,
+//   }
+EVENT_TYPE(HTTP_STREAM_JOB_CONTROLLER)
+
+// Links a JobController with its user (a URL_REQUEST).
+// The event parameters are:
+//   {
+//      "source_dependency": <The source identifier for JobController if the
+//          event is logged in URL_REQUEST or the source identifier for the
+//          URL_REQUEST if the event is logged in HTTP_STREAM_JOB_CONTROLLER>,
+//   }
+EVENT_TYPE(HTTP_STREAM_JOB_CONTROLLER_BOUND)
 
 // ------------------------------------------------------------------------
 // HttpNetworkTransaction
@@ -1435,6 +1470,14 @@ EVENT_TYPE(HTTP2_SESSION_CLOSE)
 
 // Event when the creation of a stream is stalled because we're at
 // the maximum number of concurrent streams.
+//  {
+//
+//    "num_active_streams": <Number of active streams>,
+//    "num_created_streams": <Number of created streams>,
+//    "num_pushed_streams": <Number of pushed streams>,
+//    "max_concurrent_streams": <Maximum number of concurrent streams>,
+//    "url": <Request URL>,
+//  }
 EVENT_TYPE(HTTP2_SESSION_STALLED_MAX_STREAMS)
 
 // Received an out-of-range value for initial window size in SETTINGS
@@ -1526,6 +1569,15 @@ EVENT_TYPE(HTTP2_STREAM_UPDATE_RECV_WINDOW)
 //     "description": <The textual description for the error>,
 //   }
 EVENT_TYPE(HTTP2_STREAM_ERROR)
+
+// A PRIORITY update is sent to the server.
+//   {
+//     "stream_id":        <The stream id>,
+//     "parent_stream_id": <The stream's new parent stream>,
+//     "weight":           <The stream's new weight>,
+//     "exclusive":        <Whether the new dependency is exclusive>,
+//   }
+EVENT_TYPE(HTTP2_STREAM_SEND_PRIORITY)
 
 // ------------------------------------------------------------------------
 // SpdyProxyClientSocket
@@ -1753,48 +1805,6 @@ EVENT_TYPE(QUIC_SESSION_RST_STREAM_FRAME_RECEIVED)
 //     "details": <Human readable description>,
 //   }
 EVENT_TYPE(QUIC_SESSION_RST_STREAM_FRAME_SENT)
-
-// Session received a CONGESTION_FEEDBACK frame.
-//   {
-//     "type": <The specific type of feedback being provided>,
-//     Other per-feedback type details:
-//
-//     for InterArrival:
-//     "accumulated_number_of_lost_packets": <Total number of lost packets
-//                                            over the life of this session>,
-//     "received_packets": <List of strings of the form:
-//                          <sequence_number>@<receive_time_in_ms>>,
-//
-//     for FixRate:
-//     "bitrate_in_bytes_per_second": <The configured bytes per second>,
-//
-//     for TCP:
-//     "accumulated_number_of_lost_packets": <Total number of lost packets
-//                                            over the life of this session>,
-//     "receive_window": <Number of bytes in the receive window>,
-//   }
-EVENT_TYPE(QUIC_SESSION_CONGESTION_FEEDBACK_FRAME_RECEIVED)
-
-// Session received a CONGESTION_FEEDBACK frame.
-//   {
-//     "type": <The specific type of feedback being provided>,
-//     Other per-feedback type details:
-//
-//     for InterArrival:
-//     "accumulated_number_of_lost_packets": <Total number of lost packets
-//                                            over the life of this session>,
-//     "received_packets": <List of strings of the form:
-//                          <sequence_number>@<receive_time_in_ms>>,
-//
-//     for FixRate:
-//     "bitrate_in_bytes_per_second": <The configured bytes per second>,
-//
-//     for TCP:
-//     "accumulated_number_of_lost_packets": <Total number of lost packets
-//                                            over the life of this session>,
-//     "receive_window": <Number of bytes in the receive window>,
-//   }
-EVENT_TYPE(QUIC_SESSION_CONGESTION_FEEDBACK_FRAME_SENT)
 
 // Session received a CONNECTION_CLOSE frame.
 //   {
@@ -2122,6 +2132,13 @@ EVENT_TYPE(SERVICE_WORKER_START_WORKER)
 //   "status": The ServiceWorkerStatusCode as a string. Only present on failure.
 // }
 EVENT_TYPE(SERVICE_WORKER_FETCH_EVENT)
+
+// This event is emitted when a request for a service worker script or its
+// imported scripts could not be handled.
+// {
+//   "error": The error reason as a string.
+// }
+EVENT_TYPE(SERVICE_WORKER_SCRIPT_LOAD_UNHANDLED_REQUEST_ERROR)
 
 // ------------------------------------------------------------------------
 // Global events
@@ -3064,3 +3081,29 @@ EVENT_TYPE(UPLOAD_DATA_STREAM_INIT)
 //              the end of file. Result < 0 means an error.>
 // }
 EVENT_TYPE(UPLOAD_DATA_STREAM_READ)
+
+// -----------------------------------------------------------------------------
+// ResourceScheduler related events
+// -----------------------------------------------------------------------------
+
+// The ResourceScheduler has started a previously blocked request.  Parameters:
+// {
+//   "trigger": <Trigger for evaluation that caused request start>
+// }
+EVENT_TYPE(RESOURCE_SCHEDULER_REQUEST_STARTED)
+
+// -----------------------------------------------------------------------------
+// Network Quality Estimator related events
+// -----------------------------------------------------------------------------
+
+// This event is emitted whenever NetworkQualityEstimator determines that the
+// quality of the network has changed.
+// parameters:
+//  {
+//    "http_rtt": <Current estimate of the HTTP RTT>,
+//    "transport_rtt": <Current estimate of the transport RTT>,
+//    "downstream_throughput": <Current estimate of the downstream throughput>,
+//    "effective_connection_type": <Current estimate of the effective connection
+//                                  type>,
+//  }
+EVENT_TYPE(NETWORK_QUALITY_CHANGED)

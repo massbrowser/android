@@ -273,24 +273,6 @@ suite('<history-list>', function() {
     });
   });
 
-  test('scrolling history list closes overflow menu', function() {
-    var lazyMenu = app.$.history.$.sharedMenu;
-    for (var i = 0; i < 10; i++)
-      app.historyResult(createHistoryInfo(), TEST_HISTORY_RESULTS);
-    return PolymerTest.flushTasks().then(function() {
-      items = polymerSelectAll(element, 'history-item');
-
-      MockInteractions.tap(items[2].$['menu-button']);
-      return PolymerTest.flushTasks();
-    }).then(function() {
-      assertTrue(lazyMenu.getIfExists().menuOpen);
-      element.$['infinite-list'].scrollToIndex(20);
-      return waitForEvent(lazyMenu.getIfExists(), 'menu-open-changed');
-    }).then(function() {
-      assertFalse(lazyMenu.getIfExists().menuOpen);
-    });
-  });
-
   // TODO(calamity): Reenable this test after fixing flakiness.
   // See http://crbug.com/640862.
   test.skip('scrolling history list causes toolbar shadow to appear',
@@ -458,12 +440,17 @@ suite('<history-list>', function() {
     });
   });
 
-  test('delete dialog closed on url change', function() {
+  test('delete dialog closed on back navigation', function(done) {
+    // Ensure that state changes are always mirrored to the URL.
+    app.$$('history-router').$$('iron-location').dwellTime = 0;
     app.queryState_.queryingDisabled = false;
-    var listContainer = app.$.history;
+    // Navigate from chrome://history/ to chrome://history/?q=something else.
+    app.fire('change-query', {search: 'something else'});
     app.historyResult(createHistoryInfo(), TEST_HISTORY_RESULTS);
     app.historyResult(createHistoryInfo(), ADDITIONAL_RESULTS);
-    return PolymerTest.flushTasks().then(function() {
+
+    var listContainer = app.$.history;
+    PolymerTest.flushTasks().then(function() {
       items = Polymer.dom(element.root).querySelectorAll('history-item');
 
       MockInteractions.tap(items[2].$.checkbox);
@@ -474,9 +461,15 @@ suite('<history-list>', function() {
     }).then(function() {
       // Confirmation dialog should appear.
       assertTrue(listContainer.$.dialog.getIfExists().open);
+      // Navigate back to chrome://history.
+      window.history.back();
 
-      app.set('queryState_.searchTerm', 'something else');
-      assertFalse(listContainer.$.dialog.getIfExists().open);
+      listenOnce(window, 'popstate', function() {
+        PolymerTest.flushTasks().then(function() {
+          assertFalse(listContainer.$.dialog.getIfExists().open);
+          done();
+        });
+      });
     });
   });
 
@@ -497,64 +490,10 @@ suite('<history-list>', function() {
     });
   });
 
-  test('focus and keyboard nav', function(done) {
-    app.historyResult(createHistoryInfo(), TEST_HISTORY_RESULTS);
-    PolymerTest.flushTasks().then(function() {
-      var items = polymerSelectAll(element, 'history-item');
-
-      var focused = items[2].$.checkbox;
-      focused.focus();
-
-      // Wait for next render to ensure that focus handlers have been
-      // registered (see HistoryItemElement.attached).
-      Polymer.RenderStatus.afterNextRender(this, function() {
-        MockInteractions.pressAndReleaseKeyOn(
-            focused, 39, [], 'ArrowRight');
-        focused = items[2].$.title;
-        assertEquals(focused, element.lastFocused_);
-        assertTrue(items[2].row_.isActive());
-        assertFalse(items[3].row_.isActive());
-
-        MockInteractions.pressAndReleaseKeyOn(focused, 40, [], 'ArrowDown');
-        focused = items[3].$.title;
-        assertEquals(focused, element.lastFocused_);
-        assertFalse(items[2].row_.isActive());
-        assertTrue(items[3].row_.isActive());
-
-        MockInteractions.pressAndReleaseKeyOn(
-            focused, 39, [], 'ArrowRight');
-        focused = items[3].$['menu-button'];
-        assertEquals(focused, element.lastFocused_);
-        assertFalse(items[2].row_.isActive());
-        assertTrue(items[3].row_.isActive());
-
-        MockInteractions.pressAndReleaseKeyOn(focused, 38, [], 'ArrowUp');
-        focused = items[2].$['menu-button'];
-        assertEquals(focused, element.lastFocused_);
-        assertTrue(items[2].row_.isActive());
-        assertFalse(items[3].row_.isActive());
-
-        MockInteractions.pressAndReleaseKeyOn(focused, 37, [], 'ArrowLeft');
-        focused = items[2].$$('#bookmark-star');
-        assertEquals(focused, element.lastFocused_);
-        assertTrue(items[2].row_.isActive());
-        assertFalse(items[3].row_.isActive());
-
-        MockInteractions.pressAndReleaseKeyOn(focused, 40, [], 'ArrowDown');
-        focused = items[3].$.title;
-        assertEquals(focused, element.lastFocused_);
-        assertFalse(items[2].row_.isActive());
-        assertTrue(items[3].row_.isActive());
-
-        done();
-      });
-    });
-  });
-
   teardown(function() {
     registerMessageCallback('removeVisits', this, undefined);
     registerMessageCallback('queryHistory', this, function() {});
     registerMessageCallback('navigateToUrl', this, undefined);
-    app.set('queryState_.searchTerm', '');
+    app.fire('change-query', {search: ''});
   });
 });

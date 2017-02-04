@@ -40,8 +40,6 @@
 
 namespace blink {
 
-class Blob;
-
 class CORE_EXPORT DataObjectItem
     : public GarbageCollectedFinalized<DataObjectItem> {
  public:
@@ -50,6 +48,11 @@ class CORE_EXPORT DataObjectItem
   static DataObjectItem* createFromString(const String& type,
                                           const String& data);
   static DataObjectItem* createFromFile(File*);
+  // File with non-empty filesystem ID can be converted into FileEntry by using
+  // webkitGetAsEntry.
+  static DataObjectItem* createFromFileWithFileSystemId(
+      File*,
+      const String& fileSystemId);
   static DataObjectItem* createFromURL(const String& url, const String& title);
   static DataObjectItem* createFromHTML(const String& html,
                                         const KURL& baseURL);
@@ -61,7 +64,7 @@ class CORE_EXPORT DataObjectItem
   ItemKind kind() const { return m_kind; }
   String type() const { return m_type; }
   String getAsString() const;
-  Blob* getAsFile() const;
+  File* getAsFile() const;
 
   // Used to support legacy DataTransfer APIs and renderer->browser
   // serialization.
@@ -69,6 +72,9 @@ class CORE_EXPORT DataObjectItem
   String title() const { return m_title; }
   KURL baseURL() const { return m_baseURL; }
   bool isFilename() const;
+
+  bool hasFileSystemId() const;
+  String fileSystemId() const;
 
   DECLARE_TRACE();
 
@@ -93,6 +99,7 @@ class CORE_EXPORT DataObjectItem
   KURL m_baseURL;
 
   uint64_t m_sequenceNumber;  // Only valid when m_source == PasteboardSource
+  String m_fileSystemId;      // Only valid when m_file is backed by FileEntry.
 };
 
 }  // namespace blink

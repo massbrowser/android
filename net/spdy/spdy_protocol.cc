@@ -9,6 +9,9 @@
 
 namespace net {
 
+const char* const kHttp2ConnectionHeaderPrefix =
+    "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+
 SpdyPriority ClampSpdy3Priority(SpdyPriority priority) {
   if (priority < kV3HighestPriority) {
     SPDY_BUG << "Invalid priority: " << static_cast<int>(priority);
@@ -45,100 +48,19 @@ SpdyPriority Http2WeightToSpdy3Priority(int weight) {
   return static_cast<SpdyPriority>(7.f - (weight - 1) / kSteps);
 }
 
-bool SpdyConstants::IsValidFrameType(SpdyMajorVersion version,
-                                     int frame_type_field) {
-  // Check for recognized extensions.
-  if (frame_type_field == SerializeFrameType(version, ALTSVC) ||
-      frame_type_field == SerializeFrameType(version, BLOCKED)) {
-    return true;
-  }
-
-  // DATA is the first valid frame.
-  if (frame_type_field < SerializeFrameType(version, DATA)) {
-    return false;
-  }
-
-  // CONTINUATION is the last valid frame.
-  if (frame_type_field > SerializeFrameType(version, CONTINUATION)) {
-    return false;
-  }
-
-  return true;
+bool IsDefinedFrameType(int frame_type_field) {
+  return frame_type_field >= MIN_FRAME_TYPE &&
+         frame_type_field <= MAX_FRAME_TYPE;
 }
 
-SpdyFrameType SpdyConstants::ParseFrameType(SpdyMajorVersion /*version*/,
-                                            int frame_type_field) {
-  switch (frame_type_field) {
-    case 0:
-      return DATA;
-    case 1:
-      return HEADERS;
-    case 2:
-      return PRIORITY;
-    case 3:
-      return RST_STREAM;
-    case 4:
-      return SETTINGS;
-    case 5:
-      return PUSH_PROMISE;
-    case 6:
-      return PING;
-    case 7:
-      return GOAWAY;
-    case 8:
-      return WINDOW_UPDATE;
-    case 9:
-      return CONTINUATION;
-    case 10:
-      return ALTSVC;
-    case 11:
-      return BLOCKED;
-  }
-  SPDY_BUG << "Unhandled frame type " << frame_type_field;
-  return DATA;
+SpdyFrameType ParseFrameType(int frame_type_field) {
+  SPDY_BUG_IF(!IsDefinedFrameType(frame_type_field))
+      << "Frame type not defined: " << static_cast<int>(frame_type_field);
+  return static_cast<SpdyFrameType>(frame_type_field);
 }
 
-int SpdyConstants::SerializeFrameType(SpdyMajorVersion /*version*/,
-                                      SpdyFrameType frame_type) {
-  switch (frame_type) {
-    case DATA:
-      return 0;
-    case HEADERS:
-      return 1;
-    case PRIORITY:
-      return 2;
-    case RST_STREAM:
-      return 3;
-    case SETTINGS:
-      return 4;
-    case PUSH_PROMISE:
-      return 5;
-    case PING:
-      return 6;
-    case GOAWAY:
-      return 7;
-    case WINDOW_UPDATE:
-      return 8;
-    case CONTINUATION:
-      return 9;
-    // ALTSVC and BLOCKED are extensions.
-    case ALTSVC:
-      return 10;
-    case BLOCKED:
-      return 11;
-    default:
-      SPDY_BUG << "Serializing unhandled frame type " << frame_type;
-      return -1;
-  }
-}
-
-int SpdyConstants::DataFrameType(SpdyMajorVersion version) {
-  return SerializeFrameType(version, DATA);
-}
-
-bool SpdyConstants::IsValidHTTP2FrameStreamId(
-    SpdyStreamId current_frame_stream_id,
-    SpdyFrameType frame_type_field) {
+bool IsValidHTTP2FrameStreamId(SpdyStreamId current_frame_stream_id,
+                               SpdyFrameType frame_type_field) {
   if (current_frame_stream_id == 0) {
     switch (frame_type_field) {
       case DATA:
@@ -165,291 +87,129 @@ bool SpdyConstants::IsValidHTTP2FrameStreamId(
   }
 }
 
-bool SpdyConstants::IsValidSettingId(SpdyMajorVersion version,
-                                     int setting_id_field) {
-  // HEADER_TABLE_SIZE is the first valid setting id.
-  if (setting_id_field <
-      SerializeSettingId(version, SETTINGS_HEADER_TABLE_SIZE)) {
+const char* FrameTypeToString(SpdyFrameType frame_type) {
+  switch (frame_type) {
+    case DATA:
+      return "DATA";
+    case RST_STREAM:
+      return "RST_STREAM";
+    case SETTINGS:
+      return "SETTINGS";
+    case PING:
+      return "PING";
+    case GOAWAY:
+      return "GOAWAY";
+    case HEADERS:
+      return "HEADERS";
+    case WINDOW_UPDATE:
+      return "WINDOW_UPDATE";
+    case PUSH_PROMISE:
+      return "PUSH_PROMISE";
+    case CONTINUATION:
+      return "CONTINUATION";
+    case PRIORITY:
+      return "PRIORITY";
+    case ALTSVC:
+      return "ALTSVC";
+    case BLOCKED:
+      return "BLOCKED";
+  }
+  return "UNKNOWN_FRAME_TYPE";
+}
+
+bool ParseSettingsId(int wire_setting_id, SpdySettingsIds* setting_id) {
+  // HEADER_TABLE_SIZE is the first defined setting id.
+  if (wire_setting_id < SETTINGS_MIN) {
     return false;
   }
 
-  // MAX_HEADER_LIST_SIZE is the last valid setting id.
-  if (setting_id_field >
-      SerializeSettingId(version, SETTINGS_MAX_HEADER_LIST_SIZE)) {
+  // MAX_HEADER_LIST_SIZE is the last defined setting id.
+  if (wire_setting_id > SETTINGS_MAX) {
     return false;
   }
 
+  *setting_id = static_cast<SpdySettingsIds>(wire_setting_id);
   return true;
 }
 
-SpdySettingsIds SpdyConstants::ParseSettingId(SpdyMajorVersion /*version*/,
-                                              int setting_id_field) {
-  switch (setting_id_field) {
-    case 1:
-      return SETTINGS_HEADER_TABLE_SIZE;
-    case 2:
-      return SETTINGS_ENABLE_PUSH;
-    case 3:
-      return SETTINGS_MAX_CONCURRENT_STREAMS;
-    case 4:
-      return SETTINGS_INITIAL_WINDOW_SIZE;
-    case 5:
-      return SETTINGS_MAX_FRAME_SIZE;
-    case 6:
-      return SETTINGS_MAX_HEADER_LIST_SIZE;
-  }
-  SPDY_BUG << "Unhandled setting ID " << setting_id_field;
-  return SETTINGS_UPLOAD_BANDWIDTH;
-}
-
-int SpdyConstants::SerializeSettingId(SpdyMajorVersion /*version*/,
-                                      SpdySettingsIds id) {
+bool SettingsIdToString(SpdySettingsIds id, const char** settings_id_string) {
   switch (id) {
     case SETTINGS_HEADER_TABLE_SIZE:
-      return 1;
+      *settings_id_string = "SETTINGS_HEADER_TABLE_SIZE";
+      return true;
     case SETTINGS_ENABLE_PUSH:
-      return 2;
+      *settings_id_string = "SETTINGS_ENABLE_PUSH";
+      return true;
     case SETTINGS_MAX_CONCURRENT_STREAMS:
-      return 3;
+      *settings_id_string = "SETTINGS_MAX_CONCURRENT_STREAMS";
+      return true;
     case SETTINGS_INITIAL_WINDOW_SIZE:
-      return 4;
+      *settings_id_string = "SETTINGS_INITIAL_WINDOW_SIZE";
+      return true;
     case SETTINGS_MAX_FRAME_SIZE:
-      return 5;
+      *settings_id_string = "SETTINGS_MAX_FRAME_SIZE";
+      return true;
     case SETTINGS_MAX_HEADER_LIST_SIZE:
-      return 6;
-    default:
-      SPDY_BUG << "Serializing unhandled setting id " << id;
-      return -1;
-  }
-}
-
-bool SpdyConstants::IsValidRstStreamStatus(SpdyMajorVersion version,
-                                           int rst_stream_status_field) {
-  // NO_ERROR is the first valid status code.
-  if (rst_stream_status_field <
-      SerializeRstStreamStatus(version, RST_STREAM_NO_ERROR)) {
-    return false;
+      *settings_id_string = "SETTINGS_MAX_HEADER_LIST_SIZE";
+      return true;
   }
 
-  // TODO(hkhalil): Omit COMPRESSION_ERROR and SETTINGS_TIMEOUT
-  /*
-  // This works because GOAWAY and RST_STREAM share a namespace.
-  if (rst_stream_status_field ==
-  SerializeGoAwayStatus(version, GOAWAY_COMPRESSION_ERROR) ||
-  rst_stream_status_field ==
-  SerializeGoAwayStatus(version, GOAWAY_SETTINGS_TIMEOUT)) {
+  *settings_id_string = "SETTINGS_UNKNOWN";
   return false;
-  }
-  */
-
-  // HTTP_1_1_REQUIRED is the last valid status code.
-  if (rst_stream_status_field >
-      SerializeRstStreamStatus(version, RST_STREAM_HTTP_1_1_REQUIRED)) {
-    return false;
-  }
-
-  return true;
 }
 
-SpdyRstStreamStatus SpdyConstants::ParseRstStreamStatus(
-    SpdyMajorVersion /*version*/,
-    int rst_stream_status_field) {
-  switch (rst_stream_status_field) {
-    case 0:
-      return RST_STREAM_NO_ERROR;
-    case 1:
-      return RST_STREAM_PROTOCOL_ERROR;
-    case 2:
-      return RST_STREAM_INTERNAL_ERROR;
-    case 3:
-      return RST_STREAM_FLOW_CONTROL_ERROR;
-    case 5:
-      return RST_STREAM_STREAM_CLOSED;
-    case 6:
-      return RST_STREAM_FRAME_SIZE_ERROR;
-    case 7:
-      return RST_STREAM_REFUSED_STREAM;
-    case 8:
-      return RST_STREAM_CANCEL;
-    case 10:
-      return RST_STREAM_CONNECT_ERROR;
-    case 11:
-      return RST_STREAM_ENHANCE_YOUR_CALM;
-    case 12:
-      return RST_STREAM_INADEQUATE_SECURITY;
-    case 13:
-      return RST_STREAM_HTTP_1_1_REQUIRED;
+SpdyRstStreamStatus ParseRstStreamStatus(int rst_stream_status_field) {
+  if (rst_stream_status_field < RST_STREAM_MIN ||
+      rst_stream_status_field > RST_STREAM_MAX) {
+    return RST_STREAM_INTERNAL_ERROR;
   }
 
-  SPDY_BUG << "Invalid RST_STREAM status " << rst_stream_status_field;
-  return RST_STREAM_PROTOCOL_ERROR;
+  return static_cast<SpdyRstStreamStatus>(rst_stream_status_field);
 }
 
-int SpdyConstants::SerializeRstStreamStatus(
-    SpdyMajorVersion /*version*/,
-    SpdyRstStreamStatus rst_stream_status) {
-  switch (rst_stream_status) {
+SpdyGoAwayStatus ParseGoAwayStatus(int goaway_status_field) {
+  if (goaway_status_field < GOAWAY_MIN || goaway_status_field > GOAWAY_MAX) {
+    return GOAWAY_INTERNAL_ERROR;
+  }
+
+  return static_cast<SpdyGoAwayStatus>(goaway_status_field);
+}
+
+const char* ErrorCodeToString(uint32_t error_code) {
+  switch (error_code) {
     case RST_STREAM_NO_ERROR:
-      return 0;
+      return "NO_ERROR";
     case RST_STREAM_PROTOCOL_ERROR:
-      return 1;
+      return "PROTOCOL_ERROR";
     case RST_STREAM_INTERNAL_ERROR:
-      return 2;
+      return "INTERNAL_ERROR";
     case RST_STREAM_FLOW_CONTROL_ERROR:
-      return 3;
+      return "FLOW_CONTROL_ERROR";
+    case RST_STREAM_SETTINGS_TIMEOUT:
+      return "SETTINGS_TIMEOUT";
     case RST_STREAM_STREAM_CLOSED:
-      return 5;
+      return "STREAM_CLOSED";
     case RST_STREAM_FRAME_SIZE_ERROR:
-      return 6;
+      return "FRAME_SIZE_ERROR";
     case RST_STREAM_REFUSED_STREAM:
-      return 7;
+      return "REFUSED_STREAM";
     case RST_STREAM_CANCEL:
-      return 8;
+      return "CANCEL";
+    case RST_STREAM_COMPRESSION_ERROR:
+      return "COMPRESSION_ERROR";
     case RST_STREAM_CONNECT_ERROR:
-      return 10;
+      return "CONNECT_ERROR";
     case RST_STREAM_ENHANCE_YOUR_CALM:
-      return 11;
+      return "ENHANCE_YOUR_CALM";
     case RST_STREAM_INADEQUATE_SECURITY:
-      return 12;
+      return "INADEQUATE_SECURITY";
     case RST_STREAM_HTTP_1_1_REQUIRED:
-      return 13;
-    default:
-      SPDY_BUG << "Unhandled RST_STREAM status " << rst_stream_status;
-      return -1;
+      return "HTTP_1_1_REQUIRED";
   }
+  return "UNKNOWN_ERROR_CODE";
 }
 
-bool SpdyConstants::IsValidGoAwayStatus(SpdyMajorVersion version,
-                                        int goaway_status_field) {
-  // GOAWAY_NO_ERROR is the first valid status.
-  if (goaway_status_field < SerializeGoAwayStatus(version, GOAWAY_NO_ERROR)) {
-    return false;
-  }
-
-  // GOAWAY_HTTP_1_1_REQUIRED is the last valid status.
-  if (goaway_status_field >
-      SerializeGoAwayStatus(version, GOAWAY_HTTP_1_1_REQUIRED)) {
-    return false;
-  }
-
-  return true;
-}
-
-SpdyGoAwayStatus SpdyConstants::ParseGoAwayStatus(SpdyMajorVersion /*version*/,
-                                                  int goaway_status_field) {
-  switch (goaway_status_field) {
-    case 0:
-      return GOAWAY_NO_ERROR;
-    case 1:
-      return GOAWAY_PROTOCOL_ERROR;
-    case 2:
-      return GOAWAY_INTERNAL_ERROR;
-    case 3:
-      return GOAWAY_FLOW_CONTROL_ERROR;
-    case 4:
-      return GOAWAY_SETTINGS_TIMEOUT;
-    case 5:
-      return GOAWAY_STREAM_CLOSED;
-    case 6:
-      return GOAWAY_FRAME_SIZE_ERROR;
-    case 7:
-      return GOAWAY_REFUSED_STREAM;
-    case 8:
-      return GOAWAY_CANCEL;
-    case 9:
-      return GOAWAY_COMPRESSION_ERROR;
-    case 10:
-      return GOAWAY_CONNECT_ERROR;
-    case 11:
-      return GOAWAY_ENHANCE_YOUR_CALM;
-    case 12:
-      return GOAWAY_INADEQUATE_SECURITY;
-    case 13:
-      return GOAWAY_HTTP_1_1_REQUIRED;
-  }
-
-  SPDY_BUG << "Unhandled GOAWAY status " << goaway_status_field;
-  return GOAWAY_PROTOCOL_ERROR;
-}
-
-int SpdyConstants::SerializeGoAwayStatus(SpdyMajorVersion /*version*/,
-                                         SpdyGoAwayStatus status) {
-  switch (status) {
-    case GOAWAY_NO_ERROR:
-      return 0;
-    case GOAWAY_PROTOCOL_ERROR:
-      return 1;
-    case GOAWAY_INTERNAL_ERROR:
-      return 2;
-    case GOAWAY_FLOW_CONTROL_ERROR:
-      return 3;
-    case GOAWAY_SETTINGS_TIMEOUT:
-      return 4;
-    case GOAWAY_STREAM_CLOSED:
-      return 5;
-    case GOAWAY_FRAME_SIZE_ERROR:
-      return 6;
-    case GOAWAY_REFUSED_STREAM:
-      return 7;
-    case GOAWAY_CANCEL:
-      return 8;
-    case GOAWAY_COMPRESSION_ERROR:
-      return 9;
-    case GOAWAY_CONNECT_ERROR:
-      return 10;
-    case GOAWAY_ENHANCE_YOUR_CALM:
-      return 11;
-    case GOAWAY_INADEQUATE_SECURITY:
-      return 12;
-    case GOAWAY_HTTP_1_1_REQUIRED:
-      return 13;
-    default:
-      SPDY_BUG << "Serializing unhandled GOAWAY status " << status;
-      return -1;
-  }
-}
-
-size_t SpdyConstants::GetFrameHeaderSize(SpdyMajorVersion /*version*/) {
-  return 9;
-}
-
-size_t SpdyConstants::GetDataFrameMinimumSize(SpdyMajorVersion version) {
-  return GetFrameHeaderSize(version);
-}
-
-size_t SpdyConstants::GetMaxFrameSizeLimit(SpdyMajorVersion version) {
-  return kSpdyMaxFrameSizeLimit + GetFrameHeaderSize(version);
-}
-
-size_t SpdyConstants::GetSizeOfSizeField() {
-  return sizeof(uint32_t);
-}
-
-size_t SpdyConstants::GetPerHeaderOverhead(SpdyMajorVersion version) {
-  return (version == net::HTTP2) ? 32 : 0;
-}
-
-size_t SpdyConstants::GetSettingSize(SpdyMajorVersion version) {
-  return 6;
-}
-
-int32_t SpdyConstants::GetInitialStreamWindowSize(SpdyMajorVersion version) {
-  return 64 * 1024 - 1;
-}
-
-int32_t SpdyConstants::GetInitialSessionWindowSize(SpdyMajorVersion version) {
-  return 64 * 1024 - 1;
-}
-
-std::string SpdyConstants::GetVersionString(SpdyMajorVersion version) {
-  switch (version) {
-    case HTTP2:
-      return "h2";
-    default:
-      SPDY_BUG << "Unsupported SPDY major version: " << version;
-      return "h2";
-  }
-}
+const char* const kHttp2Npn = "h2";
 
 SpdyFrameWithHeaderBlockIR::SpdyFrameWithHeaderBlockIR(
     SpdyStreamId stream_id,
@@ -491,14 +251,6 @@ void SpdyDataIR::Visit(SpdyFrameVisitor* visitor) const {
   return visitor->VisitData(*this);
 }
 
-void SpdySynStreamIR::Visit(SpdyFrameVisitor* visitor) const {
-  return visitor->VisitSynStream(*this);
-}
-
-void SpdySynReplyIR::Visit(SpdyFrameVisitor* visitor) const {
-  return visitor->VisitSynReply(*this);
-}
-
 SpdyRstStreamIR::SpdyRstStreamIR(SpdyStreamId stream_id,
                                  SpdyRstStreamStatus status)
     : SpdyFrameWithStreamIdIR(stream_id) {
@@ -511,9 +263,7 @@ void SpdyRstStreamIR::Visit(SpdyFrameVisitor* visitor) const {
   return visitor->VisitRstStream(*this);
 }
 
-SpdySettingsIR::SpdySettingsIR()
-    : clear_settings_(false),
-      is_ack_(false) {}
+SpdySettingsIR::SpdySettingsIR() : is_ack_(false) {}
 
 SpdySettingsIR::~SpdySettingsIR() {}
 

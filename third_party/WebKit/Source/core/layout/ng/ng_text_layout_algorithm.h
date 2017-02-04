@@ -6,16 +6,15 @@
 #define NGInlineLayoutAlgorithm_h
 
 #include "core/CoreExport.h"
-#include "core/layout/ng/ng_inline_node.h"
+#include "core/layout/ng/ng_break_token.h"
 #include "core/layout/ng/ng_layout_algorithm.h"
-#include "wtf/RefPtr.h"
+#include "platform/heap/Handle.h"
 
 namespace blink {
 
-class ComputedStyle;
 class NGConstraintSpace;
-class NGPhysicalFragment;
-class NGBreakToken;
+class NGInlineNode;
+class NGLineBuilder;
 
 // A class for text layout. This takes a NGInlineNode which consists only
 // non-atomic inlines and produces NGTextFragments.
@@ -33,16 +32,15 @@ class CORE_EXPORT NGTextLayoutAlgorithm : public NGLayoutAlgorithm {
                         NGConstraintSpace* space,
                         NGBreakToken* break_token = nullptr);
 
-  NGLayoutStatus Layout(NGFragmentBase*,
-                        NGPhysicalFragmentBase**,
-                        NGLayoutAlgorithm**) override;
-
-  DECLARE_VIRTUAL_TRACE();
+  NGPhysicalFragment* Layout() override;
+  void LayoutInline(NGLineBuilder*);
 
  private:
-  Member<NGInlineNode> inline_box_;
-  Member<NGConstraintSpace> constraint_space_;
-  Member<NGBreakToken> break_token_;
+  Persistent<NGInlineNode> inline_box_;
+  Persistent<NGConstraintSpace> constraint_space_;
+  Persistent<NGBreakToken> break_token_;
+
+  friend class NGInlineNodeTest;
 };
 
 }  // namespace blink

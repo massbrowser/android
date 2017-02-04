@@ -15,7 +15,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/debug/alias.h"
+#include "base/debug/crash_logging.h"
 #include "base/debug/leak_annotations.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
@@ -77,6 +77,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/crash_keys.h"
 #include "chrome/common/extensions/chrome_extensions_client.h"
 #include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/features.h"
@@ -98,6 +99,8 @@
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "components/rappor/public/rappor_utils.h"
+#include "components/rappor/rappor_service_impl.h"
 #include "components/safe_json/safe_json_parser.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/subresource_filter/content/browser/content_ruleset_service_delegate.h"
@@ -135,8 +138,8 @@
 #endif
 
 #if !defined(OS_ANDROID)
+#include "chrome/browser/gcm/gcm_product_util.h"
 #include "chrome/browser/lifetime/keep_alive_registry.h"
-#include "chrome/browser/services/gcm/gcm_product_util.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "components/gcm_driver/gcm_client_factory.h"
 #include "components/gcm_driver/gcm_desktop_utils.h"
@@ -198,6 +201,12 @@ using content::ChildProcessSecurityPolicy;
 using content::PluginService;
 using content::ResourceDispatcherHost;
 
+rappor::RapporService* GetBrowserRapporService() {
+  if (g_browser_process != nullptr)
+    return g_browser_process->rappor_service();
+  return nullptr;
+}
+
 BrowserProcessImpl::BrowserProcessImpl(
     base::SequencedTaskRunner* local_state_task_runner,
     const base::CommandLine& command_line)
@@ -216,6 +225,7 @@ BrowserProcessImpl::BrowserProcessImpl(
       local_state_task_runner_(local_state_task_runner),
       cached_default_web_client_state_(shell_integration::UNKNOWN_DEFAULT) {
   g_browser_process = this;
+  rappor::SetDefaultServiceAccessor(&GetBrowserRapporService);
   platform_part_.reset(new BrowserProcessPlatformPart());
 
 #if BUILDFLAG(ENABLE_PRINTING)
@@ -526,9 +536,14 @@ metrics::MetricsService* BrowserProcessImpl::metrics_service() {
   return GetMetricsServicesManager()->GetMetricsService();
 }
 
-rappor::RapporService* BrowserProcessImpl::rappor_service() {
+rappor::RapporServiceImpl* BrowserProcessImpl::rappor_service() {
   DCHECK(CalledOnValidThread());
-  return GetMetricsServicesManager()->GetRapporService();
+  return GetMetricsServicesManager()->GetRapporServiceImpl();
+}
+
+ukm::UkmService* BrowserProcessImpl::ukm_service() {
+  DCHECK(CalledOnValidThread());
+  return GetMetricsServicesManager()->GetUkmService();
 }
 
 IOThread* BrowserProcessImpl::io_thread() {
@@ -832,10 +847,10 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(metrics::prefs::kMetricsReportingEnabled,
                                 GoogleUpdateSettings::GetCollectStatsConsent());
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   registry->RegisterBooleanPref(
       prefs::kCrashReportingEnabled, false);
-#endif  // BUILDFLAG(ANDROID_JAVA_UI)
+#endif  // defined(OS_ANDROID)
 }
 
 DownloadRequestLimiter* BrowserProcessImpl::download_request_limiter() {
@@ -1049,14 +1064,9 @@ void BrowserProcessImpl::PreCreateThreads() {
     // commit (including in iframes) in extension processes.
     ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeIsolatedScheme(
         extensions::kExtensionScheme, true);
-    // TODO(nick): Kill off kExtensionResourceScheme.
-    ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeIsolatedScheme(
-        extensions::kExtensionResourceScheme, false);
   } else {
     ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
         extensions::kExtensionScheme);
-    ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
-        extensions::kExtensionResourceScheme);
   }
 #endif
 
@@ -1131,7 +1141,7 @@ void BrowserProcessImpl::CreateIntranetRedirectDetector() {
 }
 
 void BrowserProcessImpl::CreateNotificationPlatformBridge() {
-#if (defined(OS_ANDROID) || defined(OS_MACOSX)) && defined(ENABLE_NOTIFICATIONS)
+#if (defined(OS_ANDROID) || defined(OS_MACOSX))
   DCHECK(!notification_bridge_);
   notification_bridge_.reset(NotificationPlatformBridge::Create());
   created_notification_bridge_ = true;
@@ -1141,7 +1151,7 @@ void BrowserProcessImpl::CreateNotificationPlatformBridge() {
 void BrowserProcessImpl::CreateNotificationUIManager() {
 // Android does not use the NotificationUIManager anymore
 // All notification traffic is routed through NotificationPlatformBridge.
-#if defined(ENABLE_NOTIFICATIONS) && !defined(OS_ANDROID)
+#if !defined(OS_ANDROID)
   DCHECK(!notification_ui_manager_);
   notification_ui_manager_.reset(NotificationUIManager::Create());
   created_notification_ui_manager_ = true;
@@ -1305,10 +1315,9 @@ void BrowserProcessImpl::Pin() {
 
   // CHECK(!IsShuttingDown());
   if (IsShuttingDown()) {
-    // Copy the stacktrace which released the final reference onto our stack so
-    // it will be available in the crash report for inspection.
-    base::debug::StackTrace callstack = release_last_reference_callstack_;
-    base::debug::Alias(&callstack);
+    // TODO(crbug.com/113031, crbug.com/625646): Temporary instrumentation.
+    base::debug::SetCrashKeyToStackTrace(crash_keys::kBrowserUnpinTrace,
+                                         release_last_reference_callstack_);
     CHECK(false);
   }
 }

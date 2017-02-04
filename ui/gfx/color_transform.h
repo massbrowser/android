@@ -9,16 +9,15 @@
 #include <stdint.h>
 
 #include "build/build_config.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/gfx_export.h"
 
 namespace gfx {
 
-class ColorSpace;
-
 class GFX_EXPORT ColorTransform {
  public:
-  enum class Intent { INTENT_ABSOLUTE, INTENT_PERCEPTUAL };
+  enum class Intent { INTENT_ABSOLUTE, INTENT_PERCEPTUAL, TEST_NO_OPT };
 
   // TriStimulus is a color coordinate in any color space.
   // Channel order is XYZ, RGB or YUV.
@@ -33,6 +32,9 @@ class GFX_EXPORT ColorTransform {
       const ColorSpace& from,
       const ColorSpace& to,
       Intent intent);
+
+  static float ToLinearForTesting(ColorSpace::TransferID id, float v);
+  static float FromLinearForTesting(ColorSpace::TransferID id, float v);
 };
 }  // namespace gfx
 

@@ -23,14 +23,14 @@
 #include "chrome/browser/android/offline_pages/test_request_coordinator_builder.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/offline_pages/background/network_quality_provider_stub.h"
-#include "components/offline_pages/background/request_coordinator.h"
-#include "components/offline_pages/client_namespace_constants.h"
-#include "components/offline_pages/offline_page_feature.h"
-#include "components/offline_pages/offline_page_model.h"
-#include "components/offline_pages/offline_page_test_archiver.h"
-#include "components/offline_pages/offline_page_test_store.h"
-#include "components/offline_pages/offline_page_types.h"
+#include "components/offline_pages/core/background/network_quality_provider_stub.h"
+#include "components/offline_pages/core/background/request_coordinator.h"
+#include "components/offline_pages/core/client_namespace_constants.h"
+#include "components/offline_pages/core/offline_page_feature.h"
+#include "components/offline_pages/core/offline_page_model.h"
+#include "components/offline_pages/core/offline_page_test_archiver.h"
+#include "components/offline_pages/core/offline_page_test_store.h"
+#include "components/offline_pages/core/offline_page_types.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/filename_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -47,7 +47,6 @@ const int64_t kTestFileSize = 876543LL;
 const char* kTestPage1ClientId = "1234";
 const char* kTestPage2ClientId = "5678";
 const char* kTestPage3ClientId = "7890";
-const char* kTestPage4ClientId = "9876";
 
 void HasDuplicatesCallback(bool* out_has_duplicates,
                            base::Time* out_latest_saved_time,
@@ -168,9 +167,6 @@ void OfflinePageUtilsTest::SetLastPathCreatedByArchiver(
     const base::FilePath& file_path) {}
 
 void OfflinePageUtilsTest::CreateOfflinePages() {
-  OfflinePageModel* model =
-      OfflinePageModelFactory::GetForBrowserContext(profile());
-
   // Create page 1.
   std::unique_ptr<OfflinePageTestArchiver> archiver(BuildArchiver(
       kTestPage1Url, base::FilePath(FILE_PATH_LITERAL("page1.mhtml"))));
@@ -184,17 +180,6 @@ void OfflinePageUtilsTest::CreateOfflinePages() {
                            base::FilePath(FILE_PATH_LITERAL("page2.mhtml")));
   client_id.id = kTestPage2ClientId;
   SavePage(kTestPage2Url, client_id, std::move(archiver));
-
-  // Create page 4 - expired page.
-  archiver = BuildArchiver(kTestPage4Url,
-                           base::FilePath(FILE_PATH_LITERAL("page4.mhtml")));
-  client_id.id = kTestPage4ClientId;
-  SavePage(kTestPage4Url, client_id, std::move(archiver));
-  RunUntilIdle();
-  model->ExpirePages(
-      std::vector<int64_t>({offline_id()}), base::Time::Now(),
-      base::Bind(&OfflinePageUtilsTest::OnExpirePageDone, AsWeakPtr()));
-  RunUntilIdle();
 }
 
 void OfflinePageUtilsTest::CreateRequests() {
@@ -260,6 +245,19 @@ TEST_F(OfflinePageUtilsTest, CheckExistenceOfRequestsWithURL) {
   RunUntilIdle();
   EXPECT_FALSE(has_duplicates);
   EXPECT_TRUE(latest_saved_time.is_null());
+}
+
+TEST_F(OfflinePageUtilsTest, EqualsIgnoringFragment) {
+  EXPECT_TRUE(OfflinePageUtils::EqualsIgnoringFragment(
+      GURL("http://example.com/"), GURL("http://example.com/")));
+  EXPECT_TRUE(OfflinePageUtils::EqualsIgnoringFragment(
+      GURL("http://example.com/"), GURL("http://example.com/#test")));
+  EXPECT_TRUE(OfflinePageUtils::EqualsIgnoringFragment(
+      GURL("http://example.com/#test"), GURL("http://example.com/")));
+  EXPECT_TRUE(OfflinePageUtils::EqualsIgnoringFragment(
+      GURL("http://example.com/#test"), GURL("http://example.com/#test2")));
+  EXPECT_FALSE(OfflinePageUtils::EqualsIgnoringFragment(
+      GURL("http://example.com/"), GURL("http://test.com/#test")));
 }
 
 }  // namespace offline_pages

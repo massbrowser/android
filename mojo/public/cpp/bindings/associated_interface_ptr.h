@@ -128,7 +128,7 @@ class AssociatedInterfacePtr {
   // Similar to the method above, but also specifies a disconnect reason.
   void ResetWithReason(uint32_t custom_reason, const std::string& description) {
     if (internal_state_.is_bound())
-      internal_state_.SendDisconnectReason(custom_reason, description);
+      internal_state_.CloseWithReason(custom_reason, description);
     reset();
   }
 
@@ -204,7 +204,7 @@ class AssociatedInterfacePtr {
 
 // Creates an associated interface. The output |ptr| should be used locally
 // while the returned request should be passed through the message pipe endpoint
-// referred to by |associated_group| to setup the corresponding asssociated
+// referred to by |associated_group| to setup the corresponding associated
 // interface implementation at the remote side.
 //
 // NOTE: |ptr| should NOT be used to make calls before the request is sent.
@@ -212,7 +212,7 @@ class AssociatedInterfacePtr {
 // as soon as the request is sent, |ptr| is usable. There is no need to wait
 // until the request is bound to an implementation at the remote side.
 template <typename Interface>
-AssociatedInterfaceRequest<Interface> GetProxy(
+AssociatedInterfaceRequest<Interface> MakeRequest(
     AssociatedInterfacePtr<Interface>* ptr,
     AssociatedGroup* group,
     scoped_refptr<base::SingleThreadTaskRunner> runner =
@@ -228,7 +228,7 @@ AssociatedInterfaceRequest<Interface> GetProxy(
 
 // Creates an associated interface proxy in its own AssociatedGroup.
 template <typename Interface>
-AssociatedInterfaceRequest<Interface> GetProxyForTesting(
+AssociatedInterfaceRequest<Interface> MakeRequestForTesting(
     AssociatedInterfacePtr<Interface>* ptr,
     scoped_refptr<base::SingleThreadTaskRunner> runner =
         base::ThreadTaskRunnerHandle::Get()) {
@@ -255,16 +255,41 @@ AssociatedInterfaceRequest<Interface> GetProxyForTesting(
   return request;
 }
 
-// Creates an associated interface proxy which casts its messages into the void.
+// Like |GetProxy|, but the interface is never associated with any other
+// interface. The returned request can be bound directly to the corresponding
+// associated interface implementation, without first passing it through a
+// message pipe endpoint.
+//
+// This function has two main uses:
+//
+//  * In testing, where the returned request is bound to e.g. a mock and there
+//    are no other interfaces involved.
+//
+//  * When discarding messages sent on an interface, which can be done by
+//    discarding the returned request.
 template <typename Interface>
-void GetDummyProxyForTesting(AssociatedInterfacePtr<Interface>* proxy) {
+AssociatedInterfaceRequest<Interface> GetIsolatedProxy(
+    AssociatedInterfacePtr<Interface>* ptr) {
   MessagePipe pipe;
-  scoped_refptr<internal::MultiplexRouter> router =
+  scoped_refptr<internal::MultiplexRouter> router0 =
       new internal::MultiplexRouter(std::move(pipe.handle0),
                                     internal::MultiplexRouter::MULTI_INTERFACE,
                                     false, base::ThreadTaskRunnerHandle::Get());
-  std::unique_ptr<AssociatedGroup> group = router->CreateAssociatedGroup();
-  GetProxy(proxy, group.get());
+  scoped_refptr<internal::MultiplexRouter> router1 =
+      new internal::MultiplexRouter(std::move(pipe.handle1),
+                                    internal::MultiplexRouter::MULTI_INTERFACE,
+                                    true, base::ThreadTaskRunnerHandle::Get());
+
+  ScopedInterfaceEndpointHandle endpoint0, endpoint1;
+  router0->CreateEndpointHandlePair(&endpoint0, &endpoint1);
+  endpoint1 = router1->CreateLocalEndpointHandle(endpoint1.release());
+
+  ptr->Bind(AssociatedInterfacePtrInfo<Interface>(std::move(endpoint0),
+                                                  Interface::Version_));
+
+  AssociatedInterfaceRequest<Interface> request;
+  request.Bind(std::move(endpoint1));
+  return request;
 }
 
 }  // namespace mojo

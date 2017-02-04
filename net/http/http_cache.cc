@@ -43,7 +43,7 @@
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
 #include "net/log/net_log_with_source.h"
-#include "net/quic/core/crypto/quic_server_info.h"
+#include "net/quic/chromium/quic_server_info.h"
 
 #if defined(OS_POSIX)
 #include <unistd.h>
@@ -230,7 +230,8 @@ void HttpCache::MetadataWriter::Write(const GURL& url,
   DCHECK(buf->data());
   request_info_.url = url;
   request_info_.method = "GET";
-  request_info_.load_flags = LOAD_ONLY_FROM_CACHE | LOAD_SKIP_CACHE_VALIDATION;
+  request_info_.load_flags =
+      LOAD_ONLY_FROM_CACHE | LOAD_SKIP_CACHE_VALIDATION | LOAD_SKIP_VARY_CHECK;
 
   expected_response_time_ = expected_response_time;
   buf_ = buf;
@@ -281,8 +282,10 @@ class HttpCache::QuicServerInfoFactoryAdaptor : public QuicServerInfoFactory {
       : http_cache_(http_cache) {
   }
 
-  QuicServerInfo* GetForServer(const QuicServerId& server_id) override {
-    return new DiskCacheBasedQuicServerInfo(server_id, http_cache_);
+  std::unique_ptr<QuicServerInfo> GetForServer(
+      const QuicServerId& server_id) override {
+    return base::MakeUnique<DiskCacheBasedQuicServerInfo>(server_id,
+                                                          http_cache_);
   }
 
  private:

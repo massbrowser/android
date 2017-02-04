@@ -5,42 +5,45 @@
 #include "core/layout/ng/ng_inline_node.h"
 
 #include "core/layout/LayoutBlockFlow.h"
-#include "core/style/ComputedStyle.h"
-#include "core/layout/ng/layout_ng_block_flow.h"
+#include "core/layout/LayoutObject.h"
+#include "core/layout/LayoutText.h"
 #include "core/layout/ng/ng_bidi_paragraph.h"
-#include "core/layout/ng/ng_layout_inline_items_builder.h"
-#include "core/layout/ng/ng_text_layout_algorithm.h"
+#include "core/layout/ng/ng_box_fragment.h"
 #include "core/layout/ng/ng_constraint_space_builder.h"
-#include "core/layout/ng/ng_constraint_space.h"
+#include "core/layout/ng/ng_fragment_builder.h"
+#include "core/layout/ng/ng_line_builder.h"
+#include "core/layout/ng/ng_layout_inline_items_builder.h"
+#include "core/layout/ng/ng_physical_box_fragment.h"
 #include "core/layout/ng/ng_physical_text_fragment.h"
 #include "core/layout/ng/ng_text_fragment.h"
-#include "core/layout/ng/ng_fragment_builder.h"
-#include "core/layout/ng/ng_length_utils.h"
-#include "core/layout/ng/ng_writing_mode.h"
-#include "platform/text/TextDirection.h"
-#include "platform/fonts/shaping/CachingWordShaper.h"
+#include "core/layout/ng/ng_text_layout_algorithm.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/fonts/shaping/CachingWordShapeIterator.h"
+#include "platform/fonts/shaping/CachingWordShaper.h"
 #include "wtf/text/CharacterNames.h"
 
 namespace blink {
 
 NGInlineNode::NGInlineNode(LayoutObject* start_inline,
-                           ComputedStyle* block_style)
-    : NGLayoutInputNode(NGLayoutInputNodeType::LegacyInline),
+                           const ComputedStyle* block_style)
+    : NGLayoutInputNode(NGLayoutInputNodeType::kLegacyInline),
       start_inline_(start_inline),
       last_inline_(nullptr),
       block_style_(block_style) {
   DCHECK(start_inline);
-  PrepareLayout();  // TODO(layout-dev): Shouldn't be called here.
 }
 
 NGInlineNode::NGInlineNode()
-    : NGLayoutInputNode(NGLayoutInputNodeType::LegacyInline),
+    : NGLayoutInputNode(NGLayoutInputNodeType::kLegacyInline),
       start_inline_(nullptr),
       last_inline_(nullptr),
       block_style_(nullptr) {}
 
 NGInlineNode::~NGInlineNode() {}
+
+NGLayoutInlineItemRange NGInlineNode::Items(unsigned start, unsigned end) {
+  return NGLayoutInlineItemRange(&items_, start, end);
+}
 
 void NGInlineNode::PrepareLayout() {
   // Scan list of siblings collecting all in-flow non-atomic inlines. A single
@@ -60,6 +63,8 @@ void NGInlineNode::PrepareLayout() {
 // parent LayoutInline where possible, and joining all text content in a single
 // string to allow bidi resolution and shaping of the entire block.
 void NGInlineNode::CollectInlines(LayoutObject* start, LayoutObject* last) {
+  DCHECK(text_content_.isNull());
+  DCHECK(items_.isEmpty());
   NGLayoutInlineItemsBuilder builder(&items_);
   builder.EnterBlock(block_style_.get());
   CollectInlines(start, last, &builder);
@@ -77,7 +82,7 @@ void NGInlineNode::CollectInlines(LayoutObject* start,
   while (node) {
     if (node->isText()) {
       builder->SetIsSVGText(node->isSVGInlineText());
-      builder->Append(toLayoutText(node)->text(), node->style());
+      builder->Append(toLayoutText(node)->text(), node->style(), node);
     } else if (node->isFloating() || node->isOutOfFlowPositioned()) {
       // Skip positioned objects.
     } else if (!node->isInline()) {
@@ -88,7 +93,7 @@ void NGInlineNode::CollectInlines(LayoutObject* start,
       // For atomic inlines add a unicode "object replacement character" to
       // signal the presence of a non-text object to the unicode bidi algorithm.
       if (node->isAtomicInlineLevel()) {
-        builder->Append(objectReplacementCharacter);
+        builder->Append(objectReplacementCharacter, nullptr, node);
       }
 
       // Otherwise traverse to children if they exist.
@@ -119,7 +124,6 @@ void NGInlineNode::SegmentText() {
   text_content_.ensure16Bit();
   if (!bidi.SetParagraph(text_content_, block_style_.get())) {
     // On failure, give up bidi resolving and reordering.
-    NOTREACHED();
     is_bidi_enabled_ = false;
     return;
   }
@@ -183,6 +187,13 @@ void NGLayoutInlineItem::SetEndOffset(unsigned end_offset) {
   end_offset_ = end_offset;
 }
 
+LayoutUnit NGLayoutInlineItem::InlineSize() const {
+  LayoutUnit inline_size;
+  for (const auto& result : shape_results_)
+    inline_size += result->width();
+  return inline_size;
+}
+
 void NGInlineNode::ShapeText() {
   // TODO(layout-dev): Should pass the entire range to the shaper as context
   // and then shape each item based on the relevant font.
@@ -199,38 +210,29 @@ void NGInlineNode::ShapeText() {
     CachingWordShapeIterator iterator(shape_cache, item_run, &item_font);
     RefPtr<const ShapeResult> word_result;
     while (iterator.next(&word_result)) {
-      item.shape_results_.append(word_result.get());
+      item.shape_results_.push_back(word_result.get());
     };
   }
 }
 
-bool NGInlineNode::Layout(const NGConstraintSpace* constraint_space,
-                          NGFragmentBase** out) {
-  // TODO(layout-dev): Perform pre-layout text step.
+NGPhysicalFragment* NGInlineNode::Layout(NGConstraintSpace*) {
+  ASSERT_NOT_REACHED();
+  return nullptr;
+}
+
+void NGInlineNode::LayoutInline(NGConstraintSpace* constraint_space,
+                                NGLineBuilder* line_builder) {
+  PrepareLayout();
 
   // NOTE: We don't need to change the coordinate system here as we are an
   // inline.
-  NGConstraintSpace* child_constraint_space = new NGConstraintSpace(
-      constraint_space->WritingMode(), constraint_space->Direction(),
-      constraint_space->MutablePhysicalSpace());
+  NGConstraintSpace* child_constraint_space =
+      NGConstraintSpaceBuilder(constraint_space->WritingMode())
+          .SetTextDirection(constraint_space->Direction())
+          .ToConstraintSpace();
 
-  if (!layout_algorithm_)
-    // TODO(layout-dev): If an atomic inline run the appropriate algorithm.
-    layout_algorithm_ = new NGTextLayoutAlgorithm(this, child_constraint_space);
-
-  NGPhysicalFragmentBase* fragment = nullptr;
-  if (!layout_algorithm_->Layout(nullptr, &fragment, nullptr))
-    return false;
-
-  // TODO(layout-dev): Implement copying of fragment data to LayoutObject tree.
-
-  *out = new NGTextFragment(constraint_space->WritingMode(),
-                            constraint_space->Direction(),
-                            toNGPhysicalTextFragment(fragment));
-
-  // Reset algorithm for future use
-  layout_algorithm_ = nullptr;
-  return true;
+  NGTextLayoutAlgorithm(this, child_constraint_space)
+      .LayoutInline(line_builder);
 }
 
 NGInlineNode* NGInlineNode::NextSibling() {
@@ -244,10 +246,67 @@ NGInlineNode* NGInlineNode::NextSibling() {
   return next_sibling_;
 }
 
+LayoutObject* NGInlineNode::GetLayoutObject() {
+  return GetLayoutBlockFlow();
+}
+
+// Find the first LayoutBlockFlow in the ancestor chain of |start_inilne_|.
+LayoutBlockFlow* NGInlineNode::GetLayoutBlockFlow() const {
+  for (LayoutObject* layout_object = start_inline_->parent(); layout_object;
+       layout_object = layout_object->parent()) {
+    if (layout_object->isLayoutBlockFlow())
+      return toLayoutBlockFlow(layout_object);
+  }
+  ASSERT_NOT_REACHED();
+  return nullptr;
+}
+
+// Compute the delta of text offsets between NGInlineNode and LayoutText.
+// This map is needed to produce InlineTextBox since its offsets are to
+// LayoutText.
+// TODO(kojii): Since NGInlineNode has text after whitespace collapsed, the
+// length may not match with LayoutText. This function updates LayoutText to
+// match, but this needs more careful coding, if we keep copying to layoutobject
+// tree.
+void NGInlineNode::GetLayoutTextOffsets(
+    Vector<unsigned, 32>* text_offsets_out) {
+  LayoutText* current_text = nullptr;
+  unsigned current_offset = 0;
+  for (unsigned i = 0; i < items_.size(); i++) {
+    const NGLayoutInlineItem& item = items_[i];
+    LayoutObject* next_object = item.GetLayoutObject();
+    LayoutText* next_text = next_object && next_object->isText()
+                                ? toLayoutText(next_object)
+                                : nullptr;
+    if (next_text != current_text) {
+      if (current_text &&
+          current_text->textLength() != item.StartOffset() - current_offset) {
+        current_text->setText(Text(current_offset, item.StartOffset()).impl());
+      }
+      current_text = next_text;
+      current_offset = item.StartOffset();
+    }
+    (*text_offsets_out)[i] = current_offset;
+  }
+  if (current_text &&
+      current_text->textLength() != text_content_.length() - current_offset) {
+    current_text->setText(Text(current_offset, text_content_.length()).impl());
+  }
+}
+
 DEFINE_TRACE(NGInlineNode) {
   visitor->trace(next_sibling_);
-  visitor->trace(layout_algorithm_);
   NGLayoutInputNode::trace(visitor);
+}
+
+NGLayoutInlineItemRange::NGLayoutInlineItemRange(
+    Vector<NGLayoutInlineItem>* items,
+    unsigned start_index,
+    unsigned end_index)
+    : start_item_(&(*items)[start_index]),
+      size_(end_index - start_index),
+      start_index_(start_index) {
+  RELEASE_ASSERT(start_index <= end_index && end_index <= items->size());
 }
 
 }  // namespace blink

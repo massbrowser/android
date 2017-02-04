@@ -33,7 +33,6 @@
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/fetch/UniqueIdentifier.h"
 #include "core/fileapi/FileReaderLoader.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
 #include "core/frame/LocalFrame.h"
@@ -46,9 +45,11 @@
 #include "modules/websockets/WebSocketChannelClient.h"
 #include "modules/websockets/WebSocketFrame.h"
 #include "modules/websockets/WebSocketHandleImpl.h"
+#include "platform/loader/fetch/UniqueIdentifier.h"
 #include "platform/network/NetworkLog.h"
 #include "platform/network/WebSocketHandshakeRequest.h"
 #include "platform/weborigin/SecurityOrigin.h"
+#include "public/platform/InterfaceProvider.h"
 #include "public/platform/Platform.h"
 #include "wtf/PtrUtil.h"
 #include <memory>
@@ -131,7 +132,7 @@ DocumentWebSocketChannel::DocumentWebSocketChannel(
     WebSocketChannelClient* client,
     std::unique_ptr<SourceLocation> location,
     WebSocketHandle* handle)
-    : m_handle(wrapUnique(handle ? handle : new WebSocketHandleImpl())),
+    : m_handle(WTF::wrapUnique(handle ? handle : new WebSocketHandleImpl())),
       m_client(client),
       m_identifier(createUniqueIdentifier()),
       m_document(document),
@@ -174,7 +175,9 @@ bool DocumentWebSocketChannel::connect(const KURL& url,
     protocol.split(", ", true, protocols);
   }
 
-  if (document()->frame()) {
+  if (document()->frame() &&
+      document()->frame()->interfaceProvider() !=
+          InterfaceProvider::getEmptyInterfaceProvider()) {
     // Initialize the WebSocketHandle with the frame's InterfaceProvider to
     // provide the WebSocket implementation with context about this frame.
     // This is important so that the browser can show UI associated with
@@ -557,7 +560,7 @@ void DocumentWebSocketChannel::didReceiveData(WebSocketHandle* handle,
       frame.payloadLength);
   if (m_receivingMessageTypeIsText) {
     String message = m_receivingMessageData.isEmpty()
-                         ? emptyString()
+                         ? emptyString
                          : String::fromUTF8(m_receivingMessageData.data(),
                                             m_receivingMessageData.size());
     m_receivingMessageData.clear();
@@ -568,7 +571,8 @@ void DocumentWebSocketChannel::didReceiveData(WebSocketHandle* handle,
       m_client->didReceiveTextMessage(message);
     }
   } else {
-    std::unique_ptr<Vector<char>> binaryData = wrapUnique(new Vector<char>);
+    std::unique_ptr<Vector<char>> binaryData =
+        WTF::wrapUnique(new Vector<char>);
     binaryData->swap(m_receivingMessageData);
     m_client->didReceiveBinaryMessage(std::move(binaryData));
   }

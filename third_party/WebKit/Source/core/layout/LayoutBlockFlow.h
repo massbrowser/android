@@ -162,6 +162,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
                                          LayoutUnit position) const override;
 
   RootInlineBox* createAndAppendRootInlineBox();
+  RootInlineBox* constructLine(BidiRunList<BidiRun>&, const LineInfo&);
 
   // Return the number of lines in *this* block flow. Does not recurse into
   // block flow children.
@@ -381,7 +382,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
   PositionWithAffinity positionForPoint(const LayoutPoint&) override;
 
-  LayoutUnit lowestFloatLogicalBottom(EClear = ClearBoth) const;
+  LayoutUnit lowestFloatLogicalBottom(EClear = EClear::kBoth) const;
 
   bool hasOverhangingFloats() const {
     return parent() && containsFloats() &&
@@ -427,8 +428,10 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
   void absoluteRects(Vector<IntRect>&,
                      const LayoutPoint& accumulatedOffset) const override;
-  void absoluteQuads(Vector<FloatQuad>&) const override;
-  void absoluteQuadsForSelf(Vector<FloatQuad>& quads) const override;
+  void absoluteQuads(Vector<FloatQuad>&,
+                     MapCoordinatesFlags mode = 0) const override;
+  void absoluteQuadsForSelf(Vector<FloatQuad>& quads,
+                            MapCoordinatesFlags mode = 0) const override;
   LayoutObject* hoverAncestor() const final;
 
   LayoutUnit logicalRightOffsetForLine(
@@ -476,9 +479,8 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   LayoutSize accumulateInFlowPositionOffsets() const override;
 
  private:
-  bool layoutBlockFlow(bool relayoutChildren,
-                       LayoutUnit& pageLogicalHeight,
-                       SubtreeLayoutScope&);
+  void resetLayout();
+  void layoutChildren(bool relayoutChildren, SubtreeLayoutScope&);
   void addOverhangingFloatsFromChildren(LayoutUnit unconstrainedHeight);
   void layoutBlockChildren(bool relayoutChildren,
                            SubtreeLayoutScope&,
@@ -506,7 +508,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
                                              LayoutUnit logicalTopOffset) const;
 
   void removeFloatingObject(LayoutBox*);
-  void removeFloatingObjectsBelow(FloatingObject*, int logicalOffset);
+  void removeFloatingObjectsBelow(FloatingObject*, LayoutUnit logicalOffset);
 
   LayoutUnit getClearDelta(LayoutBox* child, LayoutUnit yPos);
 
@@ -590,7 +592,6 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
                                       LayoutUnit& totalLogicalWidth,
                                       LayoutUnit& availableLogicalWidth,
                                       unsigned expansionOpportunityCount);
-  void checkForPaginationLogicalHeightChange(LayoutUnit& pageLogicalHeight);
 
   bool shouldBreakAtLineToAvoidWidow() const {
     return m_rareData && m_rareData->m_lineBreakToAvoidWidow >= 0;
@@ -717,7 +718,8 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
     return m_floatingObjects.get();
   }
 
-  static void setAncestorShouldPaintFloatingObject(const LayoutBox& floatBox);
+  static void updateAncestorShouldPaintFloatingObject(
+      const LayoutBox& floatBox);
 
  protected:
   LayoutUnit maxPositiveMarginBefore() const {
@@ -779,8 +781,14 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
     return maxPositiveMarginAfter() - maxNegativeMarginAfter();
   }
 
+  LayoutUnit adjustedMarginBeforeForPagination(
+      const LayoutBox&,
+      LayoutUnit logicalTopMarginEdge,
+      LayoutUnit logicalTopBorderEdge,
+      const BlockChildrenLayoutInfo&) const;
+
   LayoutUnit collapseMargins(LayoutBox& child,
-                             MarginInfo&,
+                             BlockChildrenLayoutInfo&,
                              bool childIsSelfCollapsing,
                              bool childDiscardMarginBefore,
                              bool childDiscardMarginAfter);
@@ -866,7 +874,6 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   InlineFlowBox* createLineBoxes(LineLayoutItem,
                                  const LineInfo&,
                                  InlineBox* childBox);
-  RootInlineBox* constructLine(BidiRunList<BidiRun>&, const LineInfo&);
   void setMarginsForRubyRun(BidiRun*,
                             LayoutRubyRun*,
                             LayoutObject*,

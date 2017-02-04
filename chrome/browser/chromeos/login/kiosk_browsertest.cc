@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 
+#include "apps/test/app_window_waiter.h"
 #include "ash/common/wallpaper/wallpaper_controller.h"
 #include "ash/common/wallpaper/wallpaper_controller_observer.h"
 #include "ash/common/wm_shell.h"
@@ -25,7 +26,6 @@
 #include "chrome/browser/chromeos/file_manager/fake_disk_mount_manager.h"
 #include "chrome/browser/chromeos/login/app_launch_controller.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
-#include "chrome/browser/chromeos/login/test/app_window_waiter.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
@@ -542,6 +542,9 @@ class KioskTest : public OobeBaseTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     OobeBaseTest::SetUpCommandLine(command_line);
     fake_cws_->Init(embedded_test_server());
+
+    if (use_consumer_kiosk_mode_)
+      command_line->AppendSwitch(switches::kEnableConsumerKiosk);
   }
 
   void LaunchApp(const std::string& app_id, bool diagnostic_mode) {
@@ -667,7 +670,7 @@ class KioskTest : public OobeBaseTest {
     extensions::AppWindowRegistry* app_window_registry =
         extensions::AppWindowRegistry::Get(app_profile);
     extensions::AppWindow* window =
-        AppWindowWaiter(app_window_registry, test_app_id_).Wait();
+        apps::AppWindowWaiter(app_window_registry, test_app_id_).Wait();
     EXPECT_TRUE(window);
 
     // Login screen should be gone or fading out.
@@ -714,15 +717,13 @@ class KioskTest : public OobeBaseTest {
   }
 
   void EnableConsumerKioskMode() {
-    std::unique_ptr<bool> locked(new bool(false));
+    bool locked = false;
     scoped_refptr<content::MessageLoopRunner> runner =
         new content::MessageLoopRunner;
-    KioskAppManager::Get()->EnableConsumerKioskAutoLaunch(
-        base::Bind(&ConsumerKioskModeAutoStartLockCheck,
-                   locked.get(),
-                   runner->QuitClosure()));
+    KioskAppManager::Get()->EnableConsumerKioskAutoLaunch(base::Bind(
+        &ConsumerKioskModeAutoStartLockCheck, &locked, runner->QuitClosure()));
     runner->Run();
-    EXPECT_TRUE(*locked.get());
+    EXPECT_TRUE(locked);
   }
 
   KioskAppManager::ConsumerKioskAutoLaunchStatus
@@ -859,7 +860,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, ZoomSupport) {
   extensions::AppWindowRegistry* app_window_registry =
       extensions::AppWindowRegistry::Get(app_profile);
   extensions::AppWindow* window =
-      AppWindowWaiter(app_window_registry, test_app_id()).Wait();
+      apps::AppWindowWaiter(app_window_registry, test_app_id()).Wait();
   ASSERT_TRUE(window);
 
   // Gets the original width of the app window.
@@ -1068,7 +1069,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningCancel) {
 
   // Start login screen after configuring auto launch app since the warning
   // is triggered when switching to login screen.
-  wizard_controller->AdvanceToScreen(WizardController::kNetworkScreenName);
+  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_NETWORK);
   ReloadAutolaunchKioskApps();
   EXPECT_FALSE(KioskAppManager::Get()->GetAutoLaunchApp().empty());
   EXPECT_FALSE(KioskAppManager::Get()->IsAutoLaunchEnabled());
@@ -1100,7 +1101,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningConfirm) {
 
   // Start login screen after configuring auto launch app since the warning
   // is triggered when switching to login screen.
-  wizard_controller->AdvanceToScreen(WizardController::kNetworkScreenName);
+  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_NETWORK);
   ReloadAutolaunchKioskApps();
   EXPECT_FALSE(KioskAppManager::Get()->GetAutoLaunchApp().empty());
   EXPECT_FALSE(KioskAppManager::Get()->IsAutoLaunchEnabled());
@@ -1274,7 +1275,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, NoConsumerAutoLaunchWhenUntrusted) {
   chromeos::WizardController* wizard_controller =
       chromeos::WizardController::default_controller();
   ASSERT_TRUE(wizard_controller);
-  wizard_controller->AdvanceToScreen(WizardController::kNetworkScreenName);
+  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_NETWORK);
   ReloadAutolaunchKioskApps();
   wizard_controller->SkipToLoginForTesting(LoginScreenContext());
   content::WindowedNotificationObserver(
@@ -2247,10 +2248,10 @@ IN_PROC_BROWSER_TEST_F(KioskEnterpriseTest, EnterpriseKioskApp) {
 
   // Wait for the window to appear.
   extensions::AppWindow* window =
-      AppWindowWaiter(
-          extensions::AppWindowRegistry::Get(
-              ProfileManager::GetPrimaryUserProfile()),
-          kTestEnterpriseKioskApp).Wait();
+      apps::AppWindowWaiter(extensions::AppWindowRegistry::Get(
+                                ProfileManager::GetPrimaryUserProfile()),
+                            kTestEnterpriseKioskApp)
+          .Wait();
   ASSERT_TRUE(window);
 
   // Check whether the app can retrieve an OAuth2 access token.
@@ -2281,18 +2282,20 @@ IN_PROC_BROWSER_TEST_F(KioskEnterpriseTest, PrivateStore) {
 
   const char kPrivateStoreUpdate[] = "/private_store_update";
   net::EmbeddedTestServer private_server;
-  ASSERT_TRUE(private_server.Start());
 
   // |private_server| serves crx from test data dir.
   base::FilePath test_data_dir;
   PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
   private_server.ServeFilesFromDirectory(test_data_dir);
+  ASSERT_TRUE(private_server.InitializeAndListen());
 
   FakeCWS private_store;
   private_store.InitAsPrivateStore(&private_server, kPrivateStoreUpdate);
   private_store.SetUpdateCrx(kTestEnterpriseKioskApp,
                              std::string(kTestEnterpriseKioskApp) + ".crx",
                              "1.0.0");
+
+  private_server.StartAcceptingConnections();
 
   // Configure kTestEnterpriseKioskApp in device policy.
   ConfigureKioskAppInPolicy(kTestEnterpriseAccountId,
@@ -2377,7 +2380,7 @@ IN_PROC_BROWSER_TEST_F(KioskHiddenWebUITest, AutolaunchWarning) {
 
   // Start login screen after configuring auto launch app since the warning
   // is triggered when switching to login screen.
-  wizard_controller->AdvanceToScreen(WizardController::kNetworkScreenName);
+  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_NETWORK);
   ReloadAutolaunchKioskApps();
   wizard_controller->SkipToLoginForTesting(LoginScreenContext());
 

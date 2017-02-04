@@ -19,6 +19,7 @@ namespace blink {
 class KeyboardEvent;
 class LocalFrame;
 class ScrollManager;
+class WebKeyboardEvent;
 
 enum class OverrideCapsLockState { Default, On, Off };
 
@@ -35,7 +36,7 @@ class CORE_EXPORT KeyboardEventManager
       WebInputEvent::AltKey;
 #endif
 
-  KeyboardEventManager(LocalFrame*, ScrollManager*);
+  KeyboardEventManager(LocalFrame&, ScrollManager&);
   DECLARE_TRACE();
 
   bool handleAccessKey(const WebKeyboardEvent&);

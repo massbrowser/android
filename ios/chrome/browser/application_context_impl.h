@@ -13,8 +13,6 @@
 #include "base/threading/thread_checker.h"
 #include "ios/chrome/browser/application_context.h"
 
-class PrefRegistrySimple;
-
 namespace base {
 class CommandLine;
 class SequencedTaskRunner;
@@ -53,7 +51,7 @@ class ApplicationContextImpl : public ApplicationContext {
       override;
   metrics::MetricsService* GetMetricsService() override;
   variations::VariationsService* GetVariationsService() override;
-  rappor::RapporService* GetRapporService() override;
+  rappor::RapporServiceImpl* GetRapporServiceImpl() override;
   net_log::ChromeNetLog* GetNetLog() override;
   network_time::NetworkTimeTracker* GetNetworkTimeTracker() override;
   IOSChromeIOThread* GetIOSChromeIOThread() override;

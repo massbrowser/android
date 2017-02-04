@@ -7,6 +7,8 @@
 
 #include <vector>
 
+#include "base/callback.h"
+
 class GURL;
 
 namespace base {
@@ -35,7 +37,7 @@ void UpdateBookmarkOnURLVisitedInMainFrame(
 // As visits, we primarily understand visits on Android (the visit when the
 // bookmark is created also counts). Visits on desktop platforms are considered
 // only if |consider_visits_from_desktop|.
-bool GetLastVisitDateForNTPBookmark(const bookmarks::BookmarkNode* node,
+bool GetLastVisitDateForNTPBookmark(const bookmarks::BookmarkNode& node,
                                     bool consider_visits_from_desktop,
                                     base::Time* out);
 
@@ -44,7 +46,7 @@ void MarkBookmarksDismissed(bookmarks::BookmarkModel* bookmark_model,
                             const GURL& url);
 
 // Gets the dismissed flag for a given bookmark |node|. Defaults to false.
-bool IsDismissedFromNTPForBookmark(const bookmarks::BookmarkNode* node);
+bool IsDismissedFromNTPForBookmark(const bookmarks::BookmarkNode& node);
 
 // Removes the dismissed flag from all bookmarks (only for debugging).
 void MarkAllBookmarksUndismissed(bookmarks::BookmarkModel* bookmark_model);
@@ -67,8 +69,13 @@ std::vector<const bookmarks::BookmarkNode*> GetRecentlyVisitedBookmarks(
 std::vector<const bookmarks::BookmarkNode*> GetDismissedBookmarksForDebugging(
     bookmarks::BookmarkModel* bookmark_model);
 
-// Removes last visited date metadata for all bookmarks.
-void RemoveAllLastVisitDates(bookmarks::BookmarkModel* bookmark_model);
+// Removes last-visited data (incl. any other metadata managed by content
+// suggestions) for bookmarks within the provided time range.
+// TODO(tschumann): Implement URL filtering.
+void RemoveLastVisitedDatesBetween(const base::Time& begin,
+                                   const base::Time& end,
+                                   base::Callback<bool(const GURL& url)> filter,
+                                   bookmarks::BookmarkModel* bookmark_model);
 
 }  // namespace ntp_snippets
 

@@ -30,6 +30,11 @@
 #include "chrome/renderer/leak_detector/leak_detector_remote_client.h"
 #endif
 
+#if defined(OS_WIN)
+#include "chrome/common/conflicts/module_event_sink_win.mojom.h"
+#include "chrome/common/conflicts/module_watcher_win.h"
+#endif
+
 class ChromeRenderThreadObserver;
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 class ChromePDFPrintClient;
@@ -63,7 +68,7 @@ class PhishingClassifierFilter;
 }
 
 namespace subresource_filter {
-class RulesetDealer;
+class UnverifiedRulesetDealer;
 }
 
 namespace web_cache {
@@ -131,7 +136,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                   bool is_initial_navigation,
                   bool is_server_redirect,
                   bool* send_referrer) override;
-  bool WillSendRequest(blink::WebFrame* frame,
+  bool WillSendRequest(blink::WebLocalFrame* frame,
                        ui::PageTransition transition_type,
                        const blink::WebURL& url,
                        GURL* new_url) override;
@@ -182,6 +187,10 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const GURL& url) override;
   bool ShouldEnforceWebRTCRoutingPreferences() override;
   GURL OverrideFlashEmbedWithHTML(const GURL& url) override;
+  void GetTaskSchedulerInitializationParams(
+      std::vector<base::SchedulerWorkerPoolParams>* params_vector,
+      base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
+          index_to_traits_callback) override;
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   // Sets a new |spellcheck|. Used for testing only.
@@ -236,7 +245,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   std::unique_ptr<SpellCheck> spellcheck_;
 #endif
   std::unique_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
-  std::unique_ptr<subresource_filter::RulesetDealer>
+  std::unique_ptr<subresource_filter::UnverifiedRulesetDealer>
       subresource_filter_ruleset_dealer_;
   std::unique_ptr<prerender::PrerenderDispatcher> prerender_dispatcher_;
 #if BUILDFLAG(ENABLE_WEBRTC)
@@ -252,6 +261,13 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 
 #if defined(OS_CHROMEOS)
   std::unique_ptr<LeakDetectorRemoteClient> leak_detector_remote_client_;
+#endif
+
+#if defined(OS_WIN)
+  // Observes module load and unload events and notifies the ModuleDatabase in
+  // the browser process.
+  std::unique_ptr<ModuleWatcher> module_watcher_;
+  mojom::ModuleEventSinkPtr module_event_sink_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentRendererClient);

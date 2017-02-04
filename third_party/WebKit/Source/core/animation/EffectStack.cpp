@@ -58,7 +58,7 @@ void copyToActiveInterpolationsMap(
         interpolation->isInvalidatableInterpolation() &&
         toInvalidatableInterpolation(*interpolation)
             .dependsOnUnderlyingValue()) {
-      activeInterpolations.append(interpolation.get());
+      activeInterpolations.push_back(interpolation.get());
     } else {
       activeInterpolations.at(0) = interpolation.get();
     }
@@ -96,6 +96,16 @@ bool EffectStack::hasActiveAnimationsOnCompositor(
         sampledEffect->effect()->animation()->playing() &&
         sampledEffect->effect()->hasActiveAnimationsOnCompositor(property))
       return true;
+  }
+  return false;
+}
+
+bool EffectStack::affectsProperties(PropertyHandleFilter filter) const {
+  for (const auto& sampledEffect : m_sampledEffects) {
+    for (const auto& interpolation : sampledEffect->interpolations()) {
+      if (filter(interpolation->getProperty()))
+        return true;
+    }
   }
   return false;
 }

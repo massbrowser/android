@@ -10,20 +10,20 @@
 #include <set>
 #include <string>
 
+#include "ash/public/interfaces/touch_view.mojom.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/login/screens/network_error_model.h"
+#include "chrome/browser/chromeos/login/screens/error_screen.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
-#include "chrome/browser/ui/webui/chromeos/touch_view_controller_delegate.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "components/proximity_auth/screenlock_bridge.h"
@@ -31,6 +31,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "net/base/net_errors.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -217,12 +218,12 @@ class SigninScreenHandler
       public NetworkStateInformer::NetworkStateInformerObserver,
       public PowerManagerClient::Observer,
       public input_method::ImeKeyboard::Observer,
-      public TouchViewControllerDelegate::Observer,
+      public ash::mojom::TouchViewObserver,
       public OobeUI::Observer {
  public:
   SigninScreenHandler(
       const scoped_refptr<NetworkStateInformer>& network_state_informer,
-      NetworkErrorModel* network_error_model,
+      ErrorScreen* error_screen,
       CoreOobeActor* core_oobe_actor,
       GaiaScreenHandler* gaia_screen_handler);
   ~SigninScreenHandler() override;
@@ -327,9 +328,8 @@ class SigninScreenHandler
   // PowerManagerClient::Observer implementation:
   void SuspendDone(const base::TimeDelta& sleep_duration) override;
 
-  // TouchViewControllerDelegate::Observer implementation:
-  void OnMaximizeModeStarted() override;
-  void OnMaximizeModeEnded() override;
+  // ash::mojom::TouchView:
+  void OnTouchViewToggled(bool enabled) override;
 
   void UpdateAddButtonStatus();
 
@@ -456,8 +456,8 @@ class SigninScreenHandler
   bool webui_visible_ = false;
   bool preferences_changed_delayed_ = false;
 
-  NetworkErrorModel* network_error_model_;
-  CoreOobeActor* core_oobe_actor_;
+  ErrorScreen* error_screen_ = nullptr;
+  CoreOobeActor* core_oobe_actor_ = nullptr;
 
   NetworkStateInformer::State last_network_state_ =
       NetworkStateInformer::UNKNOWN;
@@ -492,8 +492,9 @@ class SigninScreenHandler
   // TODO(antrim@): remove this dependency.
   GaiaScreenHandler* gaia_screen_handler_ = nullptr;
 
-  // Maximized mode controller delegate.
-  std::unique_ptr<TouchViewControllerDelegate> max_mode_delegate_;
+  mojo::Binding<ash::mojom::TouchViewObserver> touch_view_binding_;
+  ash::mojom::TouchViewManagerPtr touch_view_manager_ptr_;
+  bool touch_view_enabled_ = false;
 
   // Input Method Engine state used at signin screen.
   scoped_refptr<input_method::InputMethodManager::State> ime_state_;

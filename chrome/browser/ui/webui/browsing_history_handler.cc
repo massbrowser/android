@@ -54,11 +54,9 @@
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #endif
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 #include "chrome/browser/android/chrome_application.h"
-#endif
-
-#if !defined(OS_ANDROID)
+#else
 #include "chrome/browser/ui/webui/md_history_ui.h"
 #endif
 
@@ -404,7 +402,7 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const base::ListValue* args) {
 
 void BrowsingHistoryHandler::HandleClearBrowsingData(
     const base::ListValue* args) {
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   chrome::android::ChromeApplication::OpenClearBrowsingData(
       web_ui()->GetWebContents());
 #else
@@ -523,6 +521,15 @@ void BrowsingHistoryHandler::OnQueryComplete(
   results_info.SetString(
       "queryEndTime",
       GetRelativeDateLocalized(clock_.get(), query_results_info->end_time));
+
+  results_info.SetString(
+      "queryStartMonth",
+      base::TimeFormatMonthAndYear(query_results_info->start_time));
+  results_info.SetString(
+      "queryInterval",
+      base::DateIntervalFormat(query_results_info->start_time,
+                               query_results_info->end_time,
+                               base::DATE_FORMAT_MONTH_WEEKDAY_DAY));
 
   web_ui()->CallJavascriptFunctionUnsafe("historyResult", results_info,
                                          results_value);

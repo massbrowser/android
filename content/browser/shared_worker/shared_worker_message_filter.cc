@@ -16,17 +16,10 @@
 
 namespace content {
 namespace {
+
 const uint32_t kFilteredMessageClasses[] = {
     ViewMsgStart, WorkerMsgStart,
 };
-
-// TODO(estark): For now, only URLMismatch errors actually stop the
-// worker from being created. Other errors are recorded in UMA in
-// Blink but do not stop the worker from being created
-// yet. https://crbug.com/573206
-bool CreateWorkerErrorIsFatal(blink::WebWorkerCreationError error) {
-  return (error == blink::WebWorkerCreationErrorURLMismatch);
-}
 
 }  // namespace
 
@@ -54,25 +47,35 @@ void SharedWorkerMessageFilter::OnChannelClosing() {
 
 bool SharedWorkerMessageFilter::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(SharedWorkerMessageFilter, message)
+  IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(SharedWorkerMessageFilter, message, this)
     // Only sent from renderer for now, until we have nested workers.
     IPC_MESSAGE_HANDLER(ViewHostMsg_CreateWorker, OnCreateWorker)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_ForwardToWorker, OnForwardToWorker)
+    IPC_MESSAGE_FORWARD(ViewHostMsg_ConnectToWorker,
+                        SharedWorkerServiceImpl::GetInstance(),
+                        SharedWorkerServiceImpl::ConnectToWorker)
     // Only sent from renderer.
-    IPC_MESSAGE_HANDLER(ViewHostMsg_DocumentDetached, OnDocumentDetached)
+    IPC_MESSAGE_FORWARD(ViewHostMsg_DocumentDetached,
+                        SharedWorkerServiceImpl::GetInstance(),
+                        SharedWorkerServiceImpl::DocumentDetached)
     // Only sent from SharedWorker in renderer.
-    IPC_MESSAGE_HANDLER(WorkerHostMsg_WorkerContextClosed,
-                        OnWorkerContextClosed)
-    IPC_MESSAGE_HANDLER(WorkerHostMsg_WorkerContextDestroyed,
-                        OnWorkerContextDestroyed)
-    IPC_MESSAGE_HANDLER(WorkerHostMsg_WorkerReadyForInspection,
-                        OnWorkerReadyForInspection)
-    IPC_MESSAGE_HANDLER(WorkerHostMsg_WorkerScriptLoaded,
-                        OnWorkerScriptLoaded)
-    IPC_MESSAGE_HANDLER(WorkerHostMsg_WorkerScriptLoadFailed,
-                        OnWorkerScriptLoadFailed)
-    IPC_MESSAGE_HANDLER(WorkerHostMsg_WorkerConnected,
-                        OnWorkerConnected)
+    IPC_MESSAGE_FORWARD(WorkerHostMsg_WorkerContextClosed,
+                        SharedWorkerServiceImpl::GetInstance(),
+                        SharedWorkerServiceImpl::WorkerContextClosed)
+    IPC_MESSAGE_FORWARD(WorkerHostMsg_WorkerContextDestroyed,
+                        SharedWorkerServiceImpl::GetInstance(),
+                        SharedWorkerServiceImpl::WorkerContextDestroyed)
+    IPC_MESSAGE_FORWARD(WorkerHostMsg_WorkerReadyForInspection,
+                        SharedWorkerServiceImpl::GetInstance(),
+                        SharedWorkerServiceImpl::WorkerReadyForInspection)
+    IPC_MESSAGE_FORWARD(WorkerHostMsg_WorkerScriptLoaded,
+                        SharedWorkerServiceImpl::GetInstance(),
+                        SharedWorkerServiceImpl::WorkerScriptLoaded)
+    IPC_MESSAGE_FORWARD(WorkerHostMsg_WorkerScriptLoadFailed,
+                        SharedWorkerServiceImpl::GetInstance(),
+                        SharedWorkerServiceImpl::WorkerScriptLoadFailed)
+    IPC_MESSAGE_FORWARD(WorkerHostMsg_WorkerConnected,
+                        SharedWorkerServiceImpl::GetInstance(),
+                        SharedWorkerServiceImpl::WorkerConnected)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(
         WorkerProcessHostMsg_RequestFileSystemAccessSync,
         OnRequestFileSystemAccess)
@@ -93,72 +96,22 @@ void SharedWorkerMessageFilter::OnCreateWorker(
   reply->error = SharedWorkerServiceImpl::GetInstance()->CreateWorker(
       params, reply->route_id, this, resource_context_,
       WorkerStoragePartitionId(partition_));
-  if (CreateWorkerErrorIsFatal(reply->error))
-    reply->route_id = MSG_ROUTING_NONE;
-}
-
-void SharedWorkerMessageFilter::OnForwardToWorker(const IPC::Message& message) {
-  SharedWorkerServiceImpl::GetInstance()->ForwardToWorker(message, this);
-}
-
-void SharedWorkerMessageFilter::OnDocumentDetached(
-    unsigned long long document_id) {
-  SharedWorkerServiceImpl::GetInstance()->DocumentDetached(document_id, this);
-}
-
-void SharedWorkerMessageFilter::OnWorkerContextClosed(int worker_route_id) {
-  SharedWorkerServiceImpl::GetInstance()->WorkerContextClosed(worker_route_id,
-                                                              this);
-}
-
-void SharedWorkerMessageFilter::OnWorkerContextDestroyed(int worker_route_id) {
-  SharedWorkerServiceImpl::GetInstance()->WorkerContextDestroyed(
-      worker_route_id,
-      this);
-}
-
-void SharedWorkerMessageFilter::OnWorkerReadyForInspection(
-    int worker_route_id) {
-  SharedWorkerServiceImpl::GetInstance()->WorkerReadyForInspection(
-      worker_route_id, this);
-}
-
-void SharedWorkerMessageFilter::OnWorkerScriptLoaded(int worker_route_id) {
-  SharedWorkerServiceImpl::GetInstance()->WorkerScriptLoaded(worker_route_id,
-                                                             this);
-}
-
-void SharedWorkerMessageFilter::OnWorkerScriptLoadFailed(int worker_route_id) {
-  SharedWorkerServiceImpl::GetInstance()->WorkerScriptLoadFailed(
-      worker_route_id,
-      this);
-}
-
-void SharedWorkerMessageFilter::OnWorkerConnected(int message_port_id,
-                                                  int worker_route_id) {
-  SharedWorkerServiceImpl::GetInstance()->WorkerConnected(
-      message_port_id,
-      worker_route_id,
-      this);
 }
 
 void SharedWorkerMessageFilter::OnRequestFileSystemAccess(
     int worker_route_id,
     const GURL& url,
     IPC::Message* reply_msg) {
-  SharedWorkerServiceImpl::GetInstance()->AllowFileSystem(
-      worker_route_id, url, reply_msg, this);
+  SharedWorkerServiceImpl::GetInstance()->AllowFileSystem(this, worker_route_id,
+                                                          url, reply_msg);
 }
 
 void SharedWorkerMessageFilter::OnAllowIndexedDB(int worker_route_id,
                                                  const GURL& url,
                                                  const base::string16& name,
                                                  bool* result) {
-  SharedWorkerServiceImpl::GetInstance()->AllowIndexedDB(worker_route_id,
-                                                         url,
-                                                         name,
-                                                         result,
-                                                         this);
+  SharedWorkerServiceImpl::GetInstance()->AllowIndexedDB(this, worker_route_id,
+                                                         url, name, result);
 }
 
 }  // namespace content

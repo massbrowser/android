@@ -81,7 +81,7 @@ std::ostream& operator<<(std::ostream& os, PositionMoveType type) {
 
 }  // namespace
 
-bool needsLayoutTreeUpdate(const Node& node) {
+static bool needsLayoutTreeUpdate(const Node& node) {
   const Document& document = node.document();
   if (document.needsLayoutTreeUpdate())
     return true;
@@ -929,12 +929,6 @@ Element* enclosingBlockFlowElement(const Node& node) {
   return nullptr;
 }
 
-bool nodeIsUserSelectAll(const Node* node) {
-  return RuntimeEnabledFeatures::userSelectAllEnabled() && node &&
-         node->layoutObject() &&
-         node->layoutObject()->style()->userSelect() == SELECT_ALL;
-}
-
 EUserSelect usedValueOfUserSelect(const Node& node) {
   if (node.isHTMLElement() && toHTMLElement(node).isTextControl())
     return SELECT_TEXT;
@@ -956,9 +950,10 @@ TextDirection directionOfEnclosingBlockAlgorithm(
                          position.computeContainerNode()),
                      CannotCrossEditingBoundary);
   if (!enclosingBlockElement)
-    return LTR;
+    return TextDirection::kLtr;
   LayoutObject* layoutObject = enclosingBlockElement->layoutObject();
-  return layoutObject ? layoutObject->style()->direction() : LTR;
+  return layoutObject ? layoutObject->style()->direction()
+                      : TextDirection::kLtr;
 }
 
 TextDirection directionOfEnclosingBlock(const Position& position) {
@@ -971,7 +966,7 @@ TextDirection directionOfEnclosingBlock(const PositionInFlatTree& position) {
 }
 
 TextDirection primaryDirectionOf(const Node& node) {
-  TextDirection primaryDirection = LTR;
+  TextDirection primaryDirection = TextDirection::kLtr;
   for (const LayoutObject* r = node.layoutObject(); r; r = r->parent()) {
     if (r->isLayoutBlockFlow()) {
       primaryDirection = r->style()->direction();
@@ -1540,7 +1535,7 @@ HTMLElement* createDefaultParagraphElement(Document& document) {
 }
 
 HTMLElement* createHTMLElement(Document& document, const QualifiedName& name) {
-  return HTMLElementFactory::createHTMLElement(name.localName(), document, 0,
+  return HTMLElementFactory::createHTMLElement(name.localName(), document,
                                                CreatedByCloneNode);
 }
 
@@ -1593,7 +1588,7 @@ bool isNodeRendered(const Node& node) {
   if (!layoutObject)
     return false;
 
-  return layoutObject->style()->visibility() == EVisibility::Visible;
+  return layoutObject->style()->visibility() == EVisibility::kVisible;
 }
 
 // return first preceding DOM position rendered at a different location, or
@@ -2059,23 +2054,6 @@ DispatchEventResult dispatchBeforeInputInsertText(EventTarget* target,
       InputEvent::InputType::InsertText, data,
       InputEvent::EventCancelable::IsCancelable,
       InputEvent::EventIsComposing::NotComposing, nullptr);
-  return target->dispatchEvent(beforeInputEvent);
-}
-
-DispatchEventResult dispatchBeforeInputFromComposition(
-    EventTarget* target,
-    InputEvent::InputType inputType,
-    const String& data,
-    InputEvent::EventCancelable cancelable) {
-  if (!RuntimeEnabledFeatures::inputEventEnabled())
-    return DispatchEventResult::NotCanceled;
-  if (!target)
-    return DispatchEventResult::NotCanceled;
-  // TODO(chongz): Pass appropriate |ranges| after it's defined on spec.
-  // http://w3c.github.io/editing/input-events.html#dom-inputevent-inputtype
-  InputEvent* beforeInputEvent = InputEvent::createBeforeInput(
-      inputType, data, cancelable, InputEvent::EventIsComposing::IsComposing,
-      nullptr);
   return target->dispatchEvent(beforeInputEvent);
 }
 

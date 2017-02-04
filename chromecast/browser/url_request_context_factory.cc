@@ -21,7 +21,8 @@
 #include "content/public/common/url_constants.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_policy_enforcer.h"
-#include "net/cert/multi_log_ct_verifier.h"
+#include "net/cert/ct_policy_status.h"
+#include "net/cert/do_nothing_ct_verifier.h"
 #include "net/cert_net/nss_ocsp.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
@@ -46,6 +47,28 @@ namespace shell {
 namespace {
 
 const char kCookieStoreFile[] = "Cookies";
+
+// A CTPolicyEnforcer that accepts all certificates.
+class IgnoresCTPolicyEnforcer : public net::CTPolicyEnforcer {
+ public:
+  IgnoresCTPolicyEnforcer() = default;
+  ~IgnoresCTPolicyEnforcer() override = default;
+
+  net::ct::CertPolicyCompliance DoesConformToCertPolicy(
+      net::X509Certificate* cert,
+      const net::SCTList& verified_scts,
+      const net::NetLogWithSource& net_log) override {
+    return net::ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS;
+  }
+
+  net::ct::EVPolicyCompliance DoesConformToCTEVPolicy(
+      net::X509Certificate* cert,
+      const net::ct::EVCertsWhitelist* ev_whitelist,
+      const net::SCTList& verified_scts,
+      const net::NetLogWithSource& net_log) override {
+    return net::ct::EVPolicyCompliance::EV_POLICY_DOES_NOT_APPLY;
+  }
+};
 
 }  // namespace
 
@@ -142,8 +165,8 @@ URLRequestContextFactory::URLRequestContextFactory()
       system_network_delegate_(CastNetworkDelegate::Create()),
       system_dependencies_initialized_(false),
       main_dependencies_initialized_(false),
-      media_dependencies_initialized_(false) {
-}
+      media_dependencies_initialized_(false),
+      enable_quic_(true) {}
 
 URLRequestContextFactory::~URLRequestContextFactory() {
 }
@@ -205,8 +228,9 @@ void URLRequestContextFactory::InitializeSystemContextDependencies() {
   cert_verifier_ = net::CertVerifier::CreateDefault();
   ssl_config_service_ = new net::SSLConfigServiceDefaults;
   transport_security_state_.reset(new net::TransportSecurityState());
-  cert_transparency_verifier_.reset(new net::MultiLogCTVerifier());
-  ct_policy_enforcer_.reset(new net::CTPolicyEnforcer());
+  // Certificate transparency is current disabled for Chromecast.
+  cert_transparency_verifier_.reset(new net::DoNothingCTVerifier());
+  ct_policy_enforcer_.reset(new IgnoresCTPolicyEnforcer());
 
   http_auth_handler_factory_ =
       net::HttpAuthHandlerFactory::CreateDefault(host_resolver_.get());
@@ -259,14 +283,12 @@ void URLRequestContextFactory::InitializeMainContextDependencies(
   // Set up interceptors in the reverse order.
   std::unique_ptr<net::URLRequestJobFactory> top_job_factory =
       std::move(job_factory);
-  for (content::URLRequestInterceptorScopedVector::reverse_iterator i =
-           request_interceptors.rbegin();
-       i != request_interceptors.rend();
+  for (auto i = request_interceptors.rbegin(); i != request_interceptors.rend();
        ++i) {
     top_job_factory.reset(new net::URLRequestInterceptingJobFactory(
-        std::move(top_job_factory), base::WrapUnique(*i)));
+        std::move(top_job_factory), std::move(*i)));
   }
-  request_interceptors.weak_clear();
+  request_interceptors.clear();
 
   main_job_factory_.reset(top_job_factory.release());
 
@@ -285,6 +307,7 @@ void URLRequestContextFactory::InitializeMediaContextDependencies(
 void URLRequestContextFactory::PopulateNetworkSessionParams(
     bool ignore_certificate_errors,
     net::HttpNetworkSession::Params* params) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   params->host_resolver = host_resolver_.get();
   params->cert_verifier = cert_verifier_.get();
   params->channel_id_service = channel_id_service_.get();
@@ -296,6 +319,9 @@ void URLRequestContextFactory::PopulateNetworkSessionParams(
   params->http_server_properties = http_server_properties_.get();
   params->ignore_certificate_errors = ignore_certificate_errors;
   params->proxy_service = proxy_service_.get();
+
+  LOG(INFO) << "Set HttpNetworkSessionParams.enable_quic = " << enable_quic_;
+  params->enable_quic = enable_quic_;
 }
 
 net::URLRequestContext* URLRequestContextFactory::CreateSystemRequestContext() {
@@ -403,6 +429,44 @@ void URLRequestContextFactory::InitializeNetworkDelegates() {
   LOG(INFO) << "Initialized app network delegate.";
   system_network_delegate_->Initialize(false);
   LOG(INFO) << "Initialized system network delegate.";
+}
+
+void URLRequestContextFactory::DisableQuic() {
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO, FROM_HERE,
+      base::Bind(&URLRequestContextFactory::DisableQuicOnBrowserIOThread,
+                 base::Unretained(this)));
+}
+
+void URLRequestContextFactory::DisableQuicOnBrowserIOThread() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  if (!enable_quic_)
+    return;
+
+  LOG(INFO) << "Disabled QUIC.";
+
+  enable_quic_ = false;
+
+  if (main_getter_) {
+    main_getter_->GetURLRequestContext()
+        ->http_transaction_factory()
+        ->GetSession()
+        ->DisableQuic();
+  }
+
+  if (system_getter_) {
+    system_getter_->GetURLRequestContext()
+        ->http_transaction_factory()
+        ->GetSession()
+        ->DisableQuic();
+  }
+
+  if (media_getter_) {
+    media_getter_->GetURLRequestContext()
+        ->http_transaction_factory()
+        ->GetSession()
+        ->DisableQuic();
+  }
 }
 
 }  // namespace shell

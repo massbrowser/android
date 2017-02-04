@@ -48,6 +48,7 @@
 #include "core/page/Page.h"
 #include "platform/Histogram.h"
 #include "platform/InstanceCounters.h"
+#include "platform/UserGestureIndicator.h"
 #include "platform/feature_policy/FeaturePolicy.h"
 #include "platform/network/ResourceError.h"
 
@@ -64,6 +65,7 @@ DEFINE_TRACE(Frame) {
   visitor->trace(m_treeNode);
   visitor->trace(m_host);
   visitor->trace(m_owner);
+  visitor->trace(m_domWindow);
   visitor->trace(m_client);
 }
 
@@ -81,7 +83,13 @@ void Frame::detach(FrameDetachType type) {
 
 void Frame::disconnectOwnerElement() {
   if (m_owner) {
-    m_owner->clearContentFrame();
+    // Ocassionally, provisional frames need to be detached, but it shouldn't
+    // affect the frame tree structure. Make sure the frame owner's content
+    // frame actually refers to this frame before clearing it.
+    // TODO(dcheng): https://crbug.com/578349 tracks the cleanup for this once
+    // it's no longer needed.
+    if (m_owner->contentFrame() == this)
+      m_owner->clearContentFrame();
     m_owner = nullptr;
   }
 }
@@ -162,9 +170,22 @@ static bool canAccessAncestor(const SecurityOrigin& activeSecurityOrigin,
 
 bool Frame::canNavigate(const Frame& targetFrame) {
   String errorReason;
-  bool isAllowedNavigation =
+  const bool isAllowedNavigation =
       canNavigateWithoutFramebusting(targetFrame, errorReason);
+  const bool sandboxed = securityContext()->getSandboxFlags() != SandboxNone;
+  const bool hasUserGesture =
+      isLocalFrame() ? toLocalFrame(this)->hasReceivedUserGesture() : false;
 
+  // Top navigation in sandbox with or w/o 'allow-top-navigation'.
+  if (targetFrame != this && sandboxed && targetFrame == tree().top()) {
+    UseCounter::count(&targetFrame, UseCounter::TopNavInSandbox);
+    if (!hasUserGesture) {
+      UseCounter::count(&targetFrame,
+                        UseCounter::TopNavInSandboxWithoutGesture);
+    }
+  }
+
+  // Top navigation w/o sandbox or in sandbox with 'allow-top-navigation'.
   if (targetFrame != this &&
       !securityContext()->isSandboxed(SandboxTopNavigation) &&
       targetFrame == tree().top()) {
@@ -174,25 +195,52 @@ bool Frame::canNavigate(const Frame& targetFrame) {
     const unsigned allowedBit = 0x2;
     unsigned framebustParams = 0;
     UseCounter::count(&targetFrame, UseCounter::TopNavigationFromSubFrame);
-    bool hasUserGesture =
-        isLocalFrame()
-            ? toLocalFrame(this)->document()->hasReceivedUserGesture()
-            : false;
+
     if (hasUserGesture)
       framebustParams |= userGestureBit;
+    if (sandboxed) {  // Sandboxed with 'allow-top-navigation'.
+      UseCounter::count(&targetFrame, UseCounter::TopNavInSandboxWithPerm);
+      if (!hasUserGesture) {
+        UseCounter::count(&targetFrame,
+                          UseCounter::TopNavInSandboxWithPermButNoGesture);
+      }
+    }
+
     if (isAllowedNavigation)
       framebustParams |= allowedBit;
     framebustHistogram.count(framebustParams);
-    // Frame-busting used to be generally allowed in most situations, but may
-    // now blocked if there is no user gesture.
-    if (!RuntimeEnabledFeatures::
-            framebustingNeedsSameOriginOrUserGestureEnabled())
-      return true;
     if (hasUserGesture || isAllowedNavigation)
       return true;
+    // Frame-busting used to be generally allowed in most situations, but may
+    // now blocked if the document initiating the navigation has never received
+    // a user gesture.
+    if (!RuntimeEnabledFeatures::
+            framebustingNeedsSameOriginOrUserGestureEnabled()) {
+      String targetFrameDescription =
+          targetFrame.isLocalFrame()
+              ? "with URL '" +
+                    toLocalFrame(targetFrame).document()->url().getString() +
+                    "'"
+              : "with origin '" +
+                    targetFrame.securityContext()
+                        ->getSecurityOrigin()
+                        ->toString() +
+                    "'";
+      String message = "Frame with URL '" +
+                       toLocalFrame(this)->document()->url().getString() +
+                       "' attempted to navigate its top-level window " +
+                       targetFrameDescription +
+                       ". Navigating the top-level window from a cross-origin "
+                       "iframe will soon require that the iframe has received "
+                       "a user gesture. See "
+                       "https://www.chromestatus.com/features/"
+                       "5851021045661696.";
+      printNavigationWarning(message);
+      return true;
+    }
     errorReason =
         "The frame attempting navigation is targeting its top-level window, "
-        "but is neither same-origin with its target nor is it processing a "
+        "but is neither same-origin with its target nor has it received a "
         "user gesture. See "
         "https://www.chromestatus.com/features/5851021045661696.";
     printNavigationErrorMessage(targetFrame, errorReason.latin1().data());
@@ -236,13 +284,30 @@ bool Frame::canNavigateWithoutFramebusting(const Frame& targetFrame,
       return false;
     }
 
-    // Top navigation is forbidden unless opted-in. allow-top-navigation
-    // will also skips origin checks.
+    // Top navigation is forbidden unless opted-in. allow-top-navigation or
+    // allow-top-navigation-with-user-activation will also skips origin checks.
     if (targetFrame == tree().top()) {
-      if (securityContext()->isSandboxed(SandboxTopNavigation)) {
+      if (securityContext()->isSandboxed(SandboxTopNavigation) &&
+          securityContext()->isSandboxed(
+              SandboxTopNavigationWithUserActivation)) {
+        // TODO(binlu): To add "or 'allow-top-navigation-with-user-activation'"
+        // to the reason below, once the new flag is shipped.
         reason =
             "The frame attempting navigation of the top-level window is "
             "sandboxed, but the 'allow-top-navigation' flag is not set.";
+        return false;
+      }
+      if (securityContext()->isSandboxed(SandboxTopNavigation) &&
+          !securityContext()->isSandboxed(
+              SandboxTopNavigationWithUserActivation) &&
+          !UserGestureIndicator::processingUserGesture()) {
+        // With only 'allow-top-navigation-with-user-activation' (but not
+        // 'allow-top-navigation'), top navigation requires a user gesture.
+        reason =
+            "The frame attempting navigation of the top-level window is "
+            "sandboxed with the 'allow-top-navigation-with-user-activation' "
+            "flag, but has no user activation (aka gesture). See "
+            "https://www.chromestatus.com/feature/5629582019395584.";
         return false;
       }
       return true;
@@ -329,9 +394,15 @@ void Frame::didChangeVisibilityState() {
   HeapVector<Member<Frame>> childFrames;
   for (Frame* child = tree().firstChild(); child;
        child = child->tree().nextSibling())
-    childFrames.append(child);
+    childFrames.push_back(child);
   for (size_t i = 0; i < childFrames.size(); ++i)
     childFrames[i]->didChangeVisibilityState();
+}
+
+void Frame::setDocumentHasReceivedUserGesture() {
+  m_hasReceivedUserGesture = true;
+  if (Frame* parent = tree().parent())
+    parent->setDocumentHasReceivedUserGesture();
 }
 
 Frame::Frame(FrameClient* client, FrameHost* host, FrameOwner* owner)

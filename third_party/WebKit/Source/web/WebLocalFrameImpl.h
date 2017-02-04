@@ -42,6 +42,7 @@
 #include "web/WebExport.h"
 #include "web/WebFrameImplBase.h"
 #include "web/WebFrameWidgetBase.h"
+#include "web/WebInputMethodControllerImpl.h"
 #include "wtf/Compiler.h"
 #include "wtf/text/WTFString.h"
 #include <memory>
@@ -51,7 +52,6 @@ namespace blink {
 class ChromePrintContext;
 class IntSize;
 class KURL;
-class Range;
 class ScrollableArea;
 class SharedWorkerRepositoryClientImpl;
 class TextFinder;
@@ -83,6 +83,8 @@ class WEB_EXPORT WebLocalFrameImpl final
       NON_EXPORTED_BASE(public WebLocalFrame) {
  public:
   // WebFrame methods:
+  // TODO(dcheng): Fix sorting here; a number of method have been moved to
+  // WebLocalFrame but not correctly updated here.
   void close() override;
   WebString uniqueName() const override;
   WebString assignedName() const override;
@@ -91,7 +93,7 @@ class WEB_EXPORT WebLocalFrameImpl final
   void setContentSettingsClient(WebContentSettingsClient*) override;
   void setSharedWorkerRepositoryClient(
       WebSharedWorkerRepositoryClient*) override;
-  WebSize scrollOffset() const override;
+  WebSize getScrollOffset() const override;
   void setScrollOffset(const WebSize&) override;
   WebSize contentsSize() const override;
   bool hasVisibleContent() const override;
@@ -105,8 +107,7 @@ class WEB_EXPORT WebLocalFrameImpl final
   void executeScript(const WebScriptSource&) override;
   void executeScriptInIsolatedWorld(int worldID,
                                     const WebScriptSource* sources,
-                                    unsigned numSources,
-                                    int extensionGroup) override;
+                                    unsigned numSources) override;
   void setIsolatedWorldSecurityOrigin(int worldID,
                                       const WebSecurityOrigin&) override;
   void setIsolatedWorldContentSecurityPolicy(int worldID,
@@ -130,13 +131,11 @@ class WEB_EXPORT WebLocalFrameImpl final
       int worldID,
       const WebScriptSource* sourcesIn,
       unsigned numSources,
-      int extensionGroup,
       WebVector<v8::Local<v8::Value>>* results) override;
   void requestExecuteScriptInIsolatedWorld(
       int worldID,
       const WebScriptSource* sourceIn,
       unsigned numSources,
-      int extensionGroup,
       bool userGesture,
       WebScriptExecutionCallback*) override;
   v8::Local<v8::Value> callFunctionEvenIfScriptDisabled(
@@ -291,8 +290,13 @@ class WEB_EXPORT WebLocalFrameImpl final
   WebFrameWidgetBase* frameWidget() const override;
   void copyImageAt(const WebPoint&) override;
   void saveImageAt(const WebPoint&) override;
+  void setEngagementLevel(mojom::EngagementLevel) override;
   void clearActiveFindMatch() override;
   void usageCountChromeLoadTimes(const WebString& metric) override;
+  base::SingleThreadTaskRunner* timerTaskRunner() override;
+  base::SingleThreadTaskRunner* loadingTaskRunner() override;
+  base::SingleThreadTaskRunner* unthrottledTaskRunner() override;
+  WebInputMethodControllerImpl* inputMethodController() const override;
 
   // WebFrameImplBase methods:
   void initializeCoreFrame(FrameHost*,
@@ -306,8 +310,12 @@ class WEB_EXPORT WebLocalFrameImpl final
 
   static WebLocalFrameImpl* create(WebTreeScopeType,
                                    WebFrameClient*,
+                                   blink::InterfaceProvider*,
+                                   blink::InterfaceRegistry*,
                                    WebFrame* opener);
   static WebLocalFrameImpl* createProvisional(WebFrameClient*,
+                                              blink::InterfaceProvider*,
+                                              blink::InterfaceRegistry*,
                                               WebRemoteFrame*,
                                               WebSandboxFlags);
   ~WebLocalFrameImpl() override;
@@ -398,15 +406,20 @@ class WEB_EXPORT WebLocalFrameImpl final
   void setContextMenuNode(Node* node) { m_contextMenuNode = node; }
   void clearContextMenuNode() { m_contextMenuNode.clear(); }
 
-  WebInputMethodControllerImpl* inputMethodController() const;
 
   DECLARE_TRACE();
 
  private:
   friend class FrameLoaderClientImpl;
 
-  WebLocalFrameImpl(WebTreeScopeType, WebFrameClient*);
-  WebLocalFrameImpl(WebRemoteFrame*, WebFrameClient*);
+  WebLocalFrameImpl(WebTreeScopeType,
+                    WebFrameClient*,
+                    blink::InterfaceProvider*,
+                    blink::InterfaceRegistry*);
+  WebLocalFrameImpl(WebRemoteFrame*,
+                    WebFrameClient*,
+                    blink::InterfaceProvider*,
+                    blink::InterfaceRegistry*);
 
   // Inherited from WebFrame, but intentionally hidden: it never makes sense
   // to call these on a WebLocalFrameImpl.
@@ -459,6 +472,10 @@ class WEB_EXPORT WebLocalFrameImpl final
   // emulation is enabled.
   IntSize m_inputEventsOffsetForEmulation;
   float m_inputEventsScaleFactorForEmulation;
+
+  // Borrowed pointers to Mojo objects.
+  blink::InterfaceProvider* m_interfaceProvider;
+  blink::InterfaceRegistry* m_interfaceRegistry;
 
   WebDevToolsFrontendImpl* m_webDevToolsFrontend;
 

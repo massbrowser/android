@@ -4,22 +4,20 @@
 
 package org.chromium.chrome.browser.omaha;
 
-import static org.chromium.chrome.test.omaha.MockRequestGenerator.DeviceType;
-
 import android.app.AlarmManager;
 import android.app.PendingIntent;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.support.test.filters.SmallTest;
 import android.test.InstrumentationTestCase;
-import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.test.omaha.AttributeFinder;
 import org.chromium.chrome.test.omaha.MockRequestGenerator;
+import org.chromium.chrome.test.omaha.MockRequestGenerator.DeviceType;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -56,13 +54,13 @@ public class OmahaClientTest extends InstrumentationTestCase {
         DUE, NOT_DUE
     }
 
-    private MockOmahaContext mContext;
+    private AdvancedMockContext mContext;
     private HookedOmahaClient mOmahaClient;
 
     @Override
     protected void setUp() {
         Context targetContext = getInstrumentation().getTargetContext();
-        mContext = new MockOmahaContext(targetContext);
+        mContext = new AdvancedMockContext(targetContext);
         mOmahaClient = HookedOmahaClient.create(mContext);
     }
 
@@ -78,11 +76,8 @@ public class OmahaClientTest extends InstrumentationTestCase {
         mOmahaClient.onHandleIntent(intent);
         assertTrue("OmahaClient has no registered request", mOmahaClient.hasRequest());
         assertTrue("Alarm does not have the correct state", mOmahaClient.getRequestAlarmWasSet());
-        assertTrue("OmahaClient wasn't restarted.", mContext.mOmahaClientRestarted);
-        assertNotNull(mContext.mIntentFired);
-        assertEquals("POST intent not fired.",
-                OmahaClient.createPostRequestIntent(mContext).getAction(),
-                mContext.mIntentFired.getAction());
+        assertEquals("OmahaClient didn't post the request",
+                OmahaClient.POST_RESULT_SCHEDULED, mOmahaClient.mPostResult);
     }
 
     /**
@@ -95,8 +90,7 @@ public class OmahaClientTest extends InstrumentationTestCase {
         mOmahaClient.onHandleIntent(intent);
         assertFalse("OmahaClient has a registered request", mOmahaClient.hasRequest());
         assertTrue("Alarm does not have the correct state", mOmahaClient.getRequestAlarmWasSet());
-        assertFalse("OmahaClient was restarted.", mContext.mOmahaClientRestarted);
-        assertNull(mContext.mIntentFired);
+        assertEquals("OmahaClient called handlePostRequest", -1, mOmahaClient.mPostResult);
     }
 
     /**
@@ -107,12 +101,11 @@ public class OmahaClientTest extends InstrumentationTestCase {
     public void testInstallSourceSetBeforeRestoringRequest() {
         // Plant a failed request.
         Context targetContext = getInstrumentation().getTargetContext();
-        MockOmahaContext mockContext = new MockOmahaContext(targetContext);
-        SharedPreferences prefs =
-                mockContext.getSharedPreferences(OmahaClient.PREF_PACKAGE, Context.MODE_PRIVATE);
+        AdvancedMockContext mockContext = new AdvancedMockContext(targetContext);
+        SharedPreferences prefs = OmahaBase.getSharedPreferences(mockContext);
         SharedPreferences.Editor editor = prefs.edit();
-        editor.putLong(OmahaClient.PREF_TIMESTAMP_OF_REQUEST, 0);
-        editor.putString(OmahaClient.PREF_PERSISTED_REQUEST_ID, "persisted_id");
+        editor.putLong(OmahaBase.PREF_TIMESTAMP_OF_REQUEST, 0);
+        editor.putString(OmahaBase.PREF_PERSISTED_REQUEST_ID, "persisted_id");
         editor.apply();
 
         // Send it off and don't crash when the state is restored and the XML is generated.
@@ -139,7 +132,7 @@ public class OmahaClientTest extends InstrumentationTestCase {
         Intent intent = OmahaClient.createRegisterRequestIntent(mContext);
         mOmahaClient.onHandleIntent(intent);
         assertFalse("OmahaClient has a registered request", mOmahaClient.hasRequest());
-        assertFalse("OmahaClient was relaunched", mContext.mOmahaClientRestarted);
+        assertEquals(-1, mOmahaClient.mPostResult);
     }
 
     /**
@@ -152,8 +145,8 @@ public class OmahaClientTest extends InstrumentationTestCase {
         mOmahaClient.mMockScheduler.setCurrentTime(1000);
         Intent intent = OmahaClient.createRegisterRequestIntent(mContext);
         mOmahaClient.onHandleIntent(intent);
-        assertTrue("OmahaClient has no registered request", mOmahaClient.hasRequest());
-        assertTrue("OmahaClient wasn't relaunched", mContext.mOmahaClientRestarted);
+        assertFalse("OmahaClient has no registered request", mOmahaClient.hasRequest());
+        assertEquals(OmahaClient.POST_RESULT_SENT, mOmahaClient.mPostResult);
     }
 
     /**
@@ -166,22 +159,23 @@ public class OmahaClientTest extends InstrumentationTestCase {
         final long millisecondsPerDay = 86400000;
         long currentTimestamp = millisecondsPerDay * 2;
         mOmahaClient.mMockScheduler.setCurrentTime(currentTimestamp);
-        mOmahaClient.registerNewRequest(currentTimestamp);
+        Intent intent = OmahaClient.createRegisterRequestIntent(mContext);
+        mOmahaClient.onHandleIntent(intent);
 
         // Rewind the clock 2 days.
         currentTimestamp -= millisecondsPerDay * 2;
         mOmahaClient.mMockScheduler.setCurrentTime(currentTimestamp);
-        mOmahaClient.restoreState();
 
-        // Confirm that the post timestamp was reset, since it's larger than the exponential
-        // backoff delay.
+        // Restore state and confirm that the post timestamp was reset, since it's larger than the
+        // exponential backoff delay.
+        HookedOmahaClient secondClient = HookedOmahaClient.create(mContext);
         assertEquals("Post timestamp was not cleared.",
-                mOmahaClient.getTimestampForNextPostAttempt(), 0);
+                0, secondClient.getTimestampForNextPostAttempt());
 
         // Confirm that the request timestamp was reset, since the next timestamp is more than
         // a day away.
         assertEquals("Request timestamp was not cleared.",
-                mOmahaClient.getTimestampForNewRequest(), 0);
+                0, secondClient.getTimestampForNewRequest());
     }
 
     /**
@@ -190,13 +184,14 @@ public class OmahaClientTest extends InstrumentationTestCase {
     @SmallTest
     @Feature({"Omaha"})
     public void testOmahaClientFileIO() {
-        // Register a request and save it to disk.
-        mOmahaClient.registerNewRequest(0);
+        // Register and send a request, which saves timestamps to disk.
+        Intent intent = OmahaClient.createRegisterRequestIntent(mContext);
+        mOmahaClient.onHandleIntent(intent);
 
-        // The second OmahaCLient should retrieve the request that the first one saved.
+        // The second OmahaClient should know the next timestamp.
         HookedOmahaClient secondClient = HookedOmahaClient.create(mContext);
-        assertTrue("The request from the first OmahaClient wasn't written",
-                secondClient.hasRequest());
+        assertEquals("The next timestamp wasn't correct",
+                OmahaClient.MS_BETWEEN_REQUESTS, secondClient.getTimestampForNewRequest());
     }
 
     @SmallTest
@@ -272,7 +267,7 @@ public class OmahaClientTest extends InstrumentationTestCase {
         HookedOmahaClient omahaClient = new HookedOmahaClient(mContext, deviceType, response,
                 connectionStatus, false);
         omahaClient.onCreate();
-        omahaClient.restoreState();
+        omahaClient.restoreState(mContext);
 
         // Set whether or not we're sending the install event.
         assertTrue("Should default to sending install event.", omahaClient.isSendInstallEvent());
@@ -325,9 +320,9 @@ public class OmahaClientTest extends InstrumentationTestCase {
 
         // Make sure we properly parsed out the server's response.
         assertEquals("Latest version numbers didn't match", expectedVersion,
-                OmahaClient.getVersionNumberGetter().getLatestKnownVersion(
-                        mContext, OmahaClient.PREF_PACKAGE, OmahaClient.PREF_LATEST_VERSION));
-        assertEquals("Market URL didn't match", expectedURL, OmahaClient.getMarketURL(mContext));
+                VersionNumberGetter.getInstance().getLatestKnownVersion(mContext));
+        assertEquals(
+                "Market URL didn't match", expectedURL, MarketURLGetter.getMarketUrl(mContext));
 
         // Check that the install event was sent properly.
         if (sentInstallEvent) {
@@ -482,12 +477,13 @@ public class OmahaClientTest extends InstrumentationTestCase {
 
         private boolean mRequestAlarmWasSet;
         private int mNumUUIDsGenerated;
+        private int mPostResult = -1;
 
         public static HookedOmahaClient create(Context context) {
             HookedOmahaClient omahaClient = new HookedOmahaClient(context, DeviceType.TABLET,
                     ServerResponse.SUCCESS, ConnectionStatus.RESPONDS, false);
             omahaClient.onCreate();
-            omahaClient.restoreState();
+            omahaClient.restoreState(context);
             return omahaClient;
         }
 
@@ -511,6 +507,12 @@ public class OmahaClientTest extends InstrumentationTestCase {
         @Override
         public int getApplicationFlags() {
             return mInstalledOnSystemImage ? ApplicationInfo.FLAG_SYSTEM : 0;
+        }
+
+        @Override
+        protected int handlePostRequest() {
+            mPostResult = super.handlePostRequest();
+            return mPostResult;
         }
 
         /**
@@ -586,8 +588,7 @@ public class OmahaClientTest extends InstrumentationTestCase {
         }
 
         @Override
-        protected void setAlarm(AlarmManager am, PendingIntent operation, int alarmType,
-                long triggerAtTime) {
+        protected void setAlarm(AlarmManager am, PendingIntent operation, long triggerAtTime) {
             mRequestAlarmWasSet = true;
         }
 
@@ -757,24 +758,6 @@ public class OmahaClientTest extends InstrumentationTestCase {
 
         public String getRequestPropertyValue() {
             return mRequestPropertyValue;
-        }
-    }
-
-    private static class MockOmahaContext extends AdvancedMockContext {
-        private boolean mOmahaClientRestarted;
-        private Intent mIntentFired;
-
-        public MockOmahaContext(Context targetContext) {
-            super(targetContext);
-        }
-
-        @Override
-        public ComponentName startService(Intent intent) {
-            assertEquals(OmahaClient.class.getCanonicalName(),
-                    intent.getComponent().getClassName());
-            mOmahaClientRestarted = true;
-            mIntentFired = intent;
-            return intent.getComponent();
         }
     }
 }

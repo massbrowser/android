@@ -7,16 +7,9 @@
 #include <limits>
 #include <utility>
 
-#include "base/logging.h"
-#include "base/stl_util.h"
-#include "net/base/linked_hash_map.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
-#include "net/quic/core/quic_bug_tracker.h"
 #include "net/quic/core/quic_connection_stats.h"
-#include "net/quic/core/quic_flags.h"
-
-using std::max;
-using std::min;
+#include "net/quic/platform/api/quic_bug_tracker.h"
 
 namespace net {
 
@@ -55,12 +48,12 @@ void QuicReceivedPacketManager::RecordPacketReceived(
     // Record how out of order stats.
     ++stats_->packets_reordered;
     stats_->max_sequence_reordering =
-        max(stats_->max_sequence_reordering,
-            ack_frame_.largest_observed - packet_number);
+        std::max(stats_->max_sequence_reordering,
+                 ack_frame_.largest_observed - packet_number);
     int64_t reordering_time_us =
         (receipt_time - time_largest_observed_).ToMicroseconds();
     stats_->max_time_reordering_us =
-        max(stats_->max_time_reordering_us, reordering_time_us);
+        std::max(stats_->max_time_reordering_us, reordering_time_us);
   }
   if (packet_number > ack_frame_.largest_observed) {
     ack_frame_.largest_observed = packet_number;
@@ -78,22 +71,9 @@ bool QuicReceivedPacketManager::IsMissing(QuicPacketNumber packet_number) {
 
 bool QuicReceivedPacketManager::IsAwaitingPacket(
     QuicPacketNumber packet_number) {
-  return ::net::IsAwaitingPacket(ack_frame_, packet_number,
-                                 peer_least_packet_awaiting_ack_);
+  return net::IsAwaitingPacket(ack_frame_, packet_number,
+                               peer_least_packet_awaiting_ack_);
 }
-
-namespace {
-struct isTooLarge {
-  explicit isTooLarge(QuicPacketNumber n) : largest_observed_(n) {}
-  QuicPacketNumber largest_observed_;
-
-  // Return true if the packet in p is too different from largest_observed_
-  // to express.
-  bool operator()(const std::pair<QuicPacketNumber, QuicTime>& p) const {
-    return largest_observed_ - p.first >= std::numeric_limits<uint8_t>::max();
-  }
-};
-}  // namespace
 
 const QuicFrame QuicReceivedPacketManager::GetUpdatedAckFrame(
     QuicTime approximate_now) {
@@ -149,7 +129,7 @@ bool QuicReceivedPacketManager::HasMissingPackets() const {
   return ack_frame_.packets.NumIntervals() > 1 ||
          (!ack_frame_.packets.Empty() &&
           ack_frame_.packets.Min() >
-              max(QuicPacketNumber(1), peer_least_packet_awaiting_ack_));
+              std::max(QuicPacketNumber(1), peer_least_packet_awaiting_ack_));
 }
 
 bool QuicReceivedPacketManager::HasNewMissingPackets() const {

@@ -62,7 +62,7 @@ class VideoCaptureBufferPoolTest
     ~Buffer() { pool_->RelinquishProducerReservation(id()); }
     int id() const { return id_; }
     size_t mapped_size() { return buffer_handle_->mapped_size(); }
-    void* data() { return buffer_handle_->data(0); }
+    void* data() { return buffer_handle_->data(); }
 
    private:
     const int id_;
@@ -90,15 +90,17 @@ class VideoCaptureBufferPoolTest
                     format_and_storage.pixel_storage) << " "
              << media::VideoPixelFormatToString(format_and_storage.pixel_format)
              << " " << dimensions.ToString();
+    const int arbitrary_frame_feedback_id = 0;
     const int buffer_id = pool_->ReserveForProducer(
         dimensions, format_and_storage.pixel_format,
-        format_and_storage.pixel_storage, &buffer_id_to_drop);
+        format_and_storage.pixel_storage, arbitrary_frame_feedback_id,
+        &buffer_id_to_drop);
     if (buffer_id == media::VideoCaptureBufferPool::kInvalidId)
       return std::unique_ptr<Buffer>();
     EXPECT_EQ(expected_dropped_id_, buffer_id_to_drop);
 
     std::unique_ptr<media::VideoCaptureBufferHandle> buffer_handle =
-        pool_->GetBufferHandle(buffer_id);
+        pool_->GetHandleForInProcessAccess(buffer_id);
     return std::unique_ptr<Buffer>(
         new Buffer(pool_, std::move(buffer_handle), buffer_id));
   }
@@ -111,8 +113,8 @@ class VideoCaptureBufferPoolTest
         format_and_storage.pixel_storage);
     if (buffer_id == media::VideoCaptureBufferPool::kInvalidId)
       return std::unique_ptr<Buffer>();
-    return std::unique_ptr<Buffer>(
-        new Buffer(pool_, pool_->GetBufferHandle(buffer_id), buffer_id));
+    return std::unique_ptr<Buffer>(new Buffer(
+        pool_, pool_->GetHandleForInProcessAccess(buffer_id), buffer_id));
   }
 
   base::MessageLoop loop_;
