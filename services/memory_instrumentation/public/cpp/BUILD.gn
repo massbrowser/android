@@ -1,0 +1,29 @@
+# Copyright 2017 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+source_set("cpp") {
+  sources = [
+    "coordinator.h",
+  ]
+
+  deps = [
+    ":struct_traits",
+  ]
+
+  public_deps = [
+    "//services/memory_instrumentation/public/interfaces",
+  ]
+}
+
+source_set("struct_traits") {
+  sources = [
+    "memory_instrumentation_traits.cc",
+    "memory_instrumentation_traits.h",
+  ]
+
+  public_deps = [
+    "//base",
+    "//services/memory_instrumentation/public/interfaces",
+  ]
+}
