@@ -82,6 +82,7 @@ using content::RenderViewHost;
 using content::ResourceRequestInfo;
 
 #define TRANSPARENT1PXGIF "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+#define TRANSPARENT1PXPNG "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg=="
 
 namespace {
 
@@ -221,6 +222,7 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     GURL* new_url) {
+    std::string url_spec = request->url().spec();
 
     bool isGlobalBlockEnabled = true;
       net::blockers::ShieldsConfig* shieldsConfig =
@@ -245,47 +247,49 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
     				) {
     		block = true;
     	}
-      bool isAdBlockEnabled = true;
-      if (enable_ad_block_) {
+    bool isAdBlockEnabled = true;
+    if (enable_ad_block_) {
         isAdBlockEnabled = enable_ad_block_->GetValue();
-      }
-    	const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
-    	if (!block
-          && isGlobalBlockEnabled
-          && isAdBlockEnabled
-          && request
-          && info
-    			&& blockers_worker_.shouldAdBlockUrl(
+    }
+    const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
+    if (!block
+        && isGlobalBlockEnabled
+        && isAdBlockEnabled
+        && request
+        && info
+    	&& blockers_worker_.shouldAdBlockUrl(
     					request->first_party_for_cookies().host(),
-    					request->url().spec(),
+    					url_spec,
     					(unsigned int)info->GetResourceType())) {
     		block = true;
-    	}
-      bool check_httpse_redirect = true;
-      if (block && content::RESOURCE_TYPE_IMAGE == info->GetResourceType()) {
+    }
+
+    bool check_httpse_redirect = true;
+    if (block && info && content::RESOURCE_TYPE_IMAGE == info->GetResourceType()) {
         check_httpse_redirect = false;
-        *new_url = GURL(TRANSPARENT1PXGIF);
-      }
-    	else if (block) {
-    	    shieldsConfig->setBlockedInfo(request->url().spec());
-    		*new_url = GURL("");
-
-
-    		return net::ERR_BLOCKED_BY_ADMINISTRATOR;
-    	}
-      //
+        *new_url = GURL(TRANSPARENT1PXPNG);
+    }
 
       // HTTPSE work
-      if (isGlobalBlockEnabled
+    if (isGlobalBlockEnabled
           && check_httpse_redirect
           && enable_httpse_
           && enable_httpse_->GetValue()) {
         std::string newURL = blockers_worker_.getHTTPSURL(&request->url());
-        if (newURL != request->url().spec()) {
+        if (newURL != url_spec) {
           *new_url = GURL(newURL);
         }
-      }
-    //
+    }
+
+
+    if (block && (nullptr == info || content::RESOURCE_TYPE_IMAGE != info->GetResourceType())) {
+        if(request && shieldsConfig){
+            shieldsConfig->setBlockedInfo(url_spec);
+        }
+        *new_url = GURL("");
+
+        return net::ERR_BLOCKED_BY_ADMINISTRATOR;
+    }
 
 
 

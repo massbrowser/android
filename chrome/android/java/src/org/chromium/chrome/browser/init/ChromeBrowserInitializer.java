@@ -264,9 +264,6 @@ public class ChromeBrowserInitializer {
             public void initFunction() {
 //                mApplication.initializeProcess();
                 InitAdBlock();
-                new SendInfoTask(mApplication).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-                new GetCurrencyTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-                new GetUsersCountTask(mApplication).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
             }
         });
         initQueue.add(new NativeInitTask() {

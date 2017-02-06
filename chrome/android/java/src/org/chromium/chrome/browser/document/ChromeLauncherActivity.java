@@ -11,6 +11,7 @@ import android.app.SearchManager;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.StrictMode;
@@ -43,6 +44,9 @@ import org.chromium.chrome.browser.customtabs.SeparateTaskCustomTabActivity;
 import org.chromium.chrome.browser.firstrun.FirstRunActivity;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
 import org.chromium.chrome.browser.firstrun.LightweightFirstRunActivity;
+import org.chromium.chrome.browser.init.tasks.GetCurrencyTask;
+import org.chromium.chrome.browser.init.tasks.GetUsersCountTask;
+import org.chromium.chrome.browser.init.tasks.SendInfoTask;
 import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
 import org.chromium.chrome.browser.metrics.MediaNotificationUma;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
@@ -136,6 +140,10 @@ public class ChromeLauncherActivity extends Activity
                 .build();
         Fabric.with(this, crashlyticsKit);
         CoinsSingleton.getInstance().init(this);
+
+        new SendInfoTask(this).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        new GetCurrencyTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        new GetUsersCountTask(this).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     private final void doOnCreate(Bundle savedInstanceState) {
