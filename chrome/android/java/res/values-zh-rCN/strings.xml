@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="your_balance">您的余额</string>
+    <string name="you_can_see_your_balance">余额可由Mass币，比特币或美元显示.\n想赚更多吗?\n每推荐一个朋友使用Mass，你将获得1美元。.
+    </string>
+    <string name="how_invites_work">如何发出邀请</string>
+    <string name="withdrawals">取现</string>
+    <string name="withdraw">取现</string>
+    <string name="zero">0</string>
+    <string name="feature_in_march_2017">此功能正在开发，敬请期待</string>
+    <string name="use_time_text">在线活动时间为%d分钟</string>
+
+    <string name="how_invites_work_description">
+        每当一个新用户通过你发出的链接来安装Mass浏览器，你将得到价值1美元Mass币。\n\n
+
+        为确保安装不是由机器人完成，我们需要一些时间（几周）来确认你的朋友确实在使用Mass。\n\n
+
+        你既可选择不同币种将Mass币取出，也可以在我们的伙伴网站用Mass币直接消费。
+    </string>
+    <string name="where_spend_coins">哪里可以用Mass币？</string>
+    <string name="refer_friend">Invite friend</string>
+
+    <string name="fre_no_unwanted_ads">无骚扰广告</string>
+    <string name="fre_no_data_harvesting">不采集数据</string>
+    <string name="fre_final_make_money">你的关注充满价值。浏览网络即可赚钱。</string>
+    <string name="fre_launch_mass_browser">打开Mass浏览器</string>
+</resources>

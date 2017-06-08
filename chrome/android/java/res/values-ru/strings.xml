@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="your_balance">Ваш баланс</string>
+    <string name="you_can_see_your_balance">
+        Баланс доступен в USD, Биткоинах и Масскоинах.\n\n
+        Хочешь заработать больше?\n
+        Получи дополнительно 1 доллар за каждую рекомендацию Mass другу.
+    </string>
+    <string name="how_invites_work">КАК ЭТО РАБОТАЕТ?</string>
+    <string name="how_invites_work_description">
+
+        Каждый раз, когда новый пользователь следует по ссылке, отправленной вами, и устанавливает Mass Browser, вы получаете эквивалент 1 $ в Mass Coins.\n\n
+
+        Чтобы удостовериться, что установка не производится роботами или мошенническим программным обеспечением, нам нужно время (обычно пару недель), чтобы убедиться, что ваш друг - настоящий человек, который использует Mass.\n\n
+
+        Вы можете конвертировать Mass Coins в одну  из доступных  валют, либо платить ими в заведениях и на сайтах  наших партнеров.
+    </string>
+    <string name="where_spend_coins">Где я могу потратить Mass Coins?</string>
+    <string name="withdrawals">Вывод средств</string>
+    <string name="withdraw">ВЫВЕСТИ</string>
+    <string name="feature_in_march_2017">Эта функция находится в стадии разработки и будет доступна в ближайшее время</string>
+    <string name="use_time_text">Вы активно используете браузер %d минут</string>
+    <string name="fre_no_unwanted_ads">Нет лишней рекламы</string>
+    <string name="fre_no_data_harvesting">Нет сбора данных</string>
+    <string name="fre_final_make_money">Ваше внимание теперь ценится.\nЗарабатывайте деньги на интернет-серфинге</string>
+    <string name="fre_launch_mass_browser">Запустить Mass Browser</string>
+</resources>
