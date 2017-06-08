@@ -17,21 +17,17 @@ using CastFocusClientAuraTest = aura::test::AuraTestBase;
 
 class TestWindow {
  public:
-  TestWindow()
-      : delegate_(new aura::test::TestWindowDelegate()),
-        window_(new aura::Window(delegate_)) {
-    window_->Init(ui::LAYER_NOT_DRAWN);
-    window_->Show();
+  TestWindow() : window_(&delegate_) {
+    window_.Init(ui::LAYER_NOT_DRAWN);
+    window_.Show();
   }
 
-  virtual ~TestWindow() {}
-
-  aura::test::TestWindowDelegate* delegate() const { return delegate_; }
-  aura::Window* window() const { return window_.get(); }
+  aura::test::TestWindowDelegate* delegate() { return &delegate_; }
+  aura::Window* window() { return &window_; }
 
  private:
-  aura::test::TestWindowDelegate* const delegate_;
-  std::unique_ptr<aura::Window> const window_;
+  aura::test::TestWindowDelegate delegate_;
+  aura::Window window_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWindow);
 };
@@ -157,6 +153,36 @@ TEST_F(CastFocusClientAuraTest, ZOrder) {
   // Confirm that there is no focused window.
   low.reset();
   EXPECT_FALSE(focus_client.GetFocusedWindow());
+}
+
+TEST_F(CastFocusClientAuraTest, ZOrderWithChildWindows) {
+  std::unique_ptr<aura::WindowTreeHost> window_tree_host(
+      aura::WindowTreeHost::Create(gfx::Rect(0, 0, 1280, 720)));
+  window_tree_host->InitHost();
+  window_tree_host->Show();
+
+  CastFocusClientAura focus_client;
+
+  // Add the window with the highest z-order.
+  std::unique_ptr<TestWindow> high_parent(new TestWindow);
+  high_parent->window()->set_id(3);
+  std::unique_ptr<TestWindow> high_child(new TestWindow);
+  high_child->delegate()->set_can_focus(true);
+  high_parent->window()->AddChild(high_child->window());
+  window_tree_host->window()->AddChild(high_parent->window());
+  focus_client.FocusWindow(high_child->window());
+  EXPECT_EQ(high_child->window(), focus_client.GetFocusedWindow());
+
+  // Add the window with the lowest z-order.
+  std::unique_ptr<TestWindow> low_parent(new TestWindow);
+  low_parent->window()->set_id(1);
+  std::unique_ptr<TestWindow> low_child(new TestWindow);
+  low_child->delegate()->set_can_focus(true);
+  low_parent->window()->AddChild(low_child->window());
+  window_tree_host->window()->AddChild(low_parent->window());
+  focus_client.FocusWindow(low_child->window());
+  // Focus should remain with the child of the highest window.
+  EXPECT_EQ(high_child->window(), focus_client.GetFocusedWindow());
 }
 
 }  // namespace test

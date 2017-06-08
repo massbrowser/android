@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import collections
 import re
 
 from webkitpy.common.system.filesystem import FileSystem
@@ -17,7 +18,7 @@ class DirectoryOwnersExtractor(object):
 
     def read_owner_map(self):
         """Reads the W3CImportExpectations file and returns a map of directories to owners."""
-        input_path = self.finder.path_from_webkit_base('LayoutTests', 'W3CImportExpectations')
+        input_path = self.finder.path_from_layout_tests('W3CImportExpectations')
         input_contents = self.filesystem.read_text_file(input_path)
         self.owner_map = self.lines_to_owner_map(input_contents.splitlines())
 
@@ -29,6 +30,8 @@ class DirectoryOwnersExtractor(object):
             if owners:
                 current_owners = owners
             directory = self.extract_directory(line)
+            if not owners and not directory:
+                current_owners = []
             if current_owners and directory:
                 owner_map[directory] = current_owners
         return owner_map
@@ -61,14 +64,15 @@ class DirectoryOwnersExtractor(object):
             changed_files: A list of file paths relative to the repository root.
 
         Returns:
-            A dict mapping (owner) email addresses to (owned) directories.
+            A dict mapping tuples of owner email addresses to lists of
+            owned directories.
         """
         tests = [self.finder.layout_test_name(path) for path in changed_files]
         tests = [t for t in tests if t is not None]
-        email_map = {}
+        email_map = collections.defaultdict(list)
         for directory, owners in self.owner_map.iteritems():
             owned_tests = [t for t in tests if t.startswith(directory)]
-            if owned_tests:
-                for owner in owners:
-                    email_map[owner] = directory
+            if not owned_tests:
+                continue
+            email_map[tuple(owners)].append(directory)
         return email_map

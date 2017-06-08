@@ -8,6 +8,7 @@
 #include "ios/net/request_tracker.h"
 
 namespace web {
+class NavigationItem;
 class WebStateImpl;
 }
 
@@ -15,8 +16,6 @@ class WebStateImpl;
 @interface Tab ()
 
 - (OpenInController*)openInController;
-- (void)closeThisTab;
-- (CRWSessionEntry*)currentSessionEntry;
 - (void)setShouldObserveInfoBarManager:(BOOL)shouldObserveInfoBarManager;
 - (void)setShouldObserveFaviconChanges:(BOOL)shouldObserveFaviconChanges;
 
@@ -24,18 +23,21 @@ class WebStateImpl;
 
 @interface Tab (TestingSupport)
 
-// Replaces the existing web state. This method should be called once
-// right after init and before any call to |view|.
-// TODO(crbug.com/620465): change to std::unique_ptr<web::WebState> once
-// Tab no longer uses private //ios/web APIs.
-- (void)replaceWebState:(std::unique_ptr<web::WebStateImpl>)webState;
-
 // Replaces the existing |externalAppLauncher_|.
 - (void)replaceExternalAppLauncher:(id)externalAppLauncher;
 
+- (FormInputAccessoryViewController*)inputAccessoryViewController;
+
+// Returns the Tab owning TabModel.
 - (TabModel*)parentTabModel;
 
-- (FormInputAccessoryViewController*)inputAccessoryViewController;
+@end
+
+@interface Tab (Private)
+
+// Attaches tab helper-like objects for AttachTabHelpers. Those objects should
+// be converted in real tab helpers and created by AttachTabHelpers.
+- (void)attachTabHelpers;
 
 @end
 

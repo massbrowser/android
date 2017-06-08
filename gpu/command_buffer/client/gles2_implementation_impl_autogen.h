@@ -3111,10 +3111,10 @@ void GLES2Implementation::GetTranslatedShaderSourceANGLE(GLuint shader,
   CheckGLError();
 }
 void GLES2Implementation::CopyTextureCHROMIUM(
-    GLenum source_id,
+    GLuint source_id,
     GLint source_level,
     GLenum dest_target,
-    GLenum dest_id,
+    GLuint dest_id,
     GLint dest_level,
     GLint internalformat,
     GLenum dest_type,
@@ -3123,12 +3123,11 @@ void GLES2Implementation::CopyTextureCHROMIUM(
     GLboolean unpack_unmultiply_alpha) {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   GPU_CLIENT_LOG(
-      "[" << GetLogPrefix() << "] glCopyTextureCHROMIUM("
-          << GLES2Util::GetStringEnum(source_id) << ", " << source_level << ", "
-          << GLES2Util::GetStringEnum(dest_target) << ", "
-          << GLES2Util::GetStringEnum(dest_id) << ", " << dest_level << ", "
-          << internalformat << ", " << GLES2Util::GetStringPixelType(dest_type)
-          << ", " << GLES2Util::GetStringBool(unpack_flip_y) << ", "
+      "[" << GetLogPrefix() << "] glCopyTextureCHROMIUM(" << source_id << ", "
+          << source_level << ", " << GLES2Util::GetStringEnum(dest_target)
+          << ", " << dest_id << ", " << dest_level << ", " << internalformat
+          << ", " << GLES2Util::GetStringPixelType(dest_type) << ", "
+          << GLES2Util::GetStringBool(unpack_flip_y) << ", "
           << GLES2Util::GetStringBool(unpack_premultiply_alpha) << ", "
           << GLES2Util::GetStringBool(unpack_unmultiply_alpha) << ")");
   helper_->CopyTextureCHROMIUM(source_id, source_level, dest_target, dest_id,
@@ -3139,10 +3138,10 @@ void GLES2Implementation::CopyTextureCHROMIUM(
 }
 
 void GLES2Implementation::CopySubTextureCHROMIUM(
-    GLenum source_id,
+    GLuint source_id,
     GLint source_level,
     GLenum dest_target,
-    GLenum dest_id,
+    GLuint dest_id,
     GLint dest_level,
     GLint xoffset,
     GLint yoffset,
@@ -3155,12 +3154,11 @@ void GLES2Implementation::CopySubTextureCHROMIUM(
     GLboolean unpack_unmultiply_alpha) {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   GPU_CLIENT_LOG(
-      "[" << GetLogPrefix() << "] glCopySubTextureCHROMIUM("
-          << GLES2Util::GetStringEnum(source_id) << ", " << source_level << ", "
-          << GLES2Util::GetStringEnum(dest_target) << ", "
-          << GLES2Util::GetStringEnum(dest_id) << ", " << dest_level << ", "
-          << xoffset << ", " << yoffset << ", " << x << ", " << y << ", "
-          << width << ", " << height << ", "
+      "[" << GetLogPrefix() << "] glCopySubTextureCHROMIUM(" << source_id
+          << ", " << source_level << ", "
+          << GLES2Util::GetStringEnum(dest_target) << ", " << dest_id << ", "
+          << dest_level << ", " << xoffset << ", " << yoffset << ", " << x
+          << ", " << y << ", " << width << ", " << height << ", "
           << GLES2Util::GetStringBool(unpack_flip_y) << ", "
           << GLES2Util::GetStringBool(unpack_premultiply_alpha) << ", "
           << GLES2Util::GetStringBool(unpack_unmultiply_alpha) << ")");
@@ -3179,12 +3177,11 @@ void GLES2Implementation::CopySubTextureCHROMIUM(
   CheckGLError();
 }
 
-void GLES2Implementation::CompressedCopyTextureCHROMIUM(GLenum source_id,
-                                                        GLenum dest_id) {
+void GLES2Implementation::CompressedCopyTextureCHROMIUM(GLuint source_id,
+                                                        GLuint dest_id) {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glCompressedCopyTextureCHROMIUM("
-                     << GLES2Util::GetStringEnum(source_id) << ", "
-                     << GLES2Util::GetStringEnum(dest_id) << ")");
+                     << source_id << ", " << dest_id << ")");
   helper_->CompressedCopyTextureCHROMIUM(source_id, dest_id);
   CheckGLError();
 }
@@ -3195,6 +3192,21 @@ void GLES2Implementation::BindTexImage2DCHROMIUM(GLenum target, GLint imageId) {
                      << GLES2Util::GetStringTextureBindTarget(target) << ", "
                      << imageId << ")");
   helper_->BindTexImage2DCHROMIUM(target, imageId);
+  CheckGLError();
+}
+
+void GLES2Implementation::BindTexImage2DWithInternalformatCHROMIUM(
+    GLenum target,
+    GLenum internalformat,
+    GLint imageId) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix()
+                     << "] glBindTexImage2DWithInternalformatCHROMIUM("
+                     << GLES2Util::GetStringTextureBindTarget(target) << ", "
+                     << GLES2Util::GetStringEnum(internalformat) << ", "
+                     << imageId << ")");
+  helper_->BindTexImage2DWithInternalformatCHROMIUM(target, internalformat,
+                                                    imageId);
   CheckGLError();
 }
 
@@ -3510,6 +3522,25 @@ void GLES2Implementation::OverlayPromotionHintCHROMIUM(GLuint texture,
                      << display_x << ", " << display_y << ")");
   helper_->OverlayPromotionHintCHROMIUM(texture, promotion_hint, display_x,
                                         display_y);
+  CheckGLError();
+}
+
+void GLES2Implementation::SetDrawRectangleCHROMIUM(GLint x,
+                                                   GLint y,
+                                                   GLint width,
+                                                   GLint height) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glSetDrawRectangleCHROMIUM(" << x
+                     << ", " << y << ", " << width << ", " << height << ")");
+  helper_->SetDrawRectangleCHROMIUM(x, y, width, height);
+  CheckGLError();
+}
+
+void GLES2Implementation::SetEnableDCLayersCHROMIUM(GLboolean enabled) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glSetEnableDCLayersCHROMIUM("
+                     << GLES2Util::GetStringBool(enabled) << ")");
+  helper_->SetEnableDCLayersCHROMIUM(enabled);
   CheckGLError();
 }
 

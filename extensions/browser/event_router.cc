@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include <tuple>
 #include <utility>
 
 #include "base/atomic_sequence_num.h"
@@ -76,20 +75,6 @@ base::StaticAtomicSequenceNumber g_extension_event_id;
 }  // namespace
 
 const char EventRouter::kRegisteredEvents[] = "events";
-
-struct EventRouter::ListenerProcess {
-  content::RenderProcessHost* process;
-  std::string extension_id;
-
-  ListenerProcess(content::RenderProcessHost* process,
-                  const std::string& extension_id)
-      : process(process), extension_id(extension_id) {}
-
-  bool operator<(const ListenerProcess& that) const {
-    return std::tie(process, extension_id) <
-           std::tie(that.process, that.extension_id);
-  }
-};
 
 // static
 void EventRouter::DispatchExtensionMessage(IPC::Sender* ipc_sender,
@@ -338,25 +323,6 @@ bool EventRouter::ExtensionHasEventListener(const std::string& extension_id,
   return listeners_.HasListenerForExtension(extension_id, event_name);
 }
 
-bool EventRouter::HasEventListenerImpl(const ListenerMap& listener_map,
-                                       const std::string& extension_id,
-                                       const std::string& event_name) {
-  ListenerMap::const_iterator it = listener_map.find(event_name);
-  if (it == listener_map.end())
-    return false;
-
-  const std::set<ListenerProcess>& listeners = it->second;
-  if (extension_id.empty())
-    return !listeners.empty();
-
-  for (std::set<ListenerProcess>::const_iterator listener = listeners.begin();
-       listener != listeners.end(); ++listener) {
-    if (listener->extension_id == extension_id)
-      return true;
-  }
-  return false;
-}
-
 std::set<std::string> EventRouter::GetRegisteredEvents(
     const std::string& extension_id) {
   std::set<std::string> events;
@@ -378,13 +344,13 @@ std::set<std::string> EventRouter::GetRegisteredEvents(
 
 void EventRouter::SetRegisteredEvents(const std::string& extension_id,
                                       const std::set<std::string>& events) {
-  ListValue* events_value = new ListValue;
+  auto events_value = base::MakeUnique<base::ListValue>();
   for (std::set<std::string>::const_iterator iter = events.begin();
        iter != events.end(); ++iter) {
     events_value->AppendString(*iter);
   }
-  extension_prefs_->UpdateExtensionPref(
-      extension_id, kRegisteredEvents, events_value);
+  extension_prefs_->UpdateExtensionPref(extension_id, kRegisteredEvents,
+                                        std::move(events_value));
 }
 
 void EventRouter::AddFilterToEvent(const std::string& event_name,
@@ -823,7 +789,7 @@ void EventRouter::OnExtensionLoaded(content::BrowserContext* browser_context,
 
 void EventRouter::OnExtensionUnloaded(content::BrowserContext* browser_context,
                                       const Extension* extension,
-                                      UnloadedExtensionInfo::Reason reason) {
+                                      UnloadedExtensionReason reason) {
   // Remove all registered listeners from our cache.
   listeners_.RemoveListenersForExtension(extension->id());
 }

@@ -138,7 +138,7 @@ void TtsExtensionEventHandler::OnTtsEvent(Utterance* utterance,
   details->SetBoolean(constants::kIsFinalEventKey, utterance->finished());
 
   std::unique_ptr<base::ListValue> arguments(new base::ListValue());
-  arguments->Set(0, details.release());
+  arguments->Append(std::move(details));
 
   std::unique_ptr<extensions::Event> event(
       new extensions::Event(::extensions::events::TTS_ON_EVENT,
@@ -311,7 +311,7 @@ ExtensionFunction::ResponseAction TtsResumeFunction::Run() {
 }
 
 ExtensionFunction::ResponseAction TtsIsSpeakingFunction::Run() {
-  return RespondNow(OneArgument(base::MakeUnique<base::FundamentalValue>(
+  return RespondNow(OneArgument(base::MakeUnique<base::Value>(
       TtsController::GetInstance()->IsSpeaking())));
 }
 
@@ -367,7 +367,8 @@ TtsAPI::TtsAPI(content::BrowserContext* context) {
 TtsAPI::~TtsAPI() {
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<TtsAPI> > g_factory =
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<TtsAPI>>::DestructorAtExit g_factory =
     LAZY_INSTANCE_INITIALIZER;
 
 BrowserContextKeyedAPIFactory<TtsAPI>* TtsAPI::GetFactoryInstance() {

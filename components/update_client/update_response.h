@@ -15,6 +15,11 @@
 
 namespace update_client {
 
+// The protocol versions so far are:
+// * Version 3.1: it changes how the run actions are serialized.
+// * Version 3.0: it is the version implemented by the desktop updaters.
+constexpr char kProtocolVersion[] = "3.1";
+
 // Parses responses for the update protocol version 3.
 // (https://github.com/google/omaha/blob/wiki/ServerProtocolV3.md)
 //
@@ -72,12 +77,12 @@ class UpdateResponse {
         // Attributes for the full update.
         std::string name;
         std::string hash_sha256;
-        int size;
+        int size = 0;
 
         // Attributes for the differential update.
         std::string namediff;
         std::string hashdiff_sha256;
-        int sizediff;
+        int sizediff = 0;
       };
 
       Manifest();
@@ -95,6 +100,9 @@ class UpdateResponse {
 
     std::string extension_id;
 
+    // The updatecheck response status.
+    std::string status;
+
     // The list of fallback urls, for full and diff updates respectively.
     // These urls are base urls; they don't include the filename.
     std::vector<GURL> crx_urls;
@@ -110,6 +118,10 @@ class UpdateResponse {
     static const char kCohort[];
     static const char kCohortHint[];
     static const char kCohortName[];
+
+    // Contains the run action returned by the server as part of an update
+    // check response.
+    std::string action_run;
   };
 
   static const int kNoDaystart = -1;
@@ -119,9 +131,10 @@ class UpdateResponse {
     ~Results();
 
     // This will be >= 0, or kNoDaystart if the <daystart> tag was not present.
-    int daystart_elapsed_seconds;
+    int daystart_elapsed_seconds = kNoDaystart;
+
     // This will be >= 0, or kNoDaystart if the <daystart> tag was not present.
-    int daystart_elapsed_days;
+    int daystart_elapsed_days = kNoDaystart;
     std::vector<Result> list;
   };
 
@@ -130,8 +143,9 @@ class UpdateResponse {
 
   // Parses an update response xml string into Result data. Returns a bool
   // indicating success or failure. On success, the results are available by
-  // calling results(). The details for any failures are available by calling
-  // errors().
+  // calling results(). In case of success, only results corresponding to
+  // the update check status |ok| or |noupdate| are included.
+  // The details for any failures are available by calling errors().
   bool Parse(const std::string& manifest_xml);
 
   const Results& results() const { return results_; }

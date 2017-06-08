@@ -120,7 +120,7 @@ def method_context(interface, method, is_visible=True):
     is_call_with_script_state = has_extended_attribute_value(method, 'CallWith', 'ScriptState')
     is_call_with_this_value = has_extended_attribute_value(method, 'CallWith', 'ThisValue')
     if is_call_with_script_state or is_call_with_this_value:
-        includes.add('bindings/core/v8/ScriptState.h')
+        includes.add('platform/bindings/ScriptState.h')
 
     # [CheckSecurity]
     is_cross_origin = 'CrossOrigin' in extended_attributes
@@ -144,8 +144,8 @@ def method_context(interface, method, is_visible=True):
     is_custom_call_epilogue = has_extended_attribute_value(method, 'Custom', 'CallEpilogue')
     is_post_message = 'PostMessage' in extended_attributes
     if is_post_message:
-        includes.add('bindings/core/v8/SerializedScriptValueFactory.h')
-        includes.add('bindings/core/v8/Transferables.h')
+        includes.add('bindings/core/v8/serialization/SerializedScriptValueFactory.h')
+        includes.add('bindings/core/v8/serialization/Transferables.h')
         includes.add('core/dom/DOMArrayBufferBase.h')
         includes.add('core/frame/ImageBitmap.h')
 
@@ -322,9 +322,9 @@ def cpp_value(interface, method, number_of_arguments):
         cpp_arguments.append('result')
 
     if method.name == 'Constructor':
-        base_name = 'create'
+        base_name = 'Create'
     elif method.name == 'NamedConstructor':
-        base_name = 'createForJSConstructor'
+        base_name = 'CreateForJSConstructor'
     else:
         base_name = v8_utilities.cpp_name(method)
 
@@ -343,7 +343,7 @@ def v8_set_return_value(interface_name, method, cpp_value, for_main_world=False)
     if use_local_result(method):
         if idl_type.is_explicit_nullable:
             # result is of type Nullable<T>
-            cpp_value = 'result.get()'
+            cpp_value = 'result.Get()'
         else:
             cpp_value = 'result'
 
@@ -362,24 +362,23 @@ def v8_value_to_local_cpp_variadic_value(method, argument, index, return_promise
         vector_type = 'Vector'
 
     return {
-        'assign_expression': 'toImplArguments<%s<%s>>(info, %s, exceptionState)' % (vector_type, this_cpp_type, index),
-        'check_expression': 'exceptionState.hadException()',
+        'assign_expression': 'ToImplArguments<%s<%s>>(info, %s, exceptionState)' % (vector_type, this_cpp_type, index),
+        'check_expression': 'exceptionState.HadException()',
         'cpp_type': this_cpp_type,
         'cpp_name': argument.name,
         'declare_variable': False,
     }
 
 
-def v8_value_to_local_cpp_value(method, argument, index, return_promise=False, restricted_float=False):
+def v8_value_to_local_cpp_value(method, argument, index, return_promise=False):
     extended_attributes = argument.extended_attributes
     idl_type = argument.idl_type
     name = argument.name
     if argument.is_variadic:
         return v8_value_to_local_cpp_variadic_value(method, argument, index, return_promise)
     return idl_type.v8_value_to_local_cpp_value(extended_attributes, 'info[%s]' % index,
-                                                name, index=index, declare_variable=False,
-                                                use_exception_state=method.returns_promise,
-                                                restricted_float=restricted_float)
+                                                name, declare_variable=False,
+                                                use_exception_state=method.returns_promise)
 
 
 ################################################################################

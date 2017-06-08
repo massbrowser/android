@@ -58,7 +58,7 @@ class PythonChecker(object):
             pep8_code = text[:4]
             pep8_message = text[5:]
 
-            category = "pep8/" + pep8_code
+            category = 'pep8/' + pep8_code
 
             self._handle_style_error(line_number, category, 5, pep8_message)
 
@@ -76,10 +76,10 @@ class PythonChecker(object):
         executive = Executive()
         env = os.environ.copy()
         env['PYTHONPATH'] = os.pathsep.join([
-            wkf.path_from_webkit_base('Tools', 'Scripts'),
-            wkf.path_from_webkit_base('Source', 'build', 'scripts'),
-            wkf.path_from_webkit_base('Tools', 'Scripts', 'webkitpy', 'thirdparty'),
-            wkf.path_from_webkit_base('Source', 'bindings', 'scripts'),
+            wkf.path_from_tools_scripts(),
+            wkf.path_from_blink_source('build', 'scripts'),
+            wkf.path_from_tools_scripts('webkitpy', 'thirdparty'),
+            wkf.path_from_blink_source('bindings', 'scripts'),
             wkf.path_from_chromium_base('build', 'android'),
             wkf.path_from_chromium_base('third_party', 'catapult', 'devil'),
             wkf.path_from_chromium_base('third_party', 'pymock'),
@@ -88,7 +88,7 @@ class PythonChecker(object):
             sys.executable,
             wkf.path_from_depot_tools_base('pylint.py'),
             '--output-format=parseable',
-            '--rcfile=' + wkf.path_from_webkit_base('Tools', 'Scripts', 'webkitpy', 'pylintrc'),
+            '--rcfile=' + wkf.path_from_tools_scripts('webkitpy', 'pylintrc'),
             path,
         ], env=env, error_handler=executive.ignore_error)
 

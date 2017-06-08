@@ -38,10 +38,11 @@ InspectorFrontendHostAPI.Events = {
   DispatchMessageChunk: Symbol('dispatchMessageChunk'),
   EnterInspectElementMode: Symbol('enterInspectElementMode'),
   EvaluateForTestInFrontend: Symbol('evaluateForTestInFrontend'),
+  EyeDropperPickedColor: Symbol('eyeDropperPickedColor'),
   FileSystemsLoaded: Symbol('fileSystemsLoaded'),
   FileSystemRemoved: Symbol('fileSystemRemoved'),
   FileSystemAdded: Symbol('fileSystemAdded'),
-  FileSystemFilesChanged: Symbol('fileSystemFilesChanged'),
+  FileSystemFilesChangedAddedRemoved: Symbol('FileSystemFilesChangedAddedRemoved'),
   IndexingTotalWorkCalculated: Symbol('indexingTotalWorkCalculated'),
   IndexingWorked: Symbol('indexingWorked'),
   IndexingDone: Symbol('indexingDone'),
@@ -74,10 +75,14 @@ InspectorFrontendHostAPI.EventDescriptors = [
   [InspectorFrontendHostAPI.Events.DispatchMessageChunk, 'dispatchMessageChunk', ['messageChunk', 'messageSize']],
   [InspectorFrontendHostAPI.Events.EnterInspectElementMode, 'enterInspectElementMode', []],
   [InspectorFrontendHostAPI.Events.EvaluateForTestInFrontend, 'evaluateForTestInFrontend', ['callId', 'script']],
+  [InspectorFrontendHostAPI.Events.EyeDropperPickedColor, 'eyeDropperPickedColor', ['color']],
   [InspectorFrontendHostAPI.Events.FileSystemsLoaded, 'fileSystemsLoaded', ['fileSystems']],
   [InspectorFrontendHostAPI.Events.FileSystemRemoved, 'fileSystemRemoved', ['fileSystemPath']],
   [InspectorFrontendHostAPI.Events.FileSystemAdded, 'fileSystemAdded', ['errorMessage', 'fileSystem']],
-  [InspectorFrontendHostAPI.Events.FileSystemFilesChanged, 'fileSystemFilesChanged', ['paths']],
+  [
+    InspectorFrontendHostAPI.Events.FileSystemFilesChangedAddedRemoved, 'fileSystemFilesChangedAddedRemoved',
+    ['changed', 'added', 'removed']
+  ],
   [
     InspectorFrontendHostAPI.Events.IndexingTotalWorkCalculated, 'indexingTotalWorkCalculated',
     ['requestId', 'fileSystemPath', 'totalWork']
@@ -139,6 +144,11 @@ InspectorFrontendHostAPI.prototype = {
    * @param {string} shortcuts
    */
   setWhitelistedShortcuts(shortcuts) {},
+
+  /**
+   * @param {boolean} active
+   */
+  setEyeDropperActive(active) {},
 
   inspectElementCompleted() {},
 

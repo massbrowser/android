@@ -56,6 +56,7 @@ void VideoFrameProviderClientImpl::SetActiveVideoLayer(
 
 void VideoFrameProviderClientImpl::Stop() {
   DCHECK(thread_checker_.CalledOnValidThread());
+  active_video_layer_ = nullptr;
   // It's called when the main thread is blocked, so lock isn't needed.
   if (provider_) {
     provider_->SetVideoFrameProviderClient(nullptr);
@@ -63,7 +64,6 @@ void VideoFrameProviderClientImpl::Stop() {
   }
   if (rendering_)
     StopRendering();
-  active_video_layer_ = nullptr;
   stopped_ = true;
 }
 

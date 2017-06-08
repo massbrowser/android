@@ -10,8 +10,8 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "content/browser/renderer_host/media/audio_output_delegate.h"
 #include "content/common/content_export.h"
+#include "media/audio/audio_output_delegate.h"
 
 namespace content {
 class AudioMirroringManager;
@@ -30,9 +30,10 @@ namespace content {
 
 // This class, except for the AudioOutputDelegateImpl::EventHandler
 // implementation, is operated on the IO thread.
-class CONTENT_EXPORT AudioOutputDelegateImpl : public AudioOutputDelegate {
+class CONTENT_EXPORT AudioOutputDelegateImpl
+    : public media::AudioOutputDelegate {
  public:
-  AudioOutputDelegateImpl(AudioOutputDelegate::EventHandler* handler,
+  AudioOutputDelegateImpl(EventHandler* handler,
                           media::AudioManager* audio_manager,
                           std::unique_ptr<media::AudioLog> audio_log,
                           AudioMirroringManager* mirroring_manager,
@@ -46,7 +47,6 @@ class CONTENT_EXPORT AudioOutputDelegateImpl : public AudioOutputDelegate {
   ~AudioOutputDelegateImpl() override;
 
   // AudioOutputDelegate implementation.
-  scoped_refptr<media::AudioOutputController> GetController() const override;
   int GetStreamId() const override;
   void OnPlayStream() override;
   void OnPauseStream() override;
@@ -54,10 +54,12 @@ class CONTENT_EXPORT AudioOutputDelegateImpl : public AudioOutputDelegate {
 
  private:
   class ControllerEventHandler;
+  friend class AudioOutputDelegateTest;
 
   void SendCreatedNotification();
   void OnError();
   void UpdatePlayingState(bool playing);
+  media::AudioOutputController* GetControllerForTesting() const;
 
   // This is the event handler which |this| send notifications to.
   EventHandler* subscriber_;

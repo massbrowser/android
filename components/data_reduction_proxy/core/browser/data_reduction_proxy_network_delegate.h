@@ -115,6 +115,15 @@ class DataReductionProxyNetworkDelegate : public net::LayeredNetworkDelegate {
   void OnCompletedInternal(net::URLRequest* request,
                            bool started) override;
 
+  // Checks if a LoFi or Lite Pages response was received and sets the state on
+  // DataReductionProxyData for |request|.
+  void OnHeadersReceivedInternal(
+      net::URLRequest* request,
+      const net::CompletionCallback& callback,
+      const net::HttpResponseHeaders* original_response_headers,
+      scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
+      GURL* allowed_unsafe_redirect_url) override;
+
   // Calculates actual data usage that went over the network at the HTTP layer
   // (e.g. not including network layer overhead) and estimates original data
   // usage for |request|.
@@ -156,6 +165,17 @@ class DataReductionProxyNetworkDelegate : public net::LayeredNetworkDelegate {
       const net::ProxyInfo& proxy_info,
       net::HttpRequestHeaders* request_headers,
       const net::URLRequest& request) const;
+
+  // May add chrome-proxy-ect header to |request_headers| if adding of
+  // chrome-proxy-ect is enabled via field trial and a valid estimate of
+  // network quality is available. This method should be called only when the
+  // resolved proxy for |request| is a data saver proxy.
+  void MaybeAddChromeProxyECTHeader(net::HttpRequestHeaders* request_headers,
+                                    const net::URLRequest& request) const;
+
+  // Removes the chrome-proxy-ect header from |request_headers|.
+  void RemoveChromeProxyECTHeader(
+      net::HttpRequestHeaders* request_headers) const;
 
   // All raw Data Reduction Proxy pointers must outlive |this|.
   DataReductionProxyConfig* data_reduction_proxy_config_;

@@ -315,7 +315,7 @@ void NetworkScreen::NotifyOnConnection() {
   // TODO(nkostylev): Check network connectivity.
   UnsubscribeNetworkNotification();
   connection_timer_.Stop();
-  Finish(BaseScreenDelegate::NETWORK_CONNECTED);
+  Finish(ScreenExitCode::NETWORK_CONNECTED);
 }
 
 void NetworkScreen::OnConnectionTimeout() {
@@ -360,7 +360,9 @@ void NetworkScreen::StopWaitingForConnection(const base::string16& network_id) {
     view_->ShowConnectingStatus(false, network_id_);
 
   GetContextEditor().SetBoolean(kContextKeyContinueButtonEnabled, is_connected);
-  if (is_connected &&
+
+  // Automatically continue if we are using Hands-Off Enrollment.
+  if (is_connected && continue_attempts_ == 0 &&
       policy::DeviceCloudPolicyManagerChromeOS::GetZeroTouchEnrollmentMode() ==
           policy::ZeroTouchEnrollmentMode::HANDS_OFF) {
     OnContinueButtonPressed();
@@ -384,6 +386,7 @@ void NetworkScreen::WaitForConnection(const base::string16& network_id) {
 }
 
 void NetworkScreen::OnContinueButtonPressed() {
+  ++continue_attempts_;
   if (view_) {
     view_->StopDemoModeDetection();
     view_->ClearErrors();

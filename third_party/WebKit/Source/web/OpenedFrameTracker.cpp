@@ -11,31 +11,28 @@ namespace blink {
 
 OpenedFrameTracker::OpenedFrameTracker() {}
 
-OpenedFrameTracker::~OpenedFrameTracker() {}
-
-bool OpenedFrameTracker::isEmpty() const {
-  return m_openedFrames.isEmpty();
+OpenedFrameTracker::~OpenedFrameTracker() {
+  DCHECK(IsEmpty());
 }
 
-void OpenedFrameTracker::add(WebFrame* frame) {
-  m_openedFrames.insert(frame);
+bool OpenedFrameTracker::IsEmpty() const {
+  return opened_frames_.IsEmpty();
 }
 
-void OpenedFrameTracker::remove(WebFrame* frame) {
-  m_openedFrames.remove(frame);
+void OpenedFrameTracker::Add(WebFrame* frame) {
+  opened_frames_.insert(frame);
 }
 
-void OpenedFrameTracker::transferTo(WebFrame* opener) {
+void OpenedFrameTracker::Remove(WebFrame* frame) {
+  opened_frames_.erase(frame);
+}
+
+void OpenedFrameTracker::TransferTo(WebFrame* opener) {
   // Copy the set of opened frames, since changing the owner will mutate this
   // set.
-  HashSet<WebFrame*> frames(m_openedFrames);
+  HashSet<WebFrame*> frames(opened_frames_);
   for (WebFrame* frame : frames)
-    frame->setOpener(opener);
-}
-
-void OpenedFrameTracker::traceFrames(Visitor* visitor) {
-  for (WebFrame* frame : m_openedFrames)
-    WebFrame::traceFrame(visitor, frame);
+    frame->SetOpener(opener);
 }
 
 }  // namespace blink

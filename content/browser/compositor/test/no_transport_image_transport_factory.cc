@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "cc/output/context_provider.h"
 #include "cc/surfaces/surface_manager.h"
@@ -17,11 +18,13 @@
 namespace content {
 
 NoTransportImageTransportFactory::NoTransportImageTransportFactory()
-    : surface_manager_(new cc::SurfaceManager),
-      // The context factory created here is for unit tests, thus passing in
-      // true in constructor.
-      context_factory_(
-          new ui::InProcessContextFactory(true, surface_manager_.get())) {}
+    : frame_sink_manager_host_(base::MakeUnique<FrameSinkManagerHost>()),
+      context_factory_(base::MakeUnique<ui::InProcessContextFactory>(
+          frame_sink_manager_host_->surface_manager())) {
+  // The context factory created here is for unit tests, thus using a higher
+  // refresh rate to spend less time waiting for BeginFrames.
+  context_factory_->SetUseFastRefreshRateForTests();
+}
 
 NoTransportImageTransportFactory::~NoTransportImageTransportFactory() {
   std::unique_ptr<display_compositor::GLHelper> lost_gl_helper =
@@ -36,6 +39,11 @@ ui::ContextFactory* NoTransportImageTransportFactory::GetContextFactory() {
 ui::ContextFactoryPrivate*
 NoTransportImageTransportFactory::GetContextFactoryPrivate() {
   return context_factory_.get();
+}
+
+FrameSinkManagerHost*
+NoTransportImageTransportFactory::GetFrameSinkManagerHost() {
+  return frame_sink_manager_host_.get();
 }
 
 display_compositor::GLHelper* NoTransportImageTransportFactory::GetGLHelper() {

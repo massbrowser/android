@@ -55,8 +55,8 @@ public final class FirstRunSignInProcessor {
      * @param activity The context for the FRE parameters processor.
      */
     public static void start(final Activity activity) {
-        SigninManager signinManager = SigninManager.get(activity.getApplicationContext());
-        signinManager.onFirstRunCheckDone();
+//        SigninManager signinManager = SigninManager.get(activity.getApplicationContext());
+//        signinManager.onFirstRunCheckDone();
 
         boolean firstRunFlowComplete = FirstRunStatus.getFirstRunFlowComplete();
         // We skip signin and the FRE if
@@ -83,34 +83,34 @@ public final class FirstRunSignInProcessor {
         }
 
         // We are only processing signin from the FRE.
-        if (getFirstRunFlowSignInComplete(activity)) {
-            return;
-        }
-        final String accountName = getFirstRunFlowSignInAccountName(activity);
-        if (!FeatureUtilities.canAllowSync(activity) || !signinManager.isSignInAllowed()
-                || TextUtils.isEmpty(accountName)) {
-            setFirstRunFlowSignInComplete(activity, true);
-            return;
-        }
+//        if (getFirstRunFlowSignInComplete(activity)) {
+//            return;
+//        }
+//        final String accountName = getFirstRunFlowSignInAccountName(activity);
+//        if (!FeatureUtilities.canAllowSync(activity) || !signinManager.isSignInAllowed()
+//                || TextUtils.isEmpty(accountName)) {
+//            setFirstRunFlowSignInComplete(activity, true);
+//            return;
+//        }
 
-        final boolean setUp = getFirstRunFlowSignInSetup(activity);
-        signinManager.signIn(accountName, activity, new SignInCallback() {
-            @Override
-            public void onSignInComplete() {
-                // Show sync settings if user pressed the "Settings" button.
-                if (setUp) {
-                    openSignInSettings(activity);
-                }
-                setFirstRunFlowSignInComplete(activity, true);
-            }
-
-            @Override
-            public void onSignInAborted() {
-                // Set FRE as complete even if signin fails because the user has already seen and
-                // accepted the terms of service.
-                setFirstRunFlowSignInComplete(activity, true);
-            }
-        });
+//        final boolean setUp = getFirstRunFlowSignInSetup(activity);
+//        signinManager.signIn(accountName, activity, new SignInCallback() {
+//            @Override
+//            public void onSignInComplete() {
+//                // Show sync settings if user pressed the "Settings" button.
+//                if (setUp) {
+//                    openSignInSettings(activity);
+//                }
+//                setFirstRunFlowSignInComplete(activity, true);
+//            }
+//
+//            @Override
+//            public void onSignInAborted() {
+//                // Set FRE as complete even if signin fails because the user has already seen and
+//                // accepted the terms of service.
+//                setFirstRunFlowSignInComplete(activity, true);
+//            }
+//        });
     }
 
     /**
@@ -218,11 +218,11 @@ public final class FirstRunSignInProcessor {
      * Allows the user to sign-in if there are no pending FRE sign-in requests.
      * @param context A context
      */
-    public static void updateSigninManagerFirstRunCheckDone(Context context) {
-        SigninManager manager = SigninManager.get(context);
-        if (manager.isSignInAllowed()) return;
-        if (!FirstRunStatus.getFirstRunFlowComplete()) return;
-        if (!getFirstRunFlowSignInComplete(context)) return;
-        manager.onFirstRunCheckDone();
-    }
+//    public static void updateSigninManagerFirstRunCheckDone(Context context) {
+//        SigninManager manager = SigninManager.get(context);
+//        if (manager.isSignInAllowed()) return;
+//        if (!FirstRunStatus.getFirstRunFlowComplete()) return;
+//        if (!getFirstRunFlowSignInComplete(context)) return;
+//        manager.onFirstRunCheckDone();
+//    }
 }

@@ -10,6 +10,7 @@
 #include "base/base_switches.h"
 #include "base/build_time.h"
 #include "base/command_line.h"
+#include "base/debug/activity_tracker.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial_param_associator.h"
 #include "base/process/memory.h"
@@ -18,6 +19,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/unguessable_token.h"
 
 // On POSIX, the fd is shared using the mapping in GlobalDescriptors.
 #if defined(OS_POSIX) && !defined(OS_NACL)
@@ -220,10 +222,8 @@ HANDLE CreateReadOnlyHandle(FieldTrialList::FieldTrialAllocator* allocator) {
 
 #if defined(OS_POSIX) && !defined(OS_NACL)
 int CreateReadOnlyHandle(FieldTrialList::FieldTrialAllocator* allocator) {
-  SharedMemoryHandle new_handle;
-  allocator->shared_memory()->ShareReadOnlyToProcess(GetCurrentProcessHandle(),
-                                                     &new_handle);
-  return SharedMemory::GetFdFromSharedMemoryHandle(new_handle);
+  SharedMemoryHandle handle = allocator->shared_memory()->GetReadOnlyHandle();
+  return SharedMemory::GetFdFromSharedMemoryHandle(handle);
 }
 #endif
 
@@ -413,7 +413,8 @@ FieldTrial::FieldTrial(const std::string& trial_name,
       ref_(FieldTrialList::FieldTrialAllocator::kReferenceNull) {
   DCHECK_GT(total_probability, 0);
   DCHECK(!trial_name_.empty());
-  DCHECK(!default_group_name_.empty());
+  DCHECK(!default_group_name_.empty())
+      << "Trial " << trial_name << " is missing a default group name.";
 }
 
 FieldTrial::~FieldTrial() {}
@@ -982,6 +983,15 @@ void FieldTrialList::NotifyFieldTrialGroupSelection(FieldTrial* field_trial) {
       ActivateFieldTrialEntryWhileLocked(field_trial);
   }
 
+  // Recording for stability debugging has to be done inline as a task posted
+  // to an observer may not get executed before a crash.
+  base::debug::GlobalActivityTracker* tracker =
+      base::debug::GlobalActivityTracker::Get();
+  if (tracker) {
+    tracker->RecordFieldTrial(field_trial->trial_name(),
+                              field_trial->group_name_internal());
+  }
+
   global_->observer_list_->Notify(
       FROM_HERE, &FieldTrialList::Observer::OnFieldTrialGroupFinalized,
       field_trial->trial_name(), field_trial->group_name_internal());
@@ -1068,7 +1078,7 @@ void FieldTrialList::ClearParamsFromSharedMemoryForTesting() {
     pickle.WriteString(group_name);
     size_t total_size = sizeof(FieldTrial::FieldTrialEntry) + pickle.size();
     FieldTrial::FieldTrialEntry* new_entry =
-        allocator->AllocateObject<FieldTrial::FieldTrialEntry>(total_size);
+        allocator->New<FieldTrial::FieldTrialEntry>(total_size);
     subtle::NoBarrier_Store(&new_entry->activated,
                             subtle::NoBarrier_Load(&prev_entry->activated));
     new_entry->pickle_size = pickle.size();
@@ -1088,7 +1098,8 @@ void FieldTrialList::ClearParamsFromSharedMemoryForTesting() {
 
     // Mark the existing entry as unused.
     allocator->ChangeType(prev_ref, 0,
-                          FieldTrial::FieldTrialEntry::kPersistentTypeId);
+                          FieldTrial::FieldTrialEntry::kPersistentTypeId,
+                          /*clear=*/false);
   }
 
   for (const auto& ref : new_refs) {
@@ -1127,7 +1138,9 @@ bool FieldTrialList::CreateTrialsFromHandleSwitch(
     const std::string& handle_switch) {
   int field_trial_handle = std::stoi(handle_switch);
   HANDLE handle = reinterpret_cast<HANDLE>(field_trial_handle);
-  SharedMemoryHandle shm_handle(handle, GetCurrentProcId());
+  // TODO(erikchen): Plumb a GUID for this SharedMemoryHandle.
+  // https://crbug.com/713763.
+  SharedMemoryHandle shm_handle(handle, base::UnguessableToken::Create());
   return FieldTrialList::CreateTrialsFromSharedMemoryHandle(shm_handle);
 }
 #endif
@@ -1145,11 +1158,10 @@ bool FieldTrialList::CreateTrialsFromDescriptor(int fd_key) {
   if (fd == -1)
     return false;
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  SharedMemoryHandle shm_handle(FileDescriptor(fd, true));
-#else
-  SharedMemoryHandle shm_handle(fd, true);
-#endif
+  // TODO(erikchen): Plumb a GUID for this SharedMemoryHandle.
+  // https://crbug.com/713763.
+  SharedMemoryHandle shm_handle(FileDescriptor(fd, true),
+                                base::UnguessableToken::Create());
 
   bool result = FieldTrialList::CreateTrialsFromSharedMemoryHandle(shm_handle);
   DCHECK(result);

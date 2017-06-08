@@ -56,7 +56,6 @@
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
-#include "content/public/browser/android/app_web_message_port_service.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/browser_thread.h"
@@ -211,7 +210,7 @@ AwContents::AwContents(std::unique_ptr<WebContents> web_contents)
   icon_helper_.reset(new IconHelper(web_contents_.get()));
   icon_helper_->SetListener(this);
   web_contents_->SetUserData(android_webview::kAwContentsUserDataKey,
-                             new AwContentsUserData(this));
+                             base::MakeUnique<AwContentsUserData>(this));
   browser_view_renderer_.RegisterWithWebContents(web_contents_.get());
 
   CompositorID compositor_id;
@@ -720,6 +719,12 @@ void AwContents::ClearCache(JNIEnv* env,
     RemoveHttpDiskCache(web_contents_->GetRenderProcessHost());
 }
 
+void AwContents::KillRenderProcess(JNIEnv* env,
+                                   const JavaParamRef<jobject>& obj) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  render_view_host_ext_->KillRenderProcess();
+}
+
 FindHelper* AwContents::GetFindHelper() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!find_helper_.get()) {
@@ -1205,9 +1210,11 @@ void AwContents::UpdateRendererPriority(
     if (view && rph == view->GetProcess()) {
       content::WebContents* wc = content::WebContents::FromRenderViewHost(view);
       if (wc && wc != web_contents_.get()) {
-        computed_priority =
-            std::max(FromWebContents(wc)->GetComputedRendererPriority(),
-                     computed_priority);
+        AwContents* aw_contents = FromWebContents(wc);
+        if (aw_contents) {
+          computed_priority = std::max(
+              aw_contents->GetComputedRendererPriority(), computed_priority);
+        }
       }
     }
   }
@@ -1232,8 +1239,9 @@ AwRendererPriorityManager* AwContents::GetAwRendererPriorityManager() {
   AwRendererPriorityManager* manager = static_cast<AwRendererPriorityManager*>(
       rph->GetUserData(kComputedRendererPriorityUserDataKey));
   if (manager == nullptr) {
+    manager = new AwRendererPriorityManager(rph);
     rph->SetUserData(kComputedRendererPriorityUserDataKey,
-                     manager = new AwRendererPriorityManager(rph));
+                     base::WrapUnique(manager));
   }
   return manager;
 }
@@ -1334,28 +1342,14 @@ void AwContents::PostMessageToFrame(JNIEnv* env,
                                     const JavaParamRef<jstring>& frame_name,
                                     const JavaParamRef<jstring>& message,
                                     const JavaParamRef<jstring>& target_origin,
-                                    const JavaParamRef<jintArray>& sent_ports) {
+                                    const JavaParamRef<jobjectArray>& ports) {
   // Use an empty source origin for android webview.
-  base::string16 source_origin;
-  base::string16 j_target_origin(ConvertJavaStringToUTF16(env, target_origin));
-  base::string16 j_message(ConvertJavaStringToUTF16(env, message));
-  std::vector<int> j_ports;
-
-  if (sent_ports != nullptr)
-    base::android::JavaIntArrayToIntVector(env, sent_ports, &j_ports);
-
   content::MessagePortProvider::PostMessageToFrame(web_contents_.get(),
-                                                   source_origin,
-                                                   j_target_origin,
-                                                   j_message,
-                                                   j_ports);
-}
-
-void AwContents::CreateMessageChannel(JNIEnv* env,
-                                      const JavaParamRef<jobject>& obj,
-                                      const JavaParamRef<jobjectArray>& ports) {
-  content::MessagePortProvider::GetAppWebMessagePortService()
-      ->CreateMessageChannel(env, ports, web_contents_.get());
+                                                   env,
+                                                   nullptr,
+                                                   target_origin,
+                                                   message,
+                                                   ports);
 }
 
 void AwContents::GrantFileSchemeAccesstoChildProcess(
@@ -1414,12 +1408,26 @@ void AwContents::DidDetachInterstitialPage() {
   browser_view_renderer_.SetActiveCompositorID(compositor_id);
 }
 
-bool AwContents::CanShowInterstitial() {
+bool AwContents::CanShowBigInterstitial() {
   JNIEnv* env = AttachCurrentThread();
   const ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return false;
-  return Java_AwContents_canShowInterstitial(env, obj);
+  return Java_AwContents_canShowBigInterstitial(env, obj);
+}
+
+void AwContents::CallProceedOnInterstitialForTesting(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
+  DCHECK(web_contents_->GetInterstitialPage());
+  web_contents_->GetInterstitialPage()->Proceed();
+}
+
+void AwContents::CallDontProceedOnInterstitialForTesting(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
+  DCHECK(web_contents_->GetInterstitialPage());
+  web_contents_->GetInterstitialPage()->DontProceed();
 }
 
 void AwContents::OnRenderProcessGone(int child_process_id) {

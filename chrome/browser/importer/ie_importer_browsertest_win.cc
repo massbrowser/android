@@ -27,6 +27,7 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_propvariant.h"
@@ -174,7 +175,7 @@ bool CreateUrlFileWithFavicon(const base::FilePath& file,
   if (FAILED(result))
     return false;
   base::win::ScopedComPtr<IPersistFile> persist_file;
-  result = persist_file.QueryFrom(locator.get());
+  result = persist_file.QueryFrom(locator.Get());
   if (FAILED(result))
     return false;
   result = locator->SetURL(url.c_str(), 0);
@@ -184,7 +185,7 @@ bool CreateUrlFileWithFavicon(const base::FilePath& file,
   // Write favicon url if specified.
   if (!favicon_url.empty()) {
     base::win::ScopedComPtr<IPropertySetStorage> property_set_storage;
-    if (FAILED(property_set_storage.QueryFrom(locator.get())))
+    if (FAILED(property_set_storage.QueryFrom(locator.Get())))
       return false;
     base::win::ScopedComPtr<IPropertyStorage> property_storage;
     if (FAILED(property_set_storage->Open(FMTID_Intshcut,
@@ -435,6 +436,7 @@ class IEImporterBrowserTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporter) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   // Sets up a favorites folder.
   base::FilePath path = temp_dir_.GetPath().AppendASCII("Favorites");
   CreateDirectory(path.value().c_str(), NULL);
@@ -519,7 +521,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporter) {
   // Cleans up.
   url_history_stg2->DeleteUrl(kIEIdentifyUrl, 0);
   url_history_stg2->DeleteUrl(kIECacheItemUrl, 0);
-  url_history_stg2.Release();
+  url_history_stg2.Reset();
 }
 
 IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest,

@@ -17,10 +17,16 @@
     runtime_flag: {
     },
 
-    // - descriptor_only
-    // These are actually descriptors and not CSS properties. Properties with
-    // the same name as a descriptor do not get this flag.
-    descriptor_only: {
+    // - is_descriptor
+    // Whether it is the name of a CSS descriptor.
+    // TODO(alancutter): Don't use CSSPropertyID for descriptors.
+    is_descriptor: {
+    },
+
+    // - is_property
+    // Whether it is the name of a CSS property.
+    is_property: {
+      default: true,
     },
 
     // - longhands: "property;other-property"
@@ -30,7 +36,7 @@
     },
 
     // - api_class: true|"classname"
-    // Specifies the existance (and optionally name) of a CSSPropertyAPI
+    // Specifies the existence (and optionally name) of a CSSPropertyAPI
     // implementation for the property to be used by make_css_property_apis.py.
     // See core/css/properties/CSSPropertyAPI.h for API details.
     // * Add this flag if the API has been implemented for this property.
@@ -50,31 +56,49 @@
     api_methods: {
       default: [],
       valid_type: "list",
-      valid_values: ["parseSingleValue"],
+       // This list must be an ordered, complete list of methods whose names match those
+       // defined in CSSPropertyDescriptor.h.
+      valid_values: ["parseSingleValue", "parseShorthand"],
     },
 
-    // - keyword_only
-    // These properties only store keyword values. This is used when
-    // generating the ComputedStyle storage for the property. The initial
-    // value for this property on a ComputedStyle is specified with the
-    // initial_keyword flag below.
-    // TODO(sashab): Rename this to field_type=keyword once we support
-    // multiple types of generatable fields in ComputedStyle
+    // - field_group
+    // Name of the group that this field belongs to. Fields in the same group are stored
+    // together as a nested class inside ComputedStyle and dynamically allocated on use.
+    // Leave this out if the field is stored directly on ComputedStyle.
+    field_group: {
+      value_type: "str"
+    },
+
+    // - field_template
+    // Affects how the interface to this field is generated.
     // TODO(sashab, meade): Remove this once TypedOM types are specified for
     // every property, since this value can be inferred from that.
-    keyword_only: {
-      default: false,
-      valid_type: "bool",
+    field_template: {
+      valid_values: [
+        // Field is stored as an enum and has a initial/getter/setter/resetter.
+        "keyword",
+        // Field stores a primitive value like int/bool. The type is specified by
+        // type_name. The interface has a initial/getter/setter/resetter.
+        "primitive",
+        // Field is stored as a bool, whose default value is false
+        // and can only be set to true. Has a initial/getter/setter.
+        "monotonic_flag",
+        // Field has type specified at field_type_path and has a getter/setter.
+        // Also has a setter taking an rvalue reference. Cannot be packed.
+        "external",
+        // Only the storage is generated. The interface is handwritten.
+        "storage_only",
+      ],
     },
 
-    // - field_storage_type: "path/to/Type"
+    // - field_type_path: "path/to/Type"
     // For properties that have generated field storage in ComputedStyle,
     // this optional argument will override the field's generated type with
     // an external one specified at the given path. The type must be defined
     // in a header file at that path, and have the same name as the file.
     // Currently, only enum types are supported, and the enum's only values
     // must be CamelCase values of the keywords of the property.
-    field_storage_type: {
+    field_type_path: {
     },
 
     // - keywords: ["keyword1", "keyword2"]
@@ -85,26 +109,28 @@
       default: [],
     },
 
-    // - initial_keyword: "keyword-value"
-    // This specifies the initial keyword value for the keyword_only
-    // property.
-    initial_keyword: {
+    // - default_value: "keyword-value"
+    // This specifies the default value for this field.
+    // - for keyword fields, this is the initial keyword
+    // - for other fields, this is a string containg the C++ expression
+    //   that is used to initialise the field.
+    default_value: {
     },
 
     // Flags which go into CSSOMTypes:
     // - typedom_types: ["Type", "OtherType"]
     // The property can take types specified in typedom_types for CSS Typed OM.
     // Keyword does not need to be specified as every property can take keywords.
-    // - repeated
-    // The property supports a list of values.
+    // - separator
+    // The property supports a list of values, and when there is more than one,
+    // it is separated with this character.
     // - supports_percentage
     // The property supports percentage types.
     typedom_types: {
       default: [],
     },
-    repeated: {
-      default: false,
-      valid_type: "bool",
+    separator: {
+      valid_values: [",", " ", "/"],
     },
     supports_percentage: {
       default: false,
@@ -184,7 +210,7 @@
     type_name: {
     },
 
-    // - converter: "convertRadius"
+    // - converter: "ConvertRadius"
     // The StyleBuilder will call the specified function on StyleBuilderConverter
     // to convert a CSSValue to an appropriate platform value
     converter: {
@@ -259,7 +285,7 @@
       custom_all: true,
       keywords: ["normal", "reverse", "alternate", "alternate-reverse"],
       priority: "Animation",
-      repeated: true,
+      separator: ",",
     },
     {
       name: "animation-duration",
@@ -276,7 +302,7 @@
       custom_all: true,
       keywords: ["infinite"],
       priority: "Animation",
-      repeated: true,
+      separator: ",",
     },
     {
       name: "animation-name",
@@ -326,16 +352,19 @@
     {
       name: "direction",
       custom_value: true,
-      field_storage_type: "platform/text/TextDirection",
+      field_type_path: "platform/text/TextDirection",
       inherited: true,
-      initial_keyword: "ltr",
-      keyword_only: true,
+      default_value: "ltr",
+      field_template: "keyword",
       keywords: ["ltr", "rtl"],
       priority: "High",
     },
     {
       name: "font-family",
-      converter: "convertFontFamily",
+      api_class: true,
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertFontFamily",
+      is_descriptor: true,
       font: true,
       inherited: true,
       name_for_methods: "FamilyDescription",
@@ -352,9 +381,11 @@
     },
     {
       name: "font-size",
-      converter: "convertFontSize",
+      api_class: true,
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertFontSize",
       font: true,
-      getter: "getSize",
+      getter: "GetSize",
       inherited: true,
       interpolable: true,
       name_for_methods: "Size",
@@ -364,7 +395,7 @@
       name: "font-size-adjust",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertFontSizeAdjust",
+      converter: "ConvertFontSizeAdjust",
       font: true,
       inherited: true,
       interpolable: true,
@@ -374,6 +405,7 @@
     },
     {
       name: "font-stretch",
+      is_descriptor: true,
       font: true,
       inherited: true,
       name_for_methods: "Stretch",
@@ -382,6 +414,7 @@
     },
     {
       name: "font-style",
+      is_descriptor: true,
       font: true,
       inherited: true,
       name_for_methods: "Style",
@@ -392,7 +425,7 @@
       name: "font-variant-ligatures",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertFontVariantLigatures",
+      converter: "ConvertFontVariantLigatures",
       font: true,
       inherited: true,
       name_for_methods: "VariantLigatures",
@@ -403,7 +436,7 @@
       name: "font-variant-caps",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertFontVariantCaps",
+      converter: "ConvertFontVariantCaps",
       font: true,
       inherited: true,
       name_for_methods: "VariantCaps",
@@ -413,7 +446,7 @@
       name: "font-variant-numeric",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertFontVariantNumeric",
+      converter: "ConvertFontVariantNumeric",
       font: true,
       inherited: true,
       name_for_methods: "VariantNumeric",
@@ -421,7 +454,8 @@
     },
     {
       name: "font-weight",
-      converter: "convertFontWeight",
+      converter: "ConvertFontWeight",
+      is_descriptor: true,
       font: true,
       inherited: true,
       interpolable: true,
@@ -431,7 +465,10 @@
     },
     {
       name: "font-feature-settings",
-      converter: "convertFontFeatureSettings",
+      api_class: true,
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertFontFeatureSettings",
+      is_descriptor: true,
       font: true,
       inherited: true,
       name_for_methods: "FeatureSettings",
@@ -441,7 +478,7 @@
       name: "font-variation-settings",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertFontVariationSettings",
+      converter: "ConvertFontVariationSettings",
       font: true,
       inherited: true,
       name_for_methods: "VariationSettings",
@@ -479,10 +516,10 @@
     {
       name: "writing-mode",
       custom_value: true,
-      field_storage_type: "platform/text/WritingMode",
+      field_type_path: "platform/text/WritingMode",
       inherited: true,
-      initial_keyword: "horizontal-tb",
-      keyword_only: true,
+      default_value: "horizontal-tb",
+      field_template: "keyword",
       keywords: ["horizontal-tb", "vertical-rl", "vertical-lr"],
       priority: "High",
       type_name: "WritingMode",
@@ -506,21 +543,27 @@
       api_class: true,
       api_methods: ["parseSingleValue"],
       custom_all: true,
+      is_descriptor: true,
       priority: "High",
+      field_template: "storage_only",
+      type_name: "float",
+      default_value: "1.0",
+      field_group: "visual",
     },
 
     {
       name: "align-content",
-      converter: "convertContentAlignmentData",
-      initial: "initialContentAlignment",
+      api_methods: ["parseSingleValue"],
+      api_class: "CSSPropertyAPIAlignOrJustifyContent",
+      converter: "ConvertContentAlignmentData",
+      initial: "InitialContentAlignment",
     },
     {
       name: "align-items",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertSelfOrDefaultAlignmentData",
-      initial: "initialDefaultAlignment",
-      api_class: true,
+      converter: "ConvertSelfOrDefaultAlignmentData",
+      initial: "InitialDefaultAlignment",
     },
     {
       name: "alignment-baseline",
@@ -530,12 +573,13 @@
       api_class: "CSSPropertyAPIAlignOrJustifySelf",
       api_methods: ["parseSingleValue"],
       name: "align-self",
-      converter: "convertSelfOrDefaultAlignmentData",
-      initial: "initialSelfAlignment",
+      converter: "ConvertSelfOrDefaultAlignmentData",
+      initial: "InitialSelfAlignment",
     },
     {
       name: "backdrop-filter",
-      converter: "convertFilterOperations",
+      api_class: "CSSPropertyAPIFilter",
+      converter: "ConvertFilterOperations",
       interpolable: true,
       runtime_flag: "CSSBackdropFilter",
     },
@@ -561,7 +605,7 @@
       name: "background-image",
       custom_all: true,
       interpolable: true,
-      keywords: ["auto"],
+      keywords: ["auto", "none"],
       typedom_types: ["Image"],
     },
     {
@@ -609,48 +653,62 @@
       name: "border-bottom-left-radius",
       api_class: "CSSPropertyAPIBorderRadius",
       api_methods: ["parseSingleValue"],
-      converter: "convertRadius",
-      initial: "initialBorderRadius",
+      converter: "ConvertRadius",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/LengthSize",
+      field_group: "surround",
+      default_value: "LengthSize(Length(0, kFixed), Length(0, kFixed))",
     },
     {
       name: "border-bottom-right-radius",
       api_class: "CSSPropertyAPIBorderRadius",
       api_methods: ["parseSingleValue"],
-      converter: "convertRadius",
-      initial: "initialBorderRadius",
+      converter: "ConvertRadius",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/LengthSize",
+      field_group: "surround",
+      default_value: "LengthSize(Length(0, kFixed), Length(0, kFixed))",
     },
     {
       name: "border-bottom-style",
-      initial: "initialBorderStyle",
+      initial: "InitialBorderStyle",
       type_name: "EBorderStyle",
+      keywords: ["none"],
+      typedom_types: ["Image"],
     },
     {
       name: "border-bottom-width",
-      converter: "convertLineWidth<unsigned>",
-      initial: "initialBorderWidth",
+      api_class: "CSSPropertyAPIBorderWidth",
+      converter: "ConvertLineWidth<float>",
+      initial: "InitialBorderWidth",
       interpolable: true,
+      keywords: ["thin", "medium", "thick"],
+      typedom_types: ["Length"],
     },
     {
       name: "border-collapse",
       independent: true,
       inherited: true,
-      initial_keyword: "separate",
-      keyword_only: true,
+      default_value: "separate",
+      field_template: "keyword",
       keywords: ["separate", "collapse"],
     },
     {
       name: "border-image-outset",
+      api_class: "CSSPropertyAPIBorderImageOutset",
       custom_all: true,
       interpolable: true,
     },
     {
       name: "border-image-repeat",
+      api_class: "CSSPropertyAPIBorderImageRepeat",
       custom_all: true,
     },
     {
       name: "border-image-slice",
+      api_class: "CSSPropertyAPIBorderImageSlice",
       custom_all: true,
       interpolable: true,
     },
@@ -665,6 +723,7 @@
     },
     {
       name: "border-image-width",
+      api_class: "CSSPropertyAPIBorderImageWidth",
       custom_all: true,
       interpolable: true,
     },
@@ -675,14 +734,19 @@
     },
     {
       name: "border-left-style",
-      initial: "initialBorderStyle",
+      initial: "InitialBorderStyle",
       type_name: "EBorderStyle",
+      keywords: ["none"],
+      typedom_types: ["Image"],
     },
     {
       name: "border-left-width",
-      converter: "convertLineWidth<unsigned>",
-      initial: "initialBorderWidth",
+      api_class: "CSSPropertyAPIBorderWidth",
+      converter: "ConvertLineWidth<float>",
+      initial: "InitialBorderWidth",
       interpolable: true,
+      keywords: ["thin", "medium", "thick"],
+      typedom_types: ["Length"],
     },
     {
       name: "border-right-color",
@@ -691,14 +755,19 @@
     },
     {
       name: "border-right-style",
-      initial: "initialBorderStyle",
+      initial: "InitialBorderStyle",
       type_name: "EBorderStyle",
+      keywords: ["none"],
+      typedom_types: ["Image"],
     },
     {
       name: "border-right-width",
-      converter: "convertLineWidth<unsigned>",
-      initial: "initialBorderWidth",
+      api_class: "CSSPropertyAPIBorderWidth",
+      converter: "ConvertLineWidth<float>",
+      initial: "InitialBorderWidth",
       interpolable: true,
+      keywords: ["thin", "medium", "thick"],
+      typedom_types: ["Length"],
     },
     {
       name: "border-top-color",
@@ -709,27 +778,36 @@
       name: "border-top-left-radius",
       api_class: "CSSPropertyAPIBorderRadius",
       api_methods: ["parseSingleValue"],
-      converter: "convertRadius",
-      initial: "initialBorderRadius",
+      converter: "ConvertRadius",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/LengthSize",
+      field_group: "surround",
+      default_value: "LengthSize(Length(0, kFixed), Length(0, kFixed))",
     },
     {
       name: "border-top-right-radius",
       api_class: "CSSPropertyAPIBorderRadius",
       api_methods: ["parseSingleValue"],
-      converter: "convertRadius",
-      initial: "initialBorderRadius",
+      converter: "ConvertRadius",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/LengthSize",
+      field_group: "surround",
+      default_value: "LengthSize(Length(0, kFixed), Length(0, kFixed))",
     },
     {
       name: "border-top-style",
-      initial: "initialBorderStyle",
+      initial: "InitialBorderStyle",
       type_name: "EBorderStyle",
+      keywords: ["none"],
+      typedom_types: ["Image"],
     },
     {
       name: "border-top-width",
-      converter: "convertLineWidth<unsigned>",
-      initial: "initialBorderWidth",
+      api_class: "CSSPropertyAPIBorderWidth",
+      converter: "ConvertLineWidth<float>",
+      initial: "InitialBorderWidth",
       interpolable: true,
       keywords: ["thin", "medium", "thick"],
       supports_percentage: true,
@@ -739,30 +817,51 @@
       name: "bottom",
       api_class: "CSSPropertyAPIMargin",
       api_methods: ["parseSingleValue"],
-      converter: "convertLengthOrAuto",
-      initial: "initialOffset",
+      converter: "ConvertLengthOrAuto",
       interpolable: true,
       keywords: ["auto"],
       supports_percentage: true,
       typedom_types: ["Length"],
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length()",
     },
     {
       name: "box-shadow",
-      converter: "convertShadowList",
+      converter: "ConvertShadowList",
       interpolable: true,
     },
     "box-sizing",
     {
       name: "break-after",
-      type_name: "EBreak",
+      // Storage for this property also covers these legacy properties:
+      // page-break-after, -webkit-column-break-after
+      default_value: "auto",
+      field_template: "keyword",
+      keywords: [
+        "auto", "avoid", "avoid-column", "avoid-page", "column", "left", "page", "recto", "right", "verso"
+      ],
+      type_name: "EBreakBetween",
     },
     {
       name: "break-before",
-      type_name: "EBreak",
+      // Storage for this property also covers these legacy properties:
+      // page-break-before, -webkit-column-break-before
+      default_value: "auto",
+      field_template: "keyword",
+      keywords: [
+        "auto", "avoid", "avoid-column", "avoid-page", "column", "left", "page", "recto", "right", "verso"
+      ],
+      type_name: "EBreakBetween",
     },
     {
       name: "break-inside",
-      type_name: "EBreak",
+      // Storage for this property also covers these legacy properties:
+      // page-break-inside, -webkit-column-break-inside
+      default_value: "auto",
+      field_template: "keyword",
+      keywords: ["auto", "avoid", "avoid-column", "avoid-page"],
     },
     {
       name: "buffered-rendering",
@@ -772,9 +871,9 @@
       name: "caption-side",
       independent: true,
       inherited: true,
-      initial_keyword: "top",
-      keyword_only: true,
-      keywords: ["top", "bottom", "left", "right"],
+      default_value: "top",
+      field_template: "keyword",
+      keywords: ["top", "bottom"],
     },
     {
       name: "caret-color",
@@ -786,23 +885,27 @@
     },
     {
       name: "clear",
-      initial_keyword: "none",
-      keyword_only: true,
+      default_value: "none",
+      field_template: "keyword",
       keywords: ["none", "left", "right", "both"],
     },
     {
       name: "clip",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertClip",
+      converter: "ConvertClip",
       custom_all: true,
       interpolable: true,
+      field_template: "storage_only",
+      field_type_path: "platform/LengthBox",
+      default_value: "LengthBox()",
+      field_group: "visual",
     },
     {
       name: "clip-path",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertClipPath",
+      converter: "ConvertClipPath",
       interpolable: true,
     },
     {
@@ -835,7 +938,7 @@
       name: "contain",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertFlags<Containment>",
+      converter: "ConvertFlags<Containment>",
       runtime_flag: "CSSContainment",
     },
     {
@@ -843,15 +946,19 @@
       api_class: true,
       api_methods: ["parseSingleValue"],
       custom_all: true,
-      repeated: true,
+      separator: ",",
       typedom_types: ["Image"],
     },
     {
       name: "counter-increment",
+      api_class: true,
+      api_methods: ["parseSingleValue"],
       custom_all: true,
     },
     {
       name: "counter-reset",
+      api_class: true,
+      api_methods: ["parseSingleValue"],
       custom_all: true,
     },
     {
@@ -860,26 +967,46 @@
       api_methods: ["parseSingleValue"],
       custom_all: true,
       inherited: true,
+      field_template: "keyword",
+      keywords: [
+        "auto", "default", "none", "context-menu", "help", "pointer", "progress", "wait", "cell", "crosshair",
+        "text", "vertical-text", "alias", "copy", "move", "no-drop", "not-allowed", "e-resize", "n-resize",
+        "ne-resize", "nw-resize", "s-resize", "se-resize", "sw-resize", "w-resize", "ew-resize", "ns-resize",
+        "nesw-resize", "nwse-resize", "col-resize", "row-resize", "all-scroll", "zoom-in", "zoom-out",
+        "-webkit-grab", "-webkit-grabbing"
+      ],
+      default_value: "auto",
     },
     {
       name: "cx",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIStrokeOrLength",
+      converter: "ConvertLength",
       interpolable: true,
       svg: true,
     },
     {
       name: "cy",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIStrokeOrLength",
+      converter: "ConvertLength",
       interpolable: true,
       svg: true,
     },
     {
       name: "d",
-      converter: "convertPathOrNone",
+      converter: "ConvertPathOrNone",
       interpolable: true,
       svg: true,
     },
-    "display",
+    {
+      name: "display",
+      default_value: "inline",
+      field_template: 'keyword',
+      keywords: [
+        "inline", "block", "list-item", "inline-block", "table", "inline-table", "table-row-group", "table-header-group",
+        "table-footer-group", "table-row", "table-column-group", "table-column", "table-cell", "table-caption", "-webkit-box",
+        "-webkit-inline-box", "flex", "inline-flex", "grid", "inline-grid", "contents", "flow-root", "none",
+      ],
+    },
     {
       name: "dominant-baseline",
       inherited: true,
@@ -889,8 +1016,8 @@
       name: "empty-cells",
       independent: true,
       inherited: true,
-      initial_keyword: "show",
-      keyword_only: true,
+      default_value: "show",
+      field_template: "keyword",
       keywords: ["show", "hide"],
       type_name: "EEmptyCells",
     },
@@ -901,14 +1028,14 @@
       custom_all: true,
       inherited: true,
       interpolable: true,
-      setter: "setFillPaint",
+      setter: "SetFillPaint",
       svg: true,
     },
     {
       name: "fill-opacity",
       api_class: "CSSPropertyAPIOpacity",
       api_methods: ["parseSingleValue"],
-      converter: "convertNumberOrPercentage",
+      converter: "ConvertNumberOrPercentage",
       inherited: true,
       interpolable: true,
       svg: true,
@@ -921,32 +1048,35 @@
     },
     {
       name: "filter",
-      converter: "convertFilterOperations",
+      api_class: "CSSPropertyAPIFilter",
+      converter: "ConvertFilterOperations",
       interpolable: true,
     },
     {
       name: "flex-basis",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertLengthOrAuto",
+      converter: "ConvertLengthOrAuto",
       interpolable: true,
     },
     "flex-direction",
     {
       name: "flex-grow",
+      api_class: "CSSPropertyAPIFlexGrowOrShrink",
       interpolable: true,
       type_name: "float",
     },
     {
       name: "flex-shrink",
+      api_class: "CSSPropertyAPIFlexGrowOrShrink",
       interpolable: true,
       type_name: "float",
     },
     "flex-wrap",
     {
       name: "float",
-      initial_keyword: "none",
-      keyword_only: true,
+      default_value: "none",
+      field_template: "keyword",
       keywords: ["none", "left", "right"],
       name_for_methods: "Floating",
       type_name: "EFloat",
@@ -955,7 +1085,7 @@
       name: "flood-color",
       api_class: "CSSPropertyAPIColor",
       api_methods: ["parseSingleValue"],
-      converter: "convertColor",
+      converter: "ConvertColor",
       interpolable: true,
       svg: true,
     },
@@ -963,79 +1093,89 @@
       name: "flood-opacity",
       api_class: "CSSPropertyAPIOpacity",
       api_methods: ["parseSingleValue"],
-      converter: "convertNumberOrPercentage",
+      converter: "ConvertNumberOrPercentage",
       interpolable: true,
       svg: true,
     },
     {
       name: "grid-auto-columns",
-      converter: "convertGridTrackSizeList",
+      api_class: "CSSPropertyAPIGridAutoLine",
+      converter: "ConvertGridTrackSizeList",
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "grid-auto-flow",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertGridAutoFlow",
+      converter: "ConvertGridAutoFlow",
       runtime_flag: "CSSGridLayout",
       type_name: "GridAutoFlow",
     },
     {
       name: "grid-auto-rows",
-      converter: "convertGridTrackSizeList",
+      api_class: "CSSPropertyAPIGridAutoLine",
+      converter: "ConvertGridTrackSizeList",
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "grid-column-end",
-      converter: "convertGridPosition",
+      converter: "ConvertGridPosition",
       runtime_flag: "CSSGridLayout",
+      api_class: "CSSPropertyAPIGridLine",
     },
     {
       name: "grid-column-gap",
-      converter: "convertLength",
+      converter: "ConvertLength",
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "grid-column-start",
-      converter: "convertGridPosition",
+      api_class: "CSSPropertyAPIGridLine",
+      converter: "ConvertGridPosition",
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "grid-row-end",
-      converter: "convertGridPosition",
+      api_class: "CSSPropertyAPIGridLine",
+      converter: "ConvertGridPosition",
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "grid-row-gap",
-      converter: "convertLength",
+      converter: "ConvertLength",
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "grid-row-start",
-      converter: "convertGridPosition",
+      api_class: "CSSPropertyAPIGridLine",
+      converter: "ConvertGridPosition",
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "grid-template-areas",
+      api_class: true,
       custom_all: true,
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "grid-template-columns",
+      api_class: "CSSPropertyAPIGridTemplateLine",
       custom_all: true,
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "grid-template-rows",
+      api_class: "CSSPropertyAPIGridTemplateLine",
       custom_all: true,
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "height",
-      converter: "convertLengthSizing",
-      initial: "initialSize",
+      api_class: "CSSPropertyAPIWidthOrHeight",
+      converter: "ConvertLengthSizing",
+      is_descriptor: true,
       interpolable: true,
-      keywords: ["auto"],
+      keywords: ["auto", "fit-content", "min-content", "max-content"],
       supports_percentage: true,
       typedom_types: ["Length"],
     },
@@ -1053,7 +1193,7 @@
       name: "image-orientation",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertImageOrientation",
+      converter: "ConvertImageOrientation",
       inherited: true,
       name_for_methods: "RespectImageOrientation",
       runtime_flag: "ImageOrientation",
@@ -1061,60 +1201,74 @@
     "isolation",
     {
       name: "justify-content",
-      converter: "convertContentAlignmentData",
-      initial: "initialContentAlignment",
+      api_class: "CSSPropertyAPIAlignOrJustifyContent",
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertContentAlignmentData",
+      initial: "InitialContentAlignment",
     },
     {
       name: "justify-items",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertSelfOrDefaultAlignmentData",
-      initial: "initialSelfAlignment",
+      converter: "ConvertSelfOrDefaultAlignmentData",
+      initial: "InitialSelfAlignment",
       runtime_flag: "CSSGridLayout",
-      api_class: true,
     },
     {
       name: "justify-self",
       api_class: "CSSPropertyAPIAlignOrJustifySelf",
       api_methods: ["parseSingleValue"],
-      converter: "convertSelfOrDefaultAlignmentData",
-      initial: "initialSelfAlignment",
+      converter: "ConvertSelfOrDefaultAlignmentData",
+      initial: "InitialSelfAlignment",
       runtime_flag: "CSSGridLayout",
     },
     {
       name: "left",
       api_class: "CSSPropertyAPIMargin",
       api_methods: ["parseSingleValue"],
-      converter: "convertLengthOrAuto",
-      initial: "initialOffset",
+      converter: "ConvertLengthOrAuto",
       interpolable: true,
       keywords: ["auto"],
       supports_percentage: true,
       typedom_types: ["Length"],
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length()",
     },
     {
       name: "letter-spacing",
       api_class: "CSSPropertyAPILetterAndWordSpacing",
       api_methods: ["parseSingleValue"],
-      converter: "convertSpacing",
+      converter: "ConvertSpacing",
       inherited: true,
-      initial: "initialLetterWordSpacing",
+      initial: "InitialLetterWordSpacing",
       interpolable: true,
     },
     {
       name: "lighting-color",
       api_class: "CSSPropertyAPIColor",
       api_methods: ["parseSingleValue"],
-      converter: "convertColor",
+      converter: "ConvertColor",
       interpolable: true,
       svg: true,
     },
     {
       name: "line-height",
-      converter: "convertLineHeight",
-      getter: "specifiedLineHeight",
+      api_class: true,
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertLineHeight",
+      getter: "SpecifiedLineHeight",
       inherited: true,
       interpolable: true,
+    },
+    {
+      name: "line-height-step",
+      api_class: true,
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertComputedLength<uint8_t>",
+      inherited: true,
+      runtime_flag: "CSSSnapSize",
     },
     {
       name: "list-style-image",
@@ -1129,15 +1283,15 @@
       name: "list-style-position",
       independent: true,
       inherited: true,
-      initial_keyword: "outside",
-      keyword_only: true,
+      default_value: "outside",
+      field_template: "keyword",
       keywords: ["outside", "inside"],
     },
     {
       name: "list-style-type",
       inherited: true,
-      initial_keyword: "disc",
-      keyword_only: true,
+      default_value: "disc",
+      field_template: "keyword",
       keywords: [
         "disc", "circle", "square", "decimal", "decimal-leading-zero", "arabic-indic", "bengali", "cambodian", "khmer", "devanagari", "gujarati", "gurmukhi", "kannada", "lao", "malayalam", "mongolian", "myanmar", "oriya", "persian", "urdu", "telugu", "tibetan", "thai", "lower-roman", "upper-roman", "lower-greek", "lower-alpha", "lower-latin", "upper-alpha", "upper-latin", "cjk-earthly-branch", "cjk-heavenly-stem", "ethiopic-halehame", "ethiopic-halehame-am", "ethiopic-halehame-ti-er", "ethiopic-halehame-ti-et", "hangul", "hangul-consonant", "korean-hangul-formal", "korean-hanja-formal", "korean-hanja-informal", "hebrew", "armenian", "lower-armenian", "upper-armenian", "georgian", "cjk-ideographic", "simp-chinese-formal", "simp-chinese-informal", "trad-chinese-formal", "trad-chinese-informal", "hiragana", "katakana", "hiragana-iroha", "katakana-iroha", "none",
       ],
@@ -1146,58 +1300,74 @@
       name: "margin-bottom",
       api_class: "CSSPropertyAPIMargin",
       api_methods: ["parseSingleValue"],
-      converter: "convertQuirkyLength",
-      initial: "initialMargin",
+      converter: "ConvertQuirkyLength",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length(kFixed)",
     },
     {
       name: "margin-left",
       api_class: "CSSPropertyAPIMargin",
       api_methods: ["parseSingleValue"],
-      converter: "convertQuirkyLength",
-      initial: "initialMargin",
+      converter: "ConvertQuirkyLength",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length(kFixed)",
     },
     {
       name: "margin-right",
       api_class: "CSSPropertyAPIMargin",
       api_methods: ["parseSingleValue"],
-      converter: "convertQuirkyLength",
-      initial: "initialMargin",
+      converter: "ConvertQuirkyLength",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length(kFixed)",
     },
     {
       name: "margin-top",
       api_class: "CSSPropertyAPIMargin",
       api_methods: ["parseSingleValue"],
-      converter: "convertQuirkyLength",
-      initial: "initialMargin",
+      converter: "ConvertQuirkyLength",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length(kFixed)",
     },
     {
       name: "marker-end",
-      converter: "convertFragmentIdentifier",
+      api_class: "CSSPropertyAPIMarker",
+      converter: "ConvertFragmentIdentifier",
       inherited: true,
       name_for_methods: "MarkerEndResource",
       svg: true,
     },
     {
       name: "marker-mid",
-      converter: "convertFragmentIdentifier",
+      api_class: "CSSPropertyAPIMarker",
+      converter: "ConvertFragmentIdentifier",
       inherited: true,
       name_for_methods: "MarkerMidResource",
       svg: true,
     },
     {
       name: "marker-start",
-      converter: "convertFragmentIdentifier",
+      api_class: "CSSPropertyAPIMarker",
+      converter: "ConvertFragmentIdentifier",
       inherited: true,
       name_for_methods: "MarkerStartResource",
       svg: true,
     },
     {
       name: "mask",
-      converter: "convertFragmentIdentifier",
+      api_class: "CSSPropertyAPIMarker",
+      converter: "ConvertFragmentIdentifier",
       name_for_methods: "MaskerResource",
       svg: true,
     },
@@ -1212,26 +1382,28 @@
     },
     {
       name: "max-height",
-      converter: "convertLengthMaxSizing",
-      initial: "initialMaxSize",
+      converter: "ConvertLengthMaxSizing",
+      is_descriptor: true,
       interpolable: true,
     },
     {
       name: "max-width",
-      converter: "convertLengthMaxSizing",
-      initial: "initialMaxSize",
+      converter: "ConvertLengthMaxSizing",
+      is_descriptor: true,
       interpolable: true,
     },
     {
       name: "min-height",
-      converter: "convertLengthSizing",
-      initial: "initialMinSize",
+      api_class: "CSSPropertyAPIWidthOrHeight",
+      converter: "ConvertLengthSizing",
+      is_descriptor: true,
       interpolable: true,
     },
     {
       name: "min-width",
-      converter: "convertLengthSizing",
-      initial: "initialMinSize",
+      api_class: "CSSPropertyAPIWidthOrHeight",
+      converter: "ConvertLengthSizing",
+      is_descriptor: true,
       interpolable: true,
     },
     {
@@ -1240,60 +1412,45 @@
       type_name: "blink::WebBlendMode",
     },
     {
-      name: "motion-offset",
-      alias_for: "offset-distance",
-    },
-    {
-      name: "motion-path",
-      alias_for: "offset-path",
-    },
-    {
-      name: "motion-rotation",
-      alias_for: "offset-rotation",
-    },
-    {
       name: "object-fit",
       type_name: "ObjectFit",
     },
     {
       name: "object-position",
-      converter: "convertPosition",
+      converter: "ConvertPosition",
       interpolable: true,
     },
     {
       name: "offset-anchor",
-      converter: "convertPositionOrAuto",
+      api_class: true,
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertPositionOrAuto",
       interpolable: true,
       runtime_flag: "CSSOffsetPositionAnchor",
     },
     {
       name: "offset-distance",
-      converter: "convertLength",
+      api_class: true,
+      converter: "ConvertLength",
       interpolable: true,
     },
     {
       name: "offset-path",
-      converter: "convertPathOrNone",
+      converter: "ConvertPathOrNone",
     },
     {
       name: "offset-position",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertPositionOrAuto",
+      converter: "ConvertPositionOrAuto",
       interpolable: true,
       runtime_flag: "CSSOffsetPositionAnchor",
     },
     {
       name: "offset-rotate",
-      converter: "convertOffsetRotate",
+      api_class: "CSSPropertyAPIOffsetRotate",
+      converter: "ConvertOffsetRotate",
       interpolable: true,
-      runtime_flag: "CSSOffsetRotate",
-    },
-    {
-      name: "offset-rotation",
-      converter: "convertOffsetRotate",
-      interpolable: true,
-      runtime_flag: "CSSOffsetRotation",
     },
     {
       name: "opacity",
@@ -1306,10 +1463,13 @@
       name: "order",
       api_class: true,
       api_methods: ["parseSingleValue"],
+      interpolable: true,
       type_name: "int",
     },
     {
       name: "orphans",
+      api_class: "CSSPropertyAPIFragmentation",
+      api_methods: ["parseSingleValue"],
       inherited: true,
       interpolable: true,
       type_name: "short",
@@ -1325,7 +1485,7 @@
       name: "outline-offset",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertComputedLength<int>",
+      converter: "ConvertComputedLength<int>",
       interpolable: true,
     },
     {
@@ -1336,15 +1496,15 @@
       name: "outline-width",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertLineWidth<unsigned short>",
+      converter: "ConvertLineWidth<unsigned short>",
       interpolable: true,
     },
     {
       name: "overflow-anchor",
       runtime_flag: "ScrollAnchoring",
       inherited: false,
-      initial_keyword: "auto",
-      keyword_only: true,
+      default_value: "auto",
+      field_template: "keyword",
       keywords: [
         "visible", "none", "auto",
       ],
@@ -1355,68 +1515,91 @@
     },
     {
       name: "overflow-x",
+      default_value: "visible",
+      field_template: "keyword",
+      keywords: [
+        "visible", "hidden", "scroll", "auto", "overlay", "-webkit-paged-x", "-webkit-paged-y",
+      ],
       type_name: "EOverflow",
     },
     {
       name: "overflow-y",
+      default_value: "visible",
+      field_template: "keyword",
+      keywords: [
+        "visible", "hidden", "scroll", "auto", "overlay", "-webkit-paged-x", "-webkit-paged-y",
+      ],
       type_name: "EOverflow",
     },
     {
       name: "padding-bottom",
       api_class: "CSSPropertyAPIPadding",
       api_methods: ["parseSingleValue"],
-      converter: "convertLength",
-      initial: "initialPadding",
+      converter: "ConvertLength",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length(kFixed)",
     },
     {
       name: "padding-left",
       api_class: "CSSPropertyAPIPadding",
       api_methods: ["parseSingleValue"],
-      converter: "convertLength",
-      initial: "initialPadding",
+      converter: "ConvertLength",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length(kFixed)",
     },
     {
       name: "padding-right",
       api_class: "CSSPropertyAPIPadding",
       api_methods: ["parseSingleValue"],
-      converter: "convertLength",
-      initial: "initialPadding",
+      converter: "ConvertLength",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length(kFixed)",
     },
     {
       name: "padding-top",
       api_class: "CSSPropertyAPIPadding",
       api_methods: ["parseSingleValue"],
-      converter: "convertLength",
-      initial: "initialPadding",
+      converter: "ConvertLength",
       interpolable: true,
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length(kFixed)",
     },
     {
       name: "paint-order",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertPaintOrder",
+      converter: "ConvertPaintOrder",
       inherited: true,
       svg: true,
     },
     {
       name: "perspective",
-      converter: "convertPerspective",
+      api_class: "CSSPropertyAPIPerspective",
+      converter: "ConvertPerspective",
       interpolable: true,
     },
     {
       name: "perspective-origin",
-      converter: "convertPosition",
+      converter: "ConvertPosition",
       interpolable: true,
     },
     {
       name: "pointer-events",
       independent: true,
       inherited: true,
-      initial_keyword: "auto",
-      keyword_only: true,
+      default_value: "auto",
+      field_template: "keyword",
       keywords: [
         "none", "auto", "stroke", "fill", "painted", "visible", "visibleStroke", "visibleFill", "visiblePainted", "bounding-box", "all",
       ],
@@ -1424,12 +1607,18 @@
     {
       name: "position",
       custom_inherit: true,
+      default_value: "static",
+      field_template: "keyword",
+      getter: "GetPosition",
+      keywords: [
+        "static", "relative", "absolute", "fixed", "sticky",
+      ],
     },
     {
       name: "quotes",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertQuotes",
+      converter: "ConvertQuotes",
       inherited: true,
     },
     {
@@ -1440,16 +1629,20 @@
       name: "right",
       api_class: "CSSPropertyAPIMargin",
       api_methods: ["parseSingleValue"],
-      converter: "convertLengthOrAuto",
-      initial: "initialOffset",
+      converter: "ConvertLengthOrAuto",
       interpolable: true,
       keywords: ["auto"],
       supports_percentage: true,
       typedom_types: ["Length"],
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length()",
     },
     {
       name: "r",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIStrokeOrLength",
+      converter: "ConvertLength",
       interpolable: true,
       svg: true,
     },
@@ -1457,7 +1650,7 @@
       name: "rx",
       api_class: "CSSPropertyAPIRadius",
       api_methods: ["parseSingleValue"],
-      converter: "convertLengthOrAuto",
+      converter: "ConvertLengthOrAuto",
       interpolable: true,
       svg: true,
     },
@@ -1465,7 +1658,7 @@
       name: "ry",
       api_class: "CSSPropertyAPIRadius",
       api_methods: ["parseSingleValue"],
-      converter: "convertLengthOrAuto",
+      converter: "ConvertLengthOrAuto",
       interpolable: true,
       svg: true,
     },
@@ -1481,24 +1674,24 @@
     },
     {
       name: "scroll-snap-points-x",
-      converter: "convertSnapPoints",
+      converter: "ConvertSnapPoints",
       runtime_flag: "CSSScrollSnapPoints",
     },
     {
       name: "scroll-snap-points-y",
-      converter: "convertSnapPoints",
+      converter: "ConvertSnapPoints",
       runtime_flag: "CSSScrollSnapPoints",
     },
     {
       name: "scroll-snap-destination",
-      converter: "convertPosition",
+      converter: "ConvertPosition",
       runtime_flag: "CSSScrollSnapPoints",
     },
     {
       name: "scroll-snap-coordinate",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertSnapCoordinates",
+      converter: "ConvertSnapCoordinates",
       runtime_flag: "CSSScrollSnapPoints",
     },
     {
@@ -1512,14 +1705,14 @@
       name: "shape-margin",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertLength",
+      converter: "ConvertLength",
       interpolable: true,
     },
     {
       name: "shape-outside",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertShapeValue",
+      converter: "ConvertShapeValue",
       interpolable: true,
       typedom_types: ["Image"],
     },
@@ -1535,14 +1728,6 @@
       custom_all: true,
     },
     {
-      name: "snap-height",
-      api_class: true,
-      api_methods: ["parseSingleValue"],
-      custom_all: true,
-      inherited: true,
-      runtime_flag: "CSSSnapSize",
-    },
-    {
       name: "speak",
       inherited: true,
     },
@@ -1550,7 +1735,7 @@
       name: "stop-color",
       api_class: "CSSPropertyAPIColor",
       api_methods: ["parseSingleValue"],
-      converter: "convertColor",
+      converter: "ConvertColor",
       interpolable: true,
       svg: true,
     },
@@ -1558,7 +1743,7 @@
       name: "stop-opacity",
       api_class: "CSSPropertyAPIOpacity",
       api_methods: ["parseSingleValue"],
-      converter: "convertNumberOrPercentage",
+      converter: "ConvertNumberOrPercentage",
       interpolable: true,
       svg: true,
     },
@@ -1569,14 +1754,14 @@
       custom_all: true,
       inherited: true,
       interpolable: true,
-      setter: "setStrokePaint",
+      setter: "SetStrokePaint",
       svg: true,
     },
     {
       name: "stroke-dasharray",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertStrokeDasharray",
+      converter: "ConvertStrokeDasharray",
       inherited: true,
       interpolable: true,
       name_for_methods: "StrokeDashArray",
@@ -1584,7 +1769,8 @@
     },
     {
       name: "stroke-dashoffset",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIStrokeOrLength",
+      converter: "ConvertLength",
       inherited: true,
       interpolable: true,
       name_for_methods: "StrokeDashOffset",
@@ -1618,22 +1804,23 @@
       name: "stroke-opacity",
       api_class: "CSSPropertyAPIOpacity",
       api_methods: ["parseSingleValue"],
-      converter: "convertNumberOrPercentage",
+      converter: "ConvertNumberOrPercentage",
       inherited: true,
       interpolable: true,
       svg: true,
     },
     {
       name: "stroke-width",
-      converter: "convertUnzoomedLength",
+      api_class: "CSSPropertyAPIStrokeOrLength",
+      converter: "ConvertUnzoomedLength",
       inherited: true,
       interpolable: true,
       svg: true,
     },
     {
       name: "table-layout",
-      initial_keyword: "auto",
-      keyword_only: true,
+      default_value: "auto",
+      field_template: "keyword",
       keywords: [
         "auto", "fixed"
       ]
@@ -1642,16 +1829,18 @@
       name: "tab-size",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertLengthOrTabSpaces",
+      converter: "ConvertLengthOrTabSpaces",
       inherited: true,
       type_name: "TabSize",
     },
     {
       name: "text-align",
       custom_value: true,
+      independent: false,
       inherited: true,
-      initial_keyword: "start",
-      keyword_only: true,
+      default_value: "start",
+      field_template: "keyword",
+      getter: "GetTextAlign",
       keywords: [
         "left", "right", "center", "justify", "webkitLeft", "webkitRight", "webkitCenter", "start", "end",
       ],
@@ -1675,6 +1864,7 @@
     // FIXME: We shouldn't switch between shorthand/not shorthand based on a runtime flag
     {
       name: "text-decoration",
+      api_class: true,
       longhands: "text-decoration-line;text-decoration-style;text-decoration-color",
       use_handlers_for: "CSSPropertyTextDecorationLine",
     },
@@ -1688,7 +1878,8 @@
     },
     {
       name: "text-decoration-line",
-      converter: "convertFlags<TextDecoration>",
+      api_class: "CSSPropertyAPITextDecorationLine",
+      converter: "ConvertFlags<TextDecoration>",
       name_for_methods: "TextDecoration",
       runtime_flag: "CSS3TextDecorations",
       type_name: "TextDecoration",
@@ -1697,7 +1888,7 @@
       name: "text-decoration-skip",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertFlags<TextDecorationSkip>",
+      converter: "ConvertFlags<TextDecorationSkip>",
       inherited: true,
       runtime_flag: "CSS3TextDecorations",
       type_name: "TextDecorationSkip",
@@ -1727,7 +1918,8 @@
     },
     {
       name: "text-shadow",
-      converter: "convertShadowList",
+      api_class: "CSSPropertyAPIShadow",
+      converter: "ConvertShadowList",
       inherited: true,
       interpolable: true,
     },
@@ -1735,7 +1927,7 @@
       name: "text-size-adjust",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertTextSizeAdjust",
+      converter: "ConvertTextSizeAdjust",
       inherited: true,
       type_name: "TextSizeAdjust",
     },
@@ -1743,8 +1935,8 @@
       name: "text-transform",
       independent: true,
       inherited: true,
-      initial_keyword: "none",
-      keyword_only: true,
+      default_value: "none",
+      field_template: "keyword",
       keywords: ["capitalize", "uppercase", "lowercase", "none"],
     },
     {
@@ -1759,32 +1951,45 @@
       name: "top",
       api_class: "CSSPropertyAPIMargin",
       api_methods: ["parseSingleValue"],
-      converter: "convertLengthOrAuto",
-      initial: "initialOffset",
+      converter: "ConvertLengthOrAuto",
       interpolable: true,
       keywords: ["auto"],
       supports_percentage: true,
       typedom_types: ["Length"],
+      field_template: "external",
+      field_type_path: "platform/Length",
+      field_group: "surround",
+      default_value: "Length()",
     },
     {
       name: "touch-action",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertFlags<TouchAction>",
+      converter: "ConvertFlags<TouchAction>",
       type_name: "TouchAction",
     },
     {
       name: "transform",
-      converter: "convertTransformOperations",
+      api_class: true,
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertTransformOperations",
       interpolable: true,
       keywords: ["none"],
       typedom_types: ["Transform"],
     },
     {
+      name: "transform-box",
+      field_template: "keyword",
+      keywords: ["border-box", "fill-box", "view-box"],
+      default_value: "border-box",
+      runtime_flag: "CSSTransformBox",
+    },
+    {
       name: "transform-origin",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertTransformOrigin",
+      converter: "ConvertTransformOrigin",
+      getter: "GetTransformOrigin",
       interpolable: true,
     },
     {
@@ -1795,7 +2000,7 @@
       name: "translate",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertTranslate",
+      converter: "ConvertTranslate",
       interpolable: true,
       runtime_flag: "CSSIndependentTransformProperties",
     },
@@ -1803,7 +2008,7 @@
       name: "rotate",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertRotate",
+      converter: "ConvertRotate",
       interpolable: true,
       runtime_flag: "CSSIndependentTransformProperties",
     },
@@ -1811,15 +2016,15 @@
       name: "scale",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertScale",
+      converter: "ConvertScale",
       interpolable: true,
       runtime_flag: "CSSIndependentTransformProperties",
     },
     {
       name: "unicode-bidi",
-      field_storage_type: "platform/text/UnicodeBidi",
-      initial_keyword: "normal",
-      keyword_only: true,
+      field_type_path: "platform/text/UnicodeBidi",
+      default_value: "normal",
+      field_template: "keyword",
       keywords: [
         "normal", "embed", "bidi-override", "isolate", "plaintext", "isolate-override",
       ],
@@ -1841,20 +2046,22 @@
       name: "visibility",
       independent: true,
       inherited: true,
-      initial_keyword: "visible",
+      default_value: "visible",
       interpolable: true,
-      keyword_only: true,
+      field_template: "keyword",
       keywords: ["visible", "hidden", "collapse"],
     },
     {
       name: "x",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIStrokeOrLength",
+      converter: "ConvertLength",
       interpolable: true,
       svg: true,
     },
     {
       name: "y",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIStrokeOrLength",
+      converter: "ConvertLength",
       interpolable: true,
       svg: true,
     },
@@ -1876,19 +2083,24 @@
     },
     {
       name: "-webkit-border-horizontal-spacing",
-      converter: "convertComputedLength<short>",
+      api_class: "CSSPropertyAPIWebkitBorderSpacing",
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertComputedLength<short>",
       inherited: true,
       interpolable: true,
       name_for_methods: "HorizontalBorderSpacing",
     },
     {
       name: "-webkit-border-image",
+      api_class: true,
       custom_value: true,
-      initial: "initialNinePieceImage",
+      initial: "InitialNinePieceImage",
     },
     {
       name: "-webkit-border-vertical-spacing",
-      converter: "convertComputedLength<short>",
+      api_class: "CSSPropertyAPIWebkitBorderSpacing",
+      api_methods: ["parseSingleValue"],
+      converter: "ConvertComputedLength<short>",
       inherited: true,
       interpolable: true,
       name_for_methods: "VerticalBorderSpacing",
@@ -1902,12 +2114,13 @@
       name: "-webkit-box-direction",
       independent: true,
       inherited: true,
-      initial_keyword: "normal",
-      keyword_only: true,
+      default_value: "normal",
+      field_template: "keyword",
       keywords: ["normal", "reverse"],
     },
     {
       name: "-webkit-box-flex",
+      api_class: true,
       type_name: "float",
     },
     {
@@ -1919,13 +2132,15 @@
     "-webkit-box-lines",
     {
       name: "-webkit-box-ordinal-group",
+      api_class: "CSSPropertyAPIFragmentation",
+      api_methods: ["parseSingleValue"],
       type_name: "unsigned int",
     },
     "-webkit-box-orient",
     "-webkit-box-pack",
     {
       name: "-webkit-box-reflect",
-      converter: "convertBoxReflect",
+      converter: "ConvertBoxReflect",
     },
     {
       name: "column-count",
@@ -1939,7 +2154,7 @@
       name: "column-gap",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertComputedLength<float>",
+      converter: "ConvertComputedLength<float>",
       custom_all: true,
       interpolable: true,
     },
@@ -1952,14 +2167,14 @@
     },
     {
       name: "column-rule-style",
-      initial: "initialBorderStyle",
+      initial: "InitialBorderStyle",
       type_name: "EBorderStyle",
     },
     {
       name: "column-rule-width",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertLineWidth<unsigned short>",
+      converter: "ConvertLineWidth<unsigned short>",
       interpolable: true,
     },
     {
@@ -1972,7 +2187,7 @@
       name: "column-width",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertComputedLength<float>",
+      converter: "ConvertComputedLength<float>",
       custom_all: true,
       interpolable: true,
     },
@@ -1980,12 +2195,12 @@
       name: "-webkit-highlight",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertString<CSSValueNone>",
+      converter: "ConvertString<CSSValueNone>",
       inherited: true,
     },
     {
       name: "-webkit-hyphenate-character",
-      converter: "convertString<CSSValueAuto>",
+      converter: "ConvertString<CSSValueAuto>",
       inherited: true,
       name_for_methods: "HyphenationString",
     },
@@ -2020,15 +2235,18 @@
     },
     {
       name: "-webkit-mask-box-image-outset",
+      api_class: "CSSPropertyAPIBorderImageOutset",
       custom_all: true,
       interpolable: true,
     },
     {
       name: "-webkit-mask-box-image-repeat",
+      api_class: "CSSPropertyAPIBorderImageRepeat",
       custom_all: true,
     },
     {
       name: "-webkit-mask-box-image-slice",
+      api_class: "CSSPropertyAPIBorderImageSlice",
       custom_all: true,
       interpolable: true,
     },
@@ -2041,6 +2259,7 @@
     },
     {
       name: "-webkit-mask-box-image-width",
+      api_class: "CSSPropertyAPIBorderImageWidth",
       custom_all: true,
       interpolable: true,
     },
@@ -2073,10 +2292,12 @@
     },
     {
       name: "-webkit-mask-repeat-x",
+      api_class: "CSSPropertyAPIWebkitMaskRepeat",
       custom_all: true,
     },
     {
       name: "-webkit-mask-repeat-y",
+      api_class: "CSSPropertyAPIWebkitMaskRepeat",
       custom_all: true,
     },
     {
@@ -2086,31 +2307,33 @@
     },
     {
       name: "-webkit-perspective-origin-x",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIWebkitOriginX",
+      converter: "ConvertLength",
       interpolable: true,
     },
     {
       name: "-webkit-perspective-origin-y",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIWebkitOriginY",
+      converter: "ConvertLength",
       interpolable: true,
     },
     {
       name: "-webkit-print-color-adjust",
       independent: true,
       inherited: true,
-      initial_keyword: "economy",
-      keyword_only: true,
+      default_value: "economy",
+      field_template: "keyword",
       keywords: ["economy", "exact"],
     },
     {
       name: "-webkit-rtl-ordering",
       independent: true,
       inherited: true,
-      initial: "initialRtlOrdering",
-      initial_keyword: "logical",
-      keyword_only: true,
+      initial: "InitialRtlOrdering",
+      default_value: "logical",
+      field_template: "keyword",
       keywords: ["logical", "visual"],
-      setter: "setRtlOrdering",
+      setter: "SetRtlOrdering",
       type_name: "EOrder",
     },
     {
@@ -2122,7 +2345,7 @@
       name: "-webkit-tap-highlight-color",
       api_class: "CSSPropertyAPIColor",
       api_methods: ["parseSingleValue"],
-      converter: "convertColor",
+      converter: "ConvertColor",
       inherited: true,
     },
     {
@@ -2173,24 +2396,26 @@
       name: "-webkit-text-stroke-width",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertTextStrokeWidth",
+      converter: "ConvertTextStrokeWidth",
       inherited: true,
     },
     {
       name: "-webkit-transform-origin-x",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIWebkitOriginX",
+      converter: "ConvertLength",
       interpolable: true,
     },
     {
       name: "-webkit-transform-origin-y",
-      converter: "convertLength",
+      api_class: "CSSPropertyAPIWebkitOriginY",
+      converter: "ConvertLength",
       interpolable: true,
     },
     {
       name: "-webkit-transform-origin-z",
       api_class: true,
       api_methods: ["parseSingleValue"],
-      converter: "convertComputedLength<float>",
+      converter: "ConvertComputedLength<float>",
       interpolable: true,
     },
     "-webkit-user-drag",
@@ -2206,22 +2431,25 @@
       name: "white-space",
       independent: true,
       inherited: true,
-      initial_keyword: "normal",
-      keyword_only: true,
+      default_value: "normal",
+      field_template: "keyword",
       keywords: ["normal", "pre", "pre-wrap", "pre-line", "nowrap", "-webkit-nowrap"],
     },
     {
       name: "widows",
+      api_class: "CSSPropertyAPIFragmentation",
+      api_methods: ["parseSingleValue"],
       inherited: true,
       interpolable: true,
       type_name: "short",
     },
     {
       name: "width",
-      converter: "convertLengthSizing",
-      initial: "initialSize",
+      api_class: "CSSPropertyAPIWidthOrHeight",
+      converter: "ConvertLengthSizing",
+      is_descriptor: true,
       interpolable: true,
-      keywords: ["auto"],
+      keywords: ["auto", "fit-content", "min-content", "max-content"],
       supports_percentage: true,
       typedom_types: ["Length"],
     },
@@ -2239,9 +2467,9 @@
       name: "word-spacing",
       api_class: "CSSPropertyAPILetterAndWordSpacing",
       api_methods: ["parseSingleValue"],
-      converter: "convertSpacing",
+      converter: "ConvertSpacing",
       inherited: true,
-      initial: "initialLetterWordSpacing",
+      initial: "InitialLetterWordSpacing",
       interpolable: true,
     },
     // UAs must treat 'word-wrap' as an alternate name for the 'overflow-wrap' property. So using the same handlers.
@@ -2303,6 +2531,8 @@
     },
     {
       name: "-webkit-border-end-width",
+      api_class: "CSSPropertyAPIWebkitBorderWidth",
+      api_methods: ["parseSingleValue"],
       direction_aware: true,
     },
     {
@@ -2317,6 +2547,8 @@
     },
     {
       name: "-webkit-border-start-width",
+      api_class: "CSSPropertyAPIWebkitBorderWidth",
+      api_methods: ["parseSingleValue"],
       direction_aware: true,
     },
     {
@@ -2331,6 +2563,8 @@
     },
     {
       name: "-webkit-border-before-width",
+      api_class: "CSSPropertyAPIWebkitBorderWidth",
+      api_methods: ["parseSingleValue"],
       direction_aware: true,
     },
     {
@@ -2345,6 +2579,8 @@
     },
     {
       name: "-webkit-border-after-width",
+      api_class: "CSSPropertyAPIWebkitBorderWidth",
+      api_methods: ["parseSingleValue"],
       direction_aware: true,
     },
     {
@@ -2397,18 +2633,22 @@
     },
     {
       name: "-webkit-logical-width",
+      api_class: "CSSPropertyAPIWebkitLogicalWidthOrHeight",
       direction_aware: true,
     },
     {
       name: "-webkit-logical-height",
+      api_class: "CSSPropertyAPIWebkitLogicalWidthOrHeight",
       direction_aware: true,
     },
     {
       name: "-webkit-min-logical-width",
+      api_class: "CSSPropertyAPIWebkitLogicalWidthOrHeight",
       direction_aware: true,
     },
     {
       name: "-webkit-min-logical-height",
+      api_class: "CSSPropertyAPIWebkitLogicalWidthOrHeight",
       direction_aware: true,
     },
     {
@@ -2445,40 +2685,48 @@
     },
     {
       name: "-webkit-text-decorations-in-effect",
+      api_class: "CSSPropertyAPITextDecorationLine",
       builder_skip: true,
       inherited: true,
     },
 
-    // Descriptors
+    // Descriptor only names
 
     {
       name: "font-display",
-      descriptor_only: true,
+      is_descriptor: true,
+      is_property: false,
       runtime_flag: "CSSFontDisplay",
     },
     {
       name: "max-zoom",
-      descriptor_only: true,
+      is_descriptor: true,
+      is_property: false,
     },
     {
       name: "min-zoom",
-      descriptor_only: true,
+      is_descriptor: true,
+      is_property: false,
     },
     {
       name: "orientation",
-      descriptor_only: true,
+      is_descriptor: true,
+      is_property: false,
     },
     {
       name: "src",
-      descriptor_only: true,
+      is_descriptor: true,
+      is_property: false,
     },
     {
       name: "unicode-range",
-      descriptor_only: true,
+      is_descriptor: true,
+      is_property: false,
     },
     {
       name: "user-zoom",
-      descriptor_only: true,
+      is_descriptor: true,
+      is_property: false,
     },
 
     // Shorthands
@@ -2534,6 +2782,8 @@
     {
       name: "border-style",
       longhands: "border-top-style;border-right-style;border-bottom-style;border-left-style",
+      keywords: ["none"],
+      typedom_types: ["Image"],
     },
     {
       name: "border-top",
@@ -2557,11 +2807,27 @@
     },
     {
       name: "font-variant",
+      is_descriptor: true,
       longhands: "font-variant-ligatures;font-variant-caps;font-variant-numeric",
     },
     {
       name: "grid",
       longhands: "grid-template-rows;grid-template-columns;grid-template-areas;grid-auto-flow;grid-auto-rows;grid-auto-columns;grid-column-gap;grid-row-gap",
+      runtime_flag: "CSSGridLayout",
+    },
+    {
+      name: "place-content",
+      longhands: "align-content;justify-content",
+      runtime_flag: "CSSGridLayout",
+    },
+    {
+      name: "place-items",
+      longhands: "align-items;justify-items",
+      runtime_flag: "CSSGridLayout",
+    },
+    {
+      name: "place-self",
+      longhands: "align-self;justify-self",
       runtime_flag: "CSSGridLayout",
     },
     {
@@ -2602,12 +2868,8 @@
       longhands: "marker-start;marker-mid;marker-end",
     },
     {
-      name: "motion",
-      longhands: "offset-path;offset-distance;offset-rotation",
-    },
-    {
       name: "offset",
-      longhands: "offset-path;offset-distance;offset-rotation",
+      longhands: "offset-path;offset-distance;offset-rotate",
     },
     {
       name: "outline",
@@ -2820,6 +3082,7 @@
     },
     {
       name: "-webkit-box-shadow",
+      api_class: "CSSPropertyAPIShadow",
       alias_for: "box-shadow",
     },
     {
@@ -2905,6 +3168,11 @@
     {
       name: "-webkit-justify-content",
       alias_for: "justify-content",
+    },
+    {
+      name: "line-break",
+      alias_for: "-webkit-line-break",
+      runtime_flag: "CSSLineBreak",
     },
     {
       name: "-webkit-opacity",

@@ -16,7 +16,18 @@ settings.FingerprintResultType = {
   SENSOR_DIRTY: 3,
   TOO_SLOW: 4,
   TOO_FAST: 5,
+  IMMOBILE: 6,
 };
+
+/**
+ * An object describing a attempt from the fingerprint hardware. The structure
+ * of this data must be kept in sync with C++ FingerprintHandler.
+ * @typedef {{
+ *   result: settings.FingerprintResultType,
+ *   indexes: !Array<number>,
+ * }}
+ */
+settings.FingerprintAttempt;
 
 /**
  * An object describing a scan from the fingerprint hardware. The structure of
@@ -28,15 +39,31 @@ settings.FingerprintResultType = {
  */
 settings.FingerprintScan;
 
+/**
+ * An object describing the necessary info to display on the fingerprint
+ * settings. The structure of this data must be kept in sync with
+ * C++ FingerprintHandler.
+ * @typedef {{
+ *   fingerprintsList: !Array<string>,
+ *   isMaxed: boolean,
+ * }}
+ */
+settings.FingerprintInfo;
+
 cr.define('settings', function() {
   /** @interface */
   function FingerprintBrowserProxy() {}
 
   FingerprintBrowserProxy.prototype = {
     /**
-     * @return {!Promise<!Array<string>>}
+     * @return {!Promise<!settings.FingerprintInfo>}
      */
     getFingerprintsList: function () {},
+
+    /**
+     * @return {!Promise<number>}
+     */
+    getNumFingerprints: function () {},
 
     startEnroll: function () {},
 
@@ -50,19 +77,27 @@ cr.define('settings', function() {
 
     /**
      * @param {number} index
-     * @return {!Promise<!Array<string>>}
+     * @return {!Promise<boolean>}
      */
     removeEnrollment: function(index) {},
 
     /**
      * @param {number} index
      * @param {string} newLabel
+     * @return {!Promise<boolean>}
      */
     changeEnrollmentLabel: function(index, newLabel) {},
 
     startAuthentication: function() {},
 
     endCurrentAuthentication: function() {},
+
+    /**
+     * TODO(sammiequon): Temporary function to let the handler know when a
+     * completed scan has been sent via click on the setup fingerprint dialog.
+     * Remove this when real scans are implemented.
+     */
+    fakeScanComplete: function() {},
   };
 
   /**
@@ -76,6 +111,11 @@ cr.define('settings', function() {
     /** @override */
     getFingerprintsList: function () {
       return cr.sendWithPromise('getFingerprintsList');
+    },
+
+    /** @override */
+    getNumFingerprints: function () {
+      return cr.sendWithPromise('getNumFingerprints');
     },
 
     /** @override */
@@ -100,7 +140,7 @@ cr.define('settings', function() {
 
     /** @override */
     changeEnrollmentLabel: function(index, newLabel) {
-      chrome.send('changeEnrollmentLabel', [index, newLabel]);
+      return cr.sendWithPromise('changeEnrollmentLabel', index, newLabel);
     },
 
     /** @override */
@@ -111,6 +151,11 @@ cr.define('settings', function() {
     /** @override */
     endCurrentAuthentication: function() {
       chrome.send('endCurrentAuthentication');
+    },
+
+    /** @override */
+    fakeScanComplete: function() {
+      chrome.send('fakeScanComplete');
     },
   };
 

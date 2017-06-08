@@ -27,6 +27,7 @@ import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.preferences.datareduction.DataReductionPromoUtils;
 import org.chromium.chrome.browser.preferences.datareduction.DataReductionProxyUma;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.searchwidget.SearchWidgetProvider;
 import org.chromium.chrome.browser.util.IntentUtils;
 
 import java.lang.ref.WeakReference;
@@ -46,6 +47,24 @@ import java.util.concurrent.Callable;
  * The activity might be run more than once, e.g. 1) for ToS and sign-in, and 2) for intro.
  */
 public class FirstRunActivity extends AsyncInitializationActivity implements FirstRunPageDelegate {
+    /** Alerted about various events when FirstRunActivity performs them. */
+    public interface FirstRunActivityObserver {
+        /** See {@link #onFlowIsKnown}. */
+        void onFlowIsKnown(Bundle freProperties);
+
+        /** See {@link #acceptTermsOfService}. */
+        void onAcceptTermsOfService();
+
+        /** See {@link #jumpToPage}. */
+        void onJumpToPage(int position);
+
+        /** Called when First Run is completed. */
+        void onUpdateCachedEngineName();
+
+        /** See {@link #abortFirstRunExperience}. */
+        void onAbortFirstRunExperience();
+    }
+
     protected static final String TAG = "FirstRunActivity";
 
     // Incoming parameters:
@@ -56,8 +75,9 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
     public static final String EXTRA_FINISH_ON_TOUCH_OUTSIDE = "Extra.FreFinishOnTouchOutside";
 
     static final String SHOW_WELCOME_PAGE = "ShowWelcome";
-    static final String SHOW_SIGNIN_PAGE = "ShowSignIn";
     static final String SHOW_DATA_REDUCTION_PAGE = "ShowDataReduction";
+    static final String SHOW_SEARCH_ENGINE_PAGE = "ShowSearchEnginePage";
+    static final String SHOW_SIGNIN_PAGE = "ShowSignIn";
 
     static final String POST_NATIVE_SETUP_NEEDED = "PostNativeSetupNeeded";
 
@@ -86,14 +106,17 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
     private static final int FRE_PROGRESS_SIGNIN_SHOWN = 3;
     private static final int FRE_PROGRESS_COMPLETED_SIGNED_IN = 4;
     private static final int FRE_PROGRESS_COMPLETED_NOT_SIGNED_IN = 5;
-    private static final int FRE_PROGRESS_MAX = 6;
+    private static final int FRE_PROGRESS_DEFAULT_SEARCH_ENGINE_SHOWN = 6;
+    private static final int FRE_PROGRESS_MAX = 7;
     private static final EnumeratedHistogramSample sMobileFreProgressMainIntentHistogram =
-            new EnumeratedHistogramSample("MobileFre.SignInChoice.MainIntent", FRE_PROGRESS_MAX);
+            new EnumeratedHistogramSample("MobileFre.Progress.MainIntent", FRE_PROGRESS_MAX);
     private static final EnumeratedHistogramSample sMobileFreProgressViewIntentHistogram =
-            new EnumeratedHistogramSample("MobileFre.SignInChoice.ViewIntent", FRE_PROGRESS_MAX);
+            new EnumeratedHistogramSample("MobileFre.Progress.ViewIntent", FRE_PROGRESS_MAX);
 
     @VisibleForTesting
     static FirstRunGlue sGlue = new FirstRunGlueImpl();
+
+    private static FirstRunActivityObserver sObserver;
 
     private boolean mShowWelcomePage = true;
 
@@ -141,35 +164,22 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
 
     }
 
-//    private void createPostNativePageSequence() {
-//        // Note: Can't just use POST_NATIVE_SETUP_NEEDED for the early return, because this
-//        // populates |mPages| which needs to be done even even if onNativeInitialized() was
-//        // performed in a previous session.
-//        if (mPostNativePageSequenceCreated) return;
-//        mFirstRunFlowSequencer.onNativeInitialized(mFreProperties);
-//
-//        boolean notifyAdapter = false;
-//        // An optional Data Saver page.
-//        if (mFreProperties.getBoolean(SHOW_DATA_REDUCTION_PAGE)) {
-//            mPages.add(pageOf(DataReductionProxyFirstRunFragment.class));
-//            mFreProgressStates.add(FRE_PROGRESS_DATA_SAVER_SHOWN);
-//            notifyAdapter = true;
-//        }
-//
-//        // An optional sign-in page.
-//        if (mFreProperties.getBoolean(SHOW_SIGNIN_PAGE)) {
-//            mPages.add(pageOf(AccountFirstRunFragment.class));
-//            mFreProgressStates.add(FRE_PROGRESS_SIGNIN_SHOWN);
-//            notifyAdapter = true;
-//        }
-//
-//        if (notifyAdapter && mPagerAdapter != null) {
-//            mPagerAdapter.notifyDataSetChanged();
-//        }
-//        mPostNativePageSequenceCreated = true;
-//    }
-
     // AsyncInitializationActivity:
+    @Override
+    protected boolean requiresFirstRunToBeCompleted(Intent intent) {
+        // The user is already in First Run.
+        return false;
+    }
+
+    @Override
+    protected Bundle transformSavedInstanceStateForOnCreate(Bundle savedInstanceState) {
+        // We pass null to Activity.onCreate() so that it doesn't automatically restore
+        // the FragmentManager state - as that may cause fragments to be loaded that have
+        // dependencies on native before native has been loaded (and then crash). Instead,
+        // these fragments will be recreated manually by us and their progression restored
+        // from |mFreProperties| which we still get from getSavedInstanceState() below.
+        return null;
+    }
 
     @Override
     public void setContentView() {
@@ -229,6 +239,7 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
                     skipPagesIfNecessary();
                 }
 
+                if (sObserver != null) sObserver.onFlowIsKnown(mFreProperties);
                 recordFreProgressHistogram(mFreProgressStates.get(0));
             }
         };
@@ -258,6 +269,11 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
         }
     }
 
+    @Override
+    public boolean shouldStartGpuProcess() {
+        return true;
+    }
+
     // Activity:
 
     @Override
@@ -280,6 +296,17 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         outState.putAll(mFreProperties);
+    }
+
+    @Override
+    public void onRestoreInstanceState(Bundle state) {
+        // Don't automatically restore state here. This is a counterpart to the override
+        // of transformSavedInstanceStateForOnCreate() as the two need to be consistent.
+        // The default implementation of this would restore the state of the views, which
+        // would otherwise cause a crash in ViewPager used to manage fragments - as it
+        // expects consistency between the states restored by onCreate() and this method.
+        // Activity doesn't check for null on the parameter, so pass an empty bundle.
+        super.onRestoreInstanceState(new Bundle());
     }
 
     @Override
@@ -339,8 +366,8 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
     @Override
     public ProfileDataCache getProfileDataCache() {
         if (mProfileDataCache == null) {
-            mProfileDataCache = new ProfileDataCache(FirstRunActivity.this, null);
-            mProfileDataCache.setProfile(Profile.getLastUsedProfile());
+            mProfileDataCache =
+                    new ProfileDataCache(FirstRunActivity.this, Profile.getLastUsedProfile());
         }
         return mProfileDataCache;
     }
@@ -363,6 +390,7 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
         finishAllTheActivities(getLocalClassName(), Activity.RESULT_CANCELED, intent);
 
         sendPendingIntentIfNecessary(false);
+        if (sObserver != null) sObserver.onAbortFirstRunExperience();
     }
 
     @Override
@@ -414,6 +442,10 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
         resultData.putExtras(mFreProperties);
         finishAllTheActivities(getLocalClassName(), Activity.RESULT_OK, resultData);
 
+        // Update the search engine name cached by the widget.
+        SearchWidgetProvider.updateCachedEngineName();
+        if (sObserver != null) sObserver.onUpdateCachedEngineName();
+
         sendPendingIntentIfNecessary(true);
     }
 
@@ -436,7 +468,9 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
 
     @Override
     public boolean didAcceptTermsOfService() {
-        return sGlue.didAcceptTermsOfService(getApplicationContext());
+        boolean result = sGlue.didAcceptTermsOfService(getApplicationContext());
+        if (sObserver != null) sObserver.onAcceptTermsOfService();
+        return result;
     }
 
     @Override
@@ -518,6 +552,8 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
      * @param position A page index to transition to.
      */
     private boolean jumpToPage(int position) {
+        if (sObserver != null) sObserver.onJumpToPage(position);
+
         if (mShowWelcomePage && !didAcceptTermsOfService()) {
             return position == 0;
         }
@@ -573,5 +609,11 @@ public class FirstRunActivity extends AsyncInitializationActivity implements Fir
     @Override
     public void showInfoPage(int url) {
         CustomTabActivity.showInfoPage(this, getString(url));
+    }
+
+    @VisibleForTesting
+    public static void setObserverForTest(FirstRunActivityObserver observer) {
+        assert sObserver == null;
+        sObserver = observer;
     }
 }

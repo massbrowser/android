@@ -5,20 +5,20 @@
 package org.chromium.chrome.browser.ntp.cards;
 
 import android.support.annotation.CallSuper;
+import android.support.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.chrome.browser.ntp.NewTabPageUma;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
-import org.chromium.chrome.browser.ntp.snippets.CategoryStatus.CategoryStatusEnum;
+import org.chromium.chrome.browser.ntp.snippets.CategoryStatus;
 import org.chromium.chrome.browser.ntp.snippets.SectionHeader;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticleViewHolder;
 import org.chromium.chrome.browser.ntp.snippets.SnippetsBridge;
 import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
-import org.chromium.chrome.browser.offlinepages.ClientId;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
-import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
+import org.chromium.chrome.browser.suggestions.SuggestionsOfflineModelObserver;
 import org.chromium.chrome.browser.suggestions.SuggestionsRanker;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
 
@@ -37,12 +37,9 @@ import java.util.Set;
 public class SuggestionsSection extends InnerNode {
     private static final String TAG = "NtpCards";
 
-    private static final Set<Integer> SECTION_DISMISSAL_GROUP = new HashSet<>(Arrays.asList(1, 2));
-
     private final Delegate mDelegate;
     private final SuggestionsCategoryInfo mCategoryInfo;
-    private final OfflinePageBridge mOfflinePageBridge;
-    private final OfflinePageBridge.OfflinePageModelObserver mOfflinePageObserver;
+    private final OfflineModelObserver mOfflineModelObserver;
 
     // Children
     private final SectionHeader mHeader;
@@ -65,11 +62,24 @@ public class SuggestionsSection extends InnerNode {
     private boolean mHasAppended;
 
     /**
+     * Whether the data displayed by this section is not the latest available and should be updated
+     * when the user stops interacting with this UI surface.
+     */
+    private boolean mIsDataStale;
+
+    /**
      * Delegate interface that allows dismissing this section without introducing
      * a circular dependency.
      */
     public interface Delegate {
+        /**
+         * Dismisses a section.
+         * @param section The section to be dismissed.
+         */
         void dismissSection(SuggestionsSection section);
+
+        /** Returns whether the UI surface is in a state that allows the suggestions to be reset. */
+        boolean isResetAllowed();
     }
 
     public SuggestionsSection(Delegate delegate, SuggestionsUiDelegate uiDelegate,
@@ -77,7 +87,6 @@ public class SuggestionsSection extends InnerNode {
             SuggestionsCategoryInfo info) {
         mDelegate = delegate;
         mCategoryInfo = info;
-        mOfflinePageBridge = offlinePageBridge;
 
         mHeader = new SectionHeader(info.getTitle());
         mSuggestionsList = new SuggestionsList(uiDelegate, ranker, info);
@@ -86,33 +95,8 @@ public class SuggestionsSection extends InnerNode {
         mProgressIndicator = new ProgressItem();
         addChildren(mHeader, mSuggestionsList, mStatus, mMoreButton, mProgressIndicator);
 
-        mOfflinePageObserver =
-                new OfflinePageBridge.OfflinePageModelObserver() {
-                    @Override
-                    public void offlinePageModelLoaded() {
-                        updateAllSnippetOfflineAvailability();
-                    }
-
-                    @Override
-                    public void offlinePageAdded(OfflinePageItem addedPage) {
-                        updateAllSnippetOfflineAvailability();
-                    }
-
-                    @Override
-                    public void offlinePageDeleted(long offlineId, ClientId clientId) {
-                        for (SnippetArticle article : mSuggestionsList) {
-                            if (article.requiresExactOfflinePage()) continue;
-                            Long articleOfflineId = article.getOfflinePageOfflineId();
-                            if (articleOfflineId == null) continue;
-                            if (articleOfflineId.longValue() != offlineId) continue;
-                            // The old value cannot be simply removed without a request to the
-                            // model, because there may be an older offline page for the same
-                            // URL.
-                            updateSnippetOfflineAvailability(article);
-                        }
-                    }
-                };
-        mOfflinePageBridge.addObserver(mOfflinePageObserver);
+        mOfflineModelObserver = new OfflineModelObserver(offlinePageBridge);
+        uiDelegate.addDestructionObserver(mOfflineModelObserver);
 
         mStatus.setVisible(!hasSuggestions());
     }
@@ -236,7 +220,7 @@ public class SuggestionsSection extends InnerNode {
     @Override
     @CallSuper
     public void detach() {
-        mOfflinePageBridge.removeObserver(mOfflinePageObserver);
+        mOfflineModelObserver.onDestroy();
         super.detach();
     }
 
@@ -248,7 +232,9 @@ public class SuggestionsSection extends InnerNode {
 
         // When the ActionItem stops being dismissable, it is possible that it was being interacted
         // with. We need to reset the view's related property changes.
-        mMoreButton.notifyItemChanged(0, NewTabPageRecyclerView.RESET_FOR_DISMISS_CALLBACK);
+        if (mMoreButton.isVisible()) {
+            mMoreButton.notifyItemChanged(0, NewTabPageRecyclerView.RESET_FOR_DISMISS_CALLBACK);
+        }
     }
 
     @Override
@@ -312,13 +298,13 @@ public class SuggestionsSection extends InnerNode {
      */
     private void childSeen(int position) {
         Log.d(TAG, "childSeen: position %d in category %d", position, mCategoryInfo.getCategory());
-        assert getStartingOffsetForChild(mSuggestionsList) == 1;
-        // We assume all non-snippet cards come after all cards of type SNIPPET.
+
         if (getItemViewType(position) == ItemViewType.SNIPPET) {
-            // As asserted above, first suggestion has position 1, etc., so the position of this
-            // child coincides with the number of suggestions above this child (including this one).
+            // We assume that all suggestions are clustered together, so the number seen can be
+            // obtained from the index of the last suggestion seen.
+            int firstSuggestionPosition = getStartingOffsetForChild(mSuggestionsList);
             mNumberOfSuggestionsSeen =
-                    Math.max(mNumberOfSuggestionsSeen, position);
+                    Math.max(mNumberOfSuggestionsSeen, position - firstSuggestionPosition + 1);
         }
     }
 
@@ -345,6 +331,10 @@ public class SuggestionsSection extends InnerNode {
         return mSuggestionsList.getItemCount();
     }
 
+    public boolean isDataStale() {
+        return mIsDataStale;
+    }
+
     public String[] getDisplayedSuggestionIds() {
         String[] suggestionIds = new String[mSuggestionsList.getItemCount()];
         for (int i = 0; i < mSuggestionsList.getItemCount(); ++i) {
@@ -354,99 +344,109 @@ public class SuggestionsSection extends InnerNode {
     }
 
     /**
-     * Puts {@code suggestions} into this section. It can either replace all existing suggestions
-     * with the new ones or append the new suggestions at the end of the list. This call may have no
-     * or only partial effect if changing the list of suggestions is not allowed (e.g. because the
-     * user has already seen the suggestions).
-     * @param suggestions The new list of suggestions for the given category.
-     * @param status The new category status.
-     * @param replaceExisting If true, {@code suggestions} replace the current list of suggestions.
-     * If false, {@code suggestions} are appended to current list of suggestions.
+     * Requests the section to update itself. If possible, it will retrieve suggestions from the
+     * backend and use them to replace the current ones. This call may have no or only partial
+     * effect if changing the list of suggestions is not allowed (e.g. because the user has already
+     * seen the suggestions). In that case, the section will be flagged as stale.
+     * (see {@link #isDataStale()})
+     *
+     * @param suggestionsSource The source used to fetch the new suggestions.
      */
-    public void setSuggestions(List<SnippetArticle> suggestions, @CategoryStatusEnum int status,
-            boolean replaceExisting) {
-        Log.d(TAG, "setSuggestions: previous number of suggestions: %d; replace existing: %b",
-                mSuggestionsList.getItemCount(), replaceExisting);
-        if (!SnippetsBridge.isCategoryStatusAvailable(status)) mSuggestionsList.clear();
-
-        if (!replaceExisting) mHasAppended = true;
-
-        // Remove suggestions to be replaced.
-        if (replaceExisting && hasSuggestions()) {
-            if (CardsVariationParameters.ignoreUpdatesForExistingSuggestions()) {
-                Log.d(TAG, "setSuggestions: replacing existing suggestion disabled");
-                NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_FAIL_DISABLED);
-                return;
-            }
-
-            if (mNumberOfSuggestionsSeen >= getSuggestionsCount() || mHasAppended) {
-                Log.d(TAG, "setSuggestions: replacing existing suggestion not possible, all seen");
-                NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_FAIL_ALL_SEEN);
-                return;
-            }
-
-            Log.d(TAG, "setSuggestions: keeping the first %d suggestion",
-                        mNumberOfSuggestionsSeen);
-            mSuggestionsList.clearAllButFirstN(mNumberOfSuggestionsSeen);
-
-            if (mNumberOfSuggestionsSeen > 0) {
-                // Make sure that mSuggestionsList will contain as many elements as newly provided
-                // in suggestions. Remove the kept first element from the new collection, if it
-                // repeats there. Otherwise, remove the last element of the new collection.
-                int targetCountToAppend =
-                        Math.max(0, suggestions.size() - mNumberOfSuggestionsSeen);
-                for (SnippetArticle suggestion : mSuggestionsList) {
-                    suggestions.remove(suggestion);
-                }
-                if (suggestions.size() > targetCountToAppend) {
-                    Log.d(TAG, "setSuggestions: removing %d excess elements from the end",
-                            suggestions.size() - targetCountToAppend);
-                    suggestions.subList(targetCountToAppend, suggestions.size()).clear();
-                }
-            }
-            NewTabPageUma.recordNumberOfSuggestionsSeenBeforeUIUpdateSuccess(
-                    mNumberOfSuggestionsSeen);
-            NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_SUCCESS_REPLACED);
-        } else {
-            NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_SUCCESS_APPENDED);
+    public void updateSuggestions(SuggestionsSource suggestionsSource) {
+        if (mDelegate.isResetAllowed()) clearData();
+        if (!canUpdateSuggestions()) {
+            mIsDataStale = true;
+            Log.d(TAG, "updateSuggestions: Category %d is stale, it can't replace suggestions.",
+                    getCategory());
+            return;
         }
 
-        mProgressIndicator.setVisible(SnippetsBridge.isCategoryLoading(status));
+        List<SnippetArticle> suggestions =
+                suggestionsSource.getSuggestionsForCategory(getCategory());
+        Log.d(TAG, "Received %d new suggestions for category %d, had %d previously.",
+                suggestions.size(), getCategory(), mSuggestionsList.getItemCount());
 
+        // Nothing to append, we can just exit now.
+        // TODO(dgn): Distinguish the init case where we have to wait? (https://crbug.com/711457)
+        if (suggestions.isEmpty()) return;
+
+        Log.d(TAG, "updateSuggestions: keeping the first %d suggestion", mNumberOfSuggestionsSeen);
+        mSuggestionsList.clearAllButFirstN(mNumberOfSuggestionsSeen);
+        if (mNumberOfSuggestionsSeen > 0) {
+            mIsDataStale = true;
+            Log.d(TAG, "updateSuggestions: Category %d is stale, it kept seen suggestions.",
+                    getCategory());
+        }
+
+        trimIncomingSuggestions(suggestions);
+        appendSuggestions(suggestions, false);
+    }
+
+    /**
+     * Adds the provided suggestions to the ones currently displayed by the section.
+     *
+     * @param suggestions The suggestions to be added at the end of the current list.
+     * @param userRequested Whether the operation is explicitly requested by the user, preventing
+     *                      scheduled updates to override the new data.
+     */
+    public void appendSuggestions(List<SnippetArticle> suggestions, boolean userRequested) {
         mSuggestionsList.addAll(suggestions);
 
         for (SnippetArticle article : suggestions) {
             if (!article.requiresExactOfflinePage()) {
-                updateSnippetOfflineAvailability(article);
+                mOfflineModelObserver.updateOfflinableSuggestionAvailability(article);
             }
         }
-    }
 
-    private void updateSnippetOfflineAvailability(final SnippetArticle article) {
-        // This method is not applicable to articles for which the exact offline id must specified.
-        assert !article.requiresExactOfflinePage();
-        if (!mOfflinePageBridge.isOfflinePageModelLoaded()) return;
-        // TabId is relevant only for recent tab offline pages, which we do not handle here, so we
-        // do not care about tab id.
-        mOfflinePageBridge.selectPageForOnlineUrl(
-                article.mUrl, /*tabId=*/0, new Callback<OfflinePageItem>() {
-                    @Override
-                    public void onResult(OfflinePageItem item) {
-                        mSuggestionsList.updateSuggestionOfflineId(
-                                article, item == null ? null : item.getOfflineId());
-                    }
-                });
+        if (userRequested) {
+            NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_SUCCESS_APPENDED);
+            mHasAppended = true;
+        } else {
+            NewTabPageUma.recordNumberOfSuggestionsSeenBeforeUIUpdateSuccess(
+                    mNumberOfSuggestionsSeen);
+            NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_SUCCESS_REPLACED);
+        }
     }
 
     /**
-     * Checks which SnippetArticles are available offline and updates them with offline id of the
-     * matched offline page.
+     * De-duplicates the new suggestions with the ones kept in {@link #mSuggestionsList} and removes
+     * the excess of incoming items to make sure that the merged list has at most as many items as
+     * the incoming list.
      */
-    private void updateAllSnippetOfflineAvailability() {
-        for (final SnippetArticle article : mSuggestionsList) {
-            if (article.requiresExactOfflinePage()) continue;
-            updateSnippetOfflineAvailability(article);
+    private void trimIncomingSuggestions(List<SnippetArticle> suggestions) {
+        if (mNumberOfSuggestionsSeen == 0) return;
+
+        int targetCountToAppend = Math.max(0, suggestions.size() - mNumberOfSuggestionsSeen);
+        for (SnippetArticle suggestion : mSuggestionsList) {
+            suggestions.remove(suggestion);
         }
+
+        if (suggestions.size() > targetCountToAppend) {
+            Log.d(TAG, "trimIncomingSuggestions: removing %d excess elements from the end",
+                    suggestions.size() - targetCountToAppend);
+            suggestions.subList(targetCountToAppend, suggestions.size()).clear();
+        }
+    }
+
+    /**
+     * Returns whether the list of suggestions can be updated at the moment.
+     */
+    private boolean canUpdateSuggestions() {
+        if (!hasSuggestions()) return true; // If we don't have any, we always accept updates.
+
+        if (CardsVariationParameters.ignoreUpdatesForExistingSuggestions()) {
+            Log.d(TAG, "setSuggestions: replacing existing suggestion disabled");
+            NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_FAIL_DISABLED);
+            return false;
+        }
+
+        if (mNumberOfSuggestionsSeen >= getSuggestionsCount() || mHasAppended) {
+            Log.d(TAG, "setSuggestions: replacing existing suggestion not possible, all seen");
+            NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_FAIL_ALL_SEEN);
+            return false;
+        }
+
+        return true;
     }
 
     /** Lets the {@link SuggestionsSection} know when a suggestion fetch has been started. */
@@ -455,9 +455,20 @@ public class SuggestionsSection extends InnerNode {
     }
 
     /** Sets the status for the section. Some statuses can cause the suggestions to be cleared. */
-    public void setStatus(@CategoryStatusEnum int status) {
-        if (!SnippetsBridge.isCategoryStatusAvailable(status)) mSuggestionsList.clear();
+    public void setStatus(@CategoryStatus int status) {
+        if (!SnippetsBridge.isCategoryStatusAvailable(status)) {
+            clearData();
+            Log.d(TAG, "setStatus: unavailable status, cleared suggestions.");
+        }
         mProgressIndicator.setVisible(SnippetsBridge.isCategoryLoading(status));
+    }
+
+    /** Clears the suggestions and related data, resetting the state of the section. */
+    public void clearData() {
+        mSuggestionsList.clear();
+        mNumberOfSuggestionsSeen = 0;
+        mHasAppended = false;
+        mIsDataStale = false;
     }
 
     @CategoryInt
@@ -475,6 +486,11 @@ public class SuggestionsSection extends InnerNode {
         return super.getItemDismissalGroup(position);
     }
 
+    /** Sets the visibility of this section's header. */
+    public void setHeaderVisibility(boolean headerVisibility) {
+        mHeader.setVisible(headerVisibility);
+    }
+
     /**
      * @return The set of indices corresponding to items that can dismiss this entire section
      * (as opposed to individual items in it).
@@ -482,14 +498,11 @@ public class SuggestionsSection extends InnerNode {
     private Set<Integer> getSectionDismissalRange() {
         if (hasSuggestions()) return Collections.emptySet();
 
-        if (!mMoreButton.isVisible()) {
-            assert getStartingOffsetForChild(mStatus) == 1;
-            return Collections.singleton(1);
-        }
+        int statusCardIndex = getStartingOffsetForChild(mStatus);
+        if (!mMoreButton.isVisible()) return Collections.singleton(statusCardIndex);
 
-        assert SECTION_DISMISSAL_GROUP.contains(getStartingOffsetForChild(mStatus));
-        assert SECTION_DISMISSAL_GROUP.contains(getStartingOffsetForChild(mMoreButton));
-        return SECTION_DISMISSAL_GROUP;
+        assert statusCardIndex + 1 == getStartingOffsetForChild(mMoreButton);
+        return new HashSet<>(Arrays.asList(statusCardIndex, statusCardIndex + 1));
     }
 
     public SuggestionsCategoryInfo getCategoryInfo() {
@@ -506,5 +519,25 @@ public class SuggestionsSection extends InnerNode {
 
     ActionItem getActionItemForTesting() {
         return mMoreButton;
+    }
+
+    SectionHeader getHeaderItemForTesting() {
+        return mHeader;
+    }
+
+    private class OfflineModelObserver extends SuggestionsOfflineModelObserver<SnippetArticle> {
+        public OfflineModelObserver(OfflinePageBridge bridge) {
+            super(bridge);
+        }
+
+        @Override
+        public void onSuggestionOfflineIdChanged(SnippetArticle suggestion, @Nullable Long id) {
+            mSuggestionsList.updateSuggestionOfflineId(suggestion, id);
+        }
+
+        @Override
+        public Iterable<SnippetArticle> getOfflinableSuggestions() {
+            return mSuggestionsList;
+        }
     }
 }

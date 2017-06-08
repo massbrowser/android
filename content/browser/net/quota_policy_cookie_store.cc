@@ -13,6 +13,7 @@
 #include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/task_scheduler/post_task.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "net/cookies/canonical_cookie.h"
@@ -153,9 +154,9 @@ std::unique_ptr<net::CookieStore> CreateCookieStore(
     }
 
     if (!background_task_runner.get()) {
-      background_task_runner =
-          BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-              base::SequencedWorkerPool::GetSequenceToken());
+      background_task_runner = base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
     }
 
     scoped_refptr<net::SQLitePersistentCookieStore> sqlite_store(

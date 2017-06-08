@@ -37,12 +37,16 @@ class AURA_EXPORT MusContextFactory : public ui::ContextFactory {
   void OnEstablishedGpuChannel(base::WeakPtr<ui::Compositor> compositor,
                                scoped_refptr<gpu::GpuChannelHost> gpu_channel);
 
+  void OnCompositorFrameSinkAvailable(
+      base::WeakPtr<ui::Compositor> compositor,
+      std::unique_ptr<cc::CompositorFrameSink> compositor_frame_sink);
+
   // ContextFactory:
   void CreateCompositorFrameSink(
       base::WeakPtr<ui::Compositor> compositor) override;
   scoped_refptr<cc::ContextProvider> SharedMainThreadContextProvider() override;
   void RemoveCompositor(ui::Compositor* compositor) override;
-  bool DoesCreateTestContexts() override;
+  double GetRefreshRate() const override;
   uint32_t GetImageTextureTarget(gfx::BufferFormat format,
                                  gfx::BufferUsage usage) override;
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;

@@ -27,6 +27,7 @@
 #include "ipc/message_router.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/associated_binding_set.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
 
 namespace base {
 class MessageLoop;
@@ -37,10 +38,6 @@ class MessageFilter;
 class SyncChannel;
 class SyncMessageFilter;
 }  // namespace IPC
-
-namespace service_manager {
-class Connection;
-}  // namespace service_manager
 
 namespace mojo {
 namespace edk {
@@ -54,7 +51,6 @@ class ChildResourceMessageFilter;
 class FileSystemDispatcher;
 class InProcessChildThreadParams;
 class NotificationDispatcher;
-class PushDispatcher;
 class ServiceWorkerMessageFilter;
 class QuotaDispatcher;
 class QuotaMessageFilter;
@@ -96,14 +92,7 @@ class CONTENT_EXPORT ChildThreadImpl
   void RecordAction(const base::UserMetricsAction& action) override;
   void RecordComputedAction(const std::string& action) override;
   ServiceManagerConnection* GetServiceManagerConnection() override;
-  service_manager::InterfaceRegistry* GetInterfaceRegistry() override;
-  service_manager::InterfaceProvider* GetRemoteInterfaces() override;
-
-  // Returns the service_manager::ServiceInfo for the child process & the
-  // browser process, once available.
-  const service_manager::ServiceInfo& GetChildServiceInfo() const;
-  const service_manager::ServiceInfo& GetBrowserServiceInfo() const;
-  bool IsConnectedToBrowser() const;
+  service_manager::Connector* GetConnector() override;
 
   IPC::SyncChannel* channel() { return channel_.get(); }
 
@@ -135,10 +124,6 @@ class CONTENT_EXPORT ChildThreadImpl
 
   NotificationDispatcher* notification_dispatcher() const {
     return notification_dispatcher_.get();
-  }
-
-  PushDispatcher* push_dispatcher() const {
-    return push_dispatcher_.get();
   }
 
   IPC::SyncMessageFilter* sync_message_filter() const {
@@ -248,23 +233,11 @@ class CONTENT_EXPORT ChildThreadImpl
       const std::string& name,
       mojom::AssociatedInterfaceAssociatedRequest request) override;
 
-  // Called when a connection is received from another service. When that other
-  // service is the browser process, stores the remote's info.
-  void OnServiceConnect(const service_manager::ServiceInfo& local_info,
-                        const service_manager::ServiceInfo& remote_info);
-
   std::unique_ptr<mojo::edk::ScopedIPCSupport> mojo_ipc_support_;
-  std::unique_ptr<service_manager::InterfaceRegistry> interface_registry_;
-  std::unique_ptr<service_manager::InterfaceProvider> remote_interfaces_;
   std::unique_ptr<ServiceManagerConnection> service_manager_connection_;
-  std::unique_ptr<service_manager::Connection> browser_connection_;
-
-  bool connected_to_browser_ = false;
-  service_manager::ServiceInfo child_info_;
-  service_manager::ServiceInfo browser_info_;
 
   mojo::AssociatedBinding<mojom::RouteProvider> route_provider_binding_;
-  mojo::AssociatedBindingSet<mojom::AssociatedInterfaceProvider>
+  mojo::AssociatedBindingSet<mojom::AssociatedInterfaceProvider, int32_t>
       associated_interface_provider_bindings_;
   mojom::RouteProviderAssociatedPtr remote_route_provider_;
 
@@ -301,8 +274,6 @@ class CONTENT_EXPORT ChildThreadImpl
   scoped_refptr<QuotaMessageFilter> quota_message_filter_;
 
   scoped_refptr<NotificationDispatcher> notification_dispatcher_;
-
-  scoped_refptr<PushDispatcher> push_dispatcher_;
 
   std::unique_ptr<base::PowerMonitor> power_monitor_;
 

@@ -19,10 +19,10 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/safe_browsing/common/safebrowsing_messages.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "components/safe_browsing_db/database_manager.h"
 #include "components/safe_browsing_db/test_database_manager.h"
 #include "content/public/browser/navigation_entry.h"
@@ -47,7 +47,7 @@ using ::testing::NotNull;
 using ::testing::Pointee;
 using ::testing::Return;
 using ::testing::SaveArg;
-using ::testing::SetArgumentPointee;
+using ::testing::SetArgPointee;
 using ::testing::StrictMock;
 using content::BrowserThread;
 using content::RenderFrameHostTester;
@@ -284,8 +284,8 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     }
     if (get_valid_cached_result) {
       EXPECT_CALL(*csd_service_, GetValidCachedResult(url, NotNull()))
-          .WillOnce(DoAll(SetArgumentPointee<1>(true),
-                          Return(*get_valid_cached_result)));
+          .WillOnce(
+              DoAll(SetArgPointee<1>(true), Return(*get_valid_cached_result)));
     }
     if (is_in_cache) {
       EXPECT_CALL(*csd_service_, IsInCache(url)).WillOnce(Return(*is_in_cache));
@@ -567,8 +567,8 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneShowInterstitial) {
   // Make sure the client object will be deleted.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&MockSafeBrowsingUIManager::InvokeOnBlockingPageComplete,
-                 ui_manager_, resource.callback));
+      base::BindOnce(&MockSafeBrowsingUIManager::InvokeOnBlockingPageComplete,
+                     ui_manager_, resource.callback));
 }
 
 TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
@@ -653,8 +653,8 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
   // Make sure the client object will be deleted.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&MockSafeBrowsingUIManager::InvokeOnBlockingPageComplete,
-                 ui_manager_, resource.callback));
+      base::BindOnce(&MockSafeBrowsingUIManager::InvokeOnBlockingPageComplete,
+                     ui_manager_, resource.callback));
 }
 
 TEST_F(ClientSideDetectionHostTest,
@@ -866,8 +866,8 @@ TEST_F(ClientSideDetectionHostTest,
   // Make sure the client object will be deleted.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&MockSafeBrowsingUIManager::InvokeOnBlockingPageComplete,
-                 ui_manager_, resource.callback));
+      base::BindOnce(&MockSafeBrowsingUIManager::InvokeOnBlockingPageComplete,
+                     ui_manager_, resource.callback));
 }
 
 TEST_F(ClientSideDetectionHostTest, UpdateIPUrlMap) {

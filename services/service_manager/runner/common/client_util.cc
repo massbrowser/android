@@ -8,26 +8,25 @@
 
 #include "base/command_line.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/pending_process_connection.h"
 #include "services/service_manager/runner/common/switches.h"
 
 namespace service_manager {
 
 mojom::ServicePtr PassServiceRequestOnCommandLine(
-    base::CommandLine* command_line, const std::string& child_token) {
-  std::string token = mojo::edk::GenerateRandomToken();
-  command_line->AppendSwitchASCII(switches::kPrimordialPipeToken, token);
-
+    mojo::edk::PendingProcessConnection* connection,
+    base::CommandLine* command_line) {
+  std::string token;
   mojom::ServicePtr client;
-  client.Bind(
-      mojom::ServicePtrInfo(
-          mojo::edk::CreateParentMessagePipe(token, child_token), 0));
+  client.Bind(mojom::ServicePtrInfo(connection->CreateMessagePipe(&token), 0));
+  command_line->AppendSwitchASCII(switches::kServicePipeToken, token);
   return client;
 }
 
 mojom::ServiceRequest GetServiceRequestFromCommandLine() {
   std::string token =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kPrimordialPipeToken);
+          switches::kServicePipeToken);
   mojom::ServiceRequest request;
   if (!token.empty())
     request.Bind(mojo::edk::CreateChildMessagePipe(token));
@@ -36,7 +35,7 @@ mojom::ServiceRequest GetServiceRequestFromCommandLine() {
 
 bool ServiceManagerIsRemote() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kPrimordialPipeToken);
+      switches::kServicePipeToken);
 }
 
 }  // namespace service_manager

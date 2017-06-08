@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 
-#include "ash/common/system/chromeos/devicetype_utils.h"
+#include "ash/system/devicetype_utils.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
@@ -22,8 +22,8 @@ const char kJsScreenPath[] = "login.ErrorMessageScreen";
 namespace chromeos {
 
 ErrorScreenHandler::ErrorScreenHandler()
-    : BaseScreenHandler(kJsScreenPath),
-      weak_ptr_factory_(this) {
+    : BaseScreenHandler(kScreenId), weak_ptr_factory_(this) {
+  set_call_js_prefix(kJsScreenPath);
 }
 
 ErrorScreenHandler::~ErrorScreenHandler() {
@@ -36,7 +36,7 @@ void ErrorScreenHandler::Show() {
     show_on_init_ = true;
     return;
   }
-  BaseScreenHandler::ShowScreen(OobeScreen::SCREEN_ERROR_MESSAGE);
+  BaseScreenHandler::ShowScreen(kScreenId);
   if (screen_)
     screen_->OnShow();
   showing_ = true;

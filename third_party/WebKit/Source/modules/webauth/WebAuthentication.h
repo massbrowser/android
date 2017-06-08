@@ -7,12 +7,12 @@
 
 #include "bindings/core/v8/ArrayBufferOrArrayBufferView.h"
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/DOMArrayBuffer.h"
 #include "modules/webauth/AuthenticationAssertionOptions.h"
 #include "modules/webauth/RelyingPartyAccount.h"
 #include "modules/webauth/ScopedCredentialOptions.h"
 #include "modules/webauth/ScopedCredentialParameters.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -31,13 +31,13 @@ class WebAuthentication final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static WebAuthentication* create(LocalFrame& frame) {
+  static WebAuthentication* Create(LocalFrame& frame) {
     return new WebAuthentication(frame);
   }
 
   virtual ~WebAuthentication();
 
-  void dispose();
+  void Dispose();
 
   ScriptPromise makeCredential(ScriptState*,
                                const RelyingPartyAccount&,

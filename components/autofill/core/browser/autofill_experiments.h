@@ -27,8 +27,12 @@ struct Suggestion;
 extern const base::Feature kAutofillCreditCardAssist;
 extern const base::Feature kAutofillScanCardholderName;
 extern const base::Feature kAutofillCreditCardPopupLayout;
+extern const base::Feature kAutofillCreditCardLastUsedDateDisplay;
+extern const base::Feature kAutofillUkmLogging;
+extern const base::Feature kAutofillUpstreamRequestCvcIfMissing;
 extern const char kCreditCardSigninPromoImpressionLimitParamKey[];
 extern const char kAutofillCreditCardPopupSettingsSuggestionValueKey[];
+extern const char kAutofillCreditCardLastUsedDateShowExpirationDateKey[];
 
 // Returns true if autofill should be enabled. See also
 // IsInAutofillSuggestionsDisabledExperiment below.
@@ -58,6 +62,13 @@ bool IsCreditCardUploadEnabled(const PrefService* pref_service,
 // Returns whether the new Autofill credit card popup layout experiment is
 // enabled.
 bool IsAutofillCreditCardPopupLayoutExperimentEnabled();
+
+// Returns whether Autofill credit card last used date display experiment is
+// enabled.
+bool IsAutofillCreditCardLastUsedDateDisplayExperimentEnabled();
+
+// Returns whether Autofill credit card last used date shows expiration date.
+bool ShowExpirationDateInAutofillCreditCardLastUsedDate();
 
 // Returns the background color for credit card autofill popup, or
 // |SK_ColorTRANSPARENT| if the new credit card autofill popup layout experiment
@@ -90,6 +101,13 @@ void ModifyAutofillCreditCardSuggestion(struct Suggestion* suggestion);
 // if the margin isn't configured in an experiment to tweak autofill popup
 // layout.
 unsigned int GetPopupMargin();
+
+// Returns whether the feature to log UKMs is enabled.
+bool IsUkmLoggingEnabled();
+
+// Returns whether the experiment is enabled where Chrome Upstream requests CVC
+// in the offer to save bubble if it was not detected during the checkout flow.
+bool IsAutofillUpstreamRequestCvcIfMissingExperimentEnabled();
 
 }  // namespace autofill
 

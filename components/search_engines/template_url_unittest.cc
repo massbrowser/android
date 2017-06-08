@@ -6,19 +6,28 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
+#include "base/i18n/case_conversion.h"
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/google/core/browser/google_util.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/search_engines/search_engines_switches.h"
 #include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/testing_search_terms_data.h"
+#include "net/base/url_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
+
+namespace {
+bool IsLowerCase(const base::string16& str) {
+  return str == base::i18n::ToLower(str);
+}
+}
 
 class TemplateURLTest : public testing::Test {
  public:
@@ -1265,6 +1274,14 @@ TEST_F(TemplateURLTest, ExtractSearchTermsWithPrefixAndSuffix) {
   // Don't match if the prefix and suffix aren't there.
   EXPECT_FALSE(url.ExtractSearchTermsFromURL(
       GURL("http://www.example.com/?q=invalid"), search_terms_data_, &result));
+
+  // Don't match if the prefix and suffix overlap.
+  TemplateURLData data_with_overlap;
+  data.alternate_urls.push_back(
+      "http://www.example.com/?q=goo{searchTerms}oogle");
+  TemplateURL url_with_overlap(data);
+  EXPECT_FALSE(url_with_overlap.ExtractSearchTermsFromURL(
+      GURL("http://www.example.com/?q=google"), search_terms_data_, &result));
 }
 
 TEST_F(TemplateURLTest, HasSearchTermsReplacementKey) {
@@ -1732,6 +1749,13 @@ TEST_F(TemplateURLTest, GenerateKeyword) {
   ASSERT_EQ(
       base::UTF8ToUTF16("\xd0\xb0\xd0\xb1\xd0\xb2"),
       TemplateURL::GenerateKeyword(GURL("http://xn--80acd")));
+
+  // Generated keywords must always be in lowercase, because TemplateURLs always
+  // converts keywords to lowercase in its constructor and TemplateURLService
+  // stores TemplateURLs in maps using keyword as key.
+  EXPECT_TRUE(IsLowerCase(TemplateURL::GenerateKeyword(GURL("http://BLAH/"))));
+  EXPECT_TRUE(IsLowerCase(
+      TemplateURL::GenerateKeyword(GURL("http://embeddedhtml.<head>/"))));
 }
 
 TEST_F(TemplateURLTest, GenerateSearchURL) {
@@ -1867,4 +1891,44 @@ TEST_F(TemplateURLTest, InvalidateCachedValues) {
   EXPECT_EQ(base::ASCIIToUTF16("123"), search_terms);
 
   search_terms_data_.set_google_base_url("http://www.google.com/");
+}
+
+// search_terms_replacement_key param of TemplateURLData with value of
+// "{google:instantExtendedEnabledKey}" is replaced inside TemplateUrl
+// constructor so must be handled specially inside MatchesData.
+// Test that TemplateURL object created with such param matches correctly its
+// TemplateURLData.
+TEST_F(TemplateURLTest, MatchesData) {
+  TemplateURLData data;
+  data.search_terms_replacement_key =
+      google_util::kGoogleInstantExtendedEnabledKeyFull;
+  TemplateURL url(data);
+  EXPECT_NE(google_util::kGoogleInstantExtendedEnabledKeyFull,
+            url.search_terms_replacement_key());
+  EXPECT_TRUE(TemplateURL::MatchesData(&url, &data, search_terms_data_));
+}
+
+// Test for correct replacement of GoogleInstantExtendedEnabledKey param.
+TEST_F(TemplateURLTest, GoogleInstantExtendedEnabledReplacement) {
+  TemplateURLData data;
+  data.SetURL(std::string("https://www.google.com?") +
+              google_util::kGoogleInstantExtendedEnabledKeyFull +
+              "&q={searchTerms}");
+  data.SetShortName(ASCIIToUTF16("Google"));
+  data.SetKeyword(ASCIIToUTF16("google.com"));
+  data.search_terms_replacement_key =
+      google_util::kGoogleInstantExtendedEnabledKeyFull;
+  TemplateURL turl(data);
+  EXPECT_TRUE(TemplateURL::MatchesData(&turl, &data, search_terms_data_));
+  // Expect that replacement of search_terms_replacement_key in TemplateURL
+  // constructor is correct.
+  EXPECT_EQ(google_util::kInstantExtendedAPIParam,
+            turl.search_terms_replacement_key());
+  // Expect that replacement of {google:instantExtendedEnabledKey} in search url
+  // is correct.
+  GURL search_generated = turl.GenerateSearchURL(search_terms_data_);
+  EXPECT_TRUE(turl.HasSearchTermsReplacementKey(search_generated));
+  net::QueryIterator it(search_generated);
+  ASSERT_FALSE(it.IsAtEnd());
+  EXPECT_EQ(google_util::kInstantExtendedAPIParam, it.GetKey());
 }

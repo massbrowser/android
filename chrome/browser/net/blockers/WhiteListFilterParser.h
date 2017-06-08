@@ -13,7 +13,8 @@ public:
   bool matches(const char *input, const char *contextDomain = nullptr);
   void deserialize(char *buffer);
 
-  char *src_data;
+  char **src_data;
+  int src_data_size;
 
 };
 

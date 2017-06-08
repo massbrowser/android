@@ -11,26 +11,45 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
+#include "chrome/browser/android/vr_shell/vr_browser_interface.h"
 #include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_types.h"
 
 namespace vr_shell {
 
+class UiScene;
+class UiSceneManager;
 class VrShell;
-class VrShellDelegate;
 class VrShellGl;
 
-class VrGLThread : public base::Thread {
+class VrGLThread : public VrBrowserInterface, public base::Thread {
  public:
   VrGLThread(
       const base::WeakPtr<VrShell>& weak_vr_shell,
-      const base::WeakPtr<VrShellDelegate>& delegate_provider,
       scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
       gvr_context* gvr_api,
       bool initially_web_vr,
+      bool in_cct,
       bool reprojected_rendering);
 
   ~VrGLThread() override;
   base::WeakPtr<VrShellGl> GetVrShellGl() { return weak_vr_shell_gl_; }
+  base::WeakPtr<UiSceneManager> GetSceneManager() {
+    return weak_scene_manager_;
+  }
+
+  // VrBrowserInterface implementation.
+  void ContentSurfaceChanged(jobject surface) override;
+  void GvrDelegateReady() override;
+  void UpdateGamepadData(device::GvrGamepadData) override;
+  void AppButtonGesturePerformed(UiInterface::Direction direction) override;
+  void OnAppButtonClicked() override;
+  void ProcessContentGesture(
+      std::unique_ptr<blink::WebInputEvent> event) override;
+  void ForceExitVr() override;
+  void RunVRDisplayInfoCallback(
+      const base::Callback<void(device::mojom::VRDisplayInfoPtr)>& callback,
+      device::mojom::VRDisplayInfoPtr* info) override;
+  void OnContentPaused(bool enabled) override;
 
  protected:
   void Init() override;
@@ -38,15 +57,18 @@ class VrGLThread : public base::Thread {
 
  private:
   // Created on GL thread.
+  std::unique_ptr<UiScene> scene_;
+  std::unique_ptr<UiSceneManager> scene_manager_;
+  base::WeakPtr<UiSceneManager> weak_scene_manager_;
   std::unique_ptr<VrShellGl> vr_shell_gl_;
   base::WeakPtr<VrShellGl> weak_vr_shell_gl_;
 
   // This state is used for initializing vr_shell_gl_.
   base::WeakPtr<VrShell> weak_vr_shell_;
-  base::WeakPtr<VrShellDelegate> delegate_provider_;
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
   gvr_context* gvr_api_;
   bool initially_web_vr_;
+  bool in_cct_;
   bool reprojected_rendering_;
 
   DISALLOW_COPY_AND_ASSIGN(VrGLThread);

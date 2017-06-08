@@ -37,6 +37,7 @@ class PopularSites {
     GURL favicon_url;
     GURL large_icon_url;
     GURL thumbnail_url;
+    int default_icon_resource;  // < 0 if there is none. Used for popular sites.
   };
 
   using SitesVector = std::vector<Site>;
@@ -65,6 +66,7 @@ class PopularSites {
   // Various internals exposed publicly for diagnostic pages only.
   virtual GURL GetLastURLFetched() const = 0;
   virtual GURL GetURLToFetch() = 0;
+  virtual std::string GetDirectoryToFetch() = 0;
   virtual std::string GetCountryToFetch() = 0;
   virtual std::string GetVersionToFetch() = 0;
   virtual const base::ListValue* GetCachedJson() = 0;

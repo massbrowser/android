@@ -149,7 +149,6 @@ Emulation.DeviceModeToolbar = class {
     this._deviceScaleItem.setTitle(Common.UIString('Device pixel ratio'));
     this._deviceScaleItem.setGlyph('');
     this._deviceScaleItem.turnIntoSelect();
-    this._deviceScaleItem.element.style.padding = '0 5px';
     toolbar.appendToolbarItem(this._deviceScaleItem);
 
     toolbar.appendToolbarItem(
@@ -159,7 +158,6 @@ Emulation.DeviceModeToolbar = class {
     this._uaItem.setTitle(Common.UIString('Device type'));
     this._uaItem.setGlyph('');
     this._uaItem.turnIntoSelect();
-    this._uaItem.element.style.padding = '0 5px';
     toolbar.appendToolbarItem(this._uaItem);
   }
 
@@ -178,10 +176,9 @@ Emulation.DeviceModeToolbar = class {
    * @param {!UI.Toolbar} toolbar
    */
   _fillOptionsToolbar(toolbar) {
-    this._networkConditionsItem = Components.NetworkConditionsSelector.createToolbarMenuButton();
+    this._networkConditionsItem = NetworkConditions.NetworkConditionsSelector.createToolbarMenuButton();
     this._networkConditionsItem.setVisible(this._showNetworkConditionsSetting.get());
     this._networkConditionsItem.setTitle(Common.UIString('Network throttling'));
-    this._networkConditionsItem.element.style.padding = '0 5px';
     this._networkConditionsItem.element.style.maxWidth = '140px';
     toolbar.appendToolbarItem(this._networkConditionsItem);
 

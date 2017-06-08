@@ -6,21 +6,21 @@
 #define Worklet_h
 
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/ScriptPromiseResolver.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/loader/WorkletScriptLoader.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "platform/loader/fetch/ResourceFetcher.h"
 
 namespace blink {
 
 class LocalFrame;
 class WorkletGlobalScopeProxy;
 
+// This is the base implementation of Worklet interface defined in the spec:
+// https://drafts.css-houdini.org/worklets/#worklet
+// Although some worklets run off the main thread, this must be created and
+// destroyed on the main thread.
 class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
-                            public WorkletScriptLoader::Client,
                             public ScriptWrappable,
                             public ContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
@@ -30,20 +30,15 @@ class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
  public:
   virtual ~Worklet() = default;
 
-  virtual void initialize() {}
-  virtual bool isInitialized() const { return true; }
+  // Worklet.idl
+  // addModule() imports ES6 module scripts.
+  virtual ScriptPromise addModule(ScriptState*, const String& module_url) = 0;
 
-  virtual WorkletGlobalScopeProxy* workletGlobalScopeProxy() const = 0;
-
-  // Worklet
-  ScriptPromise import(ScriptState*, const String& url);
-
-  // WorkletScriptLoader::Client
-  void notifyWorkletScriptLoadingFinished(WorkletScriptLoader*,
-                                          const ScriptSourceCode&) final;
+  // Returns a proxy to WorkletGlobalScope on the context thread.
+  virtual WorkletGlobalScopeProxy* GetWorkletGlobalScopeProxy() const = 0;
 
   // ContextLifecycleObserver
-  void contextDestroyed(ExecutionContext*) final;
+  virtual void ContextDestroyed(ExecutionContext*);
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -51,10 +46,7 @@ class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
   // The Worklet inherits the url and userAgent from the frame->document().
   explicit Worklet(LocalFrame*);
 
- private:
-  Member<LocalFrame> m_frame;
-  HeapHashMap<Member<WorkletScriptLoader>, Member<ScriptPromiseResolver>>
-      m_loaderAndResolvers;
+  Member<LocalFrame> frame_;
 };
 
 }  // namespace blink

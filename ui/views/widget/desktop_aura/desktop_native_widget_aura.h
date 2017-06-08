@@ -98,7 +98,7 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
   void HandleActivationChanged(bool active);
 
   // Overridden from internal::NativeWidgetPrivate:
-  void SetNativeWindowProperty(const char* name, void* value) override;
+  gfx::NativeWindow GetNativeWindow() const override;
 
  protected:
   // Overridden from internal::NativeWidgetPrivate:
@@ -111,12 +111,12 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
   Widget* GetWidget() override;
   const Widget* GetWidget() const override;
   gfx::NativeView GetNativeView() const override;
-  gfx::NativeWindow GetNativeWindow() const override;
   Widget* GetTopLevelWidget() override;
   const ui::Compositor* GetCompositor() const override;
   const ui::Layer* GetLayer() const override;
   void ReorderNativeViews() override;
   void ViewRemoved(View* view) override;
+  void SetNativeWindowProperty(const char* name, void* value) override;
   void* GetNativeWindowProperty(const char* name) const override;
   TooltipManager* GetTooltipManager() const override;
   void SetCapture() override;
@@ -258,11 +258,7 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
 
   std::unique_ptr<DesktopCaptureClient> capture_client_;
 
-  // Child of the root, contains |content_window_|.
-  aura::Window* content_window_container_;
-
-  // Child of |content_window_container_|. This is the return value from
-  // GetNativeView().
+  // This is the return value from GetNativeView().
   // WARNING: this may be NULL, in particular during shutdown it becomes NULL.
   aura::Window* content_window_;
 

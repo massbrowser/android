@@ -22,8 +22,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_target_determiner.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -81,7 +79,7 @@ class DefaultDownloadDirectory {
   const base::FilePath& path() const { return path_; }
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<DefaultDownloadDirectory>;
+  friend struct base::LazyInstanceTraitsBase<DefaultDownloadDirectory>;
 
   DefaultDownloadDirectory() {
     if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path_)) {
@@ -101,7 +99,7 @@ class DefaultDownloadDirectory {
   DISALLOW_COPY_AND_ASSIGN(DefaultDownloadDirectory);
 };
 
-base::LazyInstance<DefaultDownloadDirectory>
+base::LazyInstance<DefaultDownloadDirectory>::DestructorAtExit
     g_default_download_directory = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace

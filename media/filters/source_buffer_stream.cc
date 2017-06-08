@@ -139,7 +139,7 @@ SourceBufferRange::GapPolicy TypeToGapPolicy(SourceBufferStream::Type type) {
 }  // namespace
 
 SourceBufferStream::SourceBufferStream(const AudioDecoderConfig& audio_config,
-                                       const scoped_refptr<MediaLog>& media_log)
+                                       MediaLog* media_log)
     : media_log_(media_log),
       seek_buffer_timestamp_(kNoTimestamp),
       coded_frame_group_start_time_(kNoDecodeTimestamp()),
@@ -152,7 +152,7 @@ SourceBufferStream::SourceBufferStream(const AudioDecoderConfig& audio_config,
 }
 
 SourceBufferStream::SourceBufferStream(const VideoDecoderConfig& video_config,
-                                       const scoped_refptr<MediaLog>& media_log)
+                                       MediaLog* media_log)
     : media_log_(media_log),
       seek_buffer_timestamp_(kNoTimestamp),
       coded_frame_group_start_time_(kNoDecodeTimestamp()),
@@ -165,7 +165,7 @@ SourceBufferStream::SourceBufferStream(const VideoDecoderConfig& video_config,
 }
 
 SourceBufferStream::SourceBufferStream(const TextTrackConfig& text_config,
-                                       const scoped_refptr<MediaLog>& media_log)
+                                       MediaLog* media_log)
     : media_log_(media_log),
       text_track_config_(text_config),
       seek_buffer_timestamp_(kNoTimestamp),
@@ -1551,12 +1551,18 @@ bool SourceBufferStream::IsEndOfStreamReached() const {
 const AudioDecoderConfig& SourceBufferStream::GetCurrentAudioDecoderConfig() {
   if (config_change_pending_)
     CompleteConfigChange();
+  // Trying to track down crash. http://crbug.com/715761
+  CHECK(current_config_index_ >= 0 &&
+        static_cast<size_t>(current_config_index_) < audio_configs_.size());
   return audio_configs_[current_config_index_];
 }
 
 const VideoDecoderConfig& SourceBufferStream::GetCurrentVideoDecoderConfig() {
   if (config_change_pending_)
     CompleteConfigChange();
+  // Trying to track down crash. http://crbug.com/715761
+  CHECK(current_config_index_ >= 0 &&
+        static_cast<size_t>(current_config_index_) < video_configs_.size());
   return video_configs_[current_config_index_];
 }
 
@@ -1577,12 +1583,6 @@ bool SourceBufferStream::UpdateAudioConfig(const AudioDecoderConfig& config) {
 
   if (audio_configs_[0].codec() != config.codec()) {
     MEDIA_LOG(ERROR, media_log_) << "Audio codec changes not allowed.";
-    return false;
-  }
-
-  if (!audio_configs_[0].encryption_scheme().Matches(
-          config.encryption_scheme())) {
-    MEDIA_LOG(ERROR, media_log_) << "Audio encryption changes not allowed.";
     return false;
   }
 
@@ -1609,12 +1609,6 @@ bool SourceBufferStream::UpdateVideoConfig(const VideoDecoderConfig& config) {
 
   if (video_configs_[0].codec() != config.codec()) {
     MEDIA_LOG(ERROR, media_log_) << "Video codec changes not allowed.";
-    return false;
-  }
-
-  if (!video_configs_[0].encryption_scheme().Matches(
-          config.encryption_scheme())) {
-    MEDIA_LOG(ERROR, media_log_) << "Video encryption changes not allowed.";
     return false;
   }
 

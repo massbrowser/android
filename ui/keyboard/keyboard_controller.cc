@@ -96,9 +96,10 @@ class KeyboardWindowDelegate : public aura::WindowDelegate {
 void ToggleTouchEventLogging(bool enable) {
 #if defined(OS_CHROMEOS)
 #if defined(USE_OZONE)
-  ui::OzonePlatform::GetInstance()
-      ->GetInputController()
-      ->SetTouchEventLoggingEnabled(enable);
+  ui::InputController* controller =
+      ui::OzonePlatform::GetInstance()->GetInputController();
+  if (controller)
+    controller->SetTouchEventLoggingEnabled(enable);
 #elif defined(USE_X11)
   if (!base::SysInfo::IsRunningOnChromeOS())
     return;
@@ -175,7 +176,6 @@ KeyboardController::KeyboardController(KeyboardUI* ui,
       show_on_resize_(false),
       keyboard_locked_(false),
       keyboard_mode_(FULL_WIDTH),
-      type_(ui::TEXT_INPUT_TYPE_NONE),
       weak_factory_(this) {
   CHECK(ui);
   input_method_ = ui_->GetInputMethod();
@@ -188,6 +188,7 @@ KeyboardController::~KeyboardController() {
     if (container_->GetRootWindow())
       container_->GetRootWindow()->RemoveObserver(this);
     container_->RemoveObserver(this);
+    container_->RemovePreTargetHandler(&event_filter_);
   }
   if (input_method_)
     input_method_->RemoveObserver(this);
@@ -216,7 +217,12 @@ aura::Window* KeyboardController::GetContainerWindow() {
     container_->Init(ui::LAYER_NOT_DRAWN);
     container_->AddObserver(this);
     container_->SetLayoutManager(new KeyboardLayoutManager(this));
+    container_->AddPreTargetHandler(&event_filter_);
   }
+  return container_.get();
+}
+
+aura::Window* KeyboardController::GetContainerWindowWithoutCreationForTest() {
   return container_.get();
 }
 
@@ -267,6 +273,10 @@ void KeyboardController::HideKeyboard(HideReason reason) {
 
 void KeyboardController::AddObserver(KeyboardControllerObserver* observer) {
   observer_list_.AddObserver(observer);
+}
+
+bool KeyboardController::HasObserver(KeyboardControllerObserver* observer) {
+  return observer_list_.HasObserver(observer);
 }
 
 void KeyboardController::RemoveObserver(KeyboardControllerObserver* observer) {
@@ -363,9 +373,10 @@ void KeyboardController::OnTextInputStateChanged(
   if (!container_.get())
     return;
 
-  type_ = client ? client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
+  ui::TextInputType type =
+      client ? client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
 
-  if (type_ == ui::TEXT_INPUT_TYPE_NONE && !keyboard_locked_) {
+  if (type == ui::TEXT_INPUT_TYPE_NONE && !keyboard_locked_) {
     if (keyboard_visible_) {
       // Set the visibility state here so that any queries for visibility
       // before the timer fires returns the correct future value.
@@ -382,7 +393,7 @@ void KeyboardController::OnTextInputStateChanged(
       weak_factory_.InvalidateWeakPtrs();
       keyboard_visible_ = true;
     }
-    ui_->SetUpdateInputType(type_);
+    ui_->SetUpdateInputType(type);
     // Do not explicitly show the Virtual keyboard unless it is in the process
     // of hiding. Instead, the virtual keyboard is shown in response to a user
     // gesture (mouse or touch) that is received while an element has input
@@ -404,8 +415,9 @@ void KeyboardController::OnShowImeIfNeeded() {
 }
 
 void KeyboardController::ShowKeyboardInternal(int64_t display_id) {
-  if (!container_.get())
-    return;
+  // The container window should have been created already when
+  // |Shell::CreateKeyboard| is called.
+  DCHECK(container_.get());
 
   if (container_->children().empty()) {
     keyboard::MarkKeyboardLoadStarted();

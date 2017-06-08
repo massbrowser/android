@@ -1,12 +1,9 @@
 package org.chromium.chrome.browser.coins;
 
-import android.content.Context;
+import  android.content.Context;
 import android.content.SharedPreferences;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -22,7 +19,7 @@ public class CoinsSingleton {
     public static CoinsSingleton getInstance() {
         return instance;
     }
-    private float value = 0;
+    private float value;
     private CoinType currentType = CoinType.MASS_COIN;
     private List<ChangeListener> changeListeners = new ArrayList<ChangeListener>();
 
@@ -33,7 +30,8 @@ public class CoinsSingleton {
     private SharedPreferences sharedPreferences;
     private long lastTimeInc = 0;
     public void init(Context context) {
-        sharedPreferences = context.getSharedPreferences("coins", Context.MODE_PRIVATE);
+
+        sharedPreferences = context.getApplicationContext().getSharedPreferences("coins", Context.MODE_PRIVATE);
         value = sharedPreferences.getFloat(COIN_COUNT, 0);
         useTime = sharedPreferences.getLong(USE_TIME, 0);
         oneSurfReward = sharedPreferences.getFloat(ONE_SURF_REWARD, 1f);

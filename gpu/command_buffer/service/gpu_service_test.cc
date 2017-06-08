@@ -16,8 +16,7 @@
 namespace gpu {
 namespace gles2 {
 
-GpuServiceTest::GpuServiceTest() : ran_setup_(false), ran_teardown_(false) {
-}
+GpuServiceTest::GpuServiceTest() : ran_setup_(false), ran_teardown_(false) {}
 
 GpuServiceTest::~GpuServiceTest() {
   DCHECK(ran_teardown_);

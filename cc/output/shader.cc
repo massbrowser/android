@@ -13,6 +13,7 @@
 #include "base/strings/stringprintf.h"
 #include "cc/output/static_geometry_binding.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "ui/gfx/color_transform.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -60,28 +61,32 @@ static void GetProgramUniformLocations(GLES2Interface* context,
 static std::string SetFragmentTexCoordPrecision(
     TexCoordPrecision requested_precision,
     std::string shader_string) {
+  std::string prefix;
   switch (requested_precision) {
     case TEX_COORD_PRECISION_HIGH:
       DCHECK_NE(shader_string.find("TexCoordPrecision"), std::string::npos);
-      return "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
-             "  #define TexCoordPrecision highp\n"
-             "#else\n"
-             "  #define TexCoordPrecision mediump\n"
-             "#endif\n" +
-             shader_string;
+      prefix =
+          "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+          "  #define TexCoordPrecision highp\n"
+          "#else\n"
+          "  #define TexCoordPrecision mediump\n"
+          "#endif\n";
+      break;
     case TEX_COORD_PRECISION_MEDIUM:
       DCHECK_NE(shader_string.find("TexCoordPrecision"), std::string::npos);
-      return "#define TexCoordPrecision mediump\n" + shader_string;
+      prefix = "#define TexCoordPrecision mediump\n";
+      break;
     case TEX_COORD_PRECISION_NA:
       DCHECK_EQ(shader_string.find("TexCoordPrecision"), std::string::npos);
       DCHECK_EQ(shader_string.find("texture2D"), std::string::npos);
       DCHECK_EQ(shader_string.find("texture2DRect"), std::string::npos);
-      return shader_string;
+      break;
     default:
       NOTREACHED();
       break;
   }
-  return shader_string;
+  std::string lut_prefix = "#define LutLookup texture2D\n";
+  return prefix + lut_prefix + shader_string;
 }
 
 TexCoordPrecision TexCoordPrecisionRequired(GLES2Interface* context,
@@ -368,7 +373,7 @@ std::string VertexShader::GetShaderString() const {
     DCHECK(use_uniform_arrays_);
     HDR("uniform float opacity[NUM_QUADS * 4];");
     HDR("varying float v_alpha;");
-    SRC("v_alpha = opacity[quad_index];");
+    SRC("v_alpha = opacity[vertex_index];");
   }
 
   // Add cargo-culted dummy variables for Android.
@@ -435,7 +440,8 @@ void FragmentShader::Init(GLES2Interface* context,
         uniforms.push_back("a_texture");
       uniforms.push_back("ya_clamp_rect");
       uniforms.push_back("uv_clamp_rect");
-      uniforms.push_back("yuv_and_resource_matrix");
+      uniforms.push_back("resource_multiplier");
+      uniforms.push_back("resource_offset");
       break;
     case INPUT_COLOR_SOURCE_UNIFORM:
       uniforms.push_back("color");
@@ -488,7 +494,8 @@ void FragmentShader::Init(GLES2Interface* context,
         a_texture_location_ = locations[index++];
       ya_clamp_rect_location_ = locations[index++];
       uv_clamp_rect_location_ = locations[index++];
-      yuv_and_resource_matrix_location_ = locations[index++];
+      resource_multiplier_location_ = locations[index++];
+      resource_offset_location_ = locations[index++];
       break;
     case INPUT_COLOR_SOURCE_UNIFORM:
       color_location_ = locations[index++];
@@ -858,10 +865,12 @@ std::string FragmentShader::GetShaderSource() const {
         HDR("uniform SamplerType a_texture;");
       HDR("uniform vec4 ya_clamp_rect;");
       HDR("uniform vec4 uv_clamp_rect;");
-      HDR("uniform mat4 yuv_and_resource_matrix;");
+      HDR("uniform float resource_multiplier;");
+      HDR("uniform float resource_offset;");
       HDR("varying TexCoordPrecision vec2 v_yaTexCoord;");
       HDR("varying TexCoordPrecision vec2 v_uvTexCoord;");
-      SRC("texColor = yuv_and_resource_matrix * texColor;");
+      SRC("texColor.xyz -= vec3(resource_offset);");
+      SRC("texColor.xyz *= resource_multiplier;");
       break;
     case INPUT_COLOR_SOURCE_UNIFORM:
       DCHECK(!ignore_sampler_type_);
@@ -873,22 +882,30 @@ std::string FragmentShader::GetShaderSource() const {
   }
 
   // Apply LUT based color conversion.
-  if (color_conversion_mode_ == COLOR_CONVERSION_MODE_LUT) {
-    HDR("uniform sampler2D lut_texture;");
-    HDR("uniform float lut_size;");
-    HDR("vec4 LUT(sampler2D sampler, vec3 pos, float size) {");
-    HDR("  pos *= size - 1.0;");
-    HDR("  // Select layer");
-    HDR("  float layer = min(floor(pos.z), size - 2.0);");
-    HDR("  // Compress the xy coordinates so they stay within");
-    HDR("  // [0.5 .. 31.5] / N (assuming a LUT size of 17^3)");
-    HDR("  pos.xy = (pos.xy + vec2(0.5)) / size;");
-    HDR("  pos.y = (pos.y + layer) / size;");
-    HDR("  return mix(texture2D(sampler, pos.xy),");
-    HDR("             texture2D(sampler, pos.xy + vec2(0, 1.0 / size)),");
-    HDR("             pos.z - layer);");
-    HDR("}");
-    SRC("texColor.xyz = LUT(lut_texture, texColor.xyz, lut_size).xyz;");
+  switch (color_conversion_mode_) {
+    case COLOR_CONVERSION_MODE_LUT:
+      HDR("uniform sampler2D lut_texture;");
+      HDR("uniform float lut_size;");
+      HDR("vec4 LUT(sampler2D sampler, vec3 pos, float size) {");
+      HDR("  pos *= size - 1.0;");
+      HDR("  // Select layer");
+      HDR("  float layer = min(floor(pos.z), size - 2.0);");
+      HDR("  // Compress the xy coordinates so they stay within");
+      HDR("  // [0.5 .. 31.5] / N (assuming a LUT size of 17^3)");
+      HDR("  pos.xy = (pos.xy + vec2(0.5)) / size;");
+      HDR("  pos.y = (pos.y + layer) / size;");
+      HDR("  return mix(LutLookup(sampler, pos.xy),");
+      HDR("             LutLookup(sampler, pos.xy + vec2(0, 1.0 / size)),");
+      HDR("             pos.z - layer);");
+      HDR("}");
+      SRC("texColor.rgb = LUT(lut_texture, texColor.xyz, lut_size).xyz;");
+      break;
+    case COLOR_CONVERSION_MODE_SHADER:
+      header += color_transform_->GetShaderSource();
+      SRC("texColor.rgb = DoColorConversion(texColor.xyz);");
+      break;
+    case COLOR_CONVERSION_MODE_NONE:
+      break;
   }
 
   // Apply the color matrix to texColor.

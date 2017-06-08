@@ -19,15 +19,13 @@
 #include "ui/views/border.h"
 #include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/focus_ring.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/painter.h"
 #include "ui/views/style/platform_style.h"
 
 namespace views {
 
 namespace {
-
-// Minimum size to reserve for the button contents.
-const int kMinWidth = 48;
 
 LabelButton* CreateButton(ButtonListener* listener,
                           const base::string16& text,
@@ -36,7 +34,7 @@ LabelButton* CreateButton(ButtonListener* listener,
     return MdTextButton::Create(listener, text);
 
   LabelButton* button = new LabelButton(listener, text);
-  button->SetStyle(CustomButton::STYLE_BUTTON);
+  button->SetStyleDeprecated(CustomButton::STYLE_BUTTON);
   return button;
 }
 
@@ -135,8 +133,8 @@ std::unique_ptr<views::InkDropRipple> MdTextButton::CreateInkDropRipple()
           ink_drop_visible_opacity()));
 }
 
-void MdTextButton::StateChanged() {
-  LabelButton::StateChanged();
+void MdTextButton::StateChanged(ButtonState old_state) {
+  LabelButton::StateChanged(old_state);
   UpdateColors();
 }
 
@@ -190,12 +188,13 @@ void MdTextButton::SetFontList(const gfx::FontList& font_list) {
 MdTextButton::MdTextButton(ButtonListener* listener)
     : LabelButton(listener, base::string16()),
       is_prominent_(false) {
-  SetInkDropMode(PlatformStyle::kUseRipples ? InkDropMode::ON
-                                            : InkDropMode::OFF);
+  SetInkDropMode(InkDropMode::ON);
   set_has_ink_drop_action_on_click(true);
   SetHorizontalAlignment(gfx::ALIGN_CENTER);
   SetFocusForPlatform();
-  SetMinSize(gfx::Size(kMinWidth, 0));
+  const int minimum_width = LayoutProvider::Get()->GetDistanceMetric(
+      DISTANCE_DIALOG_BUTTON_MINIMUM_WIDTH);
+  SetMinSize(gfx::Size(minimum_width, 0));
   SetFocusPainter(nullptr);
   label()->SetAutoColorReadabilityEnabled(false);
   set_request_focus_on_press(false);
@@ -240,9 +239,10 @@ void MdTextButton::UpdatePadding() {
 
   // TODO(estade): can we get rid of the platform style border hoopla if
   // we apply the MD treatment to all buttons, even GTK buttons?
-  const int kHorizontalPadding = 16;
-  SetBorder(CreateEmptyBorder(top_padding, kHorizontalPadding, bottom_padding,
-                              kHorizontalPadding));
+  const int horizontal_padding = LayoutProvider::Get()->GetDistanceMetric(
+      DISTANCE_BUTTON_HORIZONTAL_PADDING);
+  SetBorder(CreateEmptyBorder(top_padding, horizontal_padding, bottom_padding,
+                              horizontal_padding));
 }
 
 void MdTextButton::UpdateColors() {

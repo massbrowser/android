@@ -30,11 +30,9 @@
 #include "content/public/browser/resource_context.h"
 #include "extensions/common/constants.h"
 #include "extensions/features/features.h"
-#include "net/base/sdch_manager.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
-#include "net/sdch/sdch_owner.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/default_channel_id_store.h"
 #include "net/url_request/url_request_context_storage.h"
@@ -194,7 +192,6 @@ OffTheRecordProfileIOData::~OffTheRecordProfileIOData() {
 }
 
 void OffTheRecordProfileIOData::InitializeInternal(
-    std::unique_ptr<ChromeNetworkDelegate> chrome_network_delegate,
     ProfileParams* profile_params,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {
@@ -215,11 +212,6 @@ void OffTheRecordProfileIOData::InitializeInternal(
 
   main_context->set_net_log(io_thread->net_log());
 
-  main_context_storage->set_network_delegate(
-      std::move(chrome_network_delegate));
-
-  main_context->set_host_resolver(
-      io_thread_globals->host_resolver.get());
   main_context->set_http_auth_handler_factory(
       io_thread_globals->http_auth_handler_factory.get());
   main_context->set_proxy_service(proxy_service());
@@ -255,11 +247,6 @@ void OffTheRecordProfileIOData::InitializeInternal(
       std::move(main_job_factory), std::move(request_interceptors),
       std::move(profile_params->protocol_handler_interceptor),
       main_context->network_delegate(), main_context->host_resolver()));
-
-  // Setup SDCH for this profile.
-  main_context_storage->set_sdch_manager(base::MakeUnique<net::SdchManager>());
-  sdch_policy_.reset(
-      new net::SdchOwner(main_context->sdch_manager(), main_context));
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   InitializeExtensionsRequestContext(profile_params);
@@ -359,7 +346,7 @@ net::URLRequestContext*
 OffTheRecordProfileIOData::InitializeMediaRequestContext(
     net::URLRequestContext* original_context,
     const StoragePartitionDescriptor& partition_descriptor,
-    const std::string& name) const {
+    const char* name) const {
   NOTREACHED();
   return NULL;
 }

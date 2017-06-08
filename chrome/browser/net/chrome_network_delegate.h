@@ -219,6 +219,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   BooleanPrefMember* force_google_safe_search_;
   IntegerPrefMember* force_youtube_restrict_;
   StringPrefMember* allowed_domains_for_apps_;
+  std::string main_frame_url_;
 
   // Weak, owned by our owner.
   const policy::URLBlacklistManager* url_blacklist_manager_;

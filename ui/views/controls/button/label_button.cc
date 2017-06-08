@@ -25,14 +25,13 @@
 #include "ui/views/animation/square_ink_drop_ripple.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/label_button_border.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/painter.h"
 #include "ui/views/style/platform_style.h"
 #include "ui/views/window/dialog_delegate.h"
 
 namespace {
-
-// The default spacing between the icon and text.
-const int kSpacing = 5;
 
 gfx::Font::Weight GetValueBolderThan(gfx::Font::Weight weight) {
   if (weight < gfx::Font::Weight::BOLD)
@@ -93,7 +92,8 @@ LabelButton::LabelButton(ButtonListener* listener, const base::string16& text)
       is_default_(false),
       style_(STYLE_TEXTBUTTON),
       border_is_themed_border_(true),
-      image_label_spacing_(kSpacing),
+      image_label_spacing_(LayoutProvider::Get()->GetDistanceMetric(
+          DISTANCE_RELATED_CONTROL_HORIZONTAL)),
       horizontal_alignment_(gfx::ALIGN_LEFT) {
   SetAnimationDuration(kHoverAnimationDurationMs);
   SetTextInternal(text);
@@ -104,7 +104,7 @@ LabelButton::LabelButton(ButtonListener* listener, const base::string16& text)
   ink_drop_container_->SetVisible(false);
 
   AddChildView(image_);
-  image_->set_interactive(false);
+  image_->set_can_process_events_within_subtree(false);
 
   AddChildView(label_);
   label_->SetFontList(cached_normal_font_list_);
@@ -159,10 +159,6 @@ void LabelButton::SetTextSubpixelRenderingEnabled(bool enabled) {
   label_->SetSubpixelRenderingEnabled(enabled);
 }
 
-void LabelButton::SetFontListDeprecated(const gfx::FontList& font_list) {
-  SetFontList(font_list);
-}
-
 void LabelButton::AdjustFontSize(int font_size_delta) {
   LabelButton::SetFontList(
       label()->font_list().DeriveWithSizeDelta(font_size_delta));
@@ -200,7 +196,7 @@ void LabelButton::SetIsDefault(bool is_default) {
   UpdateStyleToIndicateDefaultStatus();
 }
 
-void LabelButton::SetStyle(ButtonStyle style) {
+void LabelButton::SetStyleDeprecated(ButtonStyle style) {
   // All callers currently pass STYLE_BUTTON, and should only call this once, to
   // change from the default style.
   DCHECK_EQ(style, STYLE_BUTTON);
@@ -237,7 +233,8 @@ gfx::Size LabelButton::GetPreferredSize() const {
     return cached_preferred_size_;
 
   // Use a temporary label copy for sizing to avoid calculation side-effects.
-  Label label(GetText(), label_->font_list());
+  Label label(GetText(), {label_->font_list()});
+  label.SetLineHeight(label_->line_height());
   label.SetShadows(label_->shadows());
 
   if (style_ == STYLE_BUTTON && PlatformStyle::kDefaultLabelButtonHasBoldFont) {
@@ -426,10 +423,12 @@ void LabelButton::AddInkDropLayer(ui::Layer* ink_drop_layer) {
   image()->SetPaintToLayer();
   image()->layer()->SetFillsBoundsOpaquely(false);
   ink_drop_container_->AddInkDropLayer(ink_drop_layer);
+  InstallInkDropMask(ink_drop_layer);
 }
 
 void LabelButton::RemoveInkDropLayer(ui::Layer* ink_drop_layer) {
   image()->DestroyLayer();
+  ResetInkDropMask();
   ink_drop_container_->RemoveInkDropLayer(ink_drop_layer);
 }
 
@@ -458,7 +457,7 @@ std::unique_ptr<views::InkDropHighlight> LabelButton::CreateInkDropHighlight()
                    gfx::RectF(image()->GetMirroredBounds()).CenterPoint());
 }
 
-void LabelButton::StateChanged() {
+void LabelButton::StateChanged(ButtonState old_state) {
   const gfx::Size previous_image_size(image_->GetPreferredSize());
   UpdateImage();
   ResetLabelEnabledColor();

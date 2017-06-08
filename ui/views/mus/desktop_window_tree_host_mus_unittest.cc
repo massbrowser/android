@@ -8,8 +8,11 @@
 
 #include "base/memory/ptr_util.h"
 #include "ui/aura/client/cursor_client.h"
+#include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/transient_window_client.h"
+#include "ui/aura/env.h"
 #include "ui/aura/mus/capture_synchronizer.h"
+#include "ui/aura/mus/focus_synchronizer.h"
 #include "ui/aura/mus/in_flight_change.h"
 #include "ui/aura/mus/window_mus.h"
 #include "ui/aura/mus/window_tree_client.h"
@@ -20,6 +23,7 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
+#include "ui/wm/core/shadow_types.h"
 
 namespace views {
 
@@ -179,12 +183,35 @@ TEST_F(DesktopWindowTreeHostMusTest, Deactivate) {
   widget2->Show();
 
   widget1->Activate();
+  EXPECT_TRUE(widget1->GetNativeWindow()->HasFocus());
+
   RunPendingMessages();
   EXPECT_TRUE(widget1->IsActive());
+  EXPECT_TRUE(widget1->GetNativeWindow()->HasFocus());
   EXPECT_EQ(widget_activated(), widget1.get());
 
   DeactivateAndWait(widget1.get());
   EXPECT_FALSE(widget1->IsActive());
+}
+
+TEST_F(DesktopWindowTreeHostMusTest, ActivateBeforeShow) {
+  std::unique_ptr<Widget> widget1(CreateWidget());
+  // Activation can be attempted before visible.
+  widget1->Activate();
+  widget1->Show();
+  widget1->Activate();
+  EXPECT_TRUE(widget1->IsActive());
+  // The Widget's NativeWindow (|DesktopNativeWidgetAura::content_window_|)
+  // should be active.
+  EXPECT_TRUE(widget1->GetNativeWindow()->HasFocus());
+  // Env's active FocusClient should match the active window.
+  aura::client::FocusClient* widget_focus_client =
+      aura::client::GetFocusClient(widget1->GetNativeWindow());
+  ASSERT_TRUE(widget_focus_client);
+  EXPECT_EQ(widget_focus_client, MusClient::Get()
+                                     ->window_tree_client()
+                                     ->focus_synchronizer()
+                                     ->active_focus_client());
 }
 
 TEST_F(DesktopWindowTreeHostMusTest, CursorClientDuringTearDown) {
@@ -245,6 +272,16 @@ TEST_F(DesktopWindowTreeHostMusTest, StackAbove) {
   waiter.Wait();
 }
 
+TEST_F(DesktopWindowTreeHostMusTest, SetOpacity) {
+  std::unique_ptr<Widget> widget1(CreateWidget(nullptr));
+  widget1->Show();
+
+  aura::test::ChangeCompletionWaiter waiter(
+      MusClient::Get()->window_tree_client(), aura::ChangeType::OPACITY, true);
+  widget1->SetOpacity(0.5f);
+  waiter.Wait();
+}
+
 TEST_F(DesktopWindowTreeHostMusTest, TransientParentWiredToHostWindow) {
   std::unique_ptr<Widget> widget1(CreateWidget());
   widget1->Show();
@@ -260,6 +297,52 @@ TEST_F(DesktopWindowTreeHostMusTest, TransientParentWiredToHostWindow) {
   EXPECT_EQ(widget1->GetNativeView()->GetHost()->window(),
             transient_window_client->GetTransientParent(
                 widget2->GetNativeView()->GetHost()->window()));
+}
+
+TEST_F(DesktopWindowTreeHostMusTest, ShadowDefaults) {
+  Widget widget;
+  Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  widget.Init(params);
+  // |DesktopNativeWidgetAura::content_window_| should have no shadow; the wm
+  // should provide it if it so desires.
+  EXPECT_EQ(wm::ShadowElevation::NONE,
+            widget.GetNativeView()->GetProperty(wm::kShadowElevationKey));
+  // The wm honors the shadow property from the WindowTreeHost's window.
+  EXPECT_EQ(wm::ShadowElevation::DEFAULT,
+            widget.GetNativeView()->GetHost()->window()->GetProperty(
+                wm::kShadowElevationKey));
+}
+
+TEST_F(DesktopWindowTreeHostMusTest, NoShadow) {
+  Widget widget;
+  Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.shadow_type = Widget::InitParams::SHADOW_TYPE_NONE;
+  widget.Init(params);
+  EXPECT_EQ(wm::ShadowElevation::NONE,
+            widget.GetNativeView()->GetProperty(wm::kShadowElevationKey));
+  EXPECT_EQ(wm::ShadowElevation::NONE,
+            widget.GetNativeView()->GetHost()->window()->GetProperty(
+                wm::kShadowElevationKey));
+}
+
+TEST_F(DesktopWindowTreeHostMusTest, CreateFullscreenWidget) {
+  const Widget::InitParams::Type kWidgetTypes[] = {
+      Widget::InitParams::TYPE_WINDOW,
+      Widget::InitParams::TYPE_WINDOW_FRAMELESS,
+  };
+
+  for (auto widget_type : kWidgetTypes) {
+    Widget widget;
+    Widget::InitParams params(widget_type);
+    params.show_state = ui::SHOW_STATE_FULLSCREEN;
+    params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+    widget.Init(params);
+
+    EXPECT_TRUE(widget.IsFullscreen())
+        << "Fullscreen creation failed for type=" << widget_type;
+  }
 }
 
 }  // namespace views

@@ -16,7 +16,8 @@ import java.net.URL;
  * Created by elvis on 09.01.17.
  */
 public class GetUsersCountTask extends AsyncTask<Void, Void, Void> {
-    public static final String URL_USER_COUNT = "http://adverttool.ru/userscount.php";
+    public static final String URL_USER_COUNT = GetCurrencyTask.HOST + "userscount.php";
+
     public GetUsersCountTask(Context context) {
     }
 
@@ -39,13 +40,13 @@ public class GetUsersCountTask extends AsyncTask<Void, Void, Void> {
             CoinsSingleton.getInstance().setOneSurfReward(count > 0 && 100000f / count < 1f ? 100000f / count : 1f);
 
             float firstReward = 0f;
-            if(count < 100000) {
+            if (count < 100000) {
                 firstReward = 15625f;
-            }else if(count < 1000000) {
+            } else if (count < 1000000) {
                 firstReward = 9375f;
             }
 
-            if(CoinsSingleton.getInstance().getSharedPreferences() != null
+            if (CoinsSingleton.getInstance().getSharedPreferences() != null
                     && CoinsSingleton.getInstance().getSharedPreferences().getFloat("firstReward", 0) == 0) {
                 CoinsSingleton.getInstance().getSharedPreferences().edit().putFloat("firstReward", firstReward).apply();
                 CoinsSingleton.getInstance().setValue(firstReward + CoinsSingleton.getInstance().getValue());

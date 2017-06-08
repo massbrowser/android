@@ -4,11 +4,14 @@
 
 #include "content/browser/appcache/appcache_interceptor.h"
 
+#include <utility>
+
 #include "base/debug/crash_logging.h"
 #include "content/browser/appcache/appcache_backend_impl.h"
 #include "content/browser/appcache/appcache_host.h"
 #include "content/browser/appcache/appcache_request_handler.h"
 #include "content/browser/appcache/appcache_service_impl.h"
+#include "content/browser/appcache/appcache_url_request.h"
 #include "content/browser/appcache/appcache_url_request_job.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/bad_message.h"
@@ -21,9 +24,10 @@ static int kHandlerKey;  // Value is not used.
 
 namespace content {
 
-void AppCacheInterceptor::SetHandler(net::URLRequest* request,
-                                     AppCacheRequestHandler* handler) {
-  request->SetUserData(&kHandlerKey, handler);  // request takes ownership
+void AppCacheInterceptor::SetHandler(
+    net::URLRequest* request,
+    std::unique_ptr<AppCacheRequestHandler> handler) {
+  request->SetUserData(&kHandlerKey, std::move(handler));
 }
 
 AppCacheRequestHandler* AppCacheInterceptor::GetHandler(
@@ -61,10 +65,11 @@ void AppCacheInterceptor::SetExtraRequestInfoForHost(
     ResourceType resource_type,
     bool should_reset_appcache) {
   // Create a handler for this request and associate it with the request.
-  AppCacheRequestHandler* handler =
-      host->CreateRequestHandler(request, resource_type, should_reset_appcache);
+  std::unique_ptr<AppCacheRequestHandler> handler =
+      host->CreateRequestHandler(AppCacheURLRequest::Create(request),
+                                 resource_type, should_reset_appcache);
   if (handler)
-    SetHandler(request, handler);
+    SetHandler(request, std::move(handler));
 }
 
 void AppCacheInterceptor::GetExtraResponseInfo(net::URLRequest* request,
@@ -138,7 +143,7 @@ net::URLRequestJob* AppCacheInterceptor::MaybeInterceptRequest(
   AppCacheRequestHandler* handler = GetHandler(request);
   if (!handler)
     return NULL;
-  return handler->MaybeLoadResource(request, network_delegate);
+  return handler->MaybeLoadResource(network_delegate);
 }
 
 net::URLRequestJob* AppCacheInterceptor::MaybeInterceptRedirect(
@@ -148,8 +153,7 @@ net::URLRequestJob* AppCacheInterceptor::MaybeInterceptRedirect(
   AppCacheRequestHandler* handler = GetHandler(request);
   if (!handler)
     return NULL;
-  return handler->MaybeLoadFallbackForRedirect(
-      request, network_delegate, location);
+  return handler->MaybeLoadFallbackForRedirect(network_delegate, location);
 }
 
 net::URLRequestJob* AppCacheInterceptor::MaybeInterceptResponse(
@@ -157,7 +161,7 @@ net::URLRequestJob* AppCacheInterceptor::MaybeInterceptResponse(
   AppCacheRequestHandler* handler = GetHandler(request);
   if (!handler)
     return NULL;
-  return handler->MaybeLoadFallbackForResponse(request, network_delegate);
+  return handler->MaybeLoadFallbackForResponse(network_delegate);
 }
 
 }  // namespace content

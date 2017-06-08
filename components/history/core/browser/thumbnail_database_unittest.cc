@@ -369,8 +369,8 @@ TEST_F(ThumbnailDatabaseTest, RetainDataForPageUrls) {
                                kBlob2));
 
   // The ones not retained should be missing.
-  EXPECT_FALSE(db.GetFaviconIDForFaviconURL(kPageUrl2, false, NULL));
-  EXPECT_FALSE(db.GetFaviconIDForFaviconURL(kPageUrl4, false, NULL));
+  EXPECT_FALSE(db.GetIconMappingsForPageURL(kPageUrl2, nullptr));
+  EXPECT_FALSE(db.GetIconMappingsForPageURL(kPageUrl4, nullptr));
 
   // Schema should be the same.
   EXPECT_EQ(original_schema, db.db_.GetSchema());
@@ -391,8 +391,8 @@ TEST_F(ThumbnailDatabaseTest, RetainDataForPageUrlsExpiresRetainedFavicons) {
 
   EXPECT_TRUE(db.RetainDataForPageUrls(std::vector<GURL>(1u, kPageUrl1)));
 
-  favicon_base::FaviconID new_favicon_id = db.GetFaviconIDForFaviconURL(
-      kIconUrl1, favicon_base::FAVICON, nullptr);
+  favicon_base::FaviconID new_favicon_id =
+      db.GetFaviconIDForFaviconURL(kIconUrl1, favicon_base::FAVICON);
   ASSERT_NE(0, new_favicon_id);
   std::vector<FaviconBitmap> new_favicon_bitmaps;
   db.GetFaviconBitmaps(new_favicon_id, &new_favicon_bitmaps);
@@ -636,34 +636,8 @@ TEST_F(ThumbnailDatabaseTest, Version6) {
   ASSERT_TRUE(db.get() != NULL);
   VerifyTablesAndColumns(&db->db_);
 
-  EXPECT_TRUE(CheckPageHasIcon(db.get(),
-                               kPageUrl1,
-                               favicon_base::FAVICON,
-                               kIconUrl1,
-                               kLargeSize,
-                               sizeof(kBlob1),
-                               kBlob1));
-  EXPECT_TRUE(CheckPageHasIcon(db.get(),
-                               kPageUrl2,
-                               favicon_base::FAVICON,
-                               kIconUrl2,
-                               kLargeSize,
-                               sizeof(kBlob2),
-                               kBlob2));
-  EXPECT_TRUE(CheckPageHasIcon(db.get(),
-                               kPageUrl3,
-                               favicon_base::FAVICON,
-                               kIconUrl1,
-                               kLargeSize,
-                               sizeof(kBlob1),
-                               kBlob1));
-  EXPECT_TRUE(CheckPageHasIcon(db.get(),
-                               kPageUrl3,
-                               favicon_base::TOUCH_ICON,
-                               kIconUrl3,
-                               kLargeSize,
-                               sizeof(kBlob2),
-                               kBlob2));
+  // Version 6 is deprecated, the data should all be gone.
+  VerifyDatabaseEmpty(&db->db_);
 }
 
 // Test loading version 7 database.

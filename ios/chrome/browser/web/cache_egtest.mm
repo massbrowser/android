@@ -16,6 +16,7 @@
 #include "ios/chrome/test/app/history_test_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
 #include "ios/chrome/test/app/web_view_interaction_test_util.h"
+#import "ios/chrome/test/earl_grey/chrome_assertions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
@@ -216,7 +217,6 @@ class ScopedBlockPopupsPref {
 
 // Tests caching behavior when opening new tab. New tab should not use the
 // cached page.
-// TODO(crbug.com/644646): Monitor this test for flakiness.
 - (void)testCachingBehaviorOnOpenNewTab {
   web::test::SetUpHttpServer(base::MakeUnique<CacheTestResponseProvider>());
 
@@ -243,6 +243,7 @@ class ScopedBlockPopupsPref {
   // first allow popups.
   ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW);
   chrome_test_util::TapWebViewElementWithId(kCacheTestLinkID);
+  chrome_test_util::AssertMainTabCount(2);
   [ChromeEarlGrey waitForPageToFinishLoading];
   [[EarlGrey selectElementWithMatcher:WebViewContainingText("First Page")]
       assertWithMatcher:grey_notNil()];

@@ -18,7 +18,6 @@
 #include <type_traits>
 #include <vector>
 
-#include "base/template_util.h"
 #include "net/http2/http2_structures_test_util.h"
 #include "net/http2/tools/failure.h"
 #include "net/http2/tools/http2_random.h"
@@ -42,7 +41,7 @@ namespace {
 
 template <typename E>
 E IncrementEnum(E e) {
-  typedef typename base::underlying_type<E>::type I;
+  using I = typename std::underlying_type<E>::type;
   return static_cast<E>(1 + static_cast<I>(e));
 }
 
@@ -136,11 +135,10 @@ class IsEndStreamTest : public Http2FrameHeaderTypeAndFlagTest {};
 INSTANTIATE_TEST_CASE_P(IsEndStream,
                         IsEndStreamTest,
                         Combine(ValuesIn(ValidFrameTypes()),
-                                Values(~Http2FrameFlag::FLAG_END_STREAM,
-                                       0xff)));
+                                Values(~Http2FrameFlag::END_STREAM, 0xff)));
 TEST_P(IsEndStreamTest, IsEndStream) {
-  const bool is_set = (flags_ & Http2FrameFlag::FLAG_END_STREAM) ==
-                      Http2FrameFlag::FLAG_END_STREAM;
+  const bool is_set =
+      (flags_ & Http2FrameFlag::END_STREAM) == Http2FrameFlag::END_STREAM;
   string flags_string;
   Http2FrameHeader v(0, type_, flags_, 0);
   switch (type_) {
@@ -153,7 +151,7 @@ TEST_P(IsEndStreamTest, IsEndStream) {
       } else {
         EXPECT_THAT(flags_string, Not(HasSubstr("END_STREAM")));
       }
-      v.RetainFlags(Http2FrameFlag::FLAG_END_STREAM);
+      v.RetainFlags(Http2FrameFlag::END_STREAM);
       EXPECT_EQ(is_set, v.IsEndStream()) << v;
       {
         std::stringstream s;
@@ -175,10 +173,9 @@ class IsACKTest : public Http2FrameHeaderTypeAndFlagTest {};
 INSTANTIATE_TEST_CASE_P(IsAck,
                         IsACKTest,
                         Combine(ValuesIn(ValidFrameTypes()),
-                                Values(~Http2FrameFlag::FLAG_ACK, 0xff)));
+                                Values(~Http2FrameFlag::ACK, 0xff)));
 TEST_P(IsACKTest, IsAck) {
-  const bool is_set =
-      (flags_ & Http2FrameFlag::FLAG_ACK) == Http2FrameFlag::FLAG_ACK;
+  const bool is_set = (flags_ & Http2FrameFlag::ACK) == Http2FrameFlag::ACK;
   string flags_string;
   Http2FrameHeader v(0, type_, flags_, 0);
   switch (type_) {
@@ -191,7 +188,7 @@ TEST_P(IsACKTest, IsAck) {
       } else {
         EXPECT_THAT(flags_string, Not(HasSubstr("ACK")));
       }
-      v.RetainFlags(Http2FrameFlag::FLAG_ACK);
+      v.RetainFlags(Http2FrameFlag::ACK);
       EXPECT_EQ(is_set, v.IsAck()) << v;
       {
         std::stringstream s;
@@ -213,11 +210,10 @@ class IsEndHeadersTest : public Http2FrameHeaderTypeAndFlagTest {};
 INSTANTIATE_TEST_CASE_P(IsEndHeaders,
                         IsEndHeadersTest,
                         Combine(ValuesIn(ValidFrameTypes()),
-                                Values(~Http2FrameFlag::FLAG_END_HEADERS,
-                                       0xff)));
+                                Values(~Http2FrameFlag::END_HEADERS, 0xff)));
 TEST_P(IsEndHeadersTest, IsEndHeaders) {
-  const bool is_set = (flags_ & Http2FrameFlag::FLAG_END_HEADERS) ==
-                      Http2FrameFlag::FLAG_END_HEADERS;
+  const bool is_set =
+      (flags_ & Http2FrameFlag::END_HEADERS) == Http2FrameFlag::END_HEADERS;
   string flags_string;
   Http2FrameHeader v(0, type_, flags_, 0);
   switch (type_) {
@@ -231,7 +227,7 @@ TEST_P(IsEndHeadersTest, IsEndHeaders) {
       } else {
         EXPECT_THAT(flags_string, Not(HasSubstr("END_HEADERS")));
       }
-      v.RetainFlags(Http2FrameFlag::FLAG_END_HEADERS);
+      v.RetainFlags(Http2FrameFlag::END_HEADERS);
       EXPECT_EQ(is_set, v.IsEndHeaders()) << v;
       {
         std::stringstream s;
@@ -255,10 +251,10 @@ class IsPaddedTest : public Http2FrameHeaderTypeAndFlagTest {};
 INSTANTIATE_TEST_CASE_P(IsPadded,
                         IsPaddedTest,
                         Combine(ValuesIn(ValidFrameTypes()),
-                                Values(~Http2FrameFlag::FLAG_PADDED, 0xff)));
+                                Values(~Http2FrameFlag::PADDED, 0xff)));
 TEST_P(IsPaddedTest, IsPadded) {
   const bool is_set =
-      (flags_ & Http2FrameFlag::FLAG_PADDED) == Http2FrameFlag::FLAG_PADDED;
+      (flags_ & Http2FrameFlag::PADDED) == Http2FrameFlag::PADDED;
   string flags_string;
   Http2FrameHeader v(0, type_, flags_, 0);
   switch (type_) {
@@ -272,7 +268,7 @@ TEST_P(IsPaddedTest, IsPadded) {
       } else {
         EXPECT_THAT(flags_string, Not(HasSubstr("PADDED")));
       }
-      v.RetainFlags(Http2FrameFlag::FLAG_PADDED);
+      v.RetainFlags(Http2FrameFlag::PADDED);
       EXPECT_EQ(is_set, v.IsPadded()) << v;
       {
         std::stringstream s;
@@ -294,10 +290,10 @@ class HasPriorityTest : public Http2FrameHeaderTypeAndFlagTest {};
 INSTANTIATE_TEST_CASE_P(HasPriority,
                         HasPriorityTest,
                         Combine(ValuesIn(ValidFrameTypes()),
-                                Values(~Http2FrameFlag::FLAG_PRIORITY, 0xff)));
+                                Values(~Http2FrameFlag::PRIORITY, 0xff)));
 TEST_P(HasPriorityTest, HasPriority) {
   const bool is_set =
-      (flags_ & Http2FrameFlag::FLAG_PRIORITY) == Http2FrameFlag::FLAG_PRIORITY;
+      (flags_ & Http2FrameFlag::PRIORITY) == Http2FrameFlag::PRIORITY;
   string flags_string;
   Http2FrameHeader v(0, type_, flags_, 0);
   switch (type_) {
@@ -309,7 +305,7 @@ TEST_P(HasPriorityTest, HasPriority) {
       } else {
         EXPECT_THAT(flags_string, Not(HasSubstr("PRIORITY")));
       }
-      v.RetainFlags(Http2FrameFlag::FLAG_PRIORITY);
+      v.RetainFlags(Http2FrameFlag::PRIORITY);
       EXPECT_EQ(is_set, v.HasPriority()) << v;
       {
         std::stringstream s;

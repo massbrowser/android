@@ -48,6 +48,7 @@ UI.TreeOutline = class extends Common.Object {
     if (this._focusable)
       this.contentElement.setAttribute('tabIndex', -1);
     this.element = this.contentElement;
+    UI.ARIAUtils.markAsTree(this.element);
 
     // Adjust to allow computing margin-left for the selection element.
     // Check the padding-left for the li element for correct value.
@@ -336,10 +337,12 @@ UI.TreeElement = class {
     this._listItemNode.addEventListener('mousedown', this._handleMouseDown.bind(this), false);
     this._listItemNode.addEventListener('click', this._treeElementToggled.bind(this), false);
     this._listItemNode.addEventListener('dblclick', this._handleDoubleClick.bind(this), false);
+    UI.ARIAUtils.markAsTreeitem(this._listItemNode);
 
     this._childrenListNode = createElement('ol');
     this._childrenListNode.parentTreeElement = this;
     this._childrenListNode.classList.add('children');
+    UI.ARIAUtils.markAsGroup(this._childrenListNode);
 
     this._hidden = false;
     this._selectable = true;
@@ -633,7 +636,7 @@ UI.TreeElement = class {
    */
   startEditingTitle(editingConfig) {
     UI.InplaceEditor.startEditing(this._titleElement, editingConfig);
-    this.treeOutline._shadowRoot.getSelection().setBaseAndExtent(this._titleElement, 0, this._titleElement, 1);
+    this.treeOutline._shadowRoot.getSelection().selectAllChildren(this._titleElement);
   }
 
   /**
@@ -705,8 +708,12 @@ UI.TreeElement = class {
     this._expandable = expandable;
 
     this._listItemNode.classList.toggle('parent', expandable);
-    if (!expandable)
+    if (!expandable) {
       this.collapse();
+      UI.ARIAUtils.unsetExpanded(this._listItemNode);
+    } else {
+      UI.ARIAUtils.setExpanded(this._listItemNode, false);
+    }
   }
 
   /**
@@ -838,6 +845,7 @@ UI.TreeElement = class {
       return;
     this._listItemNode.classList.remove('expanded');
     this._childrenListNode.classList.remove('expanded');
+    UI.ARIAUtils.setExpanded(this._listItemNode, false);
     this.expanded = false;
     this.oncollapse();
     if (this.treeOutline)
@@ -866,6 +874,7 @@ UI.TreeElement = class {
     this._populateIfNeeded();
     this._listItemNode.classList.add('expanded');
     this._childrenListNode.classList.add('expanded');
+    UI.ARIAUtils.setExpanded(this._listItemNode, true);
 
     if (this.treeOutline) {
       this.onexpand();
@@ -1213,3 +1222,12 @@ UI.TreeElement = class {
 
 /** @const */
 UI.TreeElement._ArrowToggleWidth = 10;
+
+(function() {
+  var img = new Image();
+  if (window.devicePixelRatio > 1)
+    img.src = 'Images/treeoutlineTriangles_2x.png';
+  else
+    img.src = 'Images/treeoutlineTriangles.png';
+  UI.TreeElement._imagePreload = img;
+})();

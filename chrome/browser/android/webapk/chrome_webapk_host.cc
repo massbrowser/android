@@ -10,8 +10,9 @@
 
 namespace {
 
-// Variations flag to enable installing WebAPKs using Google Play.
-const char* kPlayInstall = "play_install";
+// Variations flag to enable launching Chrome renderer in WebAPK process.
+const char* kLaunchRendererInWebApkProcess =
+    "launch_renderer_in_webapk_process";
 
 }  // anonymous namespace
 
@@ -21,15 +22,23 @@ bool ChromeWebApkHost::Register(JNIEnv* env) {
 }
 
 // static
-bool ChromeWebApkHost::AreWebApkEnabled() {
+bool ChromeWebApkHost::CanInstallWebApk() {
   JNIEnv* env = base::android::AttachCurrentThread();
-  return Java_ChromeWebApkHost_areWebApkEnabled(env);
+  return Java_ChromeWebApkHost_canInstallWebApk(env);
 }
 
 // static
-jboolean CanUseGooglePlayToInstallWebApk(
+GooglePlayInstallState ChromeWebApkHost::GetGooglePlayInstallState() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  return static_cast<GooglePlayInstallState>(
+      Java_ChromeWebApkHost_getGooglePlayInstallState(env));
+}
+
+// static
+jboolean CanLaunchRendererInWebApkProcess(
     JNIEnv* env,
     const base::android::JavaParamRef<jclass>& clazz) {
   return variations::GetVariationParamValueByFeature(
-             chrome::android::kImprovedA2HS, kPlayInstall) == "true";
+             chrome::android::kImprovedA2HS, kLaunchRendererInWebApkProcess) ==
+         "true";
 }

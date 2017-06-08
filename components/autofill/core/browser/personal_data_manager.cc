@@ -55,6 +55,9 @@ using ::i18n::addressinput::AddressField;
 using ::i18n::addressinput::GetStreetAddressLinesAsSingleLine;
 using ::i18n::addressinput::STREET_ADDRESS;
 
+// The length of a local profile GUID.
+const int LOCAL_GUID_LENGTH = 36;
+
 template<typename T>
 class FormGroupMatchesByGUIDFunctor {
  public:
@@ -255,15 +258,15 @@ const char kFrecencyFieldTrialName[] = "AutofillProfileOrderByFrecency";
 const char kFrecencyFieldTrialLimitParam[] = "limit";
 
 PersonalDataManager::PersonalDataManager(const std::string& app_locale)
-    : database_(NULL),
+    : database_(nullptr),
       is_data_loaded_(false),
       pending_profiles_query_(0),
       pending_server_profiles_query_(0),
       pending_creditcards_query_(0),
       pending_server_creditcards_query_(0),
       app_locale_(app_locale),
-      pref_service_(NULL),
-      account_tracker_(NULL),
+      pref_service_(nullptr),
+      account_tracker_(nullptr),
       is_off_the_record_(false),
       has_logged_profile_count_(false),
       has_logged_local_credit_card_count_(false),
@@ -439,13 +442,16 @@ void PersonalDataManager::RemoveObserver(
 bool PersonalDataManager::ImportFormData(
     const FormStructure& form,
     bool should_return_local_card,
-    std::unique_ptr<CreditCard>* imported_credit_card) {
+    std::unique_ptr<CreditCard>* imported_credit_card,
+    bool* imported_credit_card_matches_masked_server_credit_card) {
   // We try the same |form| for both credit card and address import/update.
   // - ImportCreditCard may update an existing card, or fill
   //   |imported_credit_card| with an extracted card. See .h for details of
-  //   |should_return_local_card|.
+  //   |should_return_local_card| and
+  //   |imported_credit_card_matches_masked_server_credit_card|.
   bool cc_import =
-      ImportCreditCard(form, should_return_local_card, imported_credit_card);
+      ImportCreditCard(form, should_return_local_card, imported_credit_card,
+                       imported_credit_card_matches_masked_server_credit_card);
   // - ImportAddressProfiles may eventually save or update one or more address
   //   profiles.
   bool address_import = ImportAddressProfiles(form);
@@ -541,10 +547,16 @@ void PersonalDataManager::UpdateProfile(const AutofillProfile& profile) {
 
 AutofillProfile* PersonalDataManager::GetProfileByGUID(
     const std::string& guid) {
-  const std::vector<AutofillProfile*>& profiles = GetProfiles();
+  return GetProfileFromProfilesByGUID(guid, GetProfiles());
+}
+
+// static
+AutofillProfile* PersonalDataManager::GetProfileFromProfilesByGUID(
+    const std::string& guid,
+    const std::vector<AutofillProfile*>& profiles) {
   std::vector<AutofillProfile*>::const_iterator iter =
       FindElementByGUID<AutofillProfile>(profiles, guid);
-  return (iter != profiles.end()) ? *iter : NULL;
+  return iter != profiles.end() ? *iter : nullptr;
 }
 
 void PersonalDataManager::AddCreditCard(const CreditCard& credit_card) {
@@ -597,6 +609,27 @@ void PersonalDataManager::UpdateCreditCard(const CreditCard& credit_card) {
 
   // Make the update.
   database_->UpdateCreditCard(credit_card);
+
+  // Refresh our local cache and send notifications to observers.
+  Refresh();
+}
+
+void PersonalDataManager::AddFullServerCreditCard(
+    const CreditCard& credit_card) {
+  DCHECK_EQ(CreditCard::FULL_SERVER_CARD, credit_card.record_type());
+  DCHECK(!credit_card.IsEmpty(app_locale_));
+  DCHECK(!credit_card.server_id().empty());
+
+  if (is_off_the_record_ || !database_.get())
+    return;
+
+  // Don't add a duplicate.
+  if (FindByGUID<CreditCard>(server_credit_cards_, credit_card.guid()) ||
+      FindByContents(server_credit_cards_, credit_card))
+    return;
+
+  // Add the new credit card to the web database.
+  database_->AddFullServerCreditCard(credit_card);
 
   // Refresh our local cache and send notifications to observers.
   Refresh();
@@ -713,7 +746,7 @@ CreditCard* PersonalDataManager::GetCreditCardByGUID(const std::string& guid) {
   const std::vector<CreditCard*>& credit_cards = GetCreditCards();
   std::vector<CreditCard*>::const_iterator iter =
       FindElementByGUID<CreditCard>(credit_cards, guid);
-  return (iter != credit_cards.end()) ? *iter : NULL;
+  return iter != credit_cards.end() ? *iter : nullptr;
 }
 
 void PersonalDataManager::GetNonEmptyTypes(
@@ -874,7 +907,11 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
   // trial group or SIZE_MAX if no limit is defined.
   std::string limit_str = variations::GetVariationParamValue(
       kFrecencyFieldTrialName, kFrecencyFieldTrialLimitParam);
-  size_t limit = base::StringToSizeT(limit_str, &limit) ? limit : SIZE_MAX;
+  size_t limit = SIZE_MAX;
+  // Reassign SIZE_MAX to |limit| is needed after calling base::StringToSizeT,
+  // as this method can modify |limit| even if it returns false.
+  if (!base::StringToSizeT(limit_str, &limit))
+    limit = SIZE_MAX;
 
   unique_suggestions.resize(std::min(unique_suggestions.size(), limit));
 
@@ -933,7 +970,7 @@ void PersonalDataManager::SetPrefService(PrefService* pref_service) {
   enabled_pref_.reset(new BooleanPrefMember);
   wallet_enabled_pref_.reset(new BooleanPrefMember);
   pref_service_ = pref_service;
-  // |pref_service_| can be NULL in tests.
+  // |pref_service_| can be nullptr in tests.
   if (pref_service_) {
     enabled_pref_->Init(prefs::kAutofillEnabled, pref_service_,
         base::Bind(&PersonalDataManager::EnabledPrefChanged,
@@ -1240,10 +1277,11 @@ void PersonalDataManager::NotifyPersonalDataChanged() {
   for (PersonalDataManagerObserver& observer : observers_)
     observer.OnPersonalDataChanged();
 
-  // If new data was synced, try to convert new server profiles.
+  // If new data was synced, try to convert new server profiles and update
+  // server cards.
   if (has_synced_new_data_) {
     has_synced_new_data_ = false;
-    ConvertWalletAddressesToLocalProfiles();
+    ConvertWalletAddressesAndUpdateWalletCards();
   }
 }
 
@@ -1462,8 +1500,10 @@ bool PersonalDataManager::ImportAddressProfileForSection(
 bool PersonalDataManager::ImportCreditCard(
     const FormStructure& form,
     bool should_return_local_card,
-    std::unique_ptr<CreditCard>* imported_credit_card) {
+    std::unique_ptr<CreditCard>* imported_credit_card,
+    bool* imported_credit_card_matches_masked_server_credit_card) {
   DCHECK(!imported_credit_card->get());
+  *imported_credit_card_matches_masked_server_credit_card = false;
 
   // The candidate for credit card import. There are many ways for the candidate
   // to be rejected (see everywhere this function returns false, below).
@@ -1526,7 +1566,8 @@ bool PersonalDataManager::ImportCreditCard(
   // have already saved this card number, unless |should_return_local_card| is
   // true which indicates that upload is enabled. In this case, it's useful to
   // present the upload prompt to the user to promote the card from a local card
-  // to a synced server card.
+  // to a synced server card, provided we don't have a masked server card with
+  // the same |TypeAndLastFourDigits|.
   for (const auto& card : local_credit_cards_) {
     // Make a local copy so that the data in |local_credit_cards_| isn't
     // modified directly by the UpdateFromImportedCard() call.
@@ -1543,14 +1584,22 @@ bool PersonalDataManager::ImportCreditCard(
     }
   }
 
-  // Also don't offer to save if we already have this stored as a server card.
-  // We only check the number because if the new card has the same number as the
-  // server card, upload is guaranteed to fail. There's no mechanism for entries
-  // with the same number but different names or expiration dates as there is
-  // for local cards.
+  // Also don't offer to save if we already have this stored as a full server
+  // card. We only check the number because if the new card has the same number
+  // as the server card, upload is guaranteed to fail. There's no mechanism for
+  // entries with the same number but different names or expiration dates as
+  // there is for local cards.
+  // We can offer to save locally even if we already have this stored another
+  // masked server card with the same |TypeAndLastFourDigits| so that the user
+  // can enter the full card number without having to unmask the card.
   for (const auto& card : server_credit_cards_) {
-    if (candidate_credit_card.HasSameNumberAs(*card))
-      return false;
+    if (candidate_credit_card.HasSameNumberAs(*card)) {
+      if (card->record_type() == CreditCard::FULL_SERVER_CARD)
+        return false;
+      DCHECK_EQ(card->record_type(), CreditCard::MASKED_SERVER_CARD);
+      *imported_credit_card_matches_masked_server_credit_card = true;
+      break;
+    }
   }
 
   imported_credit_card->reset(new CreditCard(candidate_credit_card));
@@ -1590,7 +1639,7 @@ std::vector<Suggestion> PersonalDataManager::GetSuggestionsForCards(
       Suggestion* suggestion = &suggestions.back();
 
       suggestion->value = credit_card->GetInfo(type, app_locale_);
-      suggestion->icon = base::UTF8ToUTF16(credit_card->type());
+      suggestion->icon = base::UTF8ToUTF16(credit_card->network());
       suggestion->backend_id = credit_card->guid();
       suggestion->match = prefix_matched_suggestion
                               ? Suggestion::PREFIX_MATCH
@@ -1600,9 +1649,14 @@ std::vector<Suggestion> PersonalDataManager::GetSuggestionsForCards(
       // Otherwise the label is the card number, or if that is empty the
       // cardholder name. The label should never repeat the value.
       if (type.GetStorableType() == CREDIT_CARD_NUMBER) {
-        suggestion->value = credit_card->TypeAndLastFourDigits();
-        suggestion->label = credit_card->GetInfo(
-            AutofillType(CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR), app_locale_);
+        suggestion->value = credit_card->NetworkAndLastFourDigits();
+        if (IsAutofillCreditCardLastUsedDateDisplayExperimentEnabled()) {
+          suggestion->label =
+              credit_card->GetLastUsedDateForDisplay(app_locale_);
+        } else {
+          suggestion->label = credit_card->GetInfo(
+              AutofillType(CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR), app_locale_);
+        }
         if (IsAutofillCreditCardPopupLayoutExperimentEnabled())
           ModifyAutofillCreditCardSuggestion(suggestion);
       } else if (credit_card->number().empty()) {
@@ -1615,7 +1669,7 @@ std::vector<Suggestion> PersonalDataManager::GetSuggestionsForCards(
         // Since Android places the label on its own row, there's more
         // horizontal
         // space to work with. Show "Amex - 1234" rather than desktop's "*1234".
-        suggestion->label = credit_card->TypeAndLastFourDigits();
+        suggestion->label = credit_card->NetworkAndLastFourDigits();
 #else
         suggestion->label = base::ASCIIToUTF16("*");
         suggestion->label.append(credit_card->LastFourDigits());
@@ -1804,7 +1858,7 @@ void PersonalDataManager::UpdateCardsBillingAddressReference(
       C -> D
   */
 
-  for (auto& credit_card : GetCreditCards()) {
+  for (auto* credit_card : GetCreditCards()) {
     // If the credit card is not associated with a billing address, skip it.
     if (credit_card->billing_address_id().empty())
       break;
@@ -1839,7 +1893,7 @@ void PersonalDataManager::UpdateCardsBillingAddressReference(
   }
 }
 
-void PersonalDataManager::ConvertWalletAddressesToLocalProfiles() {
+void PersonalDataManager::ConvertWalletAddressesAndUpdateWalletCards() {
   // Copy the local profiles into a vector<AutofillProfile>. Theses are the
   // existing profiles. Get them sorted in decreasing order of frecency, so the
   // "best" profiles are checked first. Put the verified profiles last so the
@@ -1850,22 +1904,54 @@ void PersonalDataManager::ConvertWalletAddressesToLocalProfiles() {
     local_profiles.push_back(*existing_profile);
   }
 
+  // Since we are already iterating on all the server profiles to convert Wallet
+  // addresses and we will need to access them by guid later to update the
+  // Wallet cards, create a map here.
+  std::unordered_map<std::string, AutofillProfile*> server_id_profiles_map;
+
   // Create the map used to update credit card's billing addresses after the
   // convertion/merge.
   std::unordered_map<std::string, std::string> guids_merge_map;
 
+  bool has_converted_addresses = ConvertWalletAddressesToLocalProfiles(
+      &local_profiles, &server_id_profiles_map, &guids_merge_map);
+  bool should_update_cards = UpdateWalletCardsAlreadyConvertedBillingAddresses(
+      &local_profiles, &server_id_profiles_map, &guids_merge_map);
+
+  if (has_converted_addresses) {
+    // Save the local profiles to the DB.
+    SetProfiles(&local_profiles);
+  }
+
+  if (should_update_cards || has_converted_addresses) {
+    // Update the credit cards billing address relationship.
+    UpdateCardsBillingAddressReference(guids_merge_map);
+
+    // Force a reload of the profiles and cards.
+    Refresh();
+  }
+}
+
+bool PersonalDataManager::ConvertWalletAddressesToLocalProfiles(
+    std::vector<AutofillProfile>* local_profiles,
+    std::unordered_map<std::string, AutofillProfile*>* server_id_profiles_map,
+    std::unordered_map<std::string, std::string>* guids_merge_map) {
   bool has_converted_addresses = false;
   for (std::unique_ptr<AutofillProfile>& wallet_address : server_profiles_) {
+    // Add the profile to the map.
+    server_id_profiles_map->insert(
+        std::make_pair(wallet_address->server_id(), wallet_address.get()));
+
     // If the address has not been converted yet, convert it.
     if (!wallet_address->has_converted()) {
       // Try to merge the server address into a similar local profile, or create
       // a new local profile if no similar profile is found.
       std::string address_guid =
-          MergeServerAddressesIntoProfiles(*wallet_address, &local_profiles);
+          MergeServerAddressesIntoProfiles(*wallet_address, local_profiles);
 
       // Update the map to transfer the billing address relationship from the
       // server address to the converted/merged local profile.
-      guids_merge_map.insert(std::pair<std::string, std::string>(
+      guids_merge_map->insert(std::pair<std::string, std::string>(
           wallet_address->server_id(), address_guid));
 
       // Update the wallet addresses metadata to record the conversion.
@@ -1876,16 +1962,53 @@ void PersonalDataManager::ConvertWalletAddressesToLocalProfiles() {
     }
   }
 
-  if (has_converted_addresses) {
-    // Save the local profiles to the DB.
-    SetProfiles(&local_profiles);
+  return has_converted_addresses;
+}
 
-    // Update the credit cards billing address relationship.
-    UpdateCardsBillingAddressReference(guids_merge_map);
+bool PersonalDataManager::UpdateWalletCardsAlreadyConvertedBillingAddresses(
+    std::vector<AutofillProfile>* local_profiles,
+    std::unordered_map<std::string, AutofillProfile*>* server_id_profiles_map,
+    std::unordered_map<std::string, std::string>* guids_merge_map) {
+  // Look for server cards that still refer to server addresses but for which
+  // there is no mapping. This can happen if it's a new card for which the
+  // billing address has already been converted. This should be a no-op for most
+  // situations. Otherwise, it should affect only one Wallet card, sinces users
+  // do not add a lot of credit cards.
+  AutofillProfileComparator comparator(app_locale_);
+  bool should_update_cards = false;
+  for (std::unique_ptr<CreditCard>& wallet_card : server_credit_cards_) {
+    std::string billing_address_id = wallet_card->billing_address_id();
 
-    // Force a reload of the profiles and cards.
-    Refresh();
+    // If billing address refers to a server id and that id is not a key in the
+    // guids_merge_map, it means that the card is new but the address was
+    // already converted. Look for the matching converted profile.
+    if (!billing_address_id.empty() &&
+        billing_address_id.length() != LOCAL_GUID_LENGTH &&
+        guids_merge_map->find(billing_address_id) == guids_merge_map->end()) {
+      // Get the profile.
+      auto it = server_id_profiles_map->find(billing_address_id);
+      if (it != server_id_profiles_map->end()) {
+        AutofillProfile* billing_address = it->second;
+
+        // Look for a matching local profile (DO NOT MERGE).
+        bool matching_profile_found = false;
+        for (auto& local_profile : *local_profiles) {
+          if (!matching_profile_found &&
+              comparator.AreMergeable(*billing_address, local_profile)) {
+            matching_profile_found = true;
+
+            // The Wallet address matches this local profile. Add this to the
+            // merge mapping.
+            guids_merge_map->insert(std::pair<std::string, std::string>(
+                billing_address_id, local_profile.guid()));
+            should_update_cards = true;
+          }
+        }
+      }
+    }
   }
+
+  return should_update_cards;
 }
 
 // TODO(crbug.com/687975): Reuse MergeProfiles in this function.
@@ -1918,6 +2041,15 @@ std::string PersonalDataManager::MergeServerAddressesIntoProfiles(
     // Set the profile as being local.
     existing_profiles->back().set_record_type(AutofillProfile::LOCAL_PROFILE);
     existing_profiles->back().set_modification_date(AutofillClock::Now());
+
+    // Wallet addresses don't have an email address, use the one from the
+    // currently signed-in account.
+    std::string account_id = signin_manager_->GetAuthenticatedAccountId();
+    base::string16 email =
+        base::UTF8ToUTF16(account_tracker_->GetAccountInfo(account_id).email);
+    if (!email.empty())
+      existing_profiles->back().SetRawInfo(EMAIL_ADDRESS, email);
+
     AutofillMetrics::LogWalletAddressConversionType(
         AutofillMetrics::CONVERTED_ADDRESS_ADDED);
   }

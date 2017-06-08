@@ -58,10 +58,8 @@ public class OfflinePageUtilsTest extends ChromeActivityTestCaseBase<ChromeActiv
 
                 Profile profile = Profile.getLastUsedProfile();
                 mOfflinePageBridge = OfflinePageBridge.getForProfile(profile);
-                // Context context1 = getInstrumentation().getTargetContext();
-                Context context2 = getActivity().getBaseContext();
                 if (!NetworkChangeNotifier.isInitialized()) {
-                    NetworkChangeNotifier.init(context2);
+                    NetworkChangeNotifier.init();
                 }
                 if (mOfflinePageBridge.isOfflinePageModelLoaded()) {
                     semaphore.release();
@@ -168,9 +166,10 @@ public class OfflinePageUtilsTest extends ChromeActivityTestCaseBase<ChromeActiv
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                OfflinePageTabObserver.init(getActivity().getBaseContext(),
-                        getActivity().getTabModelSelector().getModel(false),
-                        getActivity().getSnackbarManager(), mockSnackbarController);
+                OfflinePageTabObserver offlineObserver =
+                        new OfflinePageTabObserver(getActivity().getTabModelSelector(),
+                                getActivity().getSnackbarManager(), mockSnackbarController);
+                OfflinePageTabObserver.setObserverForTesting(getActivity(), offlineObserver);
                 OfflinePageUtils.showOfflineSnackbarIfNecessary(getActivity().getActivityTab());
 
                 // Pretend that we went online, this should cause the snackbar to show.
@@ -197,7 +196,7 @@ public class OfflinePageUtilsTest extends ChromeActivityTestCaseBase<ChromeActiv
     }
 
     // TODO(petewil): This is borrowed from OfflinePageBridge test.  We should refactor
-    // to some common test code (including the setup).
+    // to some common test code (including the setup).  crbug.com/705100.
     private void savePage(final int expectedResult, final String expectedUrl)
             throws InterruptedException {
         final Semaphore semaphore = new Semaphore(0);

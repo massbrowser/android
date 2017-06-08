@@ -46,7 +46,7 @@ class SimpleWM::WindowListModel : public aura::WindowObserver {
   }
   ~WindowListModel() override {
     window_container_->RemoveObserver(this);
-    for (auto window : windows_)
+    for (auto* window : windows_)
       window->RemoveObserver(this);
   }
 
@@ -411,10 +411,11 @@ void SimpleWM::SetWindowManagerClient(
   window_manager_client_ = client;
 }
 
-bool SimpleWM::OnWmSetBounds(aura::Window* window, gfx::Rect* bounds) {
+void SimpleWM::OnWmConnected() {}
+
+void SimpleWM::OnWmSetBounds(aura::Window* window, const gfx::Rect& bounds) {
   FrameView* frame_view = GetFrameViewForClientWindow(window);
-  frame_view->GetWidget()->SetBounds(*bounds);
-  return false;
+  frame_view->GetWidget()->SetBounds(bounds);
 }
 
 bool SimpleWM::OnWmSetProperty(
@@ -423,6 +424,8 @@ bool SimpleWM::OnWmSetProperty(
     std::unique_ptr<std::vector<uint8_t>>* new_data) {
   return true;
 }
+
+void SimpleWM::OnWmSetModalType(aura::Window* window, ui::ModalType type) {}
 
 void SimpleWM::OnWmSetCanFocus(aura::Window* window, bool can_focus) {}
 
@@ -461,6 +464,15 @@ void SimpleWM::OnWmClientJankinessChanged(
     bool janky) {
   // Don't care.
 }
+
+void SimpleWM::OnWmBuildDragImage(const gfx::Point& screen_location,
+                                  const SkBitmap& drag_image,
+                                  const gfx::Vector2d& drag_image_offset,
+                                  ui::mojom::PointerKind source) {}
+
+void SimpleWM::OnWmMoveDragImage(const gfx::Point& screen_location) {}
+
+void SimpleWM::OnWmDestroyDragImage() {}
 
 void SimpleWM::OnWmWillCreateDisplay(const display::Display& display) {
   screen_->display_list().AddDisplay(display,

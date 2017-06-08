@@ -16,11 +16,9 @@
 #include "services/navigation/public/interfaces/view.mojom.h"
 #include "services/service_manager/public/c/main.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_runner.h"
-#include "services/tracing/public/cpp/provider.h"
 #include "ui/aura/mus/window_port_mus.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/canvas.h"
@@ -153,7 +151,8 @@ class UI : public views::WidgetDelegateView,
 };
 
 Webtest::Webtest() {
-  registry_.AddInterface<mojom::Launchable>(this);
+  registry_.AddInterface<mojom::Launchable>(
+      base::Bind(&Webtest::Create, base::Unretained(this)));
 }
 Webtest::~Webtest() {}
 
@@ -170,16 +169,16 @@ void Webtest::RemoveWindow(views::Widget* window) {
 }
 
 void Webtest::OnStart() {
-  tracing_.Initialize(context()->connector(), context()->identity().name());
   aura_init_ = base::MakeUnique<views::AuraInit>(
       context()->connector(), context()->identity(), "views_mus_resources.pak",
       std::string(), nullptr, views::AuraInit::Mode::AURA_MUS);
 }
 
-void Webtest::OnBindInterface(const service_manager::ServiceInfo& source_info,
-                              const std::string& interface_name,
-                              mojo::ScopedMessagePipeHandle interface_pipe) {
-  registry_.BindInterface(source_info.identity, interface_name,
+void Webtest::OnBindInterface(
+    const service_manager::BindSourceInfo& source_info,
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  registry_.BindInterface(source_info, interface_name,
                           std::move(interface_pipe));
 }
 
@@ -205,7 +204,7 @@ void Webtest::Launch(uint32_t what, mojom::LaunchMode how) {
   AddWindow(window);
 }
 
-void Webtest::Create(const service_manager::Identity& remote_identity,
+void Webtest::Create(const service_manager::BindSourceInfo& source_info,
                      mojom::LaunchableRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }

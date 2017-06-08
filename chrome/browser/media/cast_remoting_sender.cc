@@ -92,7 +92,7 @@ CastRemotingSender::CastRemotingSender(
       latest_acked_frame_id_(media::cast::FrameId::first() - 1),
       duplicate_ack_counter_(0),
       input_queue_discards_remaining_(0),
-      pipe_watcher_(FROM_HERE),
+      pipe_watcher_(FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::MANUAL),
       flow_restart_pending_(true),
       weak_factory_(this) {
   // Confirm this constructor is running on the IO BrowserThread.
@@ -110,8 +110,9 @@ CastRemotingSender::CastRemotingSender(
 
   if (!frame_event_cb_.is_null()) {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::Bind(&CastRemotingSender::SendFrameEvents,
-                              weak_factory_.GetWeakPtr()),
+        FROM_HERE,
+        base::BindOnce(&CastRemotingSender::SendFrameEvents,
+                       weak_factory_.GetWeakPtr()),
         logging_flush_interval_);
   }
 }
@@ -132,11 +133,12 @@ void CastRemotingSender::FindAndBind(
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&CastRemotingSender::FindAndBind, rtp_stream_id,
-                   base::Passed(&pipe), base::Passed(&request),
-                   // Using media::BindToCurrentLoop() so the |error_callback|
-                   // is trampolined back to the original thread.
-                   media::BindToCurrentLoop(error_callback)));
+        base::BindOnce(
+            &CastRemotingSender::FindAndBind, rtp_stream_id,
+            base::Passed(&pipe), base::Passed(&request),
+            // Using media::BindToCurrentLoop() so the |error_callback|
+            // is trampolined back to the original thread.
+            media::BindToCurrentLoop(error_callback)));
     return;
   }
 
@@ -164,10 +166,11 @@ void CastRemotingSender::FindAndBind(
   sender->error_callback_ = error_callback;
 
   sender->pipe_ = std::move(pipe);
-  sender->pipe_watcher_.Start(
-      sender->pipe_.get(), MOJO_HANDLE_SIGNAL_READABLE,
-      base::Bind(&CastRemotingSender::ProcessInputQueue,
-                 base::Unretained(sender)));
+  sender->pipe_watcher_.Watch(sender->pipe_.get(),
+                              MOJO_HANDLE_SIGNAL_NEW_DATA_READABLE,
+                              base::Bind(&CastRemotingSender::ProcessInputQueue,
+                                         base::Unretained(sender)));
+  sender->pipe_watcher_.ArmOrNotify();
   sender->binding_.Bind(std::move(request));
   sender->binding_.set_connection_error_handler(sender->error_callback_);
 }
@@ -207,7 +210,8 @@ void CastRemotingSender::ScheduleNextResendCheck() {
   time_to_next = std::max(time_to_next, kMinSchedulingDelay);
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&CastRemotingSender::ResendCheck, weak_factory_.GetWeakPtr()),
+      base::BindOnce(&CastRemotingSender::ResendCheck,
+                     weak_factory_.GetWeakPtr()),
       time_to_next);
 }
 
@@ -378,8 +382,10 @@ bool CastRemotingSender::TryConsumeDataChunk(uint32_t offset, uint32_t size,
           MOJO_READ_DATA_FLAG_DISCARD | MOJO_READ_DATA_FLAG_ALL_OR_NONE);
       if (result == MOJO_RESULT_OK)
         return true;  // Successfully discarded data.
-      if (result == MOJO_RESULT_OUT_OF_RANGE)
+      if (result == MOJO_RESULT_OUT_OF_RANGE) {
+        pipe_watcher_.ArmOrNotify();
         return false;  // Retry later.
+      }
       LOG(ERROR) << SENDER_SSRC
                  << "Unexpected result when discarding from data pipe ("
                  << result << ')';
@@ -395,8 +401,10 @@ bool CastRemotingSender::TryConsumeDataChunk(uint32_t offset, uint32_t size,
         MOJO_READ_DATA_FLAG_ALL_OR_NONE);
     if (result == MOJO_RESULT_OK)
       return true;  // Successfully consumed data.
-    if (result == MOJO_RESULT_OUT_OF_RANGE)
+    if (result == MOJO_RESULT_OUT_OF_RANGE) {
+      pipe_watcher_.ArmOrNotify();
       return false;  // Retry later.
+    }
     LOG(ERROR)
         << SENDER_SSRC << "Read from data pipe failed (" << result << ')';
   } while (false);
@@ -536,8 +544,9 @@ void CastRemotingSender::SendFrameEvents() {
   }
 
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&CastRemotingSender::SendFrameEvents,
-                            weak_factory_.GetWeakPtr()),
+      FROM_HERE,
+      base::BindOnce(&CastRemotingSender::SendFrameEvents,
+                     weak_factory_.GetWeakPtr()),
       logging_flush_interval_);
 }
 

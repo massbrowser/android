@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <map>
 #include <memory>
 #include <queue>
 
@@ -86,6 +87,9 @@ class CONTENT_EXPORT InputRouterImpl
                            SubframeTouchEventRouting);
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
                            MainframeTouchEventRouting);
+
+  // Keeps track of last position of touch points and sets MovementXY for them.
+  void SetMovementXYForTouchPoints(blink::WebTouchEvent* event);
 
   // TouchpadTapSuppressionControllerClient
   void SendMouseEventImmediately(
@@ -259,6 +263,10 @@ class CONTENT_EXPORT InputRouterImpl
   InputEventStreamValidator output_stream_validator_;
 
   float device_scale_factor_;
+  bool raf_aligned_touch_enabled_;
+
+  // Last touch position relative to screen. Used to compute movementX/Y.
+  std::map<int, gfx::Point> global_touch_position_;
 
   DISALLOW_COPY_AND_ASSIGN(InputRouterImpl);
 };

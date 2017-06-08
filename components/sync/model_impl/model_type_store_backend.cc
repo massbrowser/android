@@ -7,8 +7,10 @@
 #include <utility>
 
 #include "base/files/file_path.h"
+#include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/synchronization/lock.h"
 #include "components/sync/protocol/model_type_store_schema_descriptor.pb.h"
 #include "third_party/leveldatabase/env_chromium.h"
 #include "third_party/leveldatabase/src/helpers/memenv/memenv.h"
@@ -28,40 +30,10 @@ const int64_t kInvalidSchemaVersion = -1;
 const int64_t ModelTypeStoreBackend::kLatestSchemaVersion = 1;
 const char ModelTypeStoreBackend::kDBSchemaDescriptorRecordId[] =
     "_mts_schema_descriptor";
-
-// static
-base::LazyInstance<ModelTypeStoreBackend::BackendMap>
-    ModelTypeStoreBackend::backend_map_ = LAZY_INSTANCE_INITIALIZER;
+const char ModelTypeStoreBackend::kStoreInitResultHistogramName[] =
+    "Sync.ModelTypeStoreInitResult";
 
 namespace {
-
-// Different reasons for ModelTypeStoreBackend initialization failure are mapped
-// to these values. The enum is used for recording UMA histogram. Don't reorder,
-// change or delete values.
-enum StoreInitResultForHistogram {
-  STORE_INIT_RESULT_SUCCESS = 0,
-
-  // Following values reflect leveldb initialization errors.
-  STORE_INIT_RESULT_NOT_FOUND,
-  STORE_INIT_RESULT_CORRUPTION,
-  STORE_INIT_RESULT_NOT_SUPPORTED,
-  STORE_INIT_RESULT_INVALID_ARGUMENT,
-  STORE_INIT_RESULT_IO_ERROR,
-
-  // Issues encountered when reading or parsing schema descriptor.
-  STORE_INIT_RESULT_SCHEMA_DESCRIPTOR_ISSUE,
-
-  // Database schema migration failed.
-  STORE_INIT_RESULT_MIGRATION,
-
-  STORE_INIT_RESULT_UNKNOWN,
-  STORE_INIT_RESULT_COUNT
-};
-
-void RecordStoreInitResultHistogram(StoreInitResultForHistogram result) {
-  UMA_HISTOGRAM_ENUMERATION("Sync.ModelTypeStoreInitResult", result,
-                            STORE_INIT_RESULT_COUNT);
-}
 
 StoreInitResultForHistogram LevelDbStatusToStoreInitResult(
     const leveldb::Status& status) {
@@ -80,13 +52,59 @@ StoreInitResultForHistogram LevelDbStatusToStoreInitResult(
   return STORE_INIT_RESULT_UNKNOWN;
 }
 
+// BackendMap tracks created ModelTypeStoreBackends ensuring at most one backend
+// exists for a given path. BackendMap keeps non-owning pointer to backend
+// allowing backend lifetime to be controlled by consumers. Since backends can
+// run concurrently on different threads all map operations are guarded by lock.
+class BackendMap {
+ public:
+  BackendMap() = default;
+
+  // Returns backend reference or nullptr if backend for |path| is not in the
+  // map.
+  scoped_refptr<ModelTypeStoreBackend> GetBackend(
+      const std::string& path) const;
+  // Adds backend into the map ensuring it wasn't added before.
+  void SetBackend(const std::string& path, ModelTypeStoreBackend* backend);
+  void EraseBackend(const std::string& path);
+
+ private:
+  mutable base::Lock lock_;
+
+  std::unordered_map<std::string, ModelTypeStoreBackend*> backends_;
+
+  DISALLOW_COPY_AND_ASSIGN(BackendMap);
+};
+
+base::LazyInstance<BackendMap>::DestructorAtExit backend_map =
+    LAZY_INSTANCE_INITIALIZER;
+
+scoped_refptr<ModelTypeStoreBackend> BackendMap::GetBackend(
+    const std::string& path) const {
+  base::AutoLock scoped_lock(lock_);
+  auto it = backends_.find(path);
+  return (it == backends_.end()) ? nullptr : it->second;
+}
+
+void BackendMap::SetBackend(const std::string& path,
+                            ModelTypeStoreBackend* backend) {
+  base::AutoLock scoped_lock(lock_);
+  DCHECK(backends_.find(path) == backends_.end());
+  backends_[path] = backend;
+}
+
+void BackendMap::EraseBackend(const std::string& path) {
+  base::AutoLock scoped_lock(lock_);
+  backends_.erase(path);
+}
+
 }  // namespace
 
 ModelTypeStoreBackend::ModelTypeStoreBackend(const std::string& path)
     : path_(path) {}
 
 ModelTypeStoreBackend::~ModelTypeStoreBackend() {
-  backend_map_.Get().erase(path_);
+  backend_map.Get().EraseBackend(path_);
 }
 
 std::unique_ptr<leveldb::Env> ModelTypeStoreBackend::CreateInMemoryEnv() {
@@ -98,18 +116,19 @@ scoped_refptr<ModelTypeStoreBackend> ModelTypeStoreBackend::GetOrCreateBackend(
     const std::string& path,
     std::unique_ptr<leveldb::Env> env,
     ModelTypeStore::Result* result) {
-  if (backend_map_.Get().find(path) != backend_map_.Get().end()) {
+  scoped_refptr<ModelTypeStoreBackend> backend =
+      backend_map.Get().GetBackend(path);
+  if (backend) {
     *result = ModelTypeStore::Result::SUCCESS;
-    return make_scoped_refptr(backend_map_.Get()[path]);
+    return backend;
   }
 
-  scoped_refptr<ModelTypeStoreBackend> backend =
-      new ModelTypeStoreBackend(path);
+  backend = new ModelTypeStoreBackend(path);
 
   *result = backend->Init(path, std::move(env));
 
   if (*result == ModelTypeStore::Result::SUCCESS) {
-    backend_map_.Get()[path] = backend.get();
+    backend_map.Get().SetBackend(path, backend.get());
   } else {
     backend = nullptr;
   }
@@ -120,25 +139,25 @@ scoped_refptr<ModelTypeStoreBackend> ModelTypeStoreBackend::GetOrCreateBackend(
 ModelTypeStore::Result ModelTypeStoreBackend::Init(
     const std::string& path,
     std::unique_ptr<leveldb::Env> env) {
-  DFAKE_SCOPED_LOCK(push_pop_);
-  leveldb::DB* db_raw = nullptr;
+  DCHECK(sequence_checker_.CalledOnValidSequence());
 
-  leveldb::Options options;
-  options.create_if_missing = true;
-  options.reuse_logs = leveldb_env::kDefaultLogReuseOptionValue;
-  options.paranoid_checks = true;
-  if (env.get()) {
-    options.env = env.get();
-    env_ = std::move(env);
+  env_ = std::move(env);
+
+  leveldb::Status status = OpenDatabase(path, env_.get());
+  if (status.IsCorruption()) {
+    DCHECK(db_ == nullptr);
+    status = DestroyDatabase(path, env_.get());
+    if (status.ok())
+      status = OpenDatabase(path, env_.get());
+    if (status.ok())
+      RecordStoreInitResultHistogram(
+          STORE_INIT_RESULT_RECOVERED_AFTER_CORRUPTION);
   }
-
-  leveldb::Status status = leveldb::DB::Open(options, path, &db_raw);
   if (!status.ok()) {
-    DCHECK(db_raw == nullptr);
+    DCHECK(db_ == nullptr);
     RecordStoreInitResultHistogram(LevelDbStatusToStoreInitResult(status));
     return ModelTypeStore::Result::UNSPECIFIED_ERROR;
   }
-  db_.reset(db_raw);
 
   int64_t current_version = GetStoreVersion();
   if (current_version == kInvalidSchemaVersion) {
@@ -158,12 +177,37 @@ ModelTypeStore::Result ModelTypeStoreBackend::Init(
   return ModelTypeStore::Result::SUCCESS;
 }
 
+leveldb::Status ModelTypeStoreBackend::OpenDatabase(const std::string& path,
+                                                    leveldb::Env* env) {
+  leveldb::DB* db_raw = nullptr;
+  leveldb::Options options;
+  options.create_if_missing = true;
+  options.reuse_logs = leveldb_env::kDefaultLogReuseOptionValue;
+  options.paranoid_checks = true;
+  if (env)
+    options.env = env;
+
+  leveldb::Status status = leveldb::DB::Open(options, path, &db_raw);
+  DCHECK(status.ok() != (db_raw == nullptr));
+  if (status.ok())
+    db_.reset(db_raw);
+  return status;
+}
+
+leveldb::Status ModelTypeStoreBackend::DestroyDatabase(const std::string& path,
+                                                       leveldb::Env* env) {
+  leveldb::Options options;
+  if (env)
+    options.env = env;
+  return leveldb::DestroyDB(path, options);
+}
+
 ModelTypeStore::Result ModelTypeStoreBackend::ReadRecordsWithPrefix(
     const std::string& prefix,
     const ModelTypeStore::IdList& id_list,
     ModelTypeStore::RecordList* record_list,
     ModelTypeStore::IdList* missing_id_list) {
-  DFAKE_SCOPED_LOCK(push_pop_);
+  DCHECK(sequence_checker_.CalledOnValidSequence());
   DCHECK(db_);
   record_list->reserve(id_list.size());
   leveldb::ReadOptions read_options;
@@ -187,7 +231,7 @@ ModelTypeStore::Result ModelTypeStoreBackend::ReadRecordsWithPrefix(
 ModelTypeStore::Result ModelTypeStoreBackend::ReadAllRecordsWithPrefix(
     const std::string& prefix,
     ModelTypeStore::RecordList* record_list) {
-  DFAKE_SCOPED_LOCK(push_pop_);
+  DCHECK(sequence_checker_.CalledOnValidSequence());
   DCHECK(db_);
   leveldb::ReadOptions read_options;
   read_options.verify_checksums = true;
@@ -206,7 +250,7 @@ ModelTypeStore::Result ModelTypeStoreBackend::ReadAllRecordsWithPrefix(
 
 ModelTypeStore::Result ModelTypeStoreBackend::WriteModifications(
     std::unique_ptr<leveldb::WriteBatch> write_batch) {
-  DFAKE_SCOPED_LOCK(push_pop_);
+  DCHECK(sequence_checker_.CalledOnValidSequence());
   DCHECK(db_);
   leveldb::Status status =
       db_->Write(leveldb::WriteOptions(), write_batch.get());
@@ -255,6 +299,18 @@ bool ModelTypeStoreBackend::Migrate0To1() {
       db_->Put(leveldb::WriteOptions(), kDBSchemaDescriptorRecordId,
                schema_descriptor.SerializeAsString());
   return status.ok();
+}
+
+// static
+void ModelTypeStoreBackend::RecordStoreInitResultHistogram(
+    StoreInitResultForHistogram result) {
+  UMA_HISTOGRAM_ENUMERATION(kStoreInitResultHistogramName, result,
+                            STORE_INIT_RESULT_COUNT);
+}
+
+// static
+bool ModelTypeStoreBackend::BackendExistsForTest(const std::string& path) {
+  return backend_map.Get().GetBackend(path) != nullptr;
 }
 
 }  // namespace syncer

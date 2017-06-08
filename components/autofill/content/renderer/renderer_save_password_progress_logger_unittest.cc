@@ -64,8 +64,6 @@ class FakeContentPasswordManagerDriver : public mojom::PasswordManagerDriver {
   void ShowNotSecureWarning(base::i18n::TextDirection text_direction,
                             const gfx::RectF& bounds) override {}
 
-  void PasswordAutofillAgentConstructed() override {}
-
   void RecordSavePasswordProgress(const std::string& log) override {
     called_record_save_ = true;
     log_ = log;
@@ -74,6 +72,9 @@ class FakeContentPasswordManagerDriver : public mojom::PasswordManagerDriver {
   void SaveGenerationFieldDetectedByClassifier(
       const autofill::PasswordForm& password_form,
       const base::string16& generation_field) override {}
+
+  void CheckSafeBrowsingReputation(const GURL& form_action,
+                                   const GURL& frame_url) override {}
 
   // Records whether RecordSavePasswordProgress() gets called.
   bool called_record_save_;

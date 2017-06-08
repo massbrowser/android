@@ -19,6 +19,7 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
@@ -91,7 +92,7 @@ public class BookmarkUtils {
                     createSnackbarControllerForEditButton(activity, bookmarkId);
             if (getLastUsedParent(activity) == null) {
                 if (fromCustomTab) {
-                    String packageLabel = BuildInfo.getPackageLabel(activity);
+                    String packageLabel = BuildInfo.getPackageLabel();
                     snackbar = Snackbar.make(
                             activity.getString(R.string.bookmark_page_saved, packageLabel),
                             snackbarController, Snackbar.TYPE_ACTION, Snackbar.UMA_BOOKMARK_ADDED);
@@ -154,10 +155,13 @@ public class BookmarkUtils {
     /**
      * Shows bookmark main UI.
      */
-    public static void showBookmarkManager(Activity activity) {
+    public static void showBookmarkManager(ChromeActivity activity) {
         String url = getFirstUrlToLoad(activity);
 
-        if (DeviceFormFactor.isTablet(activity)) {
+        if (activity.getBottomSheet() != null) {
+            activity.getBottomSheetContentController().showContentAndOpenSheet(
+                    R.id.action_bookmarks);
+        } else if (DeviceFormFactor.isTablet(activity)) {
             openUrl(activity, url, activity.getComponentName());
         } else {
             Intent intent = new Intent(activity, BookmarkActivity.class);

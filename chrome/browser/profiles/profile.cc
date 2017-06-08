@@ -100,6 +100,10 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kSafeBrowsingScoutReportingEnabled,
                                 false);
   registry->RegisterBooleanPref(prefs::kSafeBrowsingScoutGroupSelected, false);
+  registry->RegisterBooleanPref(
+      prefs::kSafeBrowsingSawInterstitialExtendedReporting, false);
+  registry->RegisterBooleanPref(
+      prefs::kSafeBrowsingSawInterstitialScoutReporting, false);
   registry->RegisterBooleanPref(prefs::kSafeBrowsingProceedAnywayDisabled,
                                 false);
   registry->RegisterBooleanPref(prefs::kSSLErrorOverrideAllowed, true);
@@ -157,7 +161,6 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
                                std::string());
 #endif
 
-#if defined(ENABLE_MEDIA_ROUTER)
   registry->RegisterBooleanPref(
       prefs::kMediaRouterCloudServicesPrefSet,
       false,
@@ -171,13 +174,13 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterListPref(prefs::kMediaRouterTabMirroringSources);
-#endif
 
 #if defined(OS_CHROMEOS)
   registry->RegisterBooleanPref(prefs::kAllowScreenLock, true);
 #endif
 
   registry->RegisterDictionaryPref(prefs::kWebShareVisitedTargets);
+  registry->RegisterDictionaryPref(prefs::kExcludedSchemes);
 }
 
 std::string Profile::GetDebugName() {

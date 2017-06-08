@@ -11,6 +11,7 @@
 #include "base/hash.h"
 #include "base/single_thread_task_runner.h"
 #include "base/values.h"
+#include "cc/paint/skia_paint_canvas.h"
 #include "content/renderer/media/webmediaplayer_ms.h"
 #include "content/renderer/render_thread_impl.h"
 #include "media/base/media_switches.h"
@@ -47,25 +48,27 @@ scoped_refptr<media::VideoFrame> CopyFrame(
         media::PIXEL_FORMAT_I420, frame->coded_size(), frame->visible_rect(),
         frame->natural_size(), frame->timestamp());
 
-    sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(
-        frame->visible_rect().width(), frame->visible_rect().height());
-
     ui::ContextProviderCommandBuffer* const provider =
         RenderThreadImpl::current()->SharedMainThreadContextProvider().get();
-    if (surface && provider) {
-      DCHECK(provider->ContextGL());
-      video_renderer->Copy(
-          frame.get(), surface->getCanvas(),
-          media::Context3D(provider->ContextGL(), provider->GrContext()));
-    } else {
+    if (!provider) {
       // Return a black frame (yuv = {0, 0x80, 0x80}).
       return media::VideoFrame::CreateColorFrame(
           frame->visible_rect().size(), 0u, 0x80, 0x80, frame->timestamp());
     }
 
+    SkBitmap bitmap;
+    bitmap.allocPixels(SkImageInfo::MakeN32Premul(
+        frame->visible_rect().width(), frame->visible_rect().height()));
+    cc::SkiaPaintCanvas paint_canvas(bitmap);
+
+    DCHECK(provider->ContextGL());
+    video_renderer->Copy(
+        frame.get(), &paint_canvas,
+        media::Context3D(provider->ContextGL(), provider->GrContext()));
+
     SkPixmap pixmap;
-    const bool result = surface->getCanvas()->peekPixels(&pixmap);
-    DCHECK(result) << "Error trying to access SkSurface's pixels";
+    const bool result = bitmap.peekPixels(&pixmap);
+    DCHECK(result) << "Error trying to access SkBitmap's pixels";
 
     const uint32 source_pixel_format =
         (kN32_SkColorType == kRGBA_8888_SkColorType) ? libyuv::FOURCC_ABGR
@@ -139,24 +142,24 @@ WebMediaPlayerMSCompositor::WebMediaPlayerMSCompositor(
   io_thread_checker_.DetachFromThread();
 
   blink::WebVector<blink::WebMediaStreamTrack> video_tracks;
-  if (!web_stream.isNull())
-    web_stream.videoTracks(video_tracks);
+  if (!web_stream.IsNull())
+    web_stream.VideoTracks(video_tracks);
 
   const bool remote_video =
-      video_tracks.size() && video_tracks[0].source().remote();
+      video_tracks.size() && video_tracks[0].Source().Remote();
 
-  if (remote_video &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableRTCSmoothnessAlgorithm)) {
+  if (remote_video && !base::CommandLine::ForCurrentProcess()->HasSwitch(
+                          switches::kDisableRTCSmoothnessAlgorithm)) {
     base::AutoLock auto_lock(current_frame_lock_);
     rendering_frame_buffer_.reset(new media::VideoRendererAlgorithm(
         base::Bind(&WebMediaPlayerMSCompositor::MapTimestampsToRenderTimeTicks,
-                   base::Unretained(this))));
+                   base::Unretained(this)),
+        &media_log_));
   }
 
   // Just for logging purpose.
   std::string stream_id =
-      web_stream.isNull() ? std::string() : web_stream.id().utf8();
+      web_stream.IsNull() ? std::string() : web_stream.Id().Utf8();
   const uint32_t hash_value = base::Hash(stream_id);
   serial_ = (hash_value << 1) | (remote_video ? 1 : 0);
 }
@@ -178,13 +181,15 @@ base::TimeDelta WebMediaPlayerMSCompositor::GetCurrentTime() {
   return current_frame_.get() ? current_frame_->timestamp() : base::TimeDelta();
 }
 
-size_t WebMediaPlayerMSCompositor::total_frame_count() const {
+size_t WebMediaPlayerMSCompositor::total_frame_count() {
+  base::AutoLock auto_lock(current_frame_lock_);
   DVLOG(1) << __func__ << ", " << total_frame_count_;
   DCHECK(thread_checker_.CalledOnValidThread());
   return total_frame_count_;
 }
 
-size_t WebMediaPlayerMSCompositor::dropped_frame_count() const {
+size_t WebMediaPlayerMSCompositor::dropped_frame_count() {
+  base::AutoLock auto_lock(current_frame_lock_);
   DVLOG(1) << __func__ << ", " << dropped_frame_count_;
   DCHECK(thread_checker_.CalledOnValidThread());
   return dropped_frame_count_;
@@ -454,7 +459,8 @@ void WebMediaPlayerMSCompositor::SetAlgorithmEnabledForTesting(
   if (!rendering_frame_buffer_) {
     rendering_frame_buffer_.reset(new media::VideoRendererAlgorithm(
         base::Bind(&WebMediaPlayerMSCompositor::MapTimestampsToRenderTimeTicks,
-                   base::Unretained(this))));
+                   base::Unretained(this)),
+        &media_log_));
   }
 }
 

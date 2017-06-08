@@ -4,11 +4,17 @@
 
 #include "components/autofill/ios/browser/autofill_driver_ios.h"
 
+#include "base/memory/ptr_util.h"
 #include "components/autofill/ios/browser/autofill_driver_ios_bridge.h"
 #include "ios/web/public/browser_state.h"
+#import "ios/web/public/origin_util.h"
 #include "ios/web/public/web_state/web_state.h"
 #include "ios/web/public/web_thread.h"
 #include "ui/gfx/geometry/rect_f.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 DEFINE_WEB_STATE_USER_DATA_KEY(autofill::AutofillDriverIOS);
 
@@ -26,8 +32,8 @@ void AutofillDriverIOS::CreateForWebStateAndDelegate(
 
   web_state->SetUserData(
       UserDataKey(),
-      new AutofillDriverIOS(web_state, client, bridge, app_locale,
-                            enable_download_manager));
+      base::WrapUnique(new AutofillDriverIOS(
+          web_state, client, bridge, app_locale, enable_download_manager)));
 }
 
 AutofillDriverIOS::AutofillDriverIOS(
@@ -45,7 +51,7 @@ AutofillDriverIOS::AutofillDriverIOS(
 
 AutofillDriverIOS::~AutofillDriverIOS() {}
 
-bool AutofillDriverIOS::IsOffTheRecord() const {
+bool AutofillDriverIOS::IsIncognito() const {
   return web_state_->GetBrowserState()->IsOffTheRecord();
 }
 
@@ -82,7 +88,10 @@ void AutofillDriverIOS::RendererShouldAcceptDataListSuggestion(
     const base::string16& value) {
 }
 
-void AutofillDriverIOS::DidInteractWithCreditCardForm() {}
+void AutofillDriverIOS::DidInteractWithCreditCardForm() {
+  if (!web::IsOriginSecure(web_state_->GetLastCommittedURL()))
+    web_state_->OnCreditCardInputShownOnHttp();
+}
 
 void AutofillDriverIOS::RendererShouldClearFilledForm() {
 }

@@ -18,10 +18,9 @@ import org.chromium.base.CommandLine;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
-import org.chromium.content.browser.ChildProcessConnection;
-import org.chromium.content.browser.ChildProcessCreationParams;
-import org.chromium.content.browser.ChildProcessLauncher;
-import org.chromium.content.common.FileDescriptorInfo;
+import org.chromium.base.process_launcher.ChildProcessCreationParams;
+import org.chromium.base.process_launcher.FileDescriptorInfo;
+import org.chromium.content.browser.BaseChildProcessConnection;
 
 /**
  * A Service that assists the ChildProcessLauncherTest that responds to one message, which
@@ -68,10 +67,12 @@ public class ChildProcessLauncherTestHelperService extends Service {
 
     private void doBindService(final Message msg) {
         String[] commandLine = { "_", "--" + BaseSwitches.RENDERER_WAIT_FOR_JAVA_DEBUGGER };
-        ChildProcessCreationParams params = new ChildProcessCreationParams(getPackageName(), false,
-                LibraryProcessType.PROCESS_CHILD);
-        final ChildProcessConnection conn = ChildProcessLauncher.startForTesting(this, commandLine,
-                new FileDescriptorInfo[0], params);
+        final boolean bindToCaller = true;
+        ChildProcessCreationParams params = new ChildProcessCreationParams(
+                getPackageName(), false, LibraryProcessType.PROCESS_CHILD, bindToCaller);
+        final BaseChildProcessConnection conn =
+                ChildProcessLauncherTestUtils.startInternalForTesting(
+                        this, commandLine, new FileDescriptorInfo[0], params);
 
         // Poll the connection until it is set up. The main test in ChildProcessLauncherTest, which
         // has bound the connection to this service, manages the timeout via the lifetime of this
@@ -82,10 +83,11 @@ public class ChildProcessLauncherTestHelperService extends Service {
 
             @Override
             public void run() {
-                if (conn.getPid() != 0) {
+                int pid = ChildProcessLauncherTestUtils.getConnectionPid(conn);
+                if (pid != 0) {
                     try {
-                        mReplyTo.send(Message.obtain(null, MSG_BIND_SERVICE_REPLY, conn.getPid(),
-                                    conn.getServiceNumber()));
+                        mReplyTo.send(Message.obtain(null, MSG_BIND_SERVICE_REPLY, pid,
+                                ChildProcessLauncherTestUtils.getConnectionServiceNumber(conn)));
                     } catch (RemoteException ex) {
                         throw new RuntimeException(ex);
                     }

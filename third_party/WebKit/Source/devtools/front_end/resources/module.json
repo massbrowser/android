@@ -21,7 +21,9 @@
         "cookie_table",
         "inline_editor",
         "data_grid",
-        "components"
+        "components",
+        "network_conditions",
+        "object_ui"
     ],
     "scripts": [
         "ApplicationCacheModel.js",
@@ -38,6 +40,8 @@
         "IndexedDBModel.js",
         "IndexedDBViews.js",
         "ResourcesPanel.js",
+        "ApplicationPanelSidebar.js",
+        "ResourcesSection.js",
         "ServiceWorkerCacheViews.js",
         "ServiceWorkersView.js"
     ],

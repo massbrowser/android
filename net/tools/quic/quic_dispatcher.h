@@ -85,6 +85,11 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   // Queues the blocked writer for later resumption.
   void OnWriteBlocked(QuicBlockedWriterInterface* blocked_writer) override;
 
+  // QuicSession::Visitor interface implementation (via inheritance of
+  // QuicTimeWaitListManager::Visitor):
+  // Collects reset error code received on streams.
+  void OnRstStreamReceived(const QuicRstStreamFrame& frame) override;
+
   // QuicTimeWaitListManager::Visitor interface implementation
   // Called whenever the time wait list manager adds a new connection to the
   // time-wait list.
@@ -141,7 +146,6 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
   bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
-  bool OnPathCloseFrame(const QuicPathCloseFrame& frame) override;
   void OnPacketComplete() override;
 
   // QuicBufferedPacketStore::VisitorInterface implementation.
@@ -270,18 +274,20 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
       QuicBufferedPacketStore::EnqueuePacketResult result,
       QuicConnectionId connection_id);
 
+  // Removes the session from the session map and write blocked list, and adds
+  // the ConnectionId to the time-wait list.  If |session_closed_statelessly| is
+  // true, any future packets for the ConnectionId will be black-holed.
+  virtual void CleanUpSession(SessionMap::iterator it,
+                              QuicConnection* connection,
+                              bool session_closed_statelessly);
+
+  void StopAcceptingNewConnections();
+
  private:
   friend class test::QuicDispatcherPeer;
   friend class StatelessRejectorProcessDoneCallback;
 
   typedef std::unordered_set<QuicConnectionId> QuicConnectionIdSet;
-
-  // Removes the session from the session map and write blocked list, and adds
-  // the ConnectionId to the time-wait list.  If |session_closed_statelessly| is
-  // true, any future packets for the ConnectionId will be black-holed.
-  void CleanUpSession(SessionMap::iterator it,
-                      QuicConnection* connection,
-                      bool session_closed_statelessly);
 
   bool HandlePacketForTimeWait(const QuicPacketPublicHeader& header);
 
@@ -290,7 +296,7 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   // fate which describes what subsequent processing should be performed on the
   // packets, like ValidityChecks, and invokes ProcessUnauthenticatedHeaderFate.
   void MaybeRejectStatelessly(QuicConnectionId connection_id,
-                              const QuicPacketHeader& header);
+                              QuicVersion version);
 
   // Deliver |packets| to |session| for further processing.
   void DeliverPacketsToSession(
@@ -300,8 +306,7 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   // Perform the appropriate actions on the current packet based on |fate| -
   // either process, buffer, or drop it.
   void ProcessUnauthenticatedHeaderFate(QuicPacketFate fate,
-                                        QuicConnectionId connection_id,
-                                        QuicPacketNumber packet_number);
+                                        QuicConnectionId connection_id);
 
   // Invoked when StatelessRejector::Process completes.
   void OnStatelessRejectorProcessDone(
@@ -309,14 +314,12 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
       const QuicSocketAddress& current_client_address,
       const QuicSocketAddress& current_server_address,
       std::unique_ptr<QuicReceivedPacket> current_packet,
-      QuicPacketNumber packet_number,
       QuicVersion first_version);
 
   // Examine the state of the rejector and decide what to do with the current
   // packet.
   void ProcessStatelessRejectorState(
       std::unique_ptr<StatelessRejector> rejector,
-      QuicPacketNumber packet_number,
       QuicVersion first_version);
 
   void set_new_sessions_allowed_per_event_loop(
@@ -384,6 +387,9 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   // A backward counter of how many new sessions can be create within current
   // event loop. When reaches 0, it means can't create sessions for now.
   int16_t new_sessions_allowed_per_event_loop_;
+
+  // True if this dispatcher is not draining.
+  bool accept_new_connections_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicDispatcher);
 };

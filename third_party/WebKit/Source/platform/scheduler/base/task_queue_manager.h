@@ -14,6 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/pending_task.h"
+#include "base/run_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "platform/scheduler/base/enqueue_order.h"
@@ -51,17 +52,14 @@ class TaskTimeObserver;
 //    the incoming task queue (if any) are moved here. The work queues are
 //    registered with the selector as input to the scheduling decision.
 //
-class BLINK_PLATFORM_EXPORT TaskQueueManager
+class PLATFORM_EXPORT TaskQueueManager
     : public internal::TaskQueueSelector::Observer,
-      public base::MessageLoop::NestingObserver {
+      public base::RunLoop::NestingObserver {
  public:
   // Create a task queue manager where |delegate| identifies the thread
   // on which where the tasks are  eventually run. Category strings must have
   // application lifetime (statics or literals). They may not include " chars.
-  TaskQueueManager(scoped_refptr<TaskQueueManagerDelegate> delegate,
-                   const char* tracing_category,
-                   const char* disabled_by_default_tracing_category,
-                   const char* disabled_by_default_verbose_tracing_category);
+  explicit TaskQueueManager(scoped_refptr<TaskQueueManagerDelegate> delegate);
   ~TaskQueueManager() override;
 
   // Requests that a task to process work is posted on the main task runner.
@@ -75,7 +73,7 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
   // this class was created on.
   void MaybeScheduleDelayedWork(const tracked_objects::Location& from_here,
                                 TimeDomain* requesting_time_domain,
-                                LazyNow* lazy_now,
+                                base::TimeTicks now,
                                 base::TimeTicks run_time);
 
   // Cancels a delayed task to process work at |run_time|, previously requested
@@ -105,7 +103,7 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
   scoped_refptr<internal::TaskQueueImpl> NewTaskQueue(
       const TaskQueue::Spec& spec);
 
-  class BLINK_PLATFORM_EXPORT Observer {
+  class PLATFORM_EXPORT Observer {
    public:
     virtual ~Observer() {}
 
@@ -125,7 +123,7 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
   void SetObserver(Observer* observer);
 
   // Returns the delegate used by the TaskQueueManager.
-  const scoped_refptr<TaskQueueManagerDelegate>& delegate() const;
+  const scoped_refptr<TaskQueueManagerDelegate>& Delegate() const;
 
   // Time domains must be registered for the task queues to get updated.
   void RegisterTimeDomain(TimeDomain* time_domain);
@@ -165,14 +163,27 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
    public:
     NextTaskDelay() : time_domain_(nullptr) {}
 
+    using AllowAnyDelayForTesting = int;
+
     NextTaskDelay(base::TimeDelta delay, TimeDomain* time_domain)
         : delay_(delay), time_domain_(time_domain) {
       DCHECK_GT(delay, base::TimeDelta());
       DCHECK(time_domain);
     }
 
-    base::TimeDelta delay() const { return delay_; }
+    NextTaskDelay(base::TimeDelta delay,
+                  TimeDomain* time_domain,
+                  AllowAnyDelayForTesting)
+        : delay_(delay), time_domain_(time_domain) {
+      DCHECK(time_domain);
+    }
+
+    base::TimeDelta Delay() const { return delay_; }
     TimeDomain* time_domain() const { return time_domain_; }
+
+    bool operator>(const NextTaskDelay& other) const {
+      return delay_ > other.delay_;
+    }
 
     bool operator<(const NextTaskDelay& other) const {
       return delay_ < other.delay_;
@@ -223,8 +234,8 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
   void OnTriedToSelectBlockedWorkQueue(
       internal::WorkQueue* work_queue) override;
 
-  // base::MessageLoop::NestingObserver implementation:
-  void OnBeginNestedMessageLoop() override;
+  // base::RunLoop::NestingObserver implementation:
+  void OnBeginNestedRunLoop() override;
 
   // Called by the task queue to register a new pending task.
   void DidQueueTask(const internal::TaskQueueImpl::Task& pending_task);
@@ -239,7 +250,7 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
 
   // Delayed Tasks with run_times <= Now() are enqueued onto the work queue and
   // reloads any empty work queues.
-  void WakeupReadyDelayedQueues(LazyNow* lazy_now);
+  void WakeUpReadyDelayedQueues(LazyNow* lazy_now);
 
   // Chooses the next work queue to service. Returns true if |out_queue|
   // indicates the queue from which the next task should be run, false to
@@ -358,10 +369,6 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
   base::ObserverList<base::MessageLoop::TaskObserver> task_observers_;
 
   base::ObserverList<TaskTimeObserver> task_time_observers_;
-
-  const char* tracing_category_;
-  const char* disabled_by_default_tracing_category_;
-  const char* disabled_by_default_verbose_tracing_category_;
 
   internal::TaskQueueImpl* currently_executing_task_queue_;  // NOT OWNED
 

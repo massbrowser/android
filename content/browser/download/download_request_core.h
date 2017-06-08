@@ -52,8 +52,11 @@ class CONTENT_EXPORT DownloadRequestCore
   };
 
   // All parameters are required. |request| and |delegate| must outlive
-  // DownloadRequestCore.
-  DownloadRequestCore(net::URLRequest* request, Delegate* delegate);
+  // DownloadRequestCore. The request is not the main request if
+  // |is_parallel_request| is true.
+  DownloadRequestCore(net::URLRequest* request,
+                      Delegate* delegate,
+                      bool is_parallel_request);
   ~DownloadRequestCore();
 
   // Should be called when the URLRequest::Delegate receives OnResponseStarted.
@@ -116,11 +119,14 @@ class CONTENT_EXPORT DownloadRequestCore
 
  private:
   static DownloadInterruptReason HandleRequestStatus(
-      const net::URLRequestStatus& status);
+      const net::URLRequestStatus& status, bool has_strong_validators);
 
   static DownloadInterruptReason HandleSuccessfulServerResponse(
       const net::HttpResponseHeaders& http_headers,
       DownloadSaveInfo* save_info);
+
+  static void AddPartialRequestHeaders(net::URLRequest* request,
+                                       DownloadUrlParameters* params);
 
   std::unique_ptr<DownloadCreateInfo> CreateDownloadCreateInfo(
       DownloadInterruptReason result);
@@ -132,6 +138,7 @@ class CONTENT_EXPORT DownloadRequestCore
   // populate the DownloadCreateInfo when the time comes.
   std::unique_ptr<DownloadSaveInfo> save_info_;
   uint32_t download_id_;
+  bool transient_;
   DownloadUrlParameters::OnStartedCallback on_started_callback_;
 
   // Data flow

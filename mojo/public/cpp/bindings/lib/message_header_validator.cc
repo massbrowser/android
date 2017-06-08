@@ -64,7 +64,7 @@ bool IsValidMessageHeader(const internal::MessageHeader* header,
   if (header->version < 2)
     return true;
 
-  auto header_v2 = static_cast<const internal::MessageHeaderV2*>(header);
+  auto* header_v2 = static_cast<const internal::MessageHeaderV2*>(header);
   // For the payload pointer:
   // - Check that the pointer can be safely decoded.
   // - Claim one byte that the pointer points to. It makes sure not only the
@@ -73,9 +73,11 @@ bool IsValidMessageHeader(const internal::MessageHeader* header,
   //   payload size).
   // - Validation of the payload contents will be done separately based on the
   //   payload type.
-  if (!header_v2->payload.is_null() &&
-      (!internal::ValidatePointer(header_v2->payload, validation_context) ||
-       !validation_context->ClaimMemory(header_v2->payload.Get(), 1))) {
+  if (!internal::ValidatePointerNonNullable(header_v2->payload,
+                                            "null payload in message header",
+                                            validation_context) ||
+      !internal::ValidatePointer(header_v2->payload, validation_context) ||
+      !validation_context->ClaimMemory(header_v2->payload.Get(), 1)) {
     return false;
   }
 

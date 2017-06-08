@@ -15,7 +15,10 @@ void FakeContentPasswordManagerDriver::BindRequest(
 
 // mojom::PasswordManagerDriver:
 void FakeContentPasswordManagerDriver::PasswordFormsParsed(
-    const std::vector<autofill::PasswordForm>& forms) {}
+    const std::vector<autofill::PasswordForm>& forms) {
+  called_password_forms_parsed_ = true;
+  password_forms_parsed_ = forms;
+}
 
 void FakeContentPasswordManagerDriver::PasswordFormsRendered(
     const std::vector<autofill::PasswordForm>& visible_forms,
@@ -64,10 +67,6 @@ void FakeContentPasswordManagerDriver::ShowNotSecureWarning(
   called_show_not_secure_warning_ = true;
 }
 
-void FakeContentPasswordManagerDriver::PasswordAutofillAgentConstructed() {
-  called_agent_constructed_ = true;
-}
-
 void FakeContentPasswordManagerDriver::RecordSavePasswordProgress(
     const std::string& log) {
   called_record_save_progress_ = true;
@@ -78,4 +77,10 @@ void FakeContentPasswordManagerDriver::SaveGenerationFieldDetectedByClassifier(
     const base::string16& generation_field) {
   called_save_generation_field_ = true;
   save_generation_field_ = generation_field;
+}
+
+void FakeContentPasswordManagerDriver::CheckSafeBrowsingReputation(
+    const GURL& form_action,
+    const GURL& frame_url) {
+  called_check_safe_browsing_reputation_cnt_++;
 }

@@ -17,13 +17,8 @@ component("display_compositor") {
     "gl_helper_readback_support.h",
     "gl_helper_scaling.cc",
     "gl_helper_scaling.h",
-    "gpu_compositor_frame_sink.cc",
-    "gpu_compositor_frame_sink.h",
-    "gpu_compositor_frame_sink_delegate.h",
-    "gpu_display_compositor_frame_sink.cc",
-    "gpu_display_compositor_frame_sink.h",
-    "gpu_offscreen_compositor_frame_sink.cc",
-    "gpu_offscreen_compositor_frame_sink.h",
+    "host_shared_bitmap_manager.cc",
+    "host_shared_bitmap_manager.h",
   ]
 
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
@@ -33,7 +28,7 @@ component("display_compositor") {
   deps = [
     "//base",
     "//cc",
-    "//cc/ipc:internal_interfaces",
+    "//cc/ipc:interfaces",
     "//cc/surfaces",
     "//gpu/command_buffer/client",
     "//gpu/command_buffer/client:gles2_interface",
@@ -80,6 +75,7 @@ source_set("unit_tests") {
   testonly = true
   sources = [
     "buffer_queue_unittest.cc",
+    "host_shared_bitmap_manager_unittest.cc",
   ]
 
   if (!use_aura && !is_mac) {

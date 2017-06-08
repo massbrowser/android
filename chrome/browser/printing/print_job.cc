@@ -14,9 +14,10 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/printing/print_job_worker.h"
@@ -137,8 +138,8 @@ void PrintJob::StartPrinting() {
   is_job_pending_ = true;
 
   // Tell everyone!
-  scoped_refptr<JobEventDetails> details(
-      new JobEventDetails(JobEventDetails::NEW_DOC, document_.get(), nullptr));
+  scoped_refptr<JobEventDetails> details(new JobEventDetails(
+      JobEventDetails::NEW_DOC, 0, document_.get(), nullptr));
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PRINT_JOB_EVENT,
       content::Source<PrintJob>(this),
@@ -149,7 +150,7 @@ void PrintJob::Stop() {
   DCHECK(RunsTasksOnCurrentThread());
 
   if (quit_factory_.HasWeakPtrs()) {
-    // In case we're running a nested message loop to wait for a job to finish,
+    // In case we're running a nested run loop to wait for a job to finish,
     // and we finished before the timeout, quit the nested loop right away.
     Quit();
     quit_factory_.InvalidateWeakPtrs();
@@ -183,7 +184,7 @@ void PrintJob::Cancel() {
   }
   // Make sure a Cancel() is broadcast.
   scoped_refptr<JobEventDetails> details(
-      new JobEventDetails(JobEventDetails::FAILED, nullptr, nullptr));
+      new JobEventDetails(JobEventDetails::FAILED, 0, nullptr, nullptr));
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PRINT_JOB_EVENT,
       content::Source<PrintJob>(this),
@@ -197,7 +198,7 @@ bool PrintJob::FlushJob(base::TimeDelta timeout) {
   scoped_refptr<PrintJob> handle(this);
 
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&PrintJob::Quit, quit_factory_.GetWeakPtr()),
+      FROM_HERE, base::BindOnce(&PrintJob::Quit, quit_factory_.GetWeakPtr()),
       timeout);
 
   base::MessageLoop::ScopedNestableTaskAllower allow(
@@ -282,7 +283,7 @@ void PrintJob::StartPdfToEmfConversion(
       base::MakeUnique<PdfConversionState>(page_size, content_area);
   const int kPrinterDpi = settings().dpi();
   PdfRenderSettings settings(
-      content_area, gfx::Point(0,0), kPrinterDpi, /*autorotate=*/true,
+      content_area, gfx::Point(0, 0), kPrinterDpi, /*autorotate=*/true,
       print_text_with_gdi ? PdfRenderSettings::Mode::GDI_TEXT
                           : PdfRenderSettings::Mode::NORMAL);
   pdf_conversion_state_->Start(
@@ -330,7 +331,7 @@ void PrintJob::StartPdfToPostScriptConversion(
       gfx::Size(), gfx::Rect());
   const int kPrinterDpi = settings().dpi();
   PdfRenderSettings settings(
-      content_area, physical_offsets, kPrinterDpi, true /* autorotate? */,
+      content_area, physical_offsets, kPrinterDpi, /*autorotate=*/true,
       ps_level2 ? PdfRenderSettings::Mode::POSTSCRIPT_LEVEL2
                 : PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3);
   pdf_conversion_state_->Start(
@@ -382,7 +383,7 @@ void PrintJob::OnNotifyPrintJobEvent(const JobEventDetails& event_details) {
     case JobEventDetails::DOC_DONE: {
       // This will call Stop() and broadcast a JOB_DONE message.
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&PrintJob::OnDocumentDone, this));
+          FROM_HERE, base::BindOnce(&PrintJob::OnDocumentDone, this));
       break;
     }
     case JobEventDetails::PAGE_DONE:
@@ -408,8 +409,8 @@ void PrintJob::OnDocumentDone() {
   // Stop the worker thread.
   Stop();
 
-  scoped_refptr<JobEventDetails> details(
-      new JobEventDetails(JobEventDetails::JOB_DONE, document_.get(), nullptr));
+  scoped_refptr<JobEventDetails> details(new JobEventDetails(
+      JobEventDetails::JOB_DONE, 0, document_.get(), nullptr));
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PRINT_JOB_EVENT,
       content::Source<PrintJob>(this),
@@ -443,14 +444,20 @@ void PrintJob::ControlledWorkerShutdown() {
   }
 #endif
 
-
   // Now make sure the thread object is cleaned up. Do this on a worker
   // thread because it may block.
-  base::WorkerPool::PostTaskAndReply(
+  // TODO(fdoray): Remove MayBlock() once base::Thread::Stop() passes
+  // base::ThreadRestrictions::AssertWaitAllowed().
+  base::PostTaskWithTraitsAndReply(
       FROM_HERE,
-      base::Bind(&PrintJobWorker::Stop, base::Unretained(worker_.get())),
-      base::Bind(&PrintJob::HoldUntilStopIsCalled, this),
-      false);
+      base::TaskTraits()
+          .MayBlock()
+          .WithBaseSyncPrimitives()
+          .WithPriority(base::TaskPriority::BACKGROUND)
+          .WithShutdownBehavior(
+              base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      base::BindOnce(&PrintJobWorker::Stop, base::Unretained(worker_.get())),
+      base::BindOnce(&PrintJob::HoldUntilStopIsCalled, this));
 
   is_job_pending_ = false;
   registrar_.RemoveAll();
@@ -466,12 +473,10 @@ void PrintJob::Quit() {
 
 // Takes settings_ ownership and will be deleted in the receiving thread.
 JobEventDetails::JobEventDetails(Type type,
+                                 int job_id,
                                  PrintedDocument* document,
                                  PrintedPage* page)
-    : document_(document),
-      page_(page),
-      type_(type) {
-}
+    : document_(document), page_(page), type_(type), job_id_(job_id) {}
 
 JobEventDetails::~JobEventDetails() {
 }

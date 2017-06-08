@@ -33,6 +33,9 @@
 #include "ui/gfx/image/image_unittest_util.h"
 #include "url/gurl.h"
 
+// TODO(zpeng): Effectively test scenarios where both timeout callback and
+// success callback are invoked. See crbug.com/697228.
+
 namespace {
 
 const char* kDefaultManifestUrl = "https://www.example.com/manifest.json";
@@ -40,7 +43,7 @@ const char* kDefaultManifestName = "Default Name";
 const char* kDefaultManifestShortName = "Default Short Name";
 const char* kDefaultStartUrl = "https://www.example.com/index.html";
 const blink::WebDisplayMode kDefaultManifestDisplayMode =
-    blink::WebDisplayModeStandalone;
+    blink::kWebDisplayModeStandalone;
 
 // WebContents subclass which mocks out image and manifest fetching.
 class MockWebContents : public content::TestWebContents {

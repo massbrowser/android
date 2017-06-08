@@ -23,6 +23,7 @@ import org.chromium.chrome.browser.metrics.LaunchMetrics;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.webapk.lib.client.WebApkValidator;
+import org.chromium.webapk.lib.common.WebApkConstants;
 
 import java.lang.ref.WeakReference;
 
@@ -137,6 +138,21 @@ public class WebappLauncherActivity extends Activity {
                     ? ActivityAssigner.WEBAPK_NAMESPACE : ActivityAssigner.WEBAPP_NAMESPACE;
             int activityIndex = ActivityAssigner.instance(namespace).assign(info.id());
             activityName += String.valueOf(activityIndex);
+
+            // Finishes the old activity if it has been assigned to a different WebappActivity. See
+            // crbug.com/702998.
+            for (WeakReference<Activity> activityRef : ApplicationStatus.getRunningActivities()) {
+                Activity activity = activityRef.get();
+                if (!(activity instanceof WebappActivity)
+                        || !activity.getClass().getName().equals(activityName)) {
+                    continue;
+                }
+                WebappActivity webappActivity = (WebappActivity) activity;
+                if (!TextUtils.equals(webappActivity.mWebappInfo.id(), info.id())) {
+                    activity.finish();
+                }
+                break;
+            }
         }
 
         // Create an intent to launch the Webapp in an unmapped WebappActivity.
@@ -203,8 +219,8 @@ public class WebappLauncherActivity extends Activity {
     private boolean isValidWebApk(Intent intent) {
         if (!ChromeWebApkHost.isEnabled()) return false;
 
-        String webApkPackage = IntentUtils.safeGetStringExtra(intent,
-                ShortcutHelper.EXTRA_WEBAPK_PACKAGE_NAME);
+        String webApkPackage =
+                IntentUtils.safeGetStringExtra(intent, WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME);
         if (TextUtils.isEmpty(webApkPackage)) return false;
 
         String url = IntentUtils.safeGetStringExtra(intent, ShortcutHelper.EXTRA_URL);

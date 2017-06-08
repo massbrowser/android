@@ -21,7 +21,8 @@
 #include "device/usb/public/interfaces/chooser_service.mojom.h"
 #include "device/usb/webusb_descriptors.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 
 using content::RenderFrameHost;
 using device::MockDeviceClient;
@@ -58,10 +59,11 @@ class FakeChooserView : public ChooserController::View {
   DISALLOW_COPY_AND_ASSIGN(FakeChooserView);
 };
 
-class FakeChooserService : public device::usb::ChooserService {
+class FakeChooserService : public device::mojom::UsbChooserService {
  public:
   static void Create(RenderFrameHost* render_frame_host,
-                     device::usb::ChooserServiceRequest request) {
+                     const service_manager::BindSourceInfo& source_info,
+                     device::mojom::UsbChooserServiceRequest request) {
     mojo::MakeStrongBinding(
         base::MakeUnique<FakeChooserService>(render_frame_host),
         std::move(request));
@@ -72,7 +74,7 @@ class FakeChooserService : public device::usb::ChooserService {
 
   ~FakeChooserService() override {}
 
-  // device::usb::ChooserService:
+  // device::mojom::UsbChooserService:
   void GetPermission(const std::vector<device::UsbDeviceFilter>& device_filters,
                      const GetPermissionCallback& callback) override {
     auto chooser_controller = base::MakeUnique<UsbChooserController>(

@@ -22,6 +22,7 @@
 #include "content/public/browser/web_contents_binding_set.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
 #include "ui/gfx/geometry/rect.h"
 
 class Profile;
@@ -46,13 +47,13 @@ class ChromePasswordManagerClient
   ~ChromePasswordManagerClient() override;
 
   // PasswordManagerClient implementation.
-  bool IsAutomaticPasswordSavingEnabled() const override;
   bool IsSavingAndFillingEnabledForCurrentPage() const override;
   bool IsFillingEnabledForCurrentPage() const override;
+  void PostHSTSQueryForHost(const GURL& origin,
+                            const HSTSCallback& callback) const override;
   bool OnCredentialManagerUsed() override;
   bool PromptUserToSaveOrUpdatePassword(
       std::unique_ptr<password_manager::PasswordFormManager> form_to_save,
-      password_manager::CredentialSourceType type,
       bool update_password) override;
   bool PromptUserToChooseCredentials(
       std::vector<std::unique_ptr<autofill::PasswordForm>> local_forms,
@@ -82,7 +83,7 @@ class ChromePasswordManagerClient
   password_manager::PasswordSyncState GetPasswordSyncState() const override;
   bool WasLastNavigationHTTPError() const override;
   bool DidLastPageLoadEncounterSSLErrors() const override;
-  bool IsOffTheRecord() const override;
+  bool IsIncognito() const override;
   const password_manager::PasswordManager* GetPasswordManager() const override;
   autofill::AutofillManager* GetAutofillManagerForMainFrame() override;
   const GURL& GetMainFrameURL() const override;
@@ -104,6 +105,13 @@ class ChromePasswordManagerClient
   void GenerationAvailableForForm(const autofill::PasswordForm& form) override;
   void HidePasswordGenerationPopup() override;
 
+#if defined(SAFE_BROWSING_DB_LOCAL)
+  safe_browsing::PasswordProtectionService* GetPasswordProtectionService()
+      const override;
+  void CheckSafeBrowsingReputation(const GURL& form_action,
+                                   const GURL& frame_url) override;
+#endif
+
   static void CreateForWebContentsWithAutofillClient(
       content::WebContents* contents,
       autofill::AutofillClient* autofill_client);
@@ -113,6 +121,7 @@ class ChromePasswordManagerClient
 
   static void BindCredentialManager(
       content::RenderFrameHost* render_frame_host,
+      const service_manager::BindSourceInfo& source_info,
       password_manager::mojom::CredentialManagerRequest request);
 
   // A helper method to determine whether a save/update bubble can be shown
@@ -130,11 +139,14 @@ class ChromePasswordManagerClient
   // content::WebContentsObserver overrides.
   void DidStartNavigation(
       content::NavigationHandle* navigation_handle) override;
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID)
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
 
   // content::RenderWidgetHost::InputEventObserver overrides.
   void OnInputEvent(const blink::WebInputEvent&) override;
+#endif
 
   // Given |bounds| in the renderers coordinate system, return the same bounds
   // in the screens coordinate system.
@@ -165,8 +177,11 @@ class ChromePasswordManagerClient
 
   password_manager::PasswordManager password_manager_;
 
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID)
   password_manager::PasswordReuseDetectionManager
       password_reuse_detection_manager_;
+#endif
 
   password_manager::ContentPasswordManagerDriverFactory* driver_factory_;
 

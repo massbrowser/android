@@ -1,5 +1,7 @@
 #include "./WhiteListFilterParser.h"
-//#include "../../../../base/android/apk_assets.h"
+#include <fstream>
+#include <sstream>
+#include "../../../../base/logging.h"
 
 WhiteListFilterParser::WhiteListFilterParser() : src_data(nullptr) {
 }
@@ -11,14 +13,11 @@ WhiteListFilterParser::~WhiteListFilterParser() {
 }
 
 bool WhiteListFilterParser::matches(const char *input, const char *contextDomain) {
-    if(this->src_data != nullptr) {
-        char* pch = strtok (src_data,"|");
-        while (pch != NULL)
-        {
-            if(strstr(input, pch) != NULL) {
+    if(src_data != nullptr) {
+        for(int i = 0; i < src_data_size; i++) {
+            if(src_data[i] && (strstr(input, src_data[i]) != NULL || strstr(contextDomain, src_data[i]) != NULL)) {
                 return true;
             }
-            pch = strtok (NULL, "|");
         }
     }
     return false;
@@ -26,7 +25,24 @@ bool WhiteListFilterParser::matches(const char *input, const char *contextDomain
 
 
 void WhiteListFilterParser::deserialize(char *buffer) {
-  int len = strlen(buffer);
-  src_data = new char[len];
-  memcpy(src_data, buffer, len);
+    src_data_size = 1;
+    const char *tmp = buffer;
+
+    while((tmp = strstr(tmp, "|")) != NULL)
+    {
+        src_data_size++;
+        tmp++;
+    }
+    src_data = new char*[src_data_size + 1];
+    memset (src_data, 0, src_data_size + 1);
+
+    int i = 0;
+
+    char* pch = strtok (buffer, "|");
+    while (pch != NULL)
+    {
+        src_data[i] = pch;
+        pch = strtok (NULL, "|");
+        i++;
+    }
 }

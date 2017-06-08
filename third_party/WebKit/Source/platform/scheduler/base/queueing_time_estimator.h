@@ -7,16 +7,16 @@
 
 #include "base/macros.h"
 #include "base/time/time.h"
-#include "public/platform/WebCommon.h"
+#include "platform/PlatformExport.h"
 
 namespace blink {
 namespace scheduler {
 
 // Records the expected queueing time for a high priority task occurring
 // randomly during each interval of length |window_duration|.
-class BLINK_PLATFORM_EXPORT QueueingTimeEstimator {
+class PLATFORM_EXPORT QueueingTimeEstimator {
  public:
-  class BLINK_PLATFORM_EXPORT Client {
+  class PLATFORM_EXPORT Client {
    public:
     virtual void OnQueueingTimeForWindowEstimated(
         base::TimeDelta queueing_time) = 0;
@@ -29,15 +29,18 @@ class BLINK_PLATFORM_EXPORT QueueingTimeEstimator {
 
   class State {
    public:
+    void OnTopLevelTaskStarted(base::TimeTicks task_start_time);
+    void OnTopLevelTaskCompleted(Client* client, base::TimeTicks task_end_time);
+    void OnBeginNestedRunLoop();
+
     base::TimeDelta current_expected_queueing_time;
     base::TimeDelta window_duration;
     base::TimeTicks window_start_time;
     base::TimeTicks current_task_start_time;
-    void OnTopLevelTaskStarted(base::TimeTicks task_start_time);
-    void OnTopLevelTaskCompleted(Client* client, base::TimeTicks task_end_time);
 
    private:
     bool TimePastWindowEnd(base::TimeTicks task_end_time);
+    bool in_nested_message_loop_ = false;
   };
 
   QueueingTimeEstimator(Client* client, base::TimeDelta window_duration);
@@ -45,9 +48,10 @@ class BLINK_PLATFORM_EXPORT QueueingTimeEstimator {
 
   void OnTopLevelTaskStarted(base::TimeTicks task_start_time);
   void OnTopLevelTaskCompleted(base::TimeTicks task_end_time);
+  void OnBeginNestedRunLoop();
 
   // Returns all state except for the current |client_|.
-  const State& state() const { return state_; }
+  const State& GetState() const { return state_; }
 
   base::TimeDelta EstimateQueueingTimeIncludingCurrentTask(
       base::TimeTicks now) const;

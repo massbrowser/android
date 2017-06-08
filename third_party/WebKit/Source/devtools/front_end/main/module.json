@@ -247,25 +247,6 @@
         },
         {
             "type": "setting",
-            "category": "Debugger",
-            "title": "Disable JavaScript",
-            "settingName": "javaScriptDisabled",
-            "settingType": "boolean",
-            "order": 1,
-            "defaultValue": false,
-            "options": [
-                {
-                    "value": true,
-                    "title": "Disable JavaScript"
-                },
-                {
-                    "value": false,
-                    "title": "Enable JavaScript"
-                }
-            ]
-        },
-        {
-            "type": "setting",
             "category": "DevTools",
             "title": "Auto-open DevTools for popups",
             "settingName": "autoAttachToCreatedPages",
@@ -373,6 +354,13 @@
             "order": 80
         },
         {
+            "type": "context-menu-item",
+            "location": "mainMenu/footer",
+            "title": "Help",
+            "subMenuId": "mainMenuHelp",
+            "order": 30
+        },
+        {
             "type": "view",
             "location": "drawer-view",
             "id": "rendering",
@@ -405,6 +393,13 @@
         {
             "type": "@UI.ViewLocationResolver",
             "name": "drawer-view",
+            "category": "Drawer",
+            "className": "UI.InspectorView"
+        },
+        {
+            "type": "@UI.ViewLocationResolver",
+            "name": "panel",
+            "category": "Panel",
             "className": "UI.InspectorView"
         },
         {
@@ -427,12 +422,14 @@
         "host",
         "platform",
         "sdk",
-        "persistence"
+        "persistence",
+        "help",
+        "console_model",
+        "network_log"
     ],
     "scripts": [
         "RenderingOptions.js",
         "SimpleApp.js",
-        "OverlayController.js",
         "GCActionDelegate.js",
         "RequestAppBannerActionDelegate.js",
         "ExecutionContextSelector.js",

@@ -307,6 +307,8 @@ class AwContents : public FindHelper::Listener,
   void ClearCache(JNIEnv* env,
                   const base::android::JavaParamRef<jobject>& obj,
                   jboolean include_disk_files);
+  void KillRenderProcess(JNIEnv* env,
+                         const base::android::JavaParamRef<jobject>& obj);
   void SetPendingWebContentsForPopup(
       std::unique_ptr<content::WebContents> pending);
   jlong ReleasePopupAwContents(JNIEnv* env,
@@ -342,10 +344,6 @@ class AwContents : public FindHelper::Listener,
       const base::android::JavaParamRef<jstring>& frame_id,
       const base::android::JavaParamRef<jstring>& message,
       const base::android::JavaParamRef<jstring>& target_origin,
-      const base::android::JavaParamRef<jintArray>& sent_ports);
-  void CreateMessageChannel(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jobjectArray>& ports);
 
   void GrantFileSchemeAccesstoChildProcess(
@@ -366,7 +364,14 @@ class AwContents : public FindHelper::Listener,
   void RenderProcessReady(content::RenderProcessHost* host) override;
 
   // AwSafeBrowsingUIManager::UIManagerClient implementation
-  bool CanShowInterstitial() override;
+  bool CanShowBigInterstitial() override;
+
+  void CallProceedOnInterstitialForTesting(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+  void CallDontProceedOnInterstitialForTesting(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
 
   // AwRenderProcessGoneDelegate overrides
   void OnRenderProcessGone(int child_process_id) override;

@@ -178,12 +178,14 @@ TEST_F(DesktopNativeWidgetAuraTest, GlobalCursorState) {
 
   // Verify that setting the cursor using one cursor client
   // will set it for all root windows.
-  EXPECT_EQ(ui::kCursorNone, cursor_client_a->GetCursor().native_type());
-  EXPECT_EQ(ui::kCursorNone, cursor_client_b->GetCursor().native_type());
+  EXPECT_EQ(ui::CursorType::kNone, cursor_client_a->GetCursor().native_type());
+  EXPECT_EQ(ui::CursorType::kNone, cursor_client_b->GetCursor().native_type());
 
-  cursor_client_b->SetCursor(ui::kCursorPointer);
-  EXPECT_EQ(ui::kCursorPointer, cursor_client_a->GetCursor().native_type());
-  EXPECT_EQ(ui::kCursorPointer, cursor_client_b->GetCursor().native_type());
+  cursor_client_b->SetCursor(ui::CursorType::kPointer);
+  EXPECT_EQ(ui::CursorType::kPointer,
+            cursor_client_a->GetCursor().native_type());
+  EXPECT_EQ(ui::CursorType::kPointer,
+            cursor_client_b->GetCursor().native_type());
 
   // Verify that hiding the cursor using one cursor client will
   // hide it for all root windows. Note that hiding the cursor
@@ -380,7 +382,7 @@ class DesktopAuraWidgetTest : public WidgetTest {
 
   void SetUp() override {
     ViewsTestBase::SetUp();
-    views_delegate()->set_use_desktop_native_widgets(true);
+    test_views_delegate()->set_use_desktop_native_widgets(true);
   }
 
  private:
@@ -459,7 +461,7 @@ TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupRepositionTest) {
 
 // The following code verifies we can correctly destroy a Widget from a mouse
 // enter/exit. We could test move/drag/enter/exit but in general we don't run
-// nested message loops from such events, nor has the code ever really dealt
+// nested run loops from such events, nor has the code ever really dealt
 // with this situation.
 
 // Generates two moves (first generates enter, second real move), a press, drag
@@ -469,18 +471,18 @@ void GenerateMouseEvents(Widget* widget, ui::EventType last_event_type) {
   ui::MouseEvent move_event(ui::ET_MOUSE_MOVED, screen_bounds.CenterPoint(),
                             screen_bounds.CenterPoint(), ui::EventTimeForNow(),
                             0, 0);
-  ui::EventProcessor* dispatcher = WidgetTest::GetEventProcessor(widget);
-  ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move_event);
+  ui::EventSink* sink = WidgetTest::GetEventSink(widget);
+  ui::EventDispatchDetails details = sink->OnEventFromSource(&move_event);
   if (last_event_type == ui::ET_MOUSE_ENTERED || details.dispatcher_destroyed)
     return;
-  details = dispatcher->OnEventFromSource(&move_event);
+  details = sink->OnEventFromSource(&move_event);
   if (last_event_type == ui::ET_MOUSE_MOVED || details.dispatcher_destroyed)
     return;
 
   ui::MouseEvent press_event(ui::ET_MOUSE_PRESSED, screen_bounds.CenterPoint(),
                              screen_bounds.CenterPoint(), ui::EventTimeForNow(),
                              0, 0);
-  details = dispatcher->OnEventFromSource(&press_event);
+  details = sink->OnEventFromSource(&press_event);
   if (last_event_type == ui::ET_MOUSE_PRESSED || details.dispatcher_destroyed)
     return;
 
@@ -488,13 +490,13 @@ void GenerateMouseEvents(Widget* widget, ui::EventType last_event_type) {
   end_point.Offset(1, 1);
   ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, end_point, end_point,
                             ui::EventTimeForNow(), 0, 0);
-  details = dispatcher->OnEventFromSource(&drag_event);
+  details = sink->OnEventFromSource(&drag_event);
   if (last_event_type == ui::ET_MOUSE_DRAGGED || details.dispatcher_destroyed)
     return;
 
   ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED, end_point, end_point,
                                ui::EventTimeForNow(), 0, 0);
-  details = dispatcher->OnEventFromSource(&release_event);
+  details = sink->OnEventFromSource(&release_event);
   if (details.dispatcher_destroyed)
     return;
 }
@@ -569,7 +571,7 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
                            cursor_location_main, ui::EventTimeForNow(),
                            ui::EF_NONE, ui::EF_NONE);
   ui::EventDispatchDetails details =
-      GetEventProcessor(&top_level_widget)->OnEventFromSource(&move_main);
+      GetEventSink(&top_level_widget)->OnEventFromSource(&move_main);
   ASSERT_FALSE(details.dispatcher_destroyed);
 
   EXPECT_EQ(1, widget_view->GetEventCount(ui::ET_MOUSE_ENTERED));
@@ -594,8 +596,8 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
   ui::MouseEvent mouse_down_dialog(
       ui::ET_MOUSE_PRESSED, cursor_location_dialog, cursor_location_dialog,
       ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
-  details = GetEventProcessor(&top_level_widget)->OnEventFromSource(
-      &mouse_down_dialog);
+  details =
+      GetEventSink(&top_level_widget)->OnEventFromSource(&mouse_down_dialog);
   ASSERT_FALSE(details.dispatcher_destroyed);
   EXPECT_EQ(1, dialog_widget_view->GetEventCount(ui::ET_MOUSE_PRESSED));
 
@@ -605,32 +607,13 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
   ui::MouseEvent mouse_down_main(ui::ET_MOUSE_MOVED, cursor_location_main2,
                                  cursor_location_main2, ui::EventTimeForNow(),
                                  ui::EF_NONE, ui::EF_NONE);
-  details = GetEventProcessor(&top_level_widget)->OnEventFromSource(
-      &mouse_down_main);
+  details =
+      GetEventSink(&top_level_widget)->OnEventFromSource(&mouse_down_main);
   ASSERT_FALSE(details.dispatcher_destroyed);
   EXPECT_EQ(0, widget_view->GetEventCount(ui::ET_MOUSE_MOVED));
 
   modal_dialog_widget->CloseNow();
   top_level_widget.CloseNow();
-}
-
-TEST_F(WidgetTest, SetScreenBoundsOnNativeWindow) {
-  Widget widget;
-  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
-  params.native_widget =
-      CreatePlatformDesktopNativeWidgetImpl(params, &widget, nullptr);
-  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.bounds = gfx::Rect(10, 10, 100, 100);
-  widget.Init(params);
-  widget.Show();
-  aura::Window* window = widget.GetNativeWindow();
-  display::Screen* screen = display::Screen::GetScreen();
-
-  const gfx::Rect new_screen_bounds(50, 50, 150, 150);
-  window->SetBoundsInScreen(new_screen_bounds,
-                            screen->GetPrimaryDisplay());
-  EXPECT_EQ(new_screen_bounds, widget.GetWindowBoundsInScreen());
-  widget.CloseNow();
 }
 
 #if defined(OS_WIN)

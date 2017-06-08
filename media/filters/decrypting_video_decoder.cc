@@ -23,7 +23,7 @@ const char DecryptingVideoDecoder::kDecoderName[] = "DecryptingVideoDecoder";
 
 DecryptingVideoDecoder::DecryptingVideoDecoder(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-    const scoped_refptr<MediaLog>& media_log,
+    MediaLog* media_log,
     const base::Closure& waiting_for_decryption_key_cb)
     : task_runner_(task_runner),
       media_log_(media_log),
@@ -52,7 +52,7 @@ void DecryptingVideoDecoder::Initialize(const VideoDecoderConfig& config,
   DCHECK(decode_cb_.is_null());
   DCHECK(reset_cb_.is_null());
   DCHECK(config.IsValidConfig());
-  DCHECK(config.is_encrypted());
+  DCHECK(cdm_context);
 
   init_cb_ = BindToCurrentLoop(init_cb);
   output_cb_ = BindToCurrentLoop(output_cb);
@@ -60,7 +60,6 @@ void DecryptingVideoDecoder::Initialize(const VideoDecoderConfig& config,
   config_ = config;
 
   if (state_ == kUninitialized) {
-    DCHECK(cdm_context);
     if (!cdm_context->GetDecryptor()) {
       MEDIA_LOG(DEBUG, media_log_) << GetDisplayName() << ": no decryptor";
       base::ResetAndReturn(&init_cb_).Run(false);
@@ -69,7 +68,8 @@ void DecryptingVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
     decryptor_ = cdm_context->GetDecryptor();
   } else {
-    // Reinitialization.
+    // Reinitialization (i.e. upon a config change). The new config can be
+    // encrypted or clear.
     decryptor_->DeinitializeDecoder(Decryptor::kVideo);
   }
 

@@ -338,7 +338,7 @@ void UserCloudPolicyStore::Validate(
     const UserCloudPolicyValidator::CompletionCallback& callback) {
   // Configure the validator.
   std::unique_ptr<UserCloudPolicyValidator> validator = CreateValidator(
-      std::move(policy), CloudPolicyValidatorBase::TIMESTAMP_NOT_BEFORE);
+      std::move(policy), CloudPolicyValidatorBase::TIMESTAMP_VALIDATED);
 
   // Extract the owning domain from the signed-in user (if any is set yet).
   // If there's no owning domain, then the code just ensures that the policy
@@ -408,9 +408,8 @@ void UserCloudPolicyStore::Validate(
   }
 
   if (validate_in_background) {
-    // Start validation in the background. The Validator will free itself once
-    // validation is complete.
-    validator.release()->StartValidation(callback);
+    // Start validation in the background.
+    UserCloudPolicyValidator::StartValidation(std::move(validator), callback);
   } else {
     // Run validation immediately and invoke the callback with the results.
     validator->RunValidation();

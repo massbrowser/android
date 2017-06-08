@@ -83,6 +83,11 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
     MESSAGE_HANDLER_EX(WM_MOUSEACTIVATE, OnMouseActivate)
     MESSAGE_HANDLER_EX(WM_SETCURSOR, OnSetCursor)
     MESSAGE_HANDLER_EX(WM_TOUCH, OnTouch)
+    MESSAGE_HANDLER_EX(WM_POINTERDOWN, OnPointer)
+    MESSAGE_HANDLER_EX(WM_POINTERUPDATE, OnPointer)
+    MESSAGE_HANDLER_EX(WM_POINTERUP, OnPointer)
+    MESSAGE_HANDLER_EX(WM_POINTERENTER, OnPointer)
+    MESSAGE_HANDLER_EX(WM_POINTERLEAVE, OnPointer)
     MESSAGE_HANDLER_EX(WM_HSCROLL, OnScroll)
     MESSAGE_HANDLER_EX(WM_VSCROLL, OnScroll)
     MESSAGE_HANDLER_EX(WM_NCHITTEST, OnNCHitTest)
@@ -100,7 +105,7 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
   void UpdateParent(HWND parent);
   HWND GetParent();
 
-  IAccessible* window_accessible() { return window_accessible_.get(); }
+  IAccessible* window_accessible() { return window_accessible_.Get(); }
 
   // Functions to show and hide the window.
   void Show();
@@ -135,6 +140,7 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
   LRESULT OnMouseRange(UINT message, WPARAM w_param, LPARAM l_param,
                        BOOL& handled);
   LRESULT OnMouseActivate(UINT message, WPARAM w_param, LPARAM l_param);
+  LRESULT OnPointer(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnTouch(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnScroll(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnNCHitTest(UINT message, WPARAM w_param, LPARAM l_param);

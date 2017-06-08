@@ -21,10 +21,13 @@ using testing::_;
 namespace cc {
 namespace {
 
-// These constants are hard-coded and should match the values in
-// single_scrollbar_animation_controller_thinning.cc.
-const float kIdleThicknessScale = 0.4f;
-const float kDefaultMouseMoveDistanceToTriggerAnimation = 25.f;
+const float kIdleThicknessScale =
+    SingleScrollbarAnimationControllerThinning::kIdleThicknessScale;
+const float kMouseMoveDistanceToTriggerExpand =
+    SingleScrollbarAnimationControllerThinning::
+        kMouseMoveDistanceToTriggerExpand;
+const float kMouseMoveDistanceToTriggerFadeIn =
+    ScrollbarAnimationController::kMouseMoveDistanceToTriggerFadeIn;
 
 class MockSingleScrollbarAnimationControllerClient
     : public ScrollbarAnimationControllerClient {
@@ -34,8 +37,8 @@ class MockSingleScrollbarAnimationControllerClient
       : host_impl_(host_impl) {}
   virtual ~MockSingleScrollbarAnimationControllerClient() {}
 
-  ScrollbarSet ScrollbarsFor(int scroll_layer_id) const override {
-    return host_impl_->ScrollbarsFor(scroll_layer_id);
+  ScrollbarSet ScrollbarsFor(ElementId scroll_element_id) const override {
+    return host_impl_->ScrollbarsFor(scroll_element_id);
   }
 
   MOCK_METHOD2(PostDelayedScrollbarAnimationTask,
@@ -64,6 +67,8 @@ class SingleScrollbarAnimationControllerThinningTest : public testing::Test {
         LayerImpl::Create(host_impl_.active_tree(), 1);
     std::unique_ptr<LayerImpl> clip =
         LayerImpl::Create(host_impl_.active_tree(), 3);
+    scroll_layer->SetElementId(
+        LayerIdToElementIdForTesting(scroll_layer->id()));
     clip_layer_ = clip.get();
     scroll_layer->SetScrollClipLayer(clip_layer_->id());
     LayerImpl* scroll_layer_ptr = scroll_layer.get();
@@ -71,6 +76,7 @@ class SingleScrollbarAnimationControllerThinningTest : public testing::Test {
     const int kId = 2;
     const int kThumbThickness = 10;
     const int kTrackStart = 0;
+    const int kTrackLength = 100;
     const bool kIsLeftSideVerticalScrollbar = false;
     const bool kIsOverlayScrollbar = true;
 
@@ -84,14 +90,17 @@ class SingleScrollbarAnimationControllerThinningTest : public testing::Test {
     clip_layer_->test_properties()->AddChild(std::move(scroll_layer));
     host_impl_.active_tree()->SetRootLayerForTesting(std::move(clip));
 
-    scrollbar_layer_->SetScrollLayerId(scroll_layer_ptr->id());
+    scrollbar_layer_->SetBounds(gfx::Size(kThumbThickness, kTrackLength));
+    scrollbar_layer_->SetPosition(gfx::PointF(90, 0));
+    scrollbar_layer_->SetScrollElementId(scroll_layer_ptr->element_id());
     scrollbar_layer_->test_properties()->opacity_can_animate = true;
     clip_layer_->SetBounds(gfx::Size(100, 100));
     scroll_layer_ptr->SetBounds(gfx::Size(200, 200));
     host_impl_.active_tree()->BuildLayerListAndPropertyTreesForTesting();
 
     scrollbar_controller_ = SingleScrollbarAnimationControllerThinning::Create(
-        scroll_layer_ptr->id(), HORIZONTAL, &client_, kThinningDuration);
+        scroll_layer_ptr->element_id(), HORIZONTAL, &client_,
+        kThinningDuration);
   }
 
   FakeImplTaskRunnerProvider task_runner_provider_;
@@ -103,6 +112,13 @@ class SingleScrollbarAnimationControllerThinningTest : public testing::Test {
   SolidColorScrollbarLayerImpl* scrollbar_layer_;
   NiceMock<MockSingleScrollbarAnimationControllerClient> client_;
 };
+
+// Return a point with given offset from the top-left of scrollbar.
+gfx::PointF NearScrollbar(float offset_x, float offset_y) {
+  gfx::PointF p(90, 0);
+  p.Offset(offset_x, offset_y);
+  return p;
+}
 
 // Check initialization of scrollbar. Should start thin.
 TEST_F(SingleScrollbarAnimationControllerThinningTest, Idle) {
@@ -116,7 +132,7 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest, MouseNear) {
   base::TimeTicks time;
   time += base::TimeDelta::FromSeconds(1);
 
-  scrollbar_controller_->DidMouseMoveNear(1);
+  scrollbar_controller_->DidMouseMove(NearScrollbar(-1, 0));
   scrollbar_controller_->Animate(time);
   EXPECT_FLOAT_EQ(kIdleThicknessScale,
                   scrollbar_layer_->thumb_thickness_scale_factor());
@@ -127,15 +143,24 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest, MouseNear) {
   EXPECT_FLOAT_EQ(1.0f, scrollbar_layer_->thumb_thickness_scale_factor());
 
   // Subsequent moves within the nearness threshold should not change anything.
-  scrollbar_controller_->DidMouseMoveNear(2);
+  scrollbar_controller_->DidMouseMove(NearScrollbar(-2, 0));
   scrollbar_controller_->Animate(time);
   time += base::TimeDelta::FromSeconds(10);
   scrollbar_controller_->Animate(time);
   EXPECT_FLOAT_EQ(1.0f, scrollbar_layer_->thumb_thickness_scale_factor());
 
-  // Now move away from bar.
-  scrollbar_controller_->DidMouseMoveNear(
-      kDefaultMouseMoveDistanceToTriggerAnimation);
+  // Now move away from thumb.
+  scrollbar_controller_->DidMouseMove(
+      NearScrollbar(-kMouseMoveDistanceToTriggerExpand, 0));
+  scrollbar_controller_->Animate(time);
+  time += kThinningDuration;
+  scrollbar_controller_->Animate(time);
+  EXPECT_FLOAT_EQ(kIdleThicknessScale,
+                  scrollbar_layer_->thumb_thickness_scale_factor());
+
+  // Move away from track.
+  scrollbar_controller_->DidMouseMove(
+      NearScrollbar(-kMouseMoveDistanceToTriggerFadeIn, 0));
   scrollbar_controller_->Animate(time);
   time += kThinningDuration;
   scrollbar_controller_->Animate(time);
@@ -149,7 +174,7 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest, MouseOver) {
   base::TimeTicks time;
   time += base::TimeDelta::FromSeconds(1);
 
-  scrollbar_controller_->DidMouseMoveNear(0);
+  scrollbar_controller_->DidMouseMove(NearScrollbar(0, 0));
   scrollbar_controller_->Animate(time);
   EXPECT_FLOAT_EQ(kIdleThicknessScale,
                   scrollbar_layer_->thumb_thickness_scale_factor());
@@ -160,7 +185,7 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest, MouseOver) {
   EXPECT_FLOAT_EQ(1.0f, scrollbar_layer_->thumb_thickness_scale_factor());
 
   // Subsequent moves should not change anything.
-  scrollbar_controller_->DidMouseMoveNear(0);
+  scrollbar_controller_->DidMouseMove(NearScrollbar(0, 0));
   scrollbar_controller_->Animate(time);
   time += base::TimeDelta::FromSeconds(10);
   scrollbar_controller_->Animate(time);
@@ -168,16 +193,16 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest, MouseOver) {
 
   // Moving off the scrollbar but still withing the "near" threshold should do
   // nothing.
-  scrollbar_controller_->DidMouseMoveNear(
-      kDefaultMouseMoveDistanceToTriggerAnimation - 1.f);
+  scrollbar_controller_->DidMouseMove(
+      NearScrollbar(-kMouseMoveDistanceToTriggerExpand + 1, 0));
   scrollbar_controller_->Animate(time);
   time += base::TimeDelta::FromSeconds(10);
   scrollbar_controller_->Animate(time);
   EXPECT_FLOAT_EQ(1.0f, scrollbar_layer_->thumb_thickness_scale_factor());
 
-  // Now move away from bar.
-  scrollbar_controller_->DidMouseMoveNear(
-      kDefaultMouseMoveDistanceToTriggerAnimation);
+  // Now move away from thumb.
+  scrollbar_controller_->DidMouseMove(
+      NearScrollbar(-kMouseMoveDistanceToTriggerExpand, 0));
   scrollbar_controller_->Animate(time);
   time += kThinningDuration;
   scrollbar_controller_->Animate(time);
@@ -187,13 +212,13 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest, MouseOver) {
 
 // First move the pointer over the scrollbar off of it. Make sure the thinning
 // animation kicked off in DidMouseMoveOffScrollbar gets overridden by the
-// thickening animation in the DidMouseMoveNear call.
+// thickening animation in the DidMouseMove call.
 TEST_F(SingleScrollbarAnimationControllerThinningTest,
        MouseNearThenAwayWhileAnimating) {
   base::TimeTicks time;
   time += base::TimeDelta::FromSeconds(1);
 
-  scrollbar_controller_->DidMouseMoveNear(0);
+  scrollbar_controller_->DidMouseMove(NearScrollbar(0, 0));
   scrollbar_controller_->Animate(time);
   EXPECT_FLOAT_EQ(kIdleThicknessScale,
                   scrollbar_layer_->thumb_thickness_scale_factor());
@@ -204,7 +229,7 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest,
   EXPECT_FLOAT_EQ(1.0f, scrollbar_layer_->thumb_thickness_scale_factor());
 
   // This is tricky. The DidMouseLeave() is sent before the
-  // subsequent DidMouseMoveNear(), if the mouse moves in that direction.
+  // subsequent DidMouseMove(), if the mouse moves in that direction.
   // This results in the thumb thinning. We want to make sure that when the
   // thumb starts expanding it doesn't first narrow to the idle thinness.
   time += base::TimeDelta::FromSeconds(1);
@@ -221,7 +246,7 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest,
   // Now we get a notification for the mouse moving over the scroller. The
   // animation is reset to the thickening direction but we won't start
   // thickening until the new animation catches up to the current thickness.
-  scrollbar_controller_->DidMouseMoveNear(1);
+  scrollbar_controller_->DidMouseMove(NearScrollbar(-1, 0));
   scrollbar_controller_->Animate(time);
   EXPECT_FLOAT_EQ(1.0f - (1.0f - kIdleThicknessScale) / 2.0f,
                   scrollbar_layer_->thumb_thickness_scale_factor());
@@ -259,7 +284,7 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest,
   time += base::TimeDelta::FromSeconds(1);
 
   // Move over the scrollbar.
-  scrollbar_controller_->DidMouseMoveNear(0);
+  scrollbar_controller_->DidMouseMove(NearScrollbar(0, 0));
   scrollbar_controller_->Animate(time);
   time += kThinningDuration;
   scrollbar_controller_->Animate(time);
@@ -277,8 +302,8 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest,
 
   // Move outside the "near" threshold. Because the scrollbar is captured it
   // should remain thick.
-  scrollbar_controller_->DidMouseMoveNear(
-      kDefaultMouseMoveDistanceToTriggerAnimation);
+  scrollbar_controller_->DidMouseMove(
+      NearScrollbar(-kMouseMoveDistanceToTriggerExpand, 0));
   time += kThinningDuration;
   scrollbar_controller_->Animate(time);
   EXPECT_FLOAT_EQ(1.0f, scrollbar_layer_->thumb_thickness_scale_factor());
@@ -304,7 +329,7 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest,
   time += base::TimeDelta::FromSeconds(1);
 
   // Move over scrollbar.
-  scrollbar_controller_->DidMouseMoveNear(0);
+  scrollbar_controller_->DidMouseMove(NearScrollbar(0, 0));
   scrollbar_controller_->Animate(time);
   time += kThinningDuration;
   scrollbar_controller_->Animate(time);
@@ -319,8 +344,8 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest,
   EXPECT_FLOAT_EQ(1.0f, scrollbar_layer_->thumb_thickness_scale_factor());
 
   // Move away from scrollbar. Nothing should change.
-  scrollbar_controller_->DidMouseMoveNear(
-      kDefaultMouseMoveDistanceToTriggerAnimation);
+  scrollbar_controller_->DidMouseMove(
+      NearScrollbar(kMouseMoveDistanceToTriggerExpand, 0));
   time += base::TimeDelta::FromSeconds(1);
   scrollbar_controller_->Animate(time);
   time += base::TimeDelta::FromSeconds(10);
@@ -329,7 +354,8 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest,
 
   // Move over scrollbar and release. Since we're near the scrollbar, it should
   // remain thick.
-  scrollbar_controller_->DidMouseMoveNear(0);
+  scrollbar_controller_->DidMouseMove(
+      NearScrollbar(-kMouseMoveDistanceToTriggerExpand + 1, 0));
   scrollbar_controller_->DidMouseUp();
   time += base::TimeDelta::FromSeconds(1);
   scrollbar_controller_->Animate(time);
@@ -345,7 +371,7 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest, ThicknessAnimated) {
 
   // Move mouse near scrollbar. Test that at half the duration time, the
   // thickness is half way through its animation.
-  scrollbar_controller_->DidMouseMoveNear(1);
+  scrollbar_controller_->DidMouseMove(NearScrollbar(-1, 0));
   scrollbar_controller_->Animate(time);
   EXPECT_FLOAT_EQ(kIdleThicknessScale,
                   scrollbar_layer_->thumb_thickness_scale_factor());
@@ -361,8 +387,8 @@ TEST_F(SingleScrollbarAnimationControllerThinningTest, ThicknessAnimated) {
 
   // Move mouse away from scrollbar. Same check.
   time += base::TimeDelta::FromSeconds(1);
-  scrollbar_controller_->DidMouseMoveNear(
-      kDefaultMouseMoveDistanceToTriggerAnimation);
+  scrollbar_controller_->DidMouseMove(
+      NearScrollbar(-kMouseMoveDistanceToTriggerExpand, 0));
   scrollbar_controller_->Animate(time);
   EXPECT_FLOAT_EQ(1.0f, scrollbar_layer_->thumb_thickness_scale_factor());
 

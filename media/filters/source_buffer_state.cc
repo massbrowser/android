@@ -119,7 +119,7 @@ SourceBufferState::SourceBufferState(
     std::unique_ptr<StreamParser> stream_parser,
     std::unique_ptr<FrameProcessor> frame_processor,
     const CreateDemuxerStreamCB& create_demuxer_stream_cb,
-    const scoped_refptr<MediaLog>& media_log)
+    MediaLog* media_log)
     : create_demuxer_stream_cb_(create_demuxer_stream_cb),
       timestamp_offset_during_append_(NULL),
       parsing_media_segment_(false),
@@ -146,7 +146,7 @@ void SourceBufferState::Init(
   init_cb_ = init_cb;
 
   std::vector<std::string> expected_codecs_parsed;
-  ParseCodecString(expected_codecs, &expected_codecs_parsed, false);
+  SplitCodecsToVector(expected_codecs, &expected_codecs_parsed, false);
 
   std::vector<AudioCodec> expected_acodecs;
   std::vector<VideoCodec> expected_vcodecs;
@@ -256,7 +256,7 @@ void SourceBufferState::Remove(TimeDelta start,
   }
 }
 
-bool SourceBufferState::EvictCodedFrames(DecodeTimestamp media_time,
+bool SourceBufferState::EvictCodedFrames(base::TimeDelta media_time,
                                          size_t newDataSize) {
   size_t total_buffered_size = 0;
   for (const auto& it : audio_streams_)
@@ -795,7 +795,7 @@ bool SourceBufferState::OnNewConfigs(
 }
 
 void SourceBufferState::SetStreamMemoryLimits() {
-  auto cmd_line = base::CommandLine::ForCurrentProcess();
+  auto* cmd_line = base::CommandLine::ForCurrentProcess();
 
   std::string audio_buf_limit_switch =
       cmd_line->GetSwitchValueASCII(switches::kMSEAudioBufferSizeLimit);

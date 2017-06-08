@@ -26,6 +26,7 @@ enum GLImplementation {
   kGLImplementationDesktopGL,
   kGLImplementationDesktopGLCoreProfile,
   kGLImplementationOSMesaGL,
+  kGLImplementationSwiftShaderGL,
   kGLImplementationAppleGL,
   kGLImplementationEGLGLES2,
   kGLImplementationMockGL,
@@ -77,6 +78,9 @@ GL_EXPORT void SetGLImplementation(GLImplementation implementation);
 
 // Get the current GL implementation.
 GL_EXPORT GLImplementation GetGLImplementation();
+
+// Get the software GL implementation for the current platform.
+GL_EXPORT GLImplementation GetSoftwareGLImplementation();
 
 // Does the underlying GL support all features from Desktop GL 2.0 that were
 // removed from the ES 2.0 spec without requiring specific extension strings.

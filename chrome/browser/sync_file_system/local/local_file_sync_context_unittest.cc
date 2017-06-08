@@ -26,12 +26,12 @@
 #include "chrome/browser/sync_file_system/sync_status_code.h"
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/mock_blob_url_request_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "storage/browser/blob/scoped_file.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_operation_runner.h"
 #include "storage/browser/fileapi/isolated_context.h"
+#include "storage/browser/test/mock_blob_url_request_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/src/helpers/memenv/memenv.h"
 #include "third_party/leveldatabase/src/include/leveldb/env.h"
@@ -184,8 +184,8 @@ class LocalFileSyncContextTest : public testing::Test {
       ASSERT_TRUE(ui_task_runner_->RunsTasksOnCurrentThread());
       io_task_runner_->PostTask(
           FROM_HERE,
-          base::Bind(&LocalFileSyncContextTest::StartModifyFileOnIOThread,
-                     base::Unretained(this), file_system, url));
+          base::BindOnce(&LocalFileSyncContextTest::StartModifyFileOnIOThread,
+                         base::Unretained(this), file_system, url));
       return;
     }
     ASSERT_TRUE(io_task_runner_->RunsTasksOnCurrentThread());
@@ -205,9 +205,8 @@ class LocalFileSyncContextTest : public testing::Test {
     if (!ui_task_runner_->RunsTasksOnCurrentThread()) {
       ASSERT_TRUE(io_task_runner_->RunsTasksOnCurrentThread());
       ui_task_runner_->PostTask(
-          FROM_HERE,
-          base::Bind(&LocalFileSyncContextTest::DidModifyFile,
-                     base::Unretained(this), error));
+          FROM_HERE, base::BindOnce(&LocalFileSyncContextTest::DidModifyFile,
+                                    base::Unretained(this), error));
       return;
     }
     ASSERT_TRUE(ui_task_runner_->RunsTasksOnCurrentThread());

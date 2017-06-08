@@ -54,22 +54,41 @@ void DisplayOutputSurface::BindFramebuffer() {
   context_provider()->ContextGL()->BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void DisplayOutputSurface::SetDrawRectangle(const gfx::Rect& rect) {
+  if (set_draw_rectangle_for_frame_)
+    return;
+  DCHECK(gfx::Rect(size_).Contains(rect));
+  DCHECK(has_set_draw_rectangle_since_last_resize_ ||
+         (gfx::Rect(size_) == rect));
+  set_draw_rectangle_for_frame_ = true;
+  has_set_draw_rectangle_since_last_resize_ = true;
+  context_provider()->ContextGL()->SetDrawRectangleCHROMIUM(
+      rect.x(), rect.y(), rect.width(), rect.height());
+}
+
 void DisplayOutputSurface::Reshape(const gfx::Size& size,
                                    float device_scale_factor,
                                    const gfx::ColorSpace& color_space,
                                    bool has_alpha,
                                    bool use_stencil) {
+  size_ = size;
+  has_set_draw_rectangle_since_last_resize_ = false;
   context_provider()->ContextGL()->ResizeCHROMIUM(
       size.width(), size.height(), device_scale_factor, has_alpha);
 }
 
 void DisplayOutputSurface::SwapBuffers(cc::OutputSurfaceFrame frame) {
   DCHECK(context_provider_);
-  if (frame.sub_buffer_rect == gfx::Rect(frame.size)) {
-    context_provider_->ContextSupport()->Swap();
-  } else {
+
+  if (frame.latency_info.size() > 0)
+    context_provider_->ContextSupport()->AddLatencyInfo(frame.latency_info);
+
+  set_draw_rectangle_for_frame_ = false;
+  if (frame.sub_buffer_rect) {
     context_provider_->ContextSupport()->PartialSwapBuffers(
-        frame.sub_buffer_rect);
+        *frame.sub_buffer_rect);
+  } else {
+    context_provider_->ContextSupport()->Swap();
   }
 }
 
@@ -108,9 +127,13 @@ void DisplayOutputSurface::DidReceiveSwapBuffersAck(gfx::SwapResult result) {
 }
 
 void DisplayOutputSurface::OnGpuSwapBuffersCompleted(
-    const std::vector<ui::LatencyInfo>& latency_info,
+    const std::vector<LatencyInfo>& latency_info,
     gfx::SwapResult result,
     const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac) {
+  for (const auto& latency : latency_info) {
+    if (latency.latency_components().size() > 0)
+      latency_tracker_.OnGpuSwapBuffersCompleted(latency);
+  }
   DidReceiveSwapBuffersAck(result);
 }
 

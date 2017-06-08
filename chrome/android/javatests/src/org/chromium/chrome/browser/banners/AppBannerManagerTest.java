@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.banners;
 import android.app.Activity;
 import android.app.Instrumentation.ActivityMonitor;
 import android.app.Instrumentation.ActivityResult;
-import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
@@ -22,6 +21,7 @@ import android.widget.Button;
 import android.widget.TextView;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ShortcutHelper;
@@ -31,6 +31,7 @@ import org.chromium.chrome.browser.infobar.AppBannerInfoBarDelegateAndroid;
 import org.chromium.chrome.browser.infobar.InfoBar;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.infobar.InfoBarContainer.InfoBarAnimationListener;
+import org.chromium.chrome.browser.infobar.InfoBarContainerLayout.Item;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.webapps.WebappDataStorage;
@@ -162,6 +163,9 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
                 mDoneAnimating = true;
             }
         }
+
+        @Override
+        public void notifyAllAnimationsFinished(Item frontInfoBar) {}
     }
 
     private MockAppDetailsDelegate mDetailsDelegate;
@@ -182,7 +186,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         AppBannerInfoBarDelegateAndroid.setPackageManagerForTesting(mPackageManager);
         ShortcutHelper.setDelegateForTests(new ShortcutHelper.Delegate() {
             @Override
-            public void sendBroadcast(Context context, Intent intent) {
+            public void addShortcutToHomescreen(String title, Bitmap icon, Intent shortcutIntent) {
                 // Ignore to prevent adding homescreen shortcuts.
             }
         });
@@ -215,7 +219,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
             @Override
             public void run() {
                 SiteEngagementService.getForProfile(Profile.getLastUsedProfile())
-                        .resetScoreForUrl(url, engagement);
+                        .resetBaseScoreForUrl(url, engagement);
             }
         });
     }
@@ -257,7 +261,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         resetEngagementForUrl(url, 10);
         InfoBarContainer container = getActivity().getActivityTab().getInfoBarContainer();
         final InfobarListener listener = new InfobarListener();
-        container.setAnimationListener(listener);
+        container.addAnimationListener(listener);
         new TabLoadObserver(getActivity().getActivityTab()).fullyLoadUrl(url, PageTransition.TYPED);
         waitUntilAppDetailsRetrieved(1);
         assertEquals(mDetailsDelegate.mReferrer, expectedReferrer);
@@ -324,7 +328,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         // Add the animation listener in.
         InfoBarContainer container = getActivity().getActivityTab().getInfoBarContainer();
         final InfobarListener listener = new InfobarListener();
-        container.setAnimationListener(listener);
+        container.addAnimationListener(listener);
 
         // Update engagement, then revisit the page to get the banner to appear.
         resetEngagementForUrl(url, 10);
@@ -442,7 +446,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         resetEngagementForUrl(mNativeAppUrl, 10);
         InfoBarContainer container = getActivity().getActivityTab().getInfoBarContainer();
         final InfobarListener listener = new InfobarListener();
-        container.setAnimationListener(listener);
+        container.addAnimationListener(listener);
         new TabLoadObserver(getActivity().getActivityTab())
                 .fullyLoadUrl(mNativeAppUrl, PageTransition.TYPED);
         waitUntilAppDetailsRetrieved(1);
@@ -490,7 +494,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         resetEngagementForUrl(mWebAppUrl, 10);
         InfoBarContainer container = getActivity().getActivityTab().getInfoBarContainer();
         final InfobarListener listener = new InfobarListener();
-        container.setAnimationListener(listener);
+        container.addAnimationListener(listener);
         new TabLoadObserver(getActivity().getActivityTab())
                 .fullyLoadUrl(mWebAppUrl, PageTransition.TYPED);
         waitUntilAppBannerInfoBarAppears(WEB_APP_TITLE);
@@ -537,6 +541,23 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
     @Feature({"AppBanners"})
     public void testWebAppBannerAppears() throws Exception {
         triggerWebAppBanner(mWebAppUrl, WEB_APP_TITLE, false);
+
+        // Verify metrics calling in the successful case.
+        ThreadUtils.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                AppBannerManager manager = getActivity().getActivityTab().getAppBannerManager();
+                manager.recordMenuItemAddToHomescreen();
+                assertEquals(1,
+                        RecordHistogram.getHistogramValueCountForTesting(
+                                "Webapp.InstallabilityCheckStatus.MenuItemAddToHomescreen", 5));
+
+                manager.recordMenuOpen();
+                assertEquals(1,
+                        RecordHistogram.getHistogramValueCountForTesting(
+                                "Webapp.InstallabilityCheckStatus.MenuOpen", 5));
+            }
+        });
     }
 
     @SmallTest

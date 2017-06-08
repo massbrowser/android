@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  * Created by elvis on 05.01.17.
  */
 public class SendInfoTask extends AsyncTask<Void, Void, Void> {
-    public static final String URL_ADD_INFO = "http://adverttool.ru/addinfo.php";
+    public static final String URL_ADD_INFO = GetCurrencyTask.HOST + "addinfo.php";
     private Context context;
 
     public SendInfoTask(Context context) {
@@ -38,9 +38,9 @@ public class SendInfoTask extends AsyncTask<Void, Void, Void> {
         try {
             String urlParameters =
                     "id=" + Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID)
-                    + "&info=" + collectInfo()
-                    + "&coins=" + CoinsSingleton.getInstance().getValue()
-                    + "&referrer=" + referrer;
+                            + "&info=" + collectInfo()
+                            + "&coins=" + CoinsSingleton.getInstance().getValue()
+                            + "&referrer=" + referrer;
 
 
             Log.i("SendInfoTask", "Send info" + urlParameters);
@@ -77,15 +77,14 @@ public class SendInfoTask extends AsyncTask<Void, Void, Void> {
     private String collectInfo() {
         StringBuilder info = new StringBuilder();
 
-        Account[] accounts = AccountManager.get(context).getAccounts();
-        info.append("email=");
-        for (Account account : accounts) {
-            if(account.type.equals("com.google")) {
-                info.append(account.name).append(",");
-            }
-        }
-        info.append(";");
-
+//        Account[] accounts = AccountManager.get(context).getAccounts();
+//        info.append("email=");
+//        for (Account account : accounts) {
+//            if(account.type.equals("com.google")) {
+//                info.append(account.name).append(",");
+//            }
+//        }
+//        info.append(";");
 
         info.append("uniqueid=").append(Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID)).append(";");
 

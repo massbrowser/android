@@ -100,9 +100,10 @@ class ProcessorEntityTracker {
   // Clears any in-memory sync state associated with outstanding commits.
   void ClearTransientSyncState();
 
-  // Takes the passed commit data and caches it in the instance.
-  // The data is swapped from the input struct without copying.
-  void CacheCommitData(EntityData* data);
+  // Takes the passed commit data updates its fields with values from metadata
+  // and caches it in the instance. The data is swapped from the input struct
+  // without copying.
+  void SetCommitData(EntityData* data);
 
   // Caches the a copy of |data_ptr|, which doesn't copy the data itself.
   void CacheCommitData(const EntityDataPtr& data_ptr);
@@ -120,6 +121,9 @@ class ProcessorEntityTracker {
   // Increment sequence number in the metadata. This will also update the
   // base_specifics_hash if the entity was not already unsynced.
   void IncrementSequenceNumber();
+
+  // Returns the estimate of dynamically allocated memory in bytes.
+  size_t EstimateMemoryUsage() const;
 
  private:
   friend class ProcessorEntityTrackerTest;

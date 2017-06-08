@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_ANDROID_VR_SHELL_UI_INTERFACE_H_
 
 #include <memory>
+#include <string>
 
 #include "base/macros.h"
 #include "base/values.h"
@@ -14,31 +15,29 @@ class GURL;
 
 namespace vr_shell {
 
-class VrOmnibox;
-
-class UiCommandHandler {
- public:
-  virtual void SendCommandToUi(const base::Value& value) = 0;
-};
-
 // This class manages the communication of browser state from VR shell to the
 // HTML UI. State information is asynchronous and unidirectional.
 class UiInterface {
  public:
   enum Mode {
     STANDARD = 0,
-    WEB_VR
+    WEB_VR,
   };
 
-  explicit UiInterface(Mode initial_mode, bool fullscreen);
-  virtual ~UiInterface();
+  enum Direction {
+    NONE = 0,
+    LEFT,
+    RIGHT,
+    UP,
+    DOWN,
+  };
 
+  explicit UiInterface(Mode initial_mode);
+  virtual ~UiInterface() = default;
+
+  // Set HTML UI state or pass events.
   void SetMode(Mode mode);
-  Mode GetMode() { return mode_; }
-  void SetMenuMode(bool enabled);
-  bool GetMenuMode() { return menu_mode_; }
   void SetFullscreen(bool enabled);
-  bool GetFullscreen() { return fullscreen_; }
   void SetSecurityLevel(int level);
   void SetWebVRSecureOrigin(bool secure);
   void SetLoading(bool loading);
@@ -49,28 +48,12 @@ class UiInterface {
   void UpdateTab(bool incognito, int id, const std::string& title);
   void RemoveTab(bool incognito, int id);
   void SetURL(const GURL& url);
-
-  // Omnibox input and output handling.
-  void HandleOmniboxInput(const base::DictionaryValue& input);
-  void SetOmniboxSuggestions(std::unique_ptr<base::Value> suggestions);
-
-  // Called by WebUI when starting VR.
-  void OnDomContentsLoaded();
-  void SetUiCommandHandler(UiCommandHandler* handler);
+  void HandleAppButtonGesturePerformed(Direction direction);
+  void SetHistoryButtonsEnabled(bool can_go_back, bool can_go_forward);
 
  private:
-  void FlushUpdates();
-  void FlushModeState();
-
   Mode mode_;
-  bool menu_mode_ = false;
   bool fullscreen_ = false;
-  UiCommandHandler* handler_;
-  bool loaded_ = false;
-  base::DictionaryValue updates_;
-  std::unique_ptr<base::ListValue> tab_list_;
-
-  std::unique_ptr<VrOmnibox> omnibox_;
 
   DISALLOW_COPY_AND_ASSIGN(UiInterface);
 };

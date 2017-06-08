@@ -9,7 +9,7 @@ group("all") {
 
   deps = [
     ":ios_core",
-    "./bridge:all",
+    "./app:all",
   ]
 }
 
@@ -18,33 +18,34 @@ group("all_test") {
 
   deps = [
     ":ios_core_unit_tests",
-    "./bridge:bridge_unit_tests",
   ]
 }
 
 source_set("ios_core") {
   sources = [
-    "app_runtime.cc",
-    "app_runtime.h",
     "client_gestures.h",
     "client_gestures.mm",
-    "host.h",
-    "host.mm",
     "host_preferences.h",
     "host_preferences.mm",
     "host_preferences_persistence.h",
     "key_input.h",
     "key_input.mm",
     "key_map_us.h",
-    "utility.h",
-    "utility.mm",
   ]
 
   if (!is_chrome_branded) {
     sources += [ "host_preferences_persistence_chromium.mm" ]
+  } else {
+    # TODO(nicholss): Until we have a private implementation of this, stub it
+    # with the chromium version. We still want the logic of is_chrome_branded
+    # but to get the release builds building we will just reuse the file.
+    sources += [ "host_preferences_persistence_chromium.mm" ]
   }
 
   public_deps = [
+    "//remoting/client/ios/domain",
+    "//remoting/client/ios/facade",
+    "//remoting/client/ios/session",
     "//third_party/webrtc/base:rtc_base",
     "//third_party/webrtc/modules/desktop_capture:primitives",
   ]
@@ -72,8 +73,6 @@ source_set("ios_core_unit_tests") {
   ]
 
   sources = [
-    #    "host_refresh_unittest.mm",
-    #    "host_refresh_unittest_helper.h",
     "key_input_unittest.mm",
   ]
 

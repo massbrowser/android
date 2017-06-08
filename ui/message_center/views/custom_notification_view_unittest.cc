@@ -29,21 +29,6 @@ namespace {
 
 const SkColor kBackgroundColor = SK_ColorGREEN;
 
-std::unique_ptr<ui::GestureEvent> GenerateGestureEvent(ui::EventType type) {
-  ui::GestureEventDetails detail(type);
-  std::unique_ptr<ui::GestureEvent> event(
-      new ui::GestureEvent(0, 0, 0, base::TimeTicks(), detail));
-  return event;
-}
-
-std::unique_ptr<ui::GestureEvent> GenerateGestureHorizontalScrollUpdateEvent(
-    int dx) {
-  ui::GestureEventDetails detail(ui::ET_GESTURE_SCROLL_UPDATE, dx, 0);
-  std::unique_ptr<ui::GestureEvent> event(
-      new ui::GestureEvent(0, 0, 0, base::TimeTicks(), detail));
-  return event;
-}
-
 class TestCustomView : public views::View {
  public:
   TestCustomView() {
@@ -57,8 +42,10 @@ class TestCustomView : public views::View {
     keyboard_event_count_ = 0;
   }
 
+  void set_preferred_size(gfx::Size size) { preferred_size_ = size; }
+
   // views::View
-  gfx::Size GetPreferredSize() const override { return gfx::Size(100, 100); }
+  gfx::Size GetPreferredSize() const override { return preferred_size_; }
   bool OnMousePressed(const ui::MouseEvent& event) override {
     ++mouse_event_count_;
     return true;
@@ -80,6 +67,7 @@ class TestCustomView : public views::View {
  private:
   int mouse_event_count_ = 0;
   int keyboard_event_count_ = 0;
+  gfx::Size preferred_size_ = gfx::Size(100, 100);
 
   DISALLOW_COPY_AND_ASSIGN(TestCustomView);
 };
@@ -88,7 +76,7 @@ class TestContentViewDelegate : public CustomNotificationContentViewDelegate {
  public:
   bool IsCloseButtonFocused() const override { return false; }
   void RequestFocusOnCloseButton() override {}
-  bool IsPinned() const override { return false; }
+  void UpdateControlButtonsVisibility() override {}
 };
 
 class TestNotificationDelegate : public NotificationDelegate {
@@ -142,6 +130,11 @@ class TestMessageCenterController : public MessageCenterController {
   }
 
   void ClickOnSettingsButton(const std::string& notification_id) override {
+    // For this test, this method should not be invoked.
+    NOTREACHED();
+  }
+
+  void UpdateNotificationSize(const std::string& notification_id) override {
     // For this test, this method should not be invoked.
     NOTREACHED();
   }
@@ -239,10 +232,6 @@ class CustomNotificationViewTest : public views::ViewsTestBase {
     notification_view()->UpdateWithNotification(*notification());
   }
 
-  float GetNotificationScrollAmount() const {
-    return notification_view_->GetTransform().To2dTranslation().x();
-  }
-
   TestMessageCenterController* controller() { return &controller_; }
   Notification* notification() { return notification_.get(); }
   TestCustomView* custom_view() {
@@ -286,53 +275,6 @@ TEST_F(CustomNotificationViewTest, Events) {
   EXPECT_EQ(1, custom_view()->keyboard_event_count());
 }
 
-TEST_F(CustomNotificationViewTest, SlideOut) {
-  UpdateNotificationViews();
-  std::string notification_id = notification()->id();
-
-  auto event_begin = GenerateGestureEvent(ui::ET_GESTURE_SCROLL_BEGIN);
-  auto event_scroll10 = GenerateGestureHorizontalScrollUpdateEvent(-10);
-  auto event_scroll500 = GenerateGestureHorizontalScrollUpdateEvent(-500);
-  auto event_end = GenerateGestureEvent(ui::ET_GESTURE_SCROLL_END);
-
-  notification_view()->OnGestureEvent(event_begin.get());
-  notification_view()->OnGestureEvent(event_scroll10.get());
-  EXPECT_FALSE(controller()->IsRemoved(notification_id));
-  EXPECT_EQ(-10.f, GetNotificationScrollAmount());
-  notification_view()->OnGestureEvent(event_end.get());
-  EXPECT_FALSE(controller()->IsRemoved(notification_id));
-  EXPECT_EQ(0.f, GetNotificationScrollAmount());
-
-  notification_view()->OnGestureEvent(event_begin.get());
-  notification_view()->OnGestureEvent(event_scroll500.get());
-  EXPECT_FALSE(controller()->IsRemoved(notification_id));
-  EXPECT_EQ(-500.f, GetNotificationScrollAmount());
-  notification_view()->OnGestureEvent(event_end.get());
-  EXPECT_TRUE(controller()->IsRemoved(notification_id));
-}
-
-// Pinning notification is ChromeOS only feature.
-#if defined(OS_CHROMEOS)
-
-TEST_F(CustomNotificationViewTest, SlideOutPinned) {
-  notification()->set_pinned(true);
-  UpdateNotificationViews();
-  std::string notification_id = notification()->id();
-
-  auto event_begin = GenerateGestureEvent(ui::ET_GESTURE_SCROLL_BEGIN);
-  auto event_scroll500 = GenerateGestureHorizontalScrollUpdateEvent(-500);
-  auto event_end = GenerateGestureEvent(ui::ET_GESTURE_SCROLL_END);
-
-  notification_view()->OnGestureEvent(event_begin.get());
-  notification_view()->OnGestureEvent(event_scroll500.get());
-  EXPECT_FALSE(controller()->IsRemoved(notification_id));
-  EXPECT_LT(-500.f, GetNotificationScrollAmount());
-  notification_view()->OnGestureEvent(event_end.get());
-  EXPECT_FALSE(controller()->IsRemoved(notification_id));
-}
-
-#endif // defined(OS_CHROMEOS)
-
 TEST_F(CustomNotificationViewTest, PressBackspaceKey) {
   std::string notification_id = notification()->id();
   custom_view()->RequestFocus();
@@ -367,6 +309,25 @@ TEST_F(CustomNotificationViewTest, PressBackspaceKeyOnEditBox) {
   EXPECT_FALSE(controller()->IsRemoved(notification_id));
 
   input_method->SetFocusedTextInputClient(nullptr);
+}
+
+TEST_F(CustomNotificationViewTest, ChangeContentHeight) {
+  // Default size.
+  gfx::Size size = notification_view()->GetPreferredSize();
+  size.Enlarge(0, -notification_view()->GetInsets().height());
+  EXPECT_EQ("360x100", size.ToString());
+
+  // Allow small notifications.
+  custom_view()->set_preferred_size(gfx::Size(10, 10));
+  size = notification_view()->GetPreferredSize();
+  size.Enlarge(0, -notification_view()->GetInsets().height());
+  EXPECT_EQ("360x10", size.ToString());
+
+  // The long notification.
+  custom_view()->set_preferred_size(gfx::Size(1000, 1000));
+  size = notification_view()->GetPreferredSize();
+  size.Enlarge(0, -notification_view()->GetInsets().height());
+  EXPECT_EQ("360x1000", size.ToString());
 }
 
 }  // namespace message_center

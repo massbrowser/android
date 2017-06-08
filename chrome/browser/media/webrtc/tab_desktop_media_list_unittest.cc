@@ -62,7 +62,6 @@ gfx::Image CreateGrayscaleImage(gfx::Size size, uint8_t greyscale_value) {
   SkBitmap result;
   result.allocN32Pixels(size.width(), size.height(), true);
 
-  result.lockPixels();
   uint8_t* pixels_data = reinterpret_cast<uint8_t*>(result.getPixels());
 
   // Set greyscale value for all pixels.
@@ -78,8 +77,6 @@ gfx::Image CreateGrayscaleImage(gfx::Size size, uint8_t greyscale_value) {
           0xff;
     }
   }
-
-  result.unlockPixels();
 
   return gfx::Image::CreateFrom1xBitmap(result);
 }
@@ -171,7 +168,7 @@ class TabDesktopMediaListTest : public testing::Test {
     ASSERT_TRUE(profile_);
 
     // Create browser.
-    Browser::CreateParams profile_params(profile_);
+    Browser::CreateParams profile_params(profile_, true);
     browser_ = chrome::CreateBrowserWithTestWindowForParams(&profile_params);
     ASSERT_TRUE(browser_);
     for (int i = 0; i < kDefaultSourceCount; i++) {

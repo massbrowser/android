@@ -57,7 +57,7 @@ namespace blockers {
         tp_parser_(nullptr),
         adblock_parser_(nullptr),
         whitelist_parser_(nullptr) {
-        base::ThreadRestrictions::SetIOAllowed(true);
+//        base::ThreadRestrictions::SetIOAllowed(true);
     }
 
     BlockersWorker::~BlockersWorker() {
@@ -85,18 +85,18 @@ namespace blockers {
         return false;
     }
 
-    bool BlockersWorker::InitWhiteList() {
-        std::lock_guard<std::mutex> guard(white_list_init_mutex_);
-
-        if (!GetData(WHITELIST_DATA_FILE, whitelist_buffer_)) {
-                return false;
-        }
-
-        whitelist_parser_ = new WhiteListFilterParser();
-        whitelist_parser_->deserialize((char*)&whitelist_buffer_.front());
-
-        return true;
-    }
+//    bool BlockersWorker::InitWhiteList() {
+//        std::lock_guard<std::mutex> guard(white_list_init_mutex_);
+//
+//        if (!GetData(WHITELIST_DATA_FILE, whitelist_buffer_)) {
+//                return false;
+//        }
+//
+//        whitelist_parser_ = new WhiteListFilterParser();
+//        whitelist_parser_->deserialize((char*)&whitelist_buffer_.front());
+//
+//        return true;
+//    }
 
     bool BlockersWorker::InitTP() {
         std::lock_guard<std::mutex> guard(tp_init_mutex_);
@@ -188,6 +188,11 @@ namespace blockers {
     }
 
     bool BlockersWorker::shouldAdBlockUrl(const std::string& base_host, const std::string& url, unsigned int resource_type) {
+
+        if (nullptr == adblock_parser_ && !InitAdBlock()) {
+            return false;
+        }
+
         FilterOption currentOption = FONoFilterOption;
         content::ResourceType internalResource = (content::ResourceType)resource_type;
         if (content::RESOURCE_TYPE_STYLESHEET == internalResource) {
@@ -198,17 +203,8 @@ namespace blockers {
             currentOption = FOScript;
         }
 
-        if(nullptr != whitelist_parser_ || InitWhiteList()) {
-            if (whitelist_parser_->matches(url.c_str(), base_host.c_str())) {
-                return false;
-            }
-        }
-
-        if (nullptr == adblock_parser_ && !InitAdBlock()) {
-            return false;
-        }
-
         if (adblock_parser_->matches(url.c_str(), currentOption, base_host.c_str())) {
+            LOG(ERROR) << "!!!shouldAdBlockUrl true";
             return true;
         }
 
@@ -262,14 +258,19 @@ namespace blockers {
 
         return hosts;
     }
+//    bool BlockersWorker::isInWhiteList(const std::string& base_host, const std::string& url, const std::string& main_url) {
+////        LOG(ERROR) <<   "!! request main_url : " << main_url << " base_host : " << base_host << " url" << url;
+//        if(strstr(main_url.c_str(), "youtube.com") || strstr(base_host.c_str(), "youtube.com")) {
+//            return true;
+//        }
+//        if(nullptr != whitelist_parser_ || InitWhiteList()) {
+//            return whitelist_parser_->matches(url.c_str(), main_url.c_str());
+//        }
+//        return false;
+//    }
+
 
     bool BlockersWorker::shouldTPBlockUrl(const std::string& base_host, const std::string& host) {
-       if(nullptr != whitelist_parser_ || InitWhiteList()) {
-            if (whitelist_parser_->matches(host.c_str(), base_host.c_str())) {
-                return false;
-            }
-       }
-
         if (nullptr == tp_parser_ && !InitTP()) {
             return false;
         }
@@ -292,12 +293,12 @@ namespace blockers {
             }
         }
 
-        for (size_t i = 0; i < tp_white_list_.size(); i++) {
-            if (tp_white_list_[i] == host) {
-                return false;
-            }
-        }
-
+//        for (size_t i = 0; i < tp_white_list_.size(); i++) {
+//            if (tp_white_list_[i] == host) {
+//                return false;
+//            }
+//        }
+//        LOG(ERROR) << "!!!shouldTPBlockUrl true, base_host : " << base_host << " host : " << host;
         return true;
     }
 

@@ -284,25 +284,6 @@
     line-height: 18px;
 }
 
-.image-preview-container {
-    background: transparent;
-    text-align: left;
-    border-spacing: 0;
-    margin: 4px;
-}
-
-.image-preview-container img {
-    max-width: 100px;
-    max-height: 100px;
-    background-image: url(Images/checker.png);
-    -webkit-user-select: text;
-    -webkit-user-drag: auto;
-}
-
-.image-container {
-    padding: 0;
-}
-
 .timeline-filters-header {
     overflow: hidden;
     flex: none;
@@ -428,12 +409,6 @@
     margin-top: 5px;
 }
 
-.timeline-details-view-pie-chart-total {
-    width: 100px;
-    margin-top: 10px;
-    text-align: center;
-}
-
 .timeline-details-view-row-stack-trace {
     padding: 4px 0;
     line-height: inherit;
@@ -456,13 +431,18 @@
 }
 
 .timeline-flamechart-resizer {
-    height: 7px;
+    height: 8px;
     background-color: #f3f3f3;
-    border-top: #a3a3a3 1px solid;
+    border: 1px #a3a3a3;
+    border-style: solid none;
     display: flex;
     flex-direction: row;
     align-items: flex-end;
     justify-content: center;
+}
+
+.timeline-network-resizer-disabled > .timeline-flamechart-resizer {
+    display: none;
 }
 
 .timeline-flamechart-resizer:after {
@@ -499,21 +479,12 @@
     flex: none;
 }
 
-.timeline-filmstrip-preview {
-    margin-top: 10px;
-    max-width: 200px;
-    max-height: 200px;
+.timeline-filmstrip-preview > img {
+    margin-top: 5px;
+    max-width: 500px;
+    max-height: 300px;
     cursor: pointer;
     border: 1px solid #ddd;
-}
-
-.timeline-overview-popover .frame .time {
-    display: none;
-}
-
-.timeline-overview-popover .frame .thumbnail img {
-    max-width: 300px;
-    max-height: 500px;
 }
 
 .timeline-tree-view {
@@ -521,7 +492,7 @@
     overflow: hidden;
 }
 
-.timeline-tree-view > .toolbar {
+.timeline-tree-view .toolbar {
     border-bottom: 1px solid #dadada;
 }
 
@@ -619,8 +590,8 @@
 }
 
 .timeline-tree-view .data-grid .selected .background-bar {
-    background-color: rgba(255, 255, 255, 0.25);
-    border-bottom-color: rgba(255, 255, 255, 0.5);
+    background-color: rgba(255, 255, 255, 0.3);
+    border-bottom-color: rgba(255, 255, 255, 0.9);
 }
 
 .timeline-tree-view .timeline-details-view-body .full-widget-dimmed-banner {
@@ -659,12 +630,29 @@
 }
 
 .timeline-landing-page > div {
-    max-width: 430px;
+    max-width: 450px;
     margin: 10px;
 }
 
 .timeline-landing-page > div > p {
     flex: none;
+    white-space: pre-line;
+}
+
+.timeline-landing-page button {
+    padding: 0;
+    vertical-align: sub;
+    border: 1px solid #ddd;
+    margin-top: 4px;
+    background-color: #f3f3f3;
+}
+
+.timeline-landing-page button > span {
+    margin: -1px 2px -3px -2px;
+}
+
+.timeline-landing-page button > span:hover {
+    background-color: #333;
 }
 
 .timeline-landing-warning {

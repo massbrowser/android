@@ -51,7 +51,8 @@ bool SameLocation(const ui::LocatedEvent* event, const gfx::PointF& location) {
 
 Pointer::Pointer(PointerDelegate* delegate)
     : delegate_(delegate),
-      cursor_(ui::kCursorNull),
+      cursor_(ui::CursorType::kNull),
+      cursor_capture_source_id_(base::UnguessableToken::Create()),
       cursor_capture_weak_ptr_factory_(this) {
   auto* helper = WMHelper::GetInstance();
   helper->AddPreTargetHandler(this);
@@ -88,9 +89,8 @@ void Pointer::SetCursor(Surface* surface, const gfx::Point& hotspot) {
     }
     if (surface_) {
       surface_->window()->SetTransform(gfx::Transform());
-      WMHelper::GetInstance()
-          ->GetContainer(ash::kShellWindowId_MouseCursorContainer)
-          ->RemoveChild(surface_->window());
+      if (surface_->window()->parent())
+        surface_->window()->parent()->RemoveChild(surface_->window());
       surface_->SetSurfaceDelegate(nullptr);
       surface_->RemoveSurfaceObserver(this);
     }
@@ -118,13 +118,13 @@ void Pointer::SetCursor(Surface* surface, const gfx::Point& hotspot) {
   if (!cursor_changed)
     return;
 
-  // If |surface_| is set then ascynchrounsly capture a snapshot of cursor,
+  // If |surface_| is set then asynchronously capture a snapshot of cursor,
   // otherwise cancel pending capture and immediately set the cursor to "none".
   if (surface_) {
     CaptureCursor();
   } else {
     cursor_capture_weak_ptr_factory_.InvalidateWeakPtrs();
-    cursor_ = ui::kCursorNone;
+    cursor_ = ui::CursorType::kNone;
     UpdateCursor();
   }
 }
@@ -139,9 +139,6 @@ gfx::NativeCursor Pointer::GetCursor() {
 void Pointer::OnMouseEvent(ui::MouseEvent* event) {
   Surface* target = GetEffectiveTargetForEvent(event);
 
-  if (event->flags() & ui::EF_TOUCH_ACCESSIBILITY)
-    return;
-
   // If target is different than the current pointer focus then we need to
   // generate enter and leave events.
   if (target != focus_) {
@@ -153,7 +150,7 @@ void Pointer::OnMouseEvent(ui::MouseEvent* event) {
       // response to each OnPointerEnter() call.
       focus_->UnregisterCursorProvider(this);
       focus_ = nullptr;
-      cursor_ = ui::kCursorNull;
+      cursor_ = ui::CursorType::kNull;
       cursor_capture_weak_ptr_factory_.InvalidateWeakPtrs();
     }
     // Second generate an enter event if focus moved to a new target.
@@ -168,7 +165,10 @@ void Pointer::OnMouseEvent(ui::MouseEvent* event) {
     delegate_->OnPointerFrame();
   }
 
-  if (focus_ && event->IsMouseEvent() && event->type() != ui::ET_MOUSE_EXITED) {
+  if (!focus_)
+    return;
+
+  if (event->IsMouseEvent() && event->type() != ui::ET_MOUSE_EXITED) {
     // Generate motion event if location changed. We need to check location
     // here as mouse movement can generate both "moved" and "entered" events
     // but OnPointerMotion should only be called if location changed since
@@ -182,44 +182,52 @@ void Pointer::OnMouseEvent(ui::MouseEvent* event) {
 
   switch (event->type()) {
     case ui::ET_MOUSE_PRESSED:
-    case ui::ET_MOUSE_RELEASED:
-      if (focus_) {
-        delegate_->OnPointerButton(event->time_stamp(),
-                                   event->changed_button_flags(),
-                                   event->type() == ui::ET_MOUSE_PRESSED);
-        delegate_->OnPointerFrame();
-      }
+    case ui::ET_MOUSE_RELEASED: {
+      delegate_->OnPointerButton(event->time_stamp(),
+                                 event->changed_button_flags(),
+                                 event->type() == ui::ET_MOUSE_PRESSED);
+      delegate_->OnPointerFrame();
       break;
-    case ui::ET_SCROLL:
-      if (focus_) {
-        ui::ScrollEvent* scroll_event = static_cast<ui::ScrollEvent*>(event);
-        delegate_->OnPointerScroll(
-            event->time_stamp(),
-            gfx::Vector2dF(scroll_event->x_offset(), scroll_event->y_offset()),
-            false);
-        delegate_->OnPointerFrame();
-      }
+    }
+    case ui::ET_SCROLL: {
+      ui::ScrollEvent* scroll_event = static_cast<ui::ScrollEvent*>(event);
+      delegate_->OnPointerScroll(
+          event->time_stamp(),
+          gfx::Vector2dF(scroll_event->x_offset(), scroll_event->y_offset()),
+          false);
+      delegate_->OnPointerFrame();
       break;
-    case ui::ET_MOUSEWHEEL:
-      if (focus_) {
-        delegate_->OnPointerScroll(
-            event->time_stamp(),
-            static_cast<ui::MouseWheelEvent*>(event)->offset(), true);
-        delegate_->OnPointerFrame();
-      }
+    }
+    case ui::ET_MOUSEWHEEL: {
+      delegate_->OnPointerScroll(
+          event->time_stamp(),
+          static_cast<ui::MouseWheelEvent*>(event)->offset(), true);
+      delegate_->OnPointerFrame();
       break;
-    case ui::ET_SCROLL_FLING_START:
-      if (focus_) {
+    }
+    case ui::ET_SCROLL_FLING_START: {
+      // Fling start in chrome signals the lifting of fingers after scrolling.
+      // In wayland terms this signals the end of a scroll sequence.
+      delegate_->OnPointerScrollStop(event->time_stamp());
+      delegate_->OnPointerFrame();
+      break;
+    }
+    case ui::ET_SCROLL_FLING_CANCEL: {
+      // Fling cancel is generated very generously at every touch of the
+      // touchpad. Since it's not directly supported by the delegate, we do not
+      // want limit this event to only right after a fling start has been
+      // generated to prevent erronous behavior.
+      if (last_event_type_ == ui::ET_SCROLL_FLING_START) {
+        // We emulate fling cancel by starting a new scroll sequence that
+        // scrolls by 0 pixels, effectively stopping any kinetic scroll motion.
+        delegate_->OnPointerScroll(event->time_stamp(), gfx::Vector2dF(),
+                                   false);
+        delegate_->OnPointerFrame();
         delegate_->OnPointerScrollStop(event->time_stamp());
         delegate_->OnPointerFrame();
       }
       break;
-    case ui::ET_SCROLL_FLING_CANCEL:
-      if (focus_) {
-        delegate_->OnPointerScrollCancel(event->time_stamp());
-        delegate_->OnPointerFrame();
-      }
-      break;
+    }
     case ui::ET_MOUSE_MOVED:
     case ui::ET_MOUSE_DRAGGED:
     case ui::ET_MOUSE_ENTERED:
@@ -231,13 +239,16 @@ void Pointer::OnMouseEvent(ui::MouseEvent* event) {
       break;
   }
 
-  if (focus_)
-    UpdateCursorScale();
+  last_event_type_ = event->type();
+  UpdateCursorScale();
 }
 
 void Pointer::OnScrollEvent(ui::ScrollEvent* event) {
   OnMouseEvent(event);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// WMHelper::CursorObserver overrides:
 
 void Pointer::OnCursorSetChanged(ui::CursorSetType cursor_set) {
   if (focus_)
@@ -323,6 +334,7 @@ void Pointer::UpdateCursorScale() {
 
 void Pointer::CaptureCursor() {
   DCHECK(surface_);
+  DCHECK(focus_);
 
   // Set UI scale before submitting capture request.
   surface_->window()->layer()->SetTransform(
@@ -340,6 +352,7 @@ void Pointer::CaptureCursor() {
                          // |hotspot_| is in surface coordinate space so apply
                          // both device scale and UI scale.
                          cursor_scale_ * primary_device_scale_factor)));
+  request->set_source(cursor_capture_source_id_);
   surface_->window()->layer()->RequestCopyOfOutput(std::move(request));
 }
 
@@ -348,7 +361,7 @@ void Pointer::OnCursorCaptured(const gfx::Point& hotspot,
   if (!focus_)
     return;
 
-  cursor_ = ui::kCursorNone;
+  cursor_ = ui::CursorType::kNone;
   if (!result->IsEmpty()) {
     DCHECK(result->HasBitmap());
     std::unique_ptr<SkBitmap> bitmap = result->TakeBitmap();
@@ -358,12 +371,12 @@ void Pointer::OnCursorCaptured(const gfx::Point& hotspot,
     // TODO(reveman): Add interface for creating cursors from GpuMemoryBuffers
     // and use that here instead of the current bitmap API. crbug.com/686600
     platform_cursor = ui::CursorFactoryOzone::GetInstance()->CreateImageCursor(
-        *bitmap.get(), hotspot);
+        *bitmap.get(), hotspot, cursor_scale_);
 #elif defined(USE_X11)
     XcursorImage* image = ui::SkBitmapToXcursorImage(bitmap.get(), hotspot);
     platform_cursor = ui::CreateReffedCustomXCursor(image);
 #endif
-    cursor_ = ui::kCursorCustom;
+    cursor_ = ui::CursorType::kCustom;
     cursor_.SetPlatformCursor(platform_cursor);
 #if defined(USE_OZONE)
     ui::CursorFactoryOzone::GetInstance()->UnrefImageCursor(platform_cursor);
@@ -378,8 +391,12 @@ void Pointer::OnCursorCaptured(const gfx::Point& hotspot,
 void Pointer::UpdateCursor() {
   DCHECK(focus_);
 
+  aura::Window* root_window = focus_->window()->GetRootWindow();
+  if (!root_window)
+    return;
+
   aura::client::CursorClient* cursor_client =
-      aura::client::GetCursorClient(focus_->window()->GetRootWindow());
+      aura::client::GetCursorClient(root_window);
   if (cursor_client)
     cursor_client->SetCursor(cursor_);
 }

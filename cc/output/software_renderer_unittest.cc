@@ -67,8 +67,7 @@ class SoftwareRendererTest : public testing::Test {
                        base::Unretained(&bitmap_result),
                        loop.QuitClosure())));
 
-    renderer()->DrawFrame(list, device_scale_factor, gfx::ColorSpace(),
-                          viewport_size);
+    renderer()->DrawFrame(list, device_scale_factor, viewport_size);
     loop.Run();
     return bitmap_result;
   }
@@ -105,7 +104,7 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
                            gfx::Transform());
   SharedQuadState* shared_quad_state =
       root_render_pass->CreateAndAppendSharedQuadState();
-  shared_quad_state->SetAll(gfx::Transform(), outer_size, outer_rect,
+  shared_quad_state->SetAll(gfx::Transform(), outer_rect, outer_rect,
                             outer_rect, false, 1.0, SkBlendMode::kSrcOver, 0);
   SolidColorDrawQuad* inner_quad =
       root_render_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
@@ -171,7 +170,7 @@ TEST_F(SoftwareRendererTest, TileQuad) {
                            gfx::Transform());
   SharedQuadState* shared_quad_state =
       root_render_pass->CreateAndAppendSharedQuadState();
-  shared_quad_state->SetAll(gfx::Transform(), outer_size, outer_rect,
+  shared_quad_state->SetAll(gfx::Transform(), outer_rect, outer_rect,
                             outer_rect, false, 1.0, SkBlendMode::kSrcOver, 0);
   TileDrawQuad* inner_quad =
       root_render_pass->CreateAndAppendDrawQuad<TileDrawQuad>();
@@ -231,7 +230,7 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
                            gfx::Transform());
   SharedQuadState* shared_quad_state =
       root_render_pass->CreateAndAppendSharedQuadState();
-  shared_quad_state->SetAll(gfx::Transform(), tile_size, tile_rect, tile_rect,
+  shared_quad_state->SetAll(gfx::Transform(), tile_rect, tile_rect, tile_rect,
                             false, 1.0, SkBlendMode::kSrcOver, 0);
   TileDrawQuad* quad =
       root_render_pass->CreateAndAppendDrawQuad<TileDrawQuad>();
@@ -424,8 +423,7 @@ TEST_F(SoftwareRendererTest, PartialSwap) {
   root_pass->damage_rect = gfx::Rect(2, 2, 3, 3);
 
   renderer()->DecideRenderPassAllocationsForFrame(list);
-  renderer()->DrawFrame(&list, device_scale_factor, gfx::ColorSpace(),
-                        viewport_size);
+  renderer()->DrawFrame(&list, device_scale_factor, viewport_size);
 
   // The damage rect should be reported to the SoftwareOutputDevice.
   EXPECT_EQ(gfx::Rect(2, 2, 3, 3), device->damage_rect_at_start());

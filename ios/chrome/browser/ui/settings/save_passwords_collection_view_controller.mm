@@ -234,6 +234,7 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
           initWithType:ItemTypeHeader] autorelease];
       headerItem.text =
           l10n_util::GetNSString(IDS_PASSWORD_MANAGER_SHOW_PASSWORDS_TAB_TITLE);
+      headerItem.textColor = [[MDCPalette greyPalette] tint500];
       [model setHeader:headerItem
           forSectionWithIdentifier:SectionIdentifierSavedPasswords];
       for (const auto& form : savedForms_) {
@@ -247,6 +248,7 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
           initWithType:ItemTypeHeader] autorelease];
       headerItem.text =
           l10n_util::GetNSString(IDS_PASSWORD_MANAGER_EXCEPTIONS_TAB_TITLE);
+      headerItem.textColor = [[MDCPalette greyPalette] tint500];
       [model setHeader:headerItem
           forSectionWithIdentifier:SectionIdentifierBlacklist];
       for (const auto& form : blacklistedForms_) {
@@ -384,20 +386,6 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   return cell;
 }
 
-- (UICollectionReusableView*)collectionView:(UICollectionView*)collectionView
-          viewForSupplementaryElementOfKind:(NSString*)kind
-                                atIndexPath:(NSIndexPath*)indexPath {
-  UICollectionReusableView* view = [super collectionView:collectionView
-                       viewForSupplementaryElementOfKind:kind
-                                             atIndexPath:indexPath];
-  MDCCollectionViewTextCell* textCell =
-      base::mac::ObjCCast<MDCCollectionViewTextCell>(view);
-  if (textCell) {
-    textCell.textLabel.textColor = [[MDCPalette greyPalette] tint500];
-  }
-  return view;
-};
-
 #pragma mark - BooleanObserver
 
 - (void)booleanDidChange:(id<ObservableBoolean>)observableBoolean {
@@ -407,8 +395,7 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   savePasswordsItem_.get().on = [passwordManagerEnabled_ value];
 
   // Update the cell.
-  [self reconfigureCellsForItems:@[ savePasswordsItem_ ]
-         inSectionWithIdentifier:SectionIdentifierSavePasswordsSwitch];
+  [self reconfigureCellsForItems:@[ savePasswordsItem_ ]];
 
   // Update the rest of the UI.
   [self.editor setEditing:NO];

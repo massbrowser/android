@@ -7,12 +7,14 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/i18n/string_compare.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_manager.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/browser/translate_accept_languages.h"
 #include "components/translate/core/browser/translate_client.h"
@@ -20,7 +22,6 @@
 #include "components/translate/core/browser/translate_driver.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/common/translate_constants.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace translate {
@@ -46,6 +47,9 @@ const int kNeverTranslateMinCount = 3;
 #endif
 
 }  // namespace
+
+const base::Feature kTranslateCompactUI{"TranslateCompactUI",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
 const size_t TranslateInfoBarDelegate::kNoIndex = TranslateUIDelegate::kNoIndex;
 
@@ -99,7 +103,7 @@ void TranslateInfoBarDelegate::Create(
     old_infobar = infobar_manager->infobar_at(i);
     old_delegate = old_infobar->delegate()->AsTranslateInfoBarDelegate();
     if (old_delegate) {
-      if (!replace_existing_infobar)
+      if (!replace_existing_infobar || IsCompactUIEnabled())
         return;
       break;
     }
@@ -115,6 +119,11 @@ void TranslateInfoBarDelegate::Create(
     infobar_manager->ReplaceInfoBar(old_infobar, std::move(infobar));
   else
     infobar_manager->AddInfoBar(std::move(infobar));
+}
+
+// static
+bool TranslateInfoBarDelegate::IsCompactUIEnabled() {
+  return base::FeatureList::IsEnabled(kTranslateCompactUI);
 }
 
 void TranslateInfoBarDelegate::UpdateOriginalLanguage(
@@ -133,6 +142,8 @@ void TranslateInfoBarDelegate::Translate() {
 
 void TranslateInfoBarDelegate::RevertTranslation() {
   ui_delegate_.RevertTranslation();
+  if (IsCompactUIEnabled())
+    return;
   infobar()->RemoveSelf();
 }
 

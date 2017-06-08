@@ -209,7 +209,7 @@ aura::Window* CastFocusClientAura::GetWindowToFocus() {
 }
 
 aura::Window* CastFocusClientAura::GetZOrderWindow(aura::Window* window) {
-  while (window->parent() && !window->parent()->GetHost()) {
+  while (window->parent() && !window->parent()->IsRootWindow()) {
     window = window->parent();
   }
   return window;
@@ -221,6 +221,32 @@ void CastFocusClientAura::ResetFocusWithinActiveWindow(aura::Window* window) {
   if (focused_window_ && focused_window_->Contains(window)) {
     FocusWindow(window);
   }
+}
+
+void CastFocusClientAura::AddObserver(
+    aura::client::ActivationChangeObserver* observer) {}
+
+void CastFocusClientAura::RemoveObserver(
+    aura::client::ActivationChangeObserver* observer) {}
+
+void CastFocusClientAura::ActivateWindow(aura::Window* window) {}
+
+void CastFocusClientAura::DeactivateWindow(aura::Window* window) {}
+
+const aura::Window* CastFocusClientAura::GetActiveWindow() const {
+  return nullptr;
+}
+
+aura::Window* CastFocusClientAura::GetActivatableWindow(aura::Window* window) {
+  return window;
+}
+
+aura::Window* CastFocusClientAura::GetToplevelWindow(aura::Window* window) {
+  return GetZOrderWindow(window);
+}
+
+bool CastFocusClientAura::CanActivateWindow(aura::Window* window) const {
+  return true;
 }
 
 }  // namespace chromecast

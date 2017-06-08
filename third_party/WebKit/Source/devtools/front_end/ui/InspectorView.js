@@ -111,7 +111,11 @@ UI.InspectorView = class extends UI.VBox {
    * @return {?UI.ViewLocation}
    */
   resolveLocation(locationName) {
-    return this._drawerTabbedLocation;
+    if (locationName === 'drawer-view')
+      return this._drawerTabbedLocation;
+    if (locationName === 'panel')
+      return this._tabbedLocation;
+    return null;
   }
 
   createToolbars() {
@@ -227,16 +231,24 @@ UI.InspectorView = class extends UI.VBox {
   }
 
   /**
+   * @param {string} id
+   * @param {boolean=} userGesture
+   */
+  closeDrawerTab(id, userGesture) {
+    this._drawerTabbedPane.closeTab(id, userGesture);
+  }
+
+  /**
    * @param {!Event} event
    */
   _keyDown(event) {
     var keyboardEvent = /** @type {!KeyboardEvent} */ (event);
-    if (!UI.KeyboardShortcut.eventHasCtrlOrMeta(keyboardEvent))
+    if (!UI.KeyboardShortcut.eventHasCtrlOrMeta(keyboardEvent) || event.altKey || event.shiftKey)
       return;
 
     // Ctrl/Cmd + 1-9 should show corresponding panel.
     var panelShortcutEnabled = Common.moduleSetting('shortcutPanelSwitch').get();
-    if (panelShortcutEnabled && !event.shiftKey && !event.altKey) {
+    if (panelShortcutEnabled) {
       var panelIndex = -1;
       if (event.keyCode > 0x30 && event.keyCode < 0x3A)
         panelIndex = event.keyCode - 0x31;

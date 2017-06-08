@@ -16,6 +16,7 @@
 #include "base/nix/xdg_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/sys_info.h"
 #include "chromeos/audio/audio_device.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "media/audio/audio_device_description.h"
@@ -48,6 +49,9 @@ const int kDefaultInputBufferSize = 1024;
 
 const char kBeamformingOnDeviceId[] = "default-beamforming-on";
 const char kBeamformingOffDeviceId[] = "default-beamforming-off";
+
+const char kInternalInputDevice[] = "Built-in mic";
+const char kInternalOutputDevice[] = "Built-in speaker";
 
 enum CrosBeamformingDeviceState {
   BEAMFORMING_DEFAULT_ENABLED = 0,
@@ -164,10 +168,37 @@ void AudioManagerCras::GetAudioDeviceNamesImpl(bool is_input,
   if (base::FeatureList::IsEnabled(features::kEnumerateAudioDevices)) {
     chromeos::AudioDeviceList devices;
     chromeos::CrasAudioHandler::Get()->GetAudioDevices(&devices);
+
+    int internal_input_dev_index = 0;
+    int internal_output_dev_index = 0;
+    for (const auto& device : devices) {
+      if (device.type == chromeos::AUDIO_TYPE_INTERNAL_MIC)
+        internal_input_dev_index = dev_index_of(device.id);
+      else if (device.type == chromeos::AUDIO_TYPE_INTERNAL_SPEAKER)
+        internal_output_dev_index = dev_index_of(device.id);
+    }
+
+    bool has_internal_input = false;
+    bool has_internal_output = false;
     for (const auto& device : devices) {
       if (device.is_input == is_input && device.is_for_simple_usage()) {
-        device_names->emplace_back(device.display_name,
-                                   base::Uint64ToString(device.id));
+        int dev_index = dev_index_of(device.id);
+        if (dev_index == internal_input_dev_index) {
+          if (!has_internal_input) {
+            device_names->emplace_back(kInternalInputDevice,
+                                       base::Uint64ToString(device.id));
+            has_internal_input = true;
+          }
+        } else if (dev_index == internal_output_dev_index) {
+          if (!has_internal_output) {
+            device_names->emplace_back(kInternalOutputDevice,
+                                       base::Uint64ToString(device.id));
+            has_internal_output = true;
+          }
+        } else {
+          device_names->emplace_back(device.display_name,
+                                     base::Uint64ToString(device.id));
+        }
       }
     }
   }
@@ -265,12 +296,23 @@ AudioInputStream* AudioManagerCras::MakeLowLatencyInputStream(
   return MakeInputStream(params, device_id);
 }
 
+int AudioManagerCras::GetMinimumOutputBufferSizePerBoard() {
+  // On faster boards we can use smaller buffer size for lower latency.
+  // On slower boards we should use larger buffer size to prevent underrun.
+  std::string board = base::SysInfo::GetLsbReleaseBoard();
+  if (board == "kevin")
+    return 768;
+  else if (board == "samus")
+    return 256;
+  return kMinimumOutputBufferSize;
+}
+
 AudioParameters AudioManagerCras::GetPreferredOutputStreamParameters(
     const std::string& output_device_id,
     const AudioParameters& input_params) {
   ChannelLayout channel_layout = CHANNEL_LAYOUT_STEREO;
   int sample_rate = kDefaultSampleRate;
-  int buffer_size = kMinimumOutputBufferSize;
+  int buffer_size = GetMinimumOutputBufferSizePerBoard();
   int bits_per_sample = 16;
   if (input_params.IsValid()) {
     sample_rate = input_params.sample_rate();

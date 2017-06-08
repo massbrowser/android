@@ -5,91 +5,56 @@
 Polymer({
   is: 'bookmarks-list',
 
+  behaviors: [
+    bookmarks.StoreClient,
+  ],
+
   properties: {
-    /** @type {BookmarkTreeNode} */
-    menuItem_: Object,
+    /** @private {Array<string>} */
+    displayedList_: {
+      type: Array,
+      value: function() {
+        // Use an empty list during initialization so that the databinding to
+        // hide #bookmarksCard takes effect.
+        return [];
+      },
+    },
 
-    /** @type {Array<BookmarkTreeNode>} */
-    displayedList: Array,
-
-    searchTerm: String,
+    /** @private */
+    searchTerm_: String,
   },
 
   listeners: {
-    'open-item-menu': 'onOpenItemMenu_',
+    'click': 'deselectItems_',
   },
 
-  /**
-   * @param {Event} e
-   * @private
-   */
-  onOpenItemMenu_: function(e) {
-    this.menuItem_ = e.detail.item;
-    var menu = /** @type {!CrActionMenuElement} */ (
-        this.$.dropdown);
-    menu.showAt(/** @type {!Element} */ (e.detail.target));
-  },
-
-  // TODO(jiaxi): change these dummy click event handlers later.
-  /** @private */
-  onEditTap_: function() {
-    this.closeDropdownMenu_();
-    if (this.menuItem_.url)
-      this.$.editBookmark.showModal();
-  },
-
-  /** @private */
-  onCopyURLTap_: function() {
-    var idList = [this.menuItem_.id];
-    chrome.bookmarkManagerPrivate.copy(idList, function() {
-      // TODO(jiaxi): Add toast later.
+  attached: function() {
+    this.watch('displayedList_', function(state) {
+      return bookmarks.util.getDisplayedList(state);
     });
-    this.closeDropdownMenu_();
-  },
-
-  /** @private */
-  onDeleteTap_: function() {
-    if (this.menuItem_.url) {
-      chrome.bookmarks.remove(this.menuItem_.id, function() {
-        // TODO(jiaxi): Add toast later.
-      }.bind(this));
-    } else {
-      chrome.bookmarks.removeTree(this.menuItem_.id, function() {
-        // TODO(jiaxi): Add toast later.
-      }.bind(this));
-    }
-    this.closeDropdownMenu_();
-  },
-
-  /** @private */
-  onSaveEditTap_: function() {
-    chrome.bookmarks.update(this.menuItem_.id, {
-      'title': this.menuItem_.title,
-      'url': this.menuItem_.url,
+    this.watch('searchTerm_', function(state) {
+      return state.search.term;
     });
-    this.$.editBookmark.close();
+    this.updateFromStore();
   },
 
-  /** @private */
-  onCancelEditTap_: function() {
-    this.$.editBookmark.cancel();
-  },
-
-  /** @private */
-  closeDropdownMenu_: function() {
-    var menu = /** @type {!CrActionMenuElement} */ (
-        this.$.dropdown);
-    menu.close();
+  getDropTarget: function() {
+    return this.$.message;
   },
 
   /** @private */
   emptyListMessage_: function() {
-    var emptyListMessage = this.searchTerm ? 'noSearchResults' : 'emptyList';
+    var emptyListMessage = this.searchTerm_ ? 'noSearchResults' : 'emptyList';
     return loadTimeData.getString(emptyListMessage);
   },
 
   /** @private */
   isEmptyList_: function() {
-    return this.displayedList.length == 0;
+    return this.displayedList_.length == 0;
+  },
+
+  /** @private */
+  deselectItems_: function() {
+    this.dispatch(bookmarks.actions.deselectItems());
   },
 });

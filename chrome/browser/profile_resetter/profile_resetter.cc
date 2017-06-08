@@ -13,11 +13,10 @@
 #include "base/synchronization/cancellation_flag.h"
 #include "build/build_config.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_remover.h"
-#include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
+
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/profile_resetter/brandcoded_default_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -31,13 +30,13 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/website_settings_info.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
-#include "components/google/core/browser/google_url_tracker.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/browsing_data_remover.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/management_policy.h"
@@ -182,18 +181,6 @@ void ProfileResetter::ResetDefaultSearchEngine() {
 
     template_url_service_->RepairPrepopulatedSearchEngines();
 
-    // Reset Google search URL.
-    const TemplateURL* default_search_provider =
-        template_url_service_->GetDefaultSearchProvider();
-    if (default_search_provider &&
-        default_search_provider->HasGoogleBaseURLs(
-            template_url_service_->search_terms_data())) {
-      GoogleURLTracker* tracker =
-          GoogleURLTrackerFactory::GetForProfile(profile_);
-      if (tracker)
-        tracker->RequestServerCheck(true);
-    }
-
     MarkAsDone(DEFAULT_SEARCH_ENGINE);
   } else {
     template_url_service_sub_ =
@@ -250,18 +237,19 @@ void ProfileResetter::ResetCookiesAndSiteData() {
   DCHECK(CalledOnValidThread());
   DCHECK(!cookies_remover_);
 
-  cookies_remover_ = BrowsingDataRemoverFactory::GetForBrowserContext(profile_);
+  cookies_remover_ = content::BrowserContext::GetBrowsingDataRemover(profile_);
   cookies_remover_->AddObserver(this);
-  int remove_mask = BrowsingDataRemover::REMOVE_SITE_DATA |
-                    BrowsingDataRemover::REMOVE_CACHE;
+  int remove_mask = ChromeBrowsingDataRemoverDelegate::DATA_TYPE_SITE_DATA |
+                    content::BrowsingDataRemover::DATA_TYPE_CACHE;
   PrefService* prefs = profile_->GetPrefs();
   DCHECK(prefs);
 
   // Don't try to clear LSO data if it's not supported.
   if (!prefs->GetBoolean(prefs::kClearPluginLSODataEnabled))
-    remove_mask &= ~BrowsingDataRemover::REMOVE_PLUGIN_DATA;
-  cookies_remover_->RemoveAndReply(base::Time(), base::Time::Max(), remove_mask,
-                                   BrowsingDataHelper::UNPROTECTED_WEB, this);
+    remove_mask &= ~ChromeBrowsingDataRemoverDelegate::DATA_TYPE_PLUGIN_DATA;
+  cookies_remover_->RemoveAndReply(
+      base::Time(), base::Time::Max(), remove_mask,
+      content::BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB, this);
 }
 
 void ProfileResetter::ResetExtensions() {

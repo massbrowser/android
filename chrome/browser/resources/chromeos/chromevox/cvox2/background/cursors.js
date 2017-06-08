@@ -83,7 +83,7 @@ cursors.Cursor = function(node, index) {
   while (nodeWalker) {
     this.ancestry_.push(nodeWalker);
     nodeWalker = nodeWalker.parent;
-    if (nodeWalker && AutomationPredicate.root(nodeWalker))
+    if (nodeWalker && nodeWalker.role == RoleType.WINDOW)
       break;
   }
 };
@@ -142,7 +142,7 @@ cursors.Cursor.prototype = {
     for (var i = 0; i < this.ancestry_.length; i++) {
       var firstValidNode = this.ancestry_[i];
       if (firstValidNode != null && firstValidNode.role !== undefined &&
-          firstValidNode.root !== undefined) {
+          firstValidNode.root != undefined) {
         return firstValidNode;
       }
       // If we have to walk up to an ancestor, reset the index to NODE_INDEX.
@@ -176,9 +176,9 @@ cursors.Cursor.prototype = {
     // Selections over line break nodes are broken.
     var parent = adjustedNode.parent;
     var grandparent = parent && parent.parent;
-    if (parent.role == RoleType.LINE_BREAK) {
+    if (parent && parent.role == RoleType.LINE_BREAK) {
       adjustedNode = grandparent;
-    } else if (grandparent.role == RoleType.LINE_BREAK) {
+    } else if (grandparent && grandparent.role == RoleType.LINE_BREAK) {
       adjustedNode = grandparent.parent;
     } else if (this.index_ == cursors.NODE_INDEX ||
         adjustedNode.role == RoleType.INLINE_TEXT_BOX ||

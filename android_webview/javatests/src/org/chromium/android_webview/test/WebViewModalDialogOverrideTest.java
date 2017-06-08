@@ -14,8 +14,10 @@ import android.support.test.filters.SmallTest;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.JsPromptResultReceiver;
 import org.chromium.android_webview.JsResultReceiver;
+import org.chromium.android_webview.test.util.AwTestTouchUtils;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -157,9 +159,11 @@ public class WebViewModalDialogOverrideTest extends AwTestBase {
 
     /*
      * Verify that when the AwContentsClient calls handleJsBeforeUnload
+     * Flaky (crbug/719308)
      */
     @MediumTest
     @Feature({"AndroidWebView"})
+    @RetryOnFailure
     public void testOverrideBeforeUnloadHandling() throws Throwable {
         final CallbackHelper jsBeforeUnloadHelper = new CallbackHelper();
         TestAwContentsClient client = new TestAwContentsClient() {
@@ -176,6 +180,8 @@ public class WebViewModalDialogOverrideTest extends AwTestBase {
         loadDataSync(awContents, client.getOnPageFinishedHelper(), BEFORE_UNLOAD_URL,
                 "text/html", false);
         enableJavaScriptOnUiThread(awContents);
+        // JavaScript onbeforeunload dialogs require a user gesture.
+        AwTestTouchUtils.simulateTouchCenterOfView(view);
 
         // Don't wait synchronously because we don't leave the page.
         int currentCallCount = jsBeforeUnloadHelper.getCallCount();

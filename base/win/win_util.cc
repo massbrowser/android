@@ -10,6 +10,8 @@
 #include <shobjidl.h>  // Must be before propkey.
 #include <initguid.h>
 #include <inspectable.h>
+#include <mdmregistration.h>
+#include <objbase.h>
 #include <propkey.h>
 #include <propvarutil.h>
 #include <psapi.h>
@@ -32,8 +34,10 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/scoped_native_library.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -126,9 +130,7 @@ bool IsWindows10TabletMode(HWND hwnd) {
   }
 
   base::win::ScopedComPtr<IUIViewSettingsInterop> view_settings_interop;
-  hr = get_factory(view_settings_guid,
-                   __uuidof(IUIViewSettingsInterop),
-                   view_settings_interop.ReceiveVoid());
+  hr = get_factory(view_settings_guid, IID_PPV_ARGS(&view_settings_interop));
   if (FAILED(hr))
     return false;
 
@@ -137,10 +139,7 @@ bool IsWindows10TabletMode(HWND hwnd) {
   // TODO(ananta)
   // Avoid using GetForegroundWindow here and pass in the HWND of the window
   // intiating the request to display the keyboard.
-  hr = view_settings_interop->GetForWindow(
-      hwnd,
-      __uuidof(ABI::Windows::UI::ViewManagement::IUIViewSettings),
-      view_settings.ReceiveVoid());
+  hr = view_settings_interop->GetForWindow(hwnd, IID_PPV_ARGS(&view_settings));
   if (FAILED(hr))
     return false;
 
@@ -494,6 +493,40 @@ bool IsEnrolledToDomain() {
   }
 
   return g_domain_state == ENROLLED;
+}
+
+bool IsDeviceRegisteredWithManagement() {
+  static bool is_device_registered_with_management = []() {
+    ScopedNativeLibrary library(
+        FilePath(FILE_PATH_LITERAL("MDMRegistration.dll")));
+    if (!library.is_valid())
+      return false;
+
+    using IsDeviceRegisteredWithManagementFunction =
+        decltype(&::IsDeviceRegisteredWithManagement);
+    IsDeviceRegisteredWithManagementFunction
+        is_device_registered_with_management_function =
+            reinterpret_cast<IsDeviceRegisteredWithManagementFunction>(
+                library.GetFunctionPointer("IsDeviceRegisteredWithManagement"));
+    if (!is_device_registered_with_management_function)
+      return false;
+
+    BOOL is_managed = false;
+    HRESULT hr =
+        is_device_registered_with_management_function(&is_managed, 0, nullptr);
+    return SUCCEEDED(hr) && is_managed;
+  }();
+  return is_device_registered_with_management;
+}
+
+bool IsEnterpriseManaged() {
+  // TODO(rogerta): this function should really be:
+  //
+  //    return IsEnrolledToDomain() || IsDeviceRegisteredWithManagement();
+  //
+  // However, for now it is decided to collect some UMA metrics about
+  // IsDeviceRegisteredWithMdm() before changing chrome's behavior.
+  return IsEnrolledToDomain();
 }
 
 void SetDomainStateForTesting(bool state) {

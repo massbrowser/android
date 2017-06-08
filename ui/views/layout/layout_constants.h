@@ -70,6 +70,9 @@ constexpr int kButtonVEdgeMarginNew = 20;
 // left or right of a button (when using new style dialogs).
 constexpr int kButtonHEdgeMarginNew = 20;
 
+// Spacing between the edge of the window and the edge of the close button.
+constexpr int kCloseButtonMargin = 7;
+
 // Horizontal spacing between buttons that are logically related.
 constexpr int kRelatedButtonHSpacing = 6;
 
@@ -79,6 +82,18 @@ constexpr int kCheckboxIndent = 10;
 // Horizontal spacing between the end of an item (i.e. an icon or a checkbox)
 // and the start of its corresponding text.
 constexpr int kItemLabelSpacing = 10;
+
+// Padding on the left and right of a button's contents.
+const int kButtonHorizontalPadding = 16;
+
+// Default minimum width of buttons.
+const int kMinimumButtonWidth = 48;
+
+// Minimum width of dialog buttons.
+constexpr int kDialogMinimumButtonWidth = 75;
+
+// Extra space around vector buttons to increase their event target size.
+constexpr int kVectorButtonExtraTouchSize = 4;
 
 }  // namespace views
 

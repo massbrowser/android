@@ -67,6 +67,7 @@
     abbr,
     alertDialog,
     alert,
+    anchor,
     annotation,
     application,
     article,
@@ -199,7 +200,6 @@
   // Describes characteristics of an $(ref:automation.AutomationNode).
   enum StateType {
     busy,
-    checked,
     collapsed,
     default,
     disabled,
@@ -267,9 +267,10 @@
   enum NameFromType {
     uninitialized,
     attribute,
+    attributeExplicitlyEmpty,
     contents,
     placeholder,
-    related_element,
+    relatedElement,
     value
   };
 
@@ -442,6 +443,9 @@
     // applicable
     AutomationNode? activeDescendant;
 
+    // The target of an in-page link.
+    AutomationNode? inPageLinkTarget;
+
     //
     // Link attributes.
     //
@@ -548,24 +552,38 @@
     // Table attributes.
     //
 
-    // The number of rows in this table.
+    // The number of rows in this table as specified in the DOM.
     long? tableRowCount;
 
-    // The number of columns in this table.
+    // The number of rows in this table as specified by the page author.
+    long? ariaRowCount;
+
+    // The number of columns in this table as specified in the DOM.
     long? tableColumnCount;
+
+    // The number of columns in this table as specified by the page author.
+    long? ariaColumnCount;
 
     //
     // Table cell attributes.
     //
 
-    // The zero-based index of the column that this cell is in.
+    // The zero-based index of the column that this cell is in as specified in
+    // the DOM.
     long? tableCellColumnIndex;
+
+    // The ARIA column index as specified by the page author.
+    long? ariaCellColumnIndex;
 
     // The number of columns that this cell spans (default is 1).
     long? tableCellColumnSpan;
 
-    // The zero-based index of the row that this cell is in.
+    // The zero-based index of the row that this cell is in as specified in the
+    // DOM.
     long? tableCellRowIndex;
+
+    // The ARIA row index as specified by the page author.
+    long? ariaCellRowIndex;
 
     // The number of rows that this cell spans (default is 1).
     long? tableCellRowSpan;
@@ -634,8 +652,9 @@
     // The language code for this subtree.
     DOMString? language;
 
-    // If a checkbox or toggle button is in the mixed state.
-    boolean? buttonMixed;
+    // Tri-state describing checkbox or radio button:
+    // 'false' | 'true' | 'mixed'
+    DOMString? checked;
 
     // The RGBA foreground color of this subtree, as an integer.
     long? color;
@@ -680,6 +699,10 @@
     // resized.  Pass zero for maxWidth and/or maxHeight for the
     // original size.
     static void getImageData(long maxWidth, long maxHeight);
+
+    // Does a hit test of the given global screen coordinates, and fires
+    // eventToFire on the resulting object.
+    static void hitTest(long x, long y, EventType eventToFire);
 
     // Scrolls this node to make it visible.
     static void makeVisible();
@@ -754,7 +777,8 @@
     // tree with a placeholder root node; listen for the "loadComplete" event to
     // get a notification that the tree has fully loaded (the previous root node
     // reference will stop working at or before this point).
-    [nocompile] static void getTree(optional long tabId, RootCallback callback);
+    [nocompile] static void getTree(optional long tabId,
+                                    optional RootCallback callback);
 
     // Get the automation tree for the whole desktop which consists of all on
     // screen views. Note this API is currently only supported on Chrome OS.

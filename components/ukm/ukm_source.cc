@@ -3,19 +3,52 @@
 // found in the LICENSE file.
 
 #include "components/ukm/ukm_source.h"
+
+#include "base/hash.h"
 #include "components/metrics/proto/ukm/source.pb.h"
 
 namespace ukm {
+
+namespace {
+
+// The maximum length of a URL we will record.
+constexpr int kMaxURLLength = 2 * 1024;
+
+// The string sent in place of a URL if the real URL was too long.
+constexpr char kMaxUrlLengthMessage[] = "URLTooLong";
+
+// Returns a URL that is under the length limit, by returning a constant
+// string when the URl is too long.
+std::string GetShortenedURL(const GURL& url) {
+  if (url.spec().length() > kMaxURLLength)
+    return kMaxUrlLengthMessage;
+  return url.spec();
+}
+
+}  // namespace
 
 UkmSource::UkmSource() = default;
 
 UkmSource::~UkmSource() = default;
 
-void UkmSource::PopulateProto(Source* proto_source) {
-  proto_source->set_url(committed_url_.spec());
+void UkmSource::UpdateUrl(const GURL& url) {
+  DCHECK(!url_.is_empty());
+  if (url_ == url)
+    return;
+  if (initial_url_.is_empty())
+    initial_url_ = url_;
+  url_ = url;
+}
 
-  proto_source->set_first_contentful_paint_msec(
-      first_contentful_paint_.InMilliseconds());
+void UkmSource::PopulateProto(Source* proto_source) const {
+  DCHECK(!proto_source->has_id());
+  DCHECK(!proto_source->has_url());
+  DCHECK(!proto_source->has_initial_url());
+
+  proto_source->set_id(id_);
+  proto_source->set_url(GetShortenedURL(url_));
+  if (!initial_url_.is_empty())
+    proto_source->set_initial_url(GetShortenedURL(initial_url_));
 }
 
 }  // namespace ukm

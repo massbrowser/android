@@ -53,7 +53,6 @@ UI.SuggestBox = class {
    * @param {!UI.SuggestBoxDelegate} suggestBoxDelegate
    * @param {number=} maxItemsHeight
    * @param {boolean=} captureEnter
-   * @suppressGlobalPropertiesCheck
    */
   constructor(suggestBoxDelegate, maxItemsHeight, captureEnter) {
     this._suggestBoxDelegate = suggestBoxDelegate;
@@ -62,6 +61,8 @@ UI.SuggestBox = class {
     this._rowHeight = 17;
     this._userInteracted = false;
     this._userEnteredText = '';
+    this._defaultSelectionIsDimmed = false;
+
     /** @type {?string} */
     this._onlyCompletion = null;
 
@@ -70,20 +71,36 @@ UI.SuggestBox = class {
     this._element = this._list.element;
     this._element.classList.add('suggest-box');
     this._element.addEventListener('mousedown', event => event.preventDefault(), true);
+    this._element.addEventListener('click', this._onClick.bind(this), false);
 
-    // TODO(dgozman): take document in constructor.
-    this._glassPane =
-        new UI.GlassPane(document, false /* dimmed */, false /* blockPointerEvents */, this.hide.bind(this));
+    this._glassPane = new UI.GlassPane();
     this._glassPane.setAnchorBehavior(UI.GlassPane.AnchorBehavior.PreferBottom);
+    this._glassPane.setOutsideClickCallback(this.hide.bind(this));
     var shadowRoot = UI.createShadowRootWithCoreStyles(this._glassPane.contentElement, 'ui/suggestBox.css');
     shadowRoot.appendChild(this._element);
+  }
+
+  /**
+   * @param {boolean} value
+   */
+  setDefaultSelectionIsDimmed(value) {
+    this._defaultSelectionIsDimmed = value;
+    this._element.classList.toggle('default-selection-is-dimmed', value);
+  }
+
+  /**
+   * @param {boolean} value
+   */
+  _setUserInteracted(value) {
+    this._userInteracted = value;
+    this._element.classList.toggle('user-has-interacted', value);
   }
 
   /**
    * @return {boolean}
    */
   visible() {
-    return this._glassPane.visible();
+    return this._glassPane.isShowing();
   }
 
   /**
@@ -114,7 +131,7 @@ UI.SuggestBox = class {
     var maxItem;
     var maxLength = -Infinity;
     for (var i = 0; i < items.length; i++) {
-      var length = items[i].title.length + (items[i].subtitle || '').length;
+      var length = (items[i].title || items[i].text).length + (items[i].subtitle || '').length;
       if (length > maxLength) {
         maxLength = length;
         maxItem = items[i];
@@ -124,18 +141,22 @@ UI.SuggestBox = class {
     return Math.min(kMaxWidth, UI.measurePreferredSize(element, this._element).width);
   }
 
+  /**
+   * @suppressGlobalPropertiesCheck
+   */
   _show() {
     if (this.visible())
       return;
-    this._glassPane.show();
+    // TODO(dgozman): take document as a parameter.
+    this._glassPane.show(document);
     this._rowHeight =
-        UI.measurePreferredSize(this.createElementForItem({title: '1', subtitle: '12'}), this._element).height;
+        UI.measurePreferredSize(this.createElementForItem({text: '1', subtitle: '12'}), this._element).height;
   }
 
   hide() {
     if (!this.visible())
       return;
-    this._userInteracted = false;
+    this._setUserInteracted(false);
     this._glassPane.hide();
   }
 
@@ -152,7 +173,7 @@ UI.SuggestBox = class {
     if (!this.visible() || !this._list.selectedItem())
       return false;
 
-    var suggestion = this._list.selectedItem().title;
+    var suggestion = this._list.selectedItem().text;
     if (!suggestion)
       return false;
 
@@ -190,7 +211,7 @@ UI.SuggestBox = class {
       element.classList.add('secondary');
     element.tabIndex = -1;
     var maxTextLength = 50 + query.length;
-    var displayText = item.title.trimEnd(maxTextLength);
+    var displayText = (item.title || item.text).trimEnd(maxTextLength);
 
     var titleElement = element.createChild('span', 'suggestion-title');
     var index = displayText.toLowerCase().indexOf(query.toLowerCase());
@@ -204,13 +225,6 @@ UI.SuggestBox = class {
       var subtitleElement = element.createChild('span', 'suggestion-subtitle');
       subtitleElement.textContent = item.subtitle.trimEnd(maxTextLength - displayText.length);
     }
-
-    element.addEventListener('click', event => {
-      this._list.selectItem(item);
-      this._userInteracted = true;
-      event.consume(true);
-      this.acceptSuggestion();
-    });
     return element;
   }
 
@@ -242,11 +256,28 @@ UI.SuggestBox = class {
   selectedItemChanged(from, to, fromElement, toElement) {
     if (fromElement)
       fromElement.classList.remove('selected', 'force-white-icons');
-    if (toElement)
-      toElement.classList.add('selected', 'force-white-icons');
+    if (toElement) {
+      toElement.classList.add('selected');
+      if (fromElement || this._userInteracted || !this._defaultSelectionIsDimmed)
+        toElement.classList.add('force-white-icons');
+    }
     if (!to)
       return;
     this._applySuggestion(true);
+  }
+
+  /**
+   * @param {!Event} event
+   */
+  _onClick(event) {
+    var item = this._list.itemForNode(/** @type {?Node} */ (event.target));
+    if (!item)
+      return;
+
+    this._list.selectItem(item);
+    this._setUserInteracted(true);
+    this.acceptSuggestion();
+    event.consume(true);
   }
 
   /**
@@ -262,11 +293,11 @@ UI.SuggestBox = class {
     if (completions.length > 1)
       return true;
 
-    if (!completions[0].title.startsWith(userEnteredText))
+    if (!completions[0].text.startsWith(userEnteredText))
       return true;
 
     // Do not show a single suggestion if it is the same as user-entered query, even if allowed to show single-item suggest boxes.
-    return canShowForSingleItem && completions[0].title !== userEnteredText;
+    return canShowForSingleItem && completions[0].text !== userEnteredText;
   }
 
   /**
@@ -301,7 +332,7 @@ UI.SuggestBox = class {
       }
     } else {
       if (completions.length === 1) {
-        this._onlyCompletion = completions[0].title;
+        this._onlyCompletion = completions[0].text;
         this._applySuggestion(true);
       }
       this.hide();
@@ -333,7 +364,7 @@ UI.SuggestBox = class {
         return false;
     }
     if (selected) {
-      this._userInteracted = true;
+      this._setUserInteracted(true);
       return true;
     }
     return false;
@@ -356,7 +387,7 @@ UI.SuggestBox = class {
 };
 
 /**
- * @typedef {!{title: string, subtitle: (string|undefined), iconType: (string|undefined), priority: (number|undefined), isSecondary: (boolean|undefined)}}
+ * @typedef {!{text: string, subtitle: (string|undefined), iconType: (string|undefined), priority: (number|undefined), isSecondary: (boolean|undefined), title: (string|undefined)}}
  */
 UI.SuggestBox.Suggestion;
 

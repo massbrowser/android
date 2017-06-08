@@ -9,6 +9,8 @@
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_flag_utils.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_str_cat.h"
 
@@ -54,8 +56,8 @@ QuicFlowController::QuicFlowController(
 
 void QuicFlowController::AddBytesConsumed(QuicByteCount bytes_consumed) {
   bytes_consumed_ += bytes_consumed;
-  QUIC_DVLOG(1) << ENDPOINT << "Stream " << id_
-                << " consumed: " << bytes_consumed_;
+  QUIC_DVLOG(1) << ENDPOINT << "Stream " << id_ << " consumed "
+                << bytes_consumed_ << " bytes.";
 
   MaybeSendWindowUpdate();
 }
@@ -68,7 +70,7 @@ bool QuicFlowController::UpdateHighestReceivedOffset(
   }
 
   QUIC_DVLOG(1) << ENDPOINT << "Stream " << id_
-                << " highest byte offset increased from: "
+                << " highest byte offset increased from "
                 << highest_received_byte_offset_ << " to " << new_offset;
   highest_received_byte_offset_ = new_offset;
   return true;
@@ -91,7 +93,8 @@ void QuicFlowController::AddBytesSent(QuicByteCount bytes_sent) {
   }
 
   bytes_sent_ += bytes_sent;
-  QUIC_DVLOG(1) << ENDPOINT << "Stream " << id_ << " sent: " << bytes_sent_;
+  QUIC_DVLOG(1) << ENDPOINT << "Stream " << id_ << " sent " << bytes_sent_
+                << " bytes.";
 }
 
 bool QuicFlowController::FlowControlViolation() {
@@ -183,6 +186,14 @@ void QuicFlowController::MaybeSendWindowUpdate() {
   QuicStreamOffset available_window = receive_window_offset_ - bytes_consumed_;
   QuicByteCount threshold = WindowUpdateThreshold();
 
+  if (FLAGS_quic_reloadable_flag_quic_flow_control_faster_autotune &&
+      !prev_window_update_time_.IsInitialized()) {
+    QUIC_FLAG_COUNT(quic_reloadable_flag_quic_flow_control_faster_autotune);
+    // Treat the initial window as if it is a window update, so if 1/2 the
+    // window is used in less than 2 RTTs, the window is increased.
+    prev_window_update_time_ = connection_->clock()->ApproximateNow();
+  }
+
   if (available_window >= threshold) {
     QUIC_DVLOG(1) << ENDPOINT << "Not sending WindowUpdate for stream " << id_
                   << ", available window: " << available_window
@@ -191,10 +202,11 @@ void QuicFlowController::MaybeSendWindowUpdate() {
   }
 
   MaybeIncreaseMaxWindowSize();
-  SendWindowUpdate(available_window);
+  UpdateReceiveWindowOffsetAndSendWindowUpdate(available_window);
 }
 
-void QuicFlowController::SendWindowUpdate(QuicStreamOffset available_window) {
+void QuicFlowController::UpdateReceiveWindowOffsetAndSendWindowUpdate(
+    QuicStreamOffset available_window) {
   // Update our receive window.
   receive_window_offset_ += (receive_window_size_ - available_window);
 
@@ -205,8 +217,7 @@ void QuicFlowController::SendWindowUpdate(QuicStreamOffset available_window) {
                 << ", and receive window size: " << receive_window_size_
                 << ". New receive window offset is: " << receive_window_offset_;
 
-  // Inform the peer of our new receive window.
-  connection_->SendWindowUpdate(id_, receive_window_offset_);
+  SendWindowUpdate();
 }
 
 void QuicFlowController::MaybeSendBlocked() {
@@ -239,9 +250,12 @@ bool QuicFlowController::UpdateSendWindowOffset(
                 << " current offset: " << send_window_offset_
                 << " bytes_sent: " << bytes_sent_;
 
-  const bool blocked = IsBlocked();
+  // The flow is now unblocked but could have also been unblocked
+  // before.  Return true iff this update caused a change from blocked
+  // to unblocked.
+  const bool was_previously_blocked = IsBlocked();
   send_window_offset_ = new_send_window_offset;
-  return blocked;
+  return was_previously_blocked;
 }
 
 void QuicFlowController::EnsureWindowAtLeast(QuicByteCount window_size) {
@@ -251,7 +265,7 @@ void QuicFlowController::EnsureWindowAtLeast(QuicByteCount window_size) {
 
   QuicStreamOffset available_window = receive_window_offset_ - bytes_consumed_;
   IncreaseWindowSize();
-  SendWindowUpdate(available_window);
+  UpdateReceiveWindowOffsetAndSendWindowUpdate(available_window);
 }
 
 bool QuicFlowController::IsBlocked() const {
@@ -276,6 +290,10 @@ void QuicFlowController::UpdateReceiveWindowSize(QuicStreamOffset size) {
   }
   receive_window_size_ = size;
   receive_window_offset_ = size;
+}
+
+void QuicFlowController::SendWindowUpdate() {
+  connection_->SendWindowUpdate(id_, receive_window_offset_);
 }
 
 }  // namespace net

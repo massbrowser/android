@@ -60,7 +60,7 @@ const int kSystemColors[] = {
   COLOR_WINDOWTEXT,
 };
 
-void SetCheckerboardShader(cc::PaintFlags* paint, const RECT& align_rect) {
+void SetCheckerboardShader(SkPaint* paint, const RECT& align_rect) {
   // Create a 2x2 checkerboard pattern using the 3D face and highlight colors.
   const SkColor face = color_utils::GetSysSkColor(COLOR_3DFACE);
   const SkColor highlight = color_utils::GetSysSkColor(COLOR_3DHILIGHT);
@@ -75,7 +75,8 @@ void SetCheckerboardShader(cc::PaintFlags* paint, const RECT& align_rect) {
   SkBitmap temp_bitmap;
   temp_bitmap.installPixels(info, buffer, info.minRowBytes());
   SkBitmap bitmap;
-  temp_bitmap.copyTo(&bitmap);
+  if (bitmap.tryAllocPixels(info))
+    temp_bitmap.readPixels(info, bitmap.getPixels(), bitmap.rowBytes(), 0, 0);
 
   // Align the pattern with the upper corner of |align_rect|.
   SkMatrix local_matrix;
@@ -266,7 +267,7 @@ void NativeThemeWin::Paint(cc::PaintCanvas* canvas,
       PaintMenuGutter(canvas, rect);
       return;
     case kMenuPopupSeparator:
-      PaintMenuSeparator(canvas, *extra.menu_separator.paint_rect);
+      PaintMenuSeparator(canvas, extra.menu_separator);
       return;
     case kMenuPopupBackground:
       PaintMenuBackground(canvas, rect);
@@ -276,20 +277,9 @@ void NativeThemeWin::Paint(cc::PaintCanvas* canvas,
                                          extra.menu_item);
       return;
     default:
-      break;
+      PaintIndirect(canvas, part, state, rect, extra);
+      return;
   }
-
-  HDC surface = skia::GetNativeDrawingContext(canvas);
-
-  // When drawing the task manager or the bookmark editor, we draw into an
-  // offscreen buffer, where we can use OS-specific drawing routines for
-  // UI features like scrollbars. However, we need to set up that buffer,
-  // and then read it back when it's done and blit it onto the screen.
-
-  if (surface)
-    PaintDirect(canvas, surface, part, state, rect, extra);
-  else
-    PaintIndirect(canvas, part, state, rect, extra);
 }
 
 NativeThemeWin::NativeThemeWin()
@@ -376,27 +366,38 @@ void NativeThemeWin::UpdateSystemColors() {
     system_colors_[kSystemColor] = color_utils::GetSysSkColor(kSystemColor);
 }
 
-void NativeThemeWin::PaintMenuSeparator(SkCanvas* canvas,
-                                        const gfx::Rect& rect) const {
-  cc::PaintFlags paint;
-  paint.setColor(GetSystemColor(NativeTheme::kColorId_MenuSeparatorColor));
-  int position_y = rect.y() + rect.height() / 2;
-  canvas->drawLine(rect.x(), position_y, rect.right(), position_y, paint);
+void NativeThemeWin::PaintMenuSeparator(
+    cc::PaintCanvas* canvas,
+    const MenuSeparatorExtraParams& params) const {
+  const gfx::RectF rect(*params.paint_rect);
+  gfx::PointF start = rect.CenterPoint();
+  gfx::PointF end = start;
+  if (params.type == ui::VERTICAL_SEPARATOR) {
+    start.set_y(rect.y());
+    end.set_y(rect.bottom());
+  } else {
+    start.set_x(rect.x());
+    end.set_x(rect.right());
+  }
+
+  cc::PaintFlags flags;
+  flags.setColor(GetSystemColor(NativeTheme::kColorId_MenuSeparatorColor));
+  canvas->drawLine(start.x(), start.y(), end.x(), end.y(), flags);
 }
 
-void NativeThemeWin::PaintMenuGutter(SkCanvas* canvas,
+void NativeThemeWin::PaintMenuGutter(cc::PaintCanvas* canvas,
                                      const gfx::Rect& rect) const {
-  cc::PaintFlags paint;
-  paint.setColor(GetSystemColor(NativeTheme::kColorId_MenuSeparatorColor));
+  cc::PaintFlags flags;
+  flags.setColor(GetSystemColor(NativeTheme::kColorId_MenuSeparatorColor));
   int position_x = rect.x() + rect.width() / 2;
-  canvas->drawLine(position_x, rect.y(), position_x, rect.bottom(), paint);
+  canvas->drawLine(position_x, rect.y(), position_x, rect.bottom(), flags);
 }
 
-void NativeThemeWin::PaintMenuBackground(SkCanvas* canvas,
+void NativeThemeWin::PaintMenuBackground(cc::PaintCanvas* canvas,
                                          const gfx::Rect& rect) const {
-  cc::PaintFlags paint;
-  paint.setColor(GetSystemColor(NativeTheme::kColorId_MenuBackgroundColor));
-  canvas->drawRect(gfx::RectToSkRect(rect), paint);
+  cc::PaintFlags flags;
+  flags.setColor(GetSystemColor(NativeTheme::kColorId_MenuBackgroundColor));
+  canvas->drawRect(gfx::RectToSkRect(rect), flags);
 }
 
 void NativeThemeWin::PaintDirect(SkCanvas* destination_canvas,
@@ -423,18 +424,6 @@ void NativeThemeWin::PaintDirect(SkCanvas* destination_canvas,
       return;
     case kMenuPopupArrow:
       PaintMenuArrow(hdc, state, rect, extra.menu_arrow);
-      return;
-    case kMenuPopupBackground:
-      PaintMenuBackground(hdc, rect);
-      return;
-    case kMenuPopupGutter:
-      PaintMenuGutter(hdc, rect);
-      return;
-    case kMenuPopupSeparator:
-      PaintMenuSeparator(hdc, *extra.menu_separator.paint_rect);
-      return;
-    case kMenuItemBackground:
-      PaintMenuItemBackground(hdc, state, rect, extra.menu_item);
       return;
     case kProgressBar:
       PaintProgressBar(hdc, rect, extra.progress_bar);
@@ -478,6 +467,10 @@ void NativeThemeWin::PaintDirect(SkCanvas* destination_canvas,
     case kWindowResizeGripper:
       PaintWindowResizeGripper(hdc, rect);
       return;
+    case kMenuPopupBackground:
+    case kMenuPopupGutter:
+    case kMenuPopupSeparator:
+    case kMenuItemBackground:
     case kSliderTrack:
     case kSliderThumb:
     case kMaxPart:
@@ -578,8 +571,6 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
     case kColorId_TreeSelectionBackgroundUnfocused:
       return system_colors_[IsUsingHighContrastTheme() ?
                               COLOR_MENUHIGHLIGHT : COLOR_BTNFACE];
-    case kColorId_TreeArrow:
-      return system_colors_[COLOR_WINDOWTEXT];
 
     // Table
     case kColorId_TableBackground:
@@ -673,15 +664,34 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
   return GetAuraColor(color_id, this);
 }
 
-void NativeThemeWin::PaintIndirect(SkCanvas* destination_canvas,
+bool NativeThemeWin::SupportsNinePatch(Part part) const {
+  // The only nine-patch resources currently supported (overlay scrollbar) are
+  // painted by NativeThemeAura on Windows.
+  return false;
+}
+
+gfx::Size NativeThemeWin::GetNinePatchCanvasSize(Part part) const {
+  NOTREACHED() << "NativeThemeWin doesn't support nine-patch resources.";
+  return gfx::Size();
+}
+
+gfx::Rect NativeThemeWin::GetNinePatchAperture(Part part) const {
+  NOTREACHED() << "NativeThemeWin doesn't support nine-patch resources.";
+  return gfx::Rect();
+}
+
+void NativeThemeWin::PaintIndirect(cc::PaintCanvas* destination_canvas,
                                    Part part,
                                    State state,
                                    const gfx::Rect& rect,
                                    const ExtraParams& extra) const {
   // TODO(asvitkine): This path is pretty inefficient - for each paint operation
-  //                  it creates a new offscreen bitmap Skia canvas. This can
-  //                  be sped up by doing it only once per part/state and
-  //                  keeping a cache of the resulting bitmaps.
+  // it creates a new offscreen bitmap Skia canvas. This can be sped up by doing
+  // it only once per part/state and keeping a cache of the resulting bitmaps.
+  //
+  // TODO(enne): This could also potentially be sped up for software raster
+  // by moving these draw ops into PaintRecord itself and then moving the
+  // PaintDirect code to be part of the raster for PaintRecord.
 
   // If this process doesn't have access to GDI, we'd need to use shared memory
   // segment instead but that is not supported right now.
@@ -868,32 +878,6 @@ HRESULT NativeThemeWin::PaintButton(HDC hdc,
   return S_OK;
 }
 
-HRESULT NativeThemeWin::PaintMenuSeparator(HDC hdc,
-                                           const gfx::Rect& rect) const {
-  RECT rect_win = rect.ToRECT();
-
-  HANDLE handle = GetThemeHandle(MENU);
-  if (handle && draw_theme_) {
-    // Delta is needed for non-classic to move separator up slightly.
-    --rect_win.top;
-    --rect_win.bottom;
-    return draw_theme_(handle, hdc, MENU_POPUPSEPARATOR, MPI_NORMAL, &rect_win,
-                       NULL);
-  }
-
-  DrawEdge(hdc, &rect_win, EDGE_ETCHED, BF_TOP);
-  return S_OK;
-}
-
-HRESULT NativeThemeWin::PaintMenuGutter(HDC hdc,
-                                        const gfx::Rect& rect) const {
-  RECT rect_win = rect.ToRECT();
-  HANDLE handle = GetThemeHandle(MENU);
-  return (handle && draw_theme_) ?
-      draw_theme_(handle, hdc, MENU_POPUPGUTTER, MPI_NORMAL, &rect_win, NULL) :
-      E_NOTIMPL;
-}
-
 HRESULT NativeThemeWin::PaintMenuArrow(
     HDC hdc,
     State state,
@@ -940,22 +924,6 @@ HRESULT NativeThemeWin::PaintMenuArrow(
                            state);
 }
 
-HRESULT NativeThemeWin::PaintMenuBackground(HDC hdc,
-                                            const gfx::Rect& rect) const {
-  HANDLE handle = GetThemeHandle(MENU);
-  RECT rect_win = rect.ToRECT();
-  if (handle && draw_theme_) {
-    HRESULT result = draw_theme_(handle, hdc, MENU_POPUPBACKGROUND, 0,
-                                 &rect_win, NULL);
-    FrameRect(hdc, &rect_win, GetSysColorBrush(COLOR_3DSHADOW));
-    return result;
-  }
-
-  FillRect(hdc, &rect_win, GetSysColorBrush(COLOR_MENU));
-  DrawEdge(hdc, &rect_win, EDGE_RAISED, BF_RECT);
-  return S_OK;
-}
-
 HRESULT NativeThemeWin::PaintMenuCheck(
     HDC hdc,
     State state,
@@ -986,37 +954,6 @@ HRESULT NativeThemeWin::PaintMenuCheckBackground(HDC hdc,
   RECT rect_win = rect.ToRECT();
   return draw_theme_(handle, hdc, MENU_POPUPCHECKBACKGROUND, state_id,
                      &rect_win, NULL);
-}
-
-HRESULT NativeThemeWin::PaintMenuItemBackground(
-    HDC hdc,
-    State state,
-    const gfx::Rect& rect,
-    const MenuItemExtraParams& extra) const {
-  HANDLE handle = GetThemeHandle(MENU);
-  RECT rect_win = rect.ToRECT();
-  int state_id = MPI_NORMAL;
-  switch (state) {
-    case kDisabled:
-      state_id = extra.is_selected ? MPI_DISABLEDHOT : MPI_DISABLED;
-      break;
-    case kHovered:
-      state_id = MPI_HOT;
-      break;
-    case kNormal:
-      break;
-    case kPressed:
-    case kNumStates:
-      NOTREACHED();
-      break;
-  }
-
-  if (handle && draw_theme_)
-    return draw_theme_(handle, hdc, MENU_POPUPITEM, state_id, &rect_win, NULL);
-
-  if (extra.is_selected)
-    FillRect(hdc, &rect_win, GetSysColorBrush(COLOR_HIGHLIGHT));
-  return S_OK;
 }
 
 HRESULT NativeThemeWin::PaintPushButton(HDC hdc,
@@ -1321,7 +1258,7 @@ HRESULT NativeThemeWin::PaintScrollbarTrack(
       (system_colors_[COLOR_SCROLLBAR] != system_colors_[COLOR_WINDOW])) {
     FillRect(hdc, &rect_win, reinterpret_cast<HBRUSH>(COLOR_SCROLLBAR + 1));
   } else {
-    cc::PaintFlags paint;
+    SkPaint paint;
     RECT align_rect = gfx::Rect(extra.track_x, extra.track_y, extra.track_width,
                                 extra.track_height).ToRECT();
     SetCheckerboardShader(&paint, align_rect);
@@ -1365,13 +1302,12 @@ HRESULT NativeThemeWin::PaintSpinButton(
   return S_OK;
 }
 
-HRESULT NativeThemeWin::PaintTrackbar(
-    SkCanvas* canvas,
-    HDC hdc,
-    Part part,
-    State state,
-    const gfx::Rect& rect,
-    const TrackbarExtraParams& extra) const {
+HRESULT NativeThemeWin::PaintTrackbar(SkCanvas* canvas,
+                                      HDC hdc,
+                                      Part part,
+                                      State state,
+                                      const gfx::Rect& rect,
+                                      const TrackbarExtraParams& extra) const {
   const int part_id = extra.vertical ?
       ((part == kTrackbarTrack) ? TKP_TRACKVERT : TKP_THUMBVERT) :
       ((part == kTrackbarTrack) ? TKP_TRACK : TKP_THUMBBOTTOM);
@@ -1440,7 +1376,7 @@ HRESULT NativeThemeWin::PaintTrackbar(
 
     // If the button is pressed, draw hatching.
     if (extra.classic_state & DFCS_PUSHED) {
-      cc::PaintFlags paint;
+      SkPaint paint;
       SetCheckerboardShader(&paint, rect_win);
 
       // Fill all three pieces with the pattern.

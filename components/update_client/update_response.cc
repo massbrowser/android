@@ -20,39 +20,29 @@
 
 namespace update_client {
 
-static const char* kExpectedResponseProtocol = "3.0";
 const char UpdateResponse::Result::kCohort[] = "cohort";
 const char UpdateResponse::Result::kCohortHint[] = "cohorthint";
 const char UpdateResponse::Result::kCohortName[] = "cohortname";
 
-UpdateResponse::UpdateResponse() {
-}
-UpdateResponse::~UpdateResponse() {
-}
+UpdateResponse::UpdateResponse() = default;
+UpdateResponse::~UpdateResponse() = default;
 
-UpdateResponse::Results::Results() : daystart_elapsed_seconds(kNoDaystart) {
-}
+UpdateResponse::Results::Results() = default;
 UpdateResponse::Results::Results(const Results& other) = default;
-UpdateResponse::Results::~Results() {
-}
+UpdateResponse::Results::~Results() = default;
 
-UpdateResponse::Result::Result() {}
+UpdateResponse::Result::Result() = default;
 UpdateResponse::Result::Result(const Result& other) = default;
-UpdateResponse::Result::~Result() {
-}
+UpdateResponse::Result::~Result() = default;
 
-UpdateResponse::Result::Manifest::Manifest() {
-}
+UpdateResponse::Result::Manifest::Manifest() = default;
 UpdateResponse::Result::Manifest::Manifest(const Manifest& other) = default;
-UpdateResponse::Result::Manifest::~Manifest() {
-}
+UpdateResponse::Result::Manifest::~Manifest() = default;
 
-UpdateResponse::Result::Manifest::Package::Package() : size(0), sizediff(0) {
-}
+UpdateResponse::Result::Manifest::Package::Package() = default;
 UpdateResponse::Result::Manifest::Package::Package(const Package& other) =
     default;
-UpdateResponse::Result::Manifest::Package::~Package() {
-}
+UpdateResponse::Result::Manifest::Package::~Package() = default;
 
 void UpdateResponse::ParseError(const char* details, ...) {
   va_list args;
@@ -254,32 +244,60 @@ bool ParseUrlsTag(xmlNode* urls,
   return true;
 }
 
+// Parses the <actions> tag. It picks up the "run" attribute of the first
+// "action" element in "actions".
+void ParseActionsTag(xmlNode* updatecheck, UpdateResponse::Result* result) {
+  std::vector<xmlNode*> actions = GetChildren(updatecheck, "actions");
+  if (actions.empty())
+    return;
+
+  std::vector<xmlNode*> action = GetChildren(actions.front(), "action");
+  if (action.empty())
+    return;
+
+  result->action_run = GetAttribute(action.front(), "run");
+}
+
 // Parses the <updatecheck> tag.
 bool ParseUpdateCheckTag(xmlNode* updatecheck,
                          UpdateResponse::Result* result,
                          std::string* error) {
-  if (GetAttribute(updatecheck, "status") == "noupdate") {
+  // Read the |status| attribute.
+  result->status = GetAttribute(updatecheck, "status");
+  if (result->status.empty()) {
+    *error = "Missing status on updatecheck node";
+    return false;
+  }
+
+  if (result->status == "noupdate") {
+    ParseActionsTag(updatecheck, result);
     return true;
   }
 
-  // Get the <urls> tag.
-  std::vector<xmlNode*> urls = GetChildren(updatecheck, "urls");
-  if (urls.empty()) {
-    *error = "Missing urls on updatecheck.";
-    return false;
+  if (result->status == "ok") {
+    std::vector<xmlNode*> urls = GetChildren(updatecheck, "urls");
+    if (urls.empty()) {
+      *error = "Missing urls on updatecheck.";
+      return false;
+    }
+
+    if (!ParseUrlsTag(urls[0], result, error)) {
+      return false;
+    }
+
+    std::vector<xmlNode*> manifests = GetChildren(updatecheck, "manifest");
+    if (manifests.empty()) {
+      *error = "Missing manifest on updatecheck.";
+      return false;
+    }
+
+    ParseActionsTag(updatecheck, result);
+    return ParseManifestTag(manifests[0], result, error);
   }
 
-  if (!ParseUrlsTag(urls[0], result, error)) {
-    return false;
-  }
-
-  std::vector<xmlNode*> manifests = GetChildren(updatecheck, "manifest");
-  if (manifests.empty()) {
-    *error = "Missing manifest on updatecheck.";
-    return false;
-  }
-
-  return ParseManifestTag(manifests[0], result, error);
+  // Return the |updatecheck| element status as a parsing error.
+  *error = result->status;
+  return false;
 }
 
 // Parses a single <app> tag.
@@ -291,7 +309,7 @@ bool ParseAppTag(xmlNode* app,
   static const char* attrs[] = {UpdateResponse::Result::kCohort,
                                 UpdateResponse::Result::kCohortHint,
                                 UpdateResponse::Result::kCohortName};
-  for (const auto& attr : attrs) {
+  for (auto* attr : attrs) {
     auto value = GetAttributePtr(app, attr);
     if (value)
       result->cohort_attrs.insert({attr, *value});
@@ -320,7 +338,7 @@ bool UpdateResponse::Parse(const std::string& response_xml) {
   results_.list.clear();
   errors_.clear();
 
-  if (response_xml.length() < 1) {
+  if (response_xml.empty()) {
     ParseError("Empty xml");
     return false;
   }
@@ -348,11 +366,12 @@ bool UpdateResponse::Parse(const std::string& response_xml) {
   }
 
   // Check for the response "protocol" attribute.
-  if (GetAttribute(root, "protocol") != kExpectedResponseProtocol) {
+  const auto protocol = GetAttribute(root, "protocol");
+  if (protocol != kProtocolVersion) {
     ParseError(
         "Missing/incorrect protocol on response tag "
-        "(expected '%s')",
-        kExpectedResponseProtocol);
+        "(expected '%s', found '%s')",
+        kProtocolVersion, protocol.c_str());
     return false;
   }
 

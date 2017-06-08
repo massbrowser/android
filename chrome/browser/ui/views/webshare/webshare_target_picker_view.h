@@ -11,9 +11,17 @@
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "ui/base/models/table_model.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/views/controls/table/table_view_observer.h"
 #include "ui/views/window/dialog_delegate.h"
+
+class GURL;
+class TargetPickerTableModel;
+class WebShareTargetPickerViewTest;
+
+namespace views {
+class TableView;
+}
 
 // Dialog that presents the user with a list of share target apps. Allows the
 // user to pick one target to be opened and have data passed to it.
@@ -22,14 +30,15 @@
 // in-development feature (Web Share) behind a runtime flag. It should not be
 // used by any released code until going through UI review.
 class WebShareTargetPickerView : public views::DialogDelegateView,
-                                 public ui::TableModel {
+                                 public views::TableViewObserver {
  public:
-  // |targets| is a list of app titles that will be shown in a list. Calls
-  // |close_callback| with SHARE if an app was chosen, or CANCEL if the dialog
-  // was cancelled.
+  // |targets| is a list of app title and manifest URL pairs that will be shown
+  // in a list. If the user picks a target, this calls |callback| with the
+  // manifest URL of the chosen target, or returns null if the user cancelled
+  // the share.
   WebShareTargetPickerView(
-      const std::vector<base::string16>& targets,
-      const base::Callback<void(SharePickerResult)>& close_callback);
+      const std::vector<std::pair<base::string16, GURL>>& targets,
+      chrome::WebShareTargetPickerCallback close_callback);
   ~WebShareTargetPickerView() override;
 
   // views::View overrides:
@@ -43,16 +52,22 @@ class WebShareTargetPickerView : public views::DialogDelegateView,
   bool Cancel() override;
   bool Accept() override;
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
 
-  // ui::TableModel overrides:
-  int RowCount() override;
-  base::string16 GetText(int row, int column_id) override;
-  void SetObserver(ui::TableModelObserver* observer) override;
+  // views::TableViewObserver overrides:
+  void OnSelectionChanged() override;
+  void OnDoubleClick() override;
 
  private:
-  const std::vector<base::string16> targets_;
+  // For access to |table_|.
+  friend class WebShareTargetPickerViewTest;
 
-  base::Callback<void(SharePickerResult)> close_callback_;
+  views::TableView* table_ = nullptr;
+
+  const std::vector<std::pair<base::string16, GURL>> targets_;
+  std::unique_ptr<TargetPickerTableModel> table_model_;
+
+  chrome::WebShareTargetPickerCallback close_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(WebShareTargetPickerView);
 };

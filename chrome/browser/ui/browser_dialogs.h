@@ -10,9 +10,10 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/optional.h"
+#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
-#include "chrome/browser/webshare/share_service_impl.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -52,6 +53,10 @@ class URLRequest;
 namespace payments {
 class PaymentRequest;
 class PaymentRequestDialog;
+}
+
+namespace safe_browsing {
+class ChromeCleanerDialogController;
 }
 
 namespace security_state {
@@ -96,12 +101,6 @@ void ShowWebDialogInContainer(int container_id,
                               ui::WebDialogDelegate* delegate);
 #endif  // defined(USE_ASH)
 
-#if !defined(OS_MACOSX)
-// Shows the create web app shortcut dialog box.
-void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
-                                     content::WebContents* web_contents);
-#endif  // !defined(OS_MACOSX)
-
 // Shows the create chrome app shortcut dialog box.
 // |close_callback| may be null.
 void ShowCreateChromeAppShortcutsDialog(
@@ -116,8 +115,8 @@ content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
 
 #if defined(OS_MACOSX)
 
-// Shows a Views website settings bubble at the given anchor point.
-void ShowWebsiteSettingsBubbleViewsAtPoint(
+// Shows a Views page info bubble at the given anchor point.
+void ShowPageInfoBubbleViewsAtPoint(
     const gfx::Point& anchor_point,
     Profile* profile,
     content::WebContents* web_contents,
@@ -133,6 +132,23 @@ void ShowBookmarkBubbleViewsAtPoint(const gfx::Point& anchor_point,
                                     Browser* browser,
                                     const GURL& url,
                                     bool newly_bookmarked);
+
+// Shows a views zoom bubble at the |anchor_point|. This occurs when the zoom
+// icon is clicked or when a shortcut key is pressed or whenever |web_contents|
+// zoom factor changes. |user_action| is used to determine if the bubble will
+// auto-close.
+void ShowZoomBubbleViewsAtPoint(content::WebContents* web_contents,
+                                const gfx::Point& anchor_point,
+                                bool user_action);
+
+// Closes a views zoom bubble if currently shown.
+void CloseZoomBubbleViews();
+
+// Refreshes views zoom bubble if currently shown.
+void RefreshZoomBubbleViews();
+
+// Returns true if views zoom bubble is currently shown.
+bool IsZoomBubbleViewsShown();
 
 // Bridging methods that show/hide the toolkit-views based Task Manager on Mac.
 task_manager::TaskManagerTableModel* ShowTaskManagerViews(Browser* browser);
@@ -158,14 +174,19 @@ void ShowBookmarkEditorViews(gfx::NativeWindow parent_window,
 payments::PaymentRequestDialog* CreatePaymentRequestDialog(
     payments::PaymentRequest* request);
 
+// Used to return the target the user picked or nullopt if the user cancelled
+// the share.
+using WebShareTargetPickerCallback =
+    base::OnceCallback<void(const base::Optional<std::string>&)>;
+
 // Shows the dialog to choose a share target app. |targets| is a list of app
-// titles that will be shown in a list. Calls |callback| with SHARE if an app
-// was chosen, or CANCEL if the dialog was cancelled.
-// TODO(mgiuca): Callback should provide info about the picked app.
+// title and manifest URL pairs that will be shown in a list. If the user picks
+// a target, this calls |callback| with the manifest URL of the chosen target,
+// or supplies null if the user cancelled the share.
 void ShowWebShareTargetPickerDialog(
     gfx::NativeWindow parent_window,
-    const std::vector<base::string16>& targets,
-    const base::Callback<void(SharePickerResult)>& callback);
+    const std::vector<std::pair<base::string16, GURL>>& targets,
+    WebShareTargetPickerCallback callback);
 
 #if defined(OS_MACOSX)
 
@@ -184,6 +205,60 @@ class ContentSettingBubbleViewsBridge {
 #endif  // OS_MACOSX
 
 #endif  // TOOLKIT_VIEWS
+
+// Values used in the Dialog.Creation UMA metric. Each value represents a
+// different type of dialog box.
+// These values are written to logs. New enum values can be added, but existing
+// enums must never be renumbered or deleted and reused.
+enum class DialogIdentifier {
+  UNKNOWN = 0,
+  TRANSLATE = 1,
+  BOOKMARK = 2,
+  BOOKMARK_EDITOR = 3,
+  DESKTOP_MEDIA_PICKER = 4,
+  OUTDATED_UPGRADE = 5,
+  ONE_CLICK_SIGNIN = 6,
+  PROFILE_SIGNIN_CONFIRMATION = 7,
+  HUNG_RENDERER = 8,
+  SESSION_CRASHED = 9,
+  CONFIRM_BUBBLE = 10,
+  UPDATE_RECOMMENDED = 11,
+  CRYPTO_PASSWORD = 12,
+  SAFE_BROWSING_DOWNLOAD_FEEDBACK = 13,
+  FIRST_RUN = 14,
+  NETWORK_SHARE_PROFILE_WARNING = 15,
+  CONFLICTING_MODULE = 16,
+  CRITICAL_NOTIFICATION = 17,
+  IME_WARNING = 18,
+  TOOLBAR_ACTIONS_BAR = 19,
+  GLOBAL_ERROR = 20,
+  EXTENSION_INSTALL = 21,
+  EXTENSION_UNINSTALL = 22,
+  EXTENSION_INSTALLED = 23,
+  PAYMENT_REQUEST = 24,
+  SAVE_CARD = 25,
+  CARD_UNMASK = 26,
+  SIGN_IN = 27,
+  SIGN_IN_SYNC_CONFIRMATION = 28,
+  SIGN_IN_ERROR = 29,
+  SIGN_IN_EMAIL_CONFIRMATION = 30,
+  PROFILE_CHOOSER = 31,
+  MAX_VALUE
+};
+
+// Record an UMA metric counting the creation of a dialog box of this type.
+void RecordDialogCreation(DialogIdentifier identifier);
+
+#if defined(OS_WIN)
+
+// Shows the Chrome Cleanup dialog asking the user if they want to clean their
+// system from unwanted software. This is called when unwanted software has been
+// detected on the system.
+void ShowChromeCleanerPrompt(
+    Browser* browser,
+    safe_browsing::ChromeCleanerDialogController* controller);
+
+#endif  // OS_WIN
 
 }  // namespace chrome
 

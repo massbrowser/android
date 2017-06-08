@@ -14,13 +14,12 @@
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner_util.h"
-#include "base/threading/worker_pool.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
 #include "chrome/browser/chromeos/idle_detector.h"
-#include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
+#include "chrome/browser/chromeos/login/screens/core_oobe_view.h"
 #include "chrome/browser/chromeos/login/screens/network_screen.h"
 #include "chrome/browser/chromeos/login/ui/input_events_blocker.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -54,9 +53,10 @@ namespace chromeos {
 
 // NetworkScreenHandler, public: -----------------------------------------------
 
-NetworkScreenHandler::NetworkScreenHandler(CoreOobeActor* core_oobe_actor)
-    : BaseScreenHandler(kJsScreenPath), core_oobe_actor_(core_oobe_actor) {
-  DCHECK(core_oobe_actor_);
+NetworkScreenHandler::NetworkScreenHandler(CoreOobeView* core_oobe_view)
+    : BaseScreenHandler(kScreenId), core_oobe_view_(core_oobe_view) {
+  set_call_js_prefix(kJsScreenPath);
+  DCHECK(core_oobe_view_);
 }
 
 NetworkScreenHandler::~NetworkScreenHandler() {
@@ -64,7 +64,7 @@ NetworkScreenHandler::~NetworkScreenHandler() {
     screen_->OnViewDestroyed(this);
 }
 
-// NetworkScreenHandler, NetworkScreenActor implementation: --------------------
+// NetworkScreenHandler, NetworkScreenView implementation: ---------------------
 
 void NetworkScreenHandler::Show() {
   if (!page_is_ready()) {
@@ -74,13 +74,13 @@ void NetworkScreenHandler::Show() {
 
   PrefService* prefs = g_browser_process->local_state();
   if (prefs->GetBoolean(prefs::kFactoryResetRequested)) {
-    if (core_oobe_actor_)
-      core_oobe_actor_->ShowDeviceResetScreen();
+    if (core_oobe_view_)
+      core_oobe_view_->ShowDeviceResetScreen();
 
     return;
   } else if (prefs->GetBoolean(prefs::kDebuggingFeaturesRequested)) {
-    if (core_oobe_actor_)
-      core_oobe_actor_->ShowEnableDebuggingScreen();
+    if (core_oobe_view_)
+      core_oobe_view_->ShowEnableDebuggingScreen();
 
     return;
   }
@@ -96,8 +96,8 @@ void NetworkScreenHandler::Show() {
   network_screen_params.SetBoolean("isDeveloperMode",
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kSystemDevMode));
-  ShowScreenWithData(OobeScreen::SCREEN_OOBE_NETWORK, &network_screen_params);
-  core_oobe_actor_->InitDemoModeDetection();
+  ShowScreenWithData(kScreenId, &network_screen_params);
+  core_oobe_view_->InitDemoModeDetection();
 }
 
 void NetworkScreenHandler::Hide() {
@@ -119,11 +119,11 @@ void NetworkScreenHandler::ShowError(const base::string16& message) {
 
 void NetworkScreenHandler::ClearErrors() {
   if (page_is_ready())
-    core_oobe_actor_->ClearErrors();
+    core_oobe_view_->ClearErrors();
 }
 
 void NetworkScreenHandler::StopDemoModeDetection() {
-  core_oobe_actor_->StopDemoModeDetection();
+  core_oobe_view_->StopDemoModeDetection();
 }
 
 void NetworkScreenHandler::ShowConnectingStatus(
@@ -134,7 +134,7 @@ void NetworkScreenHandler::ShowConnectingStatus(
 void NetworkScreenHandler::ReloadLocalizedContent() {
   base::DictionaryValue localized_strings;
   GetOobeUI()->GetLocalizedStrings(&localized_strings);
-  core_oobe_actor_->ReloadContent(localized_strings);
+  core_oobe_view_->ReloadContent(localized_strings);
 }
 
 // NetworkScreenHandler, BaseScreenHandler implementation: --------------------
@@ -153,6 +153,7 @@ void NetworkScreenHandler::DeclareLocalizedValues(
   builder->Add("selectKeyboard", IDS_KEYBOARD_SELECTION_SELECT);
   builder->Add("selectNetwork", IDS_NETWORK_SELECTION_SELECT);
   builder->Add("selectTimezone", IDS_OPTIONS_SETTINGS_TIMEZONE_DESCRIPTION);
+  builder->Add("timezoneDropdownLabel", IDS_TIMEZONE_DROPDOWN_LABEL);
   builder->Add("proxySettings", IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON);
   builder->Add("continueButton", IDS_NETWORK_SELECTION_CONTINUE_BUTTON);
   builder->Add("debuggingFeaturesLink", IDS_NETWORK_ENABLE_DEV_FEATURES_LINK);
@@ -160,6 +161,7 @@ void NetworkScreenHandler::DeclareLocalizedValues(
   // MD-OOBE
   builder->Add("oobeOKButtonText", IDS_OOBE_OK_BUTTON_TEXT);
   builder->Add("welcomeNextButtonText", IDS_OOBE_WELCOME_NEXT_BUTTON_TEXT);
+  builder->Add("languageButtonLabel", IDS_LANGUAGE_BUTTON_LABEL);
   builder->Add("languageSectionTitle", IDS_LANGUAGE_SECTION_TITLE);
   builder->Add("accessibilitySectionTitle", IDS_ACCESSIBILITY_SECTION_TITLE);
   builder->Add("accessibilitySectionHint", IDS_ACCESSIBILITY_SECTION_HINT);
@@ -168,7 +170,9 @@ void NetworkScreenHandler::DeclareLocalizedValues(
   builder->Add("networkSectionHint", IDS_NETWORK_SECTION_HINT);
 
   builder->Add("languageDropdownTitle", IDS_LANGUAGE_DROPDOWN_TITLE);
+  builder->Add("languageDropdownLabel", IDS_LANGUAGE_DROPDOWN_LABEL);
   builder->Add("keyboardDropdownTitle", IDS_KEYBOARD_DROPDOWN_TITLE);
+  builder->Add("keyboardDropdownLabel", IDS_KEYBOARD_DROPDOWN_LABEL);
   builder->Add("proxySettingsMenuName", IDS_PROXY_SETTINGS_MENU_NAME);
   builder->Add("addWiFiNetworkMenuName", IDS_ADD_WI_FI_NETWORK_MENU_NAME);
   builder->Add("addMobileNetworkMenuName", IDS_ADD_MOBILE_NETWORK_MENU_NAME);
@@ -241,11 +245,10 @@ void NetworkScreenHandler::GetAdditionalParameters(
   const bool enable_layouts =
       !user_manager::UserManager::Get()->IsUserLoggedIn() && !is_slave;
 
-  dict->Set("languageList", language_list.release());
-  dict->Set(
-      "inputMethodsList",
-      GetAndActivateLoginKeyboardLayouts(
-          application_locale, selected_input_method, enable_layouts).release());
+  dict->Set("languageList", std::move(language_list));
+  dict->Set("inputMethodsList",
+            GetAndActivateLoginKeyboardLayouts(
+                application_locale, selected_input_method, enable_layouts));
   dict->Set("timezoneList", GetTimezoneList());
 }
 
@@ -263,7 +266,7 @@ void NetworkScreenHandler::Initialize() {
 // NetworkScreenHandler, private: ----------------------------------------------
 
 // static
-base::ListValue* NetworkScreenHandler::GetTimezoneList() {
+std::unique_ptr<base::ListValue> NetworkScreenHandler::GetTimezoneList() {
   std::string current_timezone_id;
   CrosSettings::Get()->GetString(kSystemTimezone, &current_timezone_id);
 
@@ -287,7 +290,7 @@ base::ListValue* NetworkScreenHandler::GetTimezoneList() {
     timezone_list->Append(std::move(timezone_option));
   }
 
-  return timezone_list.release();
+  return timezone_list;
 }
 
 }  // namespace chromeos

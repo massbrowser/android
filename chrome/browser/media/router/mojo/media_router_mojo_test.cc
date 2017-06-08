@@ -29,6 +29,38 @@ MockEventPageTracker::MockEventPageTracker() {}
 
 MockEventPageTracker::~MockEventPageTracker() {}
 
+MockMediaController::MockMediaController() : binding_(this) {}
+
+MockMediaController::~MockMediaController() {}
+
+void MockMediaController::Bind(mojom::MediaControllerRequest request) {
+  binding_.Bind(std::move(request));
+}
+
+mojom::MediaControllerPtr MockMediaController::BindInterfacePtr() {
+  return binding_.CreateInterfacePtrAndBind();
+}
+
+void MockMediaController::CloseBinding() {
+  binding_.Close();
+}
+
+MockMediaRouteController::MockMediaRouteController(
+    const MediaRoute::Id& route_id,
+    mojom::MediaControllerPtr mojo_media_controller,
+    MediaRouter* media_router)
+    : MediaRouteController(route_id,
+                           std::move(mojo_media_controller),
+                           media_router) {}
+
+MockMediaRouteController::~MockMediaRouteController() {}
+
+MockMediaRouteControllerObserver::MockMediaRouteControllerObserver(
+    scoped_refptr<MediaRouteController> controller)
+    : MediaRouteController::Observer(controller) {}
+
+MockMediaRouteControllerObserver::~MockMediaRouteControllerObserver() {}
+
 MediaRouterMojoTest::MediaRouterMojoTest()
     : mock_media_router_(new MediaRouterMojoImpl(&mock_event_page_tracker_)) {
   mock_media_router_->Initialize();

@@ -13,7 +13,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/scoped_observer.h"
 #include "base/sequence_checker.h"
+#include "base/sequenced_task_runner.h"
 #include "base/threading/non_thread_safe.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
@@ -154,7 +156,7 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
   // ExtensionRegistryObserver:
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override {
+                           UnloadedExtensionReason reason) override {
     data_->InitiateExtensionUnloadedCleanup(extension->id());
   }
 

@@ -11,10 +11,10 @@
 #include "net/quic/core/crypto/crypto_protocol.h"
 #include "net/quic/core/crypto/crypto_utils.h"
 #include "net/quic/core/crypto/null_encrypter.h"
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_session.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_str_cat.h"
 
@@ -143,9 +143,10 @@ void QuicCryptoClientStream::OnHandshakeMessage(
   DoHandshakeLoop(&message);
 }
 
-void QuicCryptoClientStream::CryptoConnect() {
+bool QuicCryptoClientStream::CryptoConnect() {
   next_state_ = STATE_INITIALIZE;
   DoHandshakeLoop(nullptr);
+  return session()->connection()->connected();
 }
 
 int QuicCryptoClientStream::num_sent_client_hellos() const {
@@ -322,7 +323,7 @@ void QuicCryptoClientStream::DoSendCHLO(
     out.set_minimum_size(
         static_cast<size_t>(max_packet_size - kFramingOverhead));
     next_state_ = STATE_RECV_REJ;
-    CryptoUtils::HashHandshakeMessage(out, &chlo_hash_);
+    CryptoUtils::HashHandshakeMessage(out, &chlo_hash_, Perspective::IS_CLIENT);
     SendHandshakeMessage(out);
     return;
   }
@@ -350,7 +351,7 @@ void QuicCryptoClientStream::DoSendCHLO(
     CloseConnectionWithDetails(error, error_details);
     return;
   }
-  CryptoUtils::HashHandshakeMessage(out, &chlo_hash_);
+  CryptoUtils::HashHandshakeMessage(out, &chlo_hash_, Perspective::IS_CLIENT);
   channel_id_sent_ = (channel_id_key_.get() != nullptr);
   if (cached->proof_verify_details()) {
     proof_handler_->OnProofVerifyDetailsAvailable(

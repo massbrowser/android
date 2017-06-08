@@ -38,12 +38,12 @@ const int kMaxNumberOfRetryAttempts = 2;
 }  // namespace
 
 // static
-std::shared_ptr<BluetoothLowEnergyWeaveClientConnection::Factory>
+BluetoothLowEnergyWeaveClientConnection::Factory*
     BluetoothLowEnergyWeaveClientConnection::Factory::factory_instance_ =
         nullptr;
 
 // static
-std::unique_ptr<BluetoothLowEnergyWeaveClientConnection>
+std::unique_ptr<Connection>
 BluetoothLowEnergyWeaveClientConnection::Factory::NewInstance(
     const RemoteDevice& remote_device,
     const std::string& device_address,
@@ -51,7 +51,7 @@ BluetoothLowEnergyWeaveClientConnection::Factory::NewInstance(
     const device::BluetoothUUID remote_service_uuid,
     BluetoothThrottler* bluetooth_throttler) {
   if (!factory_instance_) {
-    factory_instance_.reset(new Factory());
+    factory_instance_ = new Factory();
   }
   return factory_instance_->BuildInstance(
       remote_device,
@@ -63,11 +63,11 @@ BluetoothLowEnergyWeaveClientConnection::Factory::NewInstance(
 
 // static
 void BluetoothLowEnergyWeaveClientConnection::Factory::SetInstanceForTesting(
-    std::shared_ptr<Factory> factory) {
+    Factory* factory) {
   factory_instance_ = factory;
 }
 
-std::unique_ptr<BluetoothLowEnergyWeaveClientConnection>
+std::unique_ptr<Connection>
 BluetoothLowEnergyWeaveClientConnection::Factory::BuildInstance(
     const RemoteDevice& remote_device,
     const std::string& device_address,
@@ -508,7 +508,7 @@ void BluetoothLowEnergyWeaveClientConnection::OnRemoteCharacteristicWritten() {
       break;
     case WriteRequestType::CONNECTION_CLOSE:
       DestroyConnection();
-      break;
+      return;
     default:
       NOTREACHED();
   }
@@ -610,7 +610,7 @@ BluetoothLowEnergyWeaveClientConnection::GetRemoteService() {
   if (remote_service_.id.empty()) {
     std::vector<device::BluetoothRemoteGattService*> services =
         bluetooth_device->GetGattServices();
-    for (const auto& service : services)
+    for (auto* service : services)
       if (service->GetUUID() == remote_service_.uuid) {
         remote_service_.id = service->GetIdentifier();
         break;

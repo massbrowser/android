@@ -9,6 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/format_macros.h"
+#include "base/i18n/case_conversion.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
@@ -161,7 +162,6 @@ bool IsTemplateParameterString(const std::string& param) {
 }
 
 }  // namespace
-
 
 // TemplateURLRef::SearchTermsArgs --------------------------------------------
 
@@ -506,7 +506,9 @@ bool TemplateURLRef::ExtractSearchTermsFromURL(
           // suffix, then this is not a match.
           base::StringPiece search_term =
               base::StringPiece(source).substr(value.begin, value.len);
-          if (!search_term.starts_with(search_term_value_prefix_) ||
+          if (search_term.size() < (search_term_value_prefix_.size() +
+                                    search_term_value_suffix_.size()) ||
+              !search_term.starts_with(search_term_value_prefix_) ||
               !search_term.ends_with(search_term_value_suffix_))
             continue;
 
@@ -605,7 +607,7 @@ bool TemplateURLRef::ParseParameter(size_t start,
   } else if (parameter == "google:instantExtendedEnabledParameter") {
     replacements->push_back(Replacement(GOOGLE_INSTANT_EXTENDED_ENABLED,
                                         start));
-  } else if (parameter == "google:instantExtendedEnabledKey") {
+  } else if (parameter == google_util::kGoogleInstantExtendedEnabledKey) {
     url->insert(start, google_util::kInstantExtendedAPIParam);
   } else if (parameter == "google:iOSSearchLanguage") {
     replacements->push_back(Replacement(GOOGLE_IOS_SEARCH_LANGUAGE, start));
@@ -1139,8 +1141,12 @@ std::string TemplateURLRef::HandleReplacements(
 // TemplateURL ----------------------------------------------------------------
 
 TemplateURL::AssociatedExtensionInfo::AssociatedExtensionInfo(
-    const std::string& extension_id)
-    : extension_id(extension_id), wants_to_be_default_engine(false) {}
+    const std::string& extension_id,
+    base::Time install_time,
+    bool wants_to_be_default_engine)
+    : extension_id(extension_id),
+      install_time(install_time),
+      wants_to_be_default_engine(wants_to_be_default_engine) {}
 
 TemplateURL::AssociatedExtensionInfo::~AssociatedExtensionInfo() {
 }
@@ -1159,9 +1165,23 @@ TemplateURL::TemplateURL(const TemplateURLData& data, Type type)
   SetPrepopulateId(data_.prepopulate_id);
 
   if (data_.search_terms_replacement_key ==
-      "{google:instantExtendedEnabledKey}") {
+      google_util::kGoogleInstantExtendedEnabledKeyFull)
     data_.search_terms_replacement_key = google_util::kInstantExtendedAPIParam;
-  }
+}
+
+TemplateURL::TemplateURL(const TemplateURLData& data,
+                         Type type,
+                         std::string extension_id,
+                         base::Time install_time,
+                         bool wants_to_be_default_engine)
+    : TemplateURL(data, type) {
+  DCHECK(type == NORMAL_CONTROLLED_BY_EXTENSION ||
+         type == OMNIBOX_API_EXTENSION);
+  // Omnibox keywords may not be set as default.
+  DCHECK(!wants_to_be_default_engine || type != OMNIBOX_API_EXTENSION) << type;
+  DCHECK_EQ(kInvalidTemplateURLID, data.id);
+  extension_info_ = base::MakeUnique<AssociatedExtensionInfo>(
+      extension_id, install_time, wants_to_be_default_engine);
 }
 
 TemplateURL::~TemplateURL() {
@@ -1179,7 +1199,8 @@ base::string16 TemplateURL::GenerateKeyword(const GURL& url) {
   // Special case: if the host was exactly "www." (not sure this can happen but
   // perhaps with some weird intranet and custom DNS server?), ensure we at
   // least don't return the empty string.
-  return keyword.empty() ? base::ASCIIToUTF16("www") : keyword;
+  return keyword.empty() ? base::ASCIIToUTF16("www")
+                         : base::i18n::ToLower(keyword);
 }
 
 // static
@@ -1206,23 +1227,34 @@ bool TemplateURL::MatchesData(const TemplateURL* t_url,
     return !t_url && !data;
 
   return (t_url->short_name() == data->short_name()) &&
-      t_url->HasSameKeywordAs(*data, search_terms_data) &&
-      (t_url->url() == data->url()) &&
-      (t_url->suggestions_url() == data->suggestions_url) &&
-      (t_url->instant_url() == data->instant_url) &&
-      (t_url->image_url() == data->image_url) &&
-      (t_url->new_tab_url() == data->new_tab_url) &&
-      (t_url->search_url_post_params() == data->search_url_post_params) &&
-      (t_url->suggestions_url_post_params() ==
+         t_url->HasSameKeywordAs(*data, search_terms_data) &&
+         (t_url->url() == data->url()) &&
+         (t_url->suggestions_url() == data->suggestions_url) &&
+         (t_url->instant_url() == data->instant_url) &&
+         (t_url->image_url() == data->image_url) &&
+         (t_url->new_tab_url() == data->new_tab_url) &&
+         (t_url->search_url_post_params() == data->search_url_post_params) &&
+         (t_url->suggestions_url_post_params() ==
           data->suggestions_url_post_params) &&
-      (t_url->instant_url_post_params() == data->instant_url_post_params) &&
-      (t_url->image_url_post_params() == data->image_url_post_params) &&
-      (t_url->favicon_url() == data->favicon_url) &&
-      (t_url->safe_for_autoreplace() == data->safe_for_autoreplace) &&
-      (t_url->input_encodings() == data->input_encodings) &&
-      (t_url->alternate_urls() == data->alternate_urls) &&
-      (t_url->search_terms_replacement_key() ==
-          data->search_terms_replacement_key);
+         (t_url->instant_url_post_params() == data->instant_url_post_params) &&
+         (t_url->image_url_post_params() == data->image_url_post_params) &&
+         (t_url->favicon_url() == data->favicon_url) &&
+         (t_url->safe_for_autoreplace() == data->safe_for_autoreplace) &&
+         (t_url->input_encodings() == data->input_encodings) &&
+         (t_url->alternate_urls() == data->alternate_urls) &&
+         SearchTermsReplacementKeysMatch(t_url->search_terms_replacement_key(),
+                                         data->search_terms_replacement_key);
+}
+
+// Special case for search_terms_replacement_key comparison, because of
+// its special initialization in TemplateUrl constructor.
+bool TemplateURL::SearchTermsReplacementKeysMatch(const std::string& key1,
+                                                  const std::string& key2) {
+  const auto IsInstantExtended = [](const std::string& key) {
+    return (key == google_util::kInstantExtendedAPIParam) ||
+           (key == google_util::kGoogleInstantExtendedEnabledKeyFull);
+  };
+  return (key1 == key2) || (IsInstantExtended(key1) && IsInstantExtended(key2));
 }
 
 base::string16 TemplateURL::AdjustedShortNameForLocaleDirection() const {
@@ -1318,7 +1350,7 @@ bool TemplateURL::ReplaceSearchTermsInURL(
     const GURL& url,
     const TemplateURLRef::SearchTermsArgs& search_terms_args,
     const SearchTermsData& search_terms_data,
-    GURL* result) {
+    GURL* result) const {
   // TODO(beaudoin): Use AQS from |search_terms_args| too.
   url::Parsed::ComponentType search_term_component;
   url::Component search_terms_position;

@@ -115,7 +115,7 @@ void ReportInvalidReferrerSend(const GURL& target_url,
   if (!target_url.SchemeIsHTTPOrHTTPS())
     return;
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(&ReportInvalidReferrerSendOnUI));
+                          base::BindOnce(&ReportInvalidReferrerSendOnUI));
   base::debug::DumpWithoutCrashing();
   NOTREACHED();
 }
@@ -223,72 +223,74 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
     const net::CompletionCallback& callback,
     GURL* new_url) {
     std::string url_spec = request->url().spec();
+    std::string first_party_for_cookies_host =  request->first_party_for_cookies().host();
+
 
     bool isGlobalBlockEnabled = true;
       net::blockers::ShieldsConfig* shieldsConfig =
         net::blockers::ShieldsConfig::getShieldsConfig();
       if (request && nullptr != shieldsConfig) {
-          std::string hostConfig = shieldsConfig->getHostSettings(request->first_party_for_cookies().host());
+          std::string hostConfig = shieldsConfig->getHostSettings(first_party_for_cookies_host);
           if ("0" == hostConfig) {
               isGlobalBlockEnabled = false;
           }
       }
-      bool isTPEnabled = true;
-    	bool block = false;
-      if (enable_tracking_protection_) {
-        isTPEnabled = enable_tracking_protection_->GetValue();
-      }
-    	if (request
-          && isGlobalBlockEnabled
-          && isTPEnabled
-    			&& blockers_worker_.shouldTPBlockUrl(
-    					request->first_party_for_cookies().host(),
-    					request->url().host())
-    				) {
-    		block = true;
-    	}
-    bool isAdBlockEnabled = true;
-    if (enable_ad_block_) {
-        isAdBlockEnabled = enable_ad_block_->GetValue();
-    }
     const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
-    if (!block
-        && isGlobalBlockEnabled
-        && isAdBlockEnabled
-        && request
-        && info
-    	&& blockers_worker_.shouldAdBlockUrl(
-    					request->first_party_for_cookies().host(),
-    					url_spec,
-    					(unsigned int)info->GetResourceType())) {
-    		block = true;
+
+    if(info && info->GetResourceType() == 0) {
+        main_frame_url_ = url_spec;
     }
 
-    bool check_httpse_redirect = true;
-    if (block && info && content::RESOURCE_TYPE_IMAGE == info->GetResourceType()) {
-        check_httpse_redirect = false;
-        *new_url = GURL(TRANSPARENT1PXPNG);
-    }
+    if(request && isGlobalBlockEnabled)
+//        && !blockers_worker_.isInWhiteList(first_party_for_cookies_host, url_spec, main_frame_url_)
+    {
 
-      // HTTPSE work
-    if (isGlobalBlockEnabled
-          && check_httpse_redirect
-          && enable_httpse_
-          && enable_httpse_->GetValue()) {
-        std::string newURL = blockers_worker_.getHTTPSURL(&request->url());
-        if (newURL != url_spec) {
-          *new_url = GURL(newURL);
+        bool isTPEnabled = true;
+        bool block = false;
+        if (enable_tracking_protection_) {
+            isTPEnabled = enable_tracking_protection_->GetValue();
         }
-    }
-
-
-    if (block && (nullptr == info || content::RESOURCE_TYPE_IMAGE != info->GetResourceType())) {
-        if(request && shieldsConfig){
-            shieldsConfig->setBlockedInfo(url_spec);
+        if (isTPEnabled
+            && blockers_worker_.shouldTPBlockUrl(first_party_for_cookies_host, request->url().host()))
+        {
+            block = true;
         }
-        *new_url = GURL("");
+        bool isAdBlockEnabled = true;
+        if (enable_ad_block_) {
+            isAdBlockEnabled = enable_ad_block_->GetValue();
+        }
 
-        return net::ERR_BLOCKED_BY_ADMINISTRATOR;
+        if (!block
+            && isAdBlockEnabled
+            && info
+            && blockers_worker_.shouldAdBlockUrl(first_party_for_cookies_host, url_spec
+                            ,(unsigned int)info->GetResourceType()))
+        {
+                block = true;
+        }
+
+        if (block && info && content::RESOURCE_TYPE_IMAGE == info->GetResourceType()) {
+            if(shieldsConfig){
+                shieldsConfig->setBlockedInfo(url_spec);
+            }
+            *new_url = GURL(TRANSPARENT1PXGIF);
+        }
+
+        if (block && (nullptr == info || content::RESOURCE_TYPE_IMAGE != info->GetResourceType())) {
+            if(shieldsConfig){
+                shieldsConfig->setBlockedInfo(url_spec);
+            }
+            *new_url = GURL("");
+
+            return net::ERR_BLOCKED_BY_ADMINISTRATOR;
+        }
+//           HTTPSE work
+        if (enable_httpse_ && enable_httpse_->GetValue()) {
+            std::string newURL = blockers_worker_.getHTTPSURL(&request->url());
+            if (newURL != url_spec) {
+              *new_url = GURL(newURL);
+            }
+        }
     }
 
 
@@ -420,6 +422,7 @@ void ChromeNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
 
 void ChromeNetworkDelegate::OnResponseStarted(net::URLRequest* request,
                                               int net_error) {
+//  LOG(ERROR) << "OnResponseStarted";
   extensions_delegate_->OnResponseStarted(request, net_error);
 }
 
@@ -495,10 +498,9 @@ bool ChromeNetworkDelegate::OnCanGetCookies(
   if (info) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&TabSpecificContentSettings::CookiesRead,
-                   info->GetWebContentsGetterForRequest(),
-                   request.url(), request.first_party_for_cookies(),
-                   cookie_list, !allow));
+        base::BindOnce(&TabSpecificContentSettings::CookiesRead,
+                       info->GetWebContentsGetterForRequest(), request.url(),
+                       request.first_party_for_cookies(), cookie_list, !allow));
   }
 
   return allow;
@@ -518,10 +520,10 @@ bool ChromeNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
   if (info) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&TabSpecificContentSettings::CookieChanged,
-                   info->GetWebContentsGetterForRequest(),
-                   request.url(), request.first_party_for_cookies(),
-                   cookie_line, *options, !allow));
+        base::BindOnce(&TabSpecificContentSettings::CookieChanged,
+                       info->GetWebContentsGetterForRequest(), request.url(),
+                       request.first_party_for_cookies(), cookie_line, *options,
+                       !allow));
   }
 
   return allow;

@@ -22,7 +22,6 @@
 #include "components/metrics/metrics_service.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
-#include "components/variations/variations_associated_data.h"
 
 namespace metrics {
 
@@ -141,8 +140,10 @@ void FileMetricsProvider::RegisterSource(const base::FilePath& path,
   source->prefs_key = prefs_key.as_string();
 
   switch (source->type) {
-    case SOURCE_HISTOGRAMS_ATOMIC_FILE:
     case SOURCE_HISTOGRAMS_ACTIVE_FILE:
+      DCHECK(prefs_key.empty());
+    // fall through
+    case SOURCE_HISTOGRAMS_ATOMIC_FILE:
       source->path = path;
       break;
     case SOURCE_HISTOGRAMS_ATOMIC_DIR:
@@ -335,10 +336,18 @@ FileMetricsProvider::AccessResult FileMetricsProvider::CheckAndMapMetricSource(
     return ACCESS_RESULT_INVALID_CONTENTS;
   }
 
-  // Create an allocator for the mapped file. Ownership passes to the allocator.
-  source->allocator.reset(new base::PersistentHistogramAllocator(
+  // Map the file and validate it.
+  std::unique_ptr<base::PersistentMemoryAllocator> memory_allocator =
       base::MakeUnique<base::FilePersistentMemoryAllocator>(
-          std::move(mapped), 0, 0, base::StringPiece(), read_only)));
+          std::move(mapped), 0, 0, base::StringPiece(), read_only);
+  if (memory_allocator->GetMemoryState() ==
+      base::PersistentMemoryAllocator::MEMORY_DELETED) {
+    return ACCESS_RESULT_MEMORY_DELETED;
+  }
+
+  // Create an allocator for the mapped file. Ownership passes to the allocator.
+  source->allocator = base::MakeUnique<base::PersistentHistogramAllocator>(
+      std::move(memory_allocator));
 
   return ACCESS_RESULT_SUCCESS;
 }
@@ -480,12 +489,6 @@ void FileMetricsProvider::OnDidCreateMetricsLog() {
 
 bool FileMetricsProvider::HasInitialStabilityMetrics() {
   DCHECK(thread_checker_.CalledOnValidThread());
-
-  // Check if there is an experiment that disables stability metrics.
-  std::string unreported = variations::GetVariationParamValueByFeature(
-      base::kPersistentHistogramsFeature, "send_unreported_metrics");
-  if (unreported == "no")
-    sources_for_previous_run_.clear();
 
   // Measure the total time spent checking all sources as well as the time
   // per individual file. This method is called during startup and thus blocks

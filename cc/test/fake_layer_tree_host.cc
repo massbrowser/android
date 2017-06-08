@@ -35,7 +35,6 @@ std::unique_ptr<FakeLayerTreeHost> FakeLayerTreeHost::Create(
     TestTaskGraphRunner* task_graph_runner,
     MutatorHost* mutator_host) {
   LayerTreeSettings settings;
-  settings.verify_clip_tree_calculations = true;
   return Create(client, task_graph_runner, mutator_host, settings);
 }
 
@@ -87,7 +86,6 @@ LayerImpl* FakeLayerTreeHost::CommitAndCreateLayerImplTree() {
                                       : Layer::INVALID_ID);
   }
 
-  active_tree()->UpdatePropertyTreesForBoundsDelta();
   return active_tree()->root_layer_for_testing();
 }
 

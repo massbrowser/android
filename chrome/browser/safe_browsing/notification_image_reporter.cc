@@ -18,12 +18,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "components/safe_browsing_db/database_manager.h"
 #include "components/safe_browsing_db/safe_browsing_prefs.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_status_code.h"
 #include "net/url_request/report_sender.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -45,7 +46,7 @@ const char kDefaultMimeType[] = "image/png";
 
 // Passed to ReportSender::Send as an ErrorCallback, so must take a GURL, but it
 // is unused.
-void LogReportResult(const GURL& url, int net_error) {
+void LogReportResult(const GURL& url, int net_error, int http_response_code) {
   UMA_HISTOGRAM_SPARSE_SLOWLY("SafeBrowsing.NotificationImageReporter.NetError",
                               net_error);
 }
@@ -58,9 +59,8 @@ const char NotificationImageReporter::kReportingUploadUrl[] =
 
 NotificationImageReporter::NotificationImageReporter(
     net::URLRequestContext* request_context)
-    : NotificationImageReporter(base::MakeUnique<net::ReportSender>(
-          request_context,
-          net::ReportSender::CookiesPreference::DO_NOT_SEND_COOKIES)) {}
+    : NotificationImageReporter(
+          base::MakeUnique<net::ReportSender>(request_context)) {}
 
 NotificationImageReporter::NotificationImageReporter(
     std::unique_ptr<net::ReportSender> report_sender)
@@ -113,8 +113,8 @@ void NotificationImageReporter::ReportNotificationImageOnIO(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&NotificationImageReporter::ReportNotificationImageOnUI,
-                 weak_factory_on_io_.GetWeakPtr(), profile, origin, image));
+      base::BindOnce(&NotificationImageReporter::ReportNotificationImageOnUI,
+                     weak_factory_on_io_.GetWeakPtr(), profile, origin, image));
 }
 
 double NotificationImageReporter::GetReportChance() const {
@@ -146,14 +146,14 @@ void NotificationImageReporter::ReportNotificationImageOnUI(
   if (GetExtendedReportingLevel(*profile->GetPrefs()) != SBER_LEVEL_SCOUT) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&NotificationImageReporter::SkippedReporting,
-                   weak_this_on_io));
+        base::BindOnce(&NotificationImageReporter::SkippedReporting,
+                       weak_this_on_io));
     return;
   }
 
   BrowserThread::GetBlockingPool()->PostWorkerTask(
       FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &NotificationImageReporter::DownscaleNotificationImageOnBlockingPool,
           weak_this_on_io, origin, image));
 }
@@ -187,10 +187,11 @@ void NotificationImageReporter::DownscaleNotificationImageOnBlockingPool(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&NotificationImageReporter::SendReportOnIO, weak_this_on_io,
-                 origin, base::RefCountedBytes::TakeVector(&png_bytes),
-                 gfx::Size(downscaled_image.width(), downscaled_image.height()),
-                 gfx::Size(image.width(), image.height())));
+      base::BindOnce(
+          &NotificationImageReporter::SendReportOnIO, weak_this_on_io, origin,
+          base::RefCountedBytes::TakeVector(&png_bytes),
+          gfx::Size(downscaled_image.width(), downscaled_image.height()),
+          gfx::Size(image.width(), image.height())));
 }
 
 void NotificationImageReporter::SendReportOnIO(
@@ -215,10 +216,11 @@ void NotificationImageReporter::SendReportOnIO(
 
   std::string serialized_report;
   report.SerializeToString(&serialized_report);
-  report_sender_->Send(
-      GURL(kReportingUploadUrl), "application/octet-stream", serialized_report,
-      base::Bind(&LogReportResult, GURL(kReportingUploadUrl), net::OK),
-      base::Bind(&LogReportResult));
+  report_sender_->Send(GURL(kReportingUploadUrl), "application/octet-stream",
+                       serialized_report,
+                       base::Bind(&LogReportResult, GURL(kReportingUploadUrl),
+                                  net::OK, net::HTTP_OK),
+                       base::Bind(&LogReportResult));
   // TODO(johnme): Consider logging bandwidth and/or duration to UMA.
 }
 

@@ -19,19 +19,19 @@ public class ADBlockUtils {
 
     public static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "cd ad_data";
 
-    public static final String TRACKING_PROTECTION_URL = "https://mass.network/android-browser-data/TrackingProtection.dat";
+    public static final String TRACKING_PROTECTION_URL = "http://apimass.com/api/v1/TrackingProtection.dat";
 //    public static final String TRACKING_PROTECTION_URL = "https://s3.amazonaws.com/tracking-protection-data/1/TrackingProtection.dat";
     public static final String TRACKING_PROTECTION_LOCALFILENAME = "TrackingProtection.dat";
     public static final String TRACKING_PROTECTION_LOCALFILENAME_DOWNLOADED = "TrackingProtectionDownloaded.dat";
     public static final String ETAG_PREPEND_TP = "tp";
 
-    public static final String ADBLOCK_URL = "https://mass.network/android-browser-data/ABPFilterParserData.dat";
+    public static final String ADBLOCK_URL = "http://apimass.com/api/v1/ABPFilterParserData.dat";
 //    public static final String ADBLOCK_URL = "https://s3.amazonaws.com/adblock-data/1/ABPFilterParserData.dat";
     public static final String ADBLOCK_LOCALFILENAME = "ABPFilterParserData.dat";
     public static final String ADBLOCK_LOCALFILENAME_DOWNLOADED = "ABPFilterParserDataDownloaded.dat";
     public static final String ETAG_PREPEND_ADBLOCK = "abp";
 
-    public static final String HTTPS_URL = "https://mass.network/android-browser-data/httpse.sqlite";
+    public static final String HTTPS_URL = "http://apimass.com/api/v1/httpse.sqlite";
 //    public static final String HTTPS_URL = "https://s3.amazonaws.com/https-everywhere-data/5.1.9/httpse.sqlite";
     public static final String HTTPS_LOCALFILENAME = "httpse.sqlite";
     public static final String HTTPS_LOCALFILENAME_DOWNLOADED = "httpseDownloaded.sqlite";

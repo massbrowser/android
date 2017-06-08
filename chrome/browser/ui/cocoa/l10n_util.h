@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CHROME_BROWSER_UI_COCOA_L10N_UTIL_H_
+#define CHROME_BROWSER_UI_COCOA_L10N_UTIL_H_
+
 #import <Cocoa/Cocoa.h>
 #include <stddef.h>
 
@@ -49,4 +52,17 @@ bool ShouldDoExperimentalRTLLayout();
 // OSes would make Chrome stick out.
 bool ShouldFlipWindowControlsInRTL();
 
+// Returns NSImageLeading when available (10.12+), otherwise
+// NSImageLeft for LTR and NSImageRight in RTL.
+NSCellImagePosition LeadingCellImagePosition();
+// Returns NSImageTrailing when available (10.12+), otherwise
+// NSImageRight for LTR and NSImageLeft in RTL.
+NSCellImagePosition TrailingCellImagePosition();
+
+// Returns an autoreleased image containing |image| flipped
+// across the x axis.
+NSImage* FlippedImage(NSImage* image);
+
 }  // namespace cocoa_l10n_util
+
+#endif  // CHROME_BROWSER_UI_COCOA_L10N_UTIL_H_

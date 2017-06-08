@@ -4,10 +4,9 @@
 
 #include "net/tools/transport_security_state_generator/preloaded_state_generator.h"
 
-#include <iostream>
-
 #include <string>
 
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "net/tools/transport_security_state_generator/cert_util.h"
@@ -101,7 +100,7 @@ std::string WritePinsetList(const std::string& name,
 
   output.append(kIndent);
   output.append(kIndent);
-  output.append("NULL,");
+  output.append("nullptr,");
   output.append(kNewLine);
   output.append("};");
 
@@ -132,13 +131,8 @@ PreloadedStateGenerator::~PreloadedStateGenerator() {}
 std::string PreloadedStateGenerator::Generate(
     const std::string& preload_template,
     const TransportSecurityStateEntries& entries,
-    const DomainIDList& domain_ids,
-    const Pinsets& pinsets,
-    bool verbose) {
+    const Pinsets& pinsets) {
   std::string output = preload_template;
-
-  NameIDMap domain_ids_map;
-  ProcessDomainIds(domain_ids, &domain_ids_map, &output);
 
   ProcessSPKIHashes(pinsets, &output);
 
@@ -158,63 +152,33 @@ std::string PreloadedStateGenerator::Generate(
   // second run.
   HuffmanRepresentationTable table = ApproximateHuffman(entries);
   HuffmanBuilder huffman_builder;
-  TrieWriter writer(table, domain_ids_map, expect_ct_report_uri_map,
+  TrieWriter writer(table, expect_ct_report_uri_map,
                     expect_staple_report_uri_map, pinsets_map,
                     &huffman_builder);
-  writer.WriteEntries(entries);
-  uint32_t initial_length = writer.position();
+  uint32_t root_position;
+  if (!writer.WriteEntries(entries, &root_position)) {
+    return std::string();
+  }
 
   HuffmanRepresentationTable optimal_table = huffman_builder.ToTable();
-  TrieWriter new_writer(optimal_table, domain_ids_map, expect_ct_report_uri_map,
+  TrieWriter new_writer(optimal_table, expect_ct_report_uri_map,
                         expect_staple_report_uri_map, pinsets_map, nullptr);
 
-  uint32_t root_position = new_writer.WriteEntries(entries);
+  if (!new_writer.WriteEntries(entries, &root_position)) {
+    return std::string();
+  }
+
   uint32_t new_length = new_writer.position();
-
   std::vector<uint8_t> huffman_tree = huffman_builder.ToVector();
-
   new_writer.Flush();
 
   ReplaceTag("HUFFMAN_TREE", FormatVectorAsArray(huffman_tree), &output);
   ReplaceTag("HSTS_TRIE", FormatVectorAsArray(new_writer.bytes()), &output);
 
-  ReplaceTag("HSTS_TRIE_BITS", std::to_string(new_length), &output);
-  ReplaceTag("HSTS_TRIE_ROOT", std::to_string(root_position), &output);
-
-  if (verbose) {
-    std::cout << "Saved " << std::to_string(initial_length - new_length)
-              << " bits by using accurate Huffman counts." << std::endl;
-    std::cout << "Bit length " << std::to_string(new_length) << std::endl;
-    std::cout << "Root position " << std::to_string(root_position) << std::endl;
-  }
+  ReplaceTag("HSTS_TRIE_BITS", base::SizeTToString(new_length), &output);
+  ReplaceTag("HSTS_TRIE_ROOT", base::SizeTToString(root_position), &output);
 
   return output;
-}
-
-void PreloadedStateGenerator::ProcessDomainIds(const DomainIDList& domain_ids,
-                                               NameIDMap* map,
-                                               std::string* tpl) {
-  std::string output = "{";
-  output.append(kNewLine);
-
-  for (size_t i = 0; i < domain_ids.size(); ++i) {
-    const std::string& current = domain_ids.at(i);
-    output.append(kIndent);
-    output.append("DOMAIN_" + current + ",");
-    output.append(kNewLine);
-
-    map->insert(NameIDPair(current, static_cast<uint32_t>(i)));
-  }
-
-  output.append(kIndent);
-  output.append("// Boundary value for UMA_HISTOGRAM_ENUMERATION.");
-  output.append(kNewLine);
-  output.append(kIndent);
-  output.append("DOMAIN_NUM_EVENTS,");
-  output.append(kNewLine);
-  output.append("}");
-
-  ReplaceTag("DOMAIN_IDS", output, tpl);
 }
 
 void PreloadedStateGenerator::ProcessSPKIHashes(const Pinsets& pinset,
@@ -275,6 +239,11 @@ void PreloadedStateGenerator::ProcessExpectCTURIs(
     }
   }
 
+  output.append(kIndent);
+  output.append(kIndent);
+  output.append("nullptr,");
+  output.append(kNewLine);
+
   output.append("}");
   ReplaceTag("EXPECT_CT_REPORT_URIS", output, tpl);
 }
@@ -301,6 +270,11 @@ void PreloadedStateGenerator::ProcessExpectStapleURIs(
           static_cast<uint32_t>(expect_staple_report_uri_map->size())));
     }
   }
+
+  output.append(kIndent);
+  output.append(kIndent);
+  output.append("nullptr,");
+  output.append(kNewLine);
 
   output.append("}");
   ReplaceTag("EXPECT_STAPLE_REPORT_URIS", output, tpl);

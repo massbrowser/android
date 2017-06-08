@@ -14,6 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/password_manager/native_backend_libsecret.h"
@@ -273,7 +274,9 @@ class NativeBackendLibsecretTest : public testing::Test {
     SYNCED,
   };
 
-  NativeBackendLibsecretTest() {}
+  NativeBackendLibsecretTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
 
   void SetUp() override {
     ASSERT_FALSE(global_mock_libsecret_items);
@@ -598,7 +601,7 @@ class NativeBackendLibsecretTest : public testing::Test {
     EXPECT_TRUE(global_mock_libsecret_items->empty());
   }
 
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   // Provide some test forms to avoid having to set them up in each test.
   PasswordForm form_google_;
@@ -695,14 +698,25 @@ TEST_F(NativeBackendLibsecretTest, PSLUpdatingStrictAddLogin) {
 
 TEST_F(NativeBackendLibsecretTest, FetchFederatedCredentialOnHTTPS) {
   other_auth_.signon_realm = "federation://www.example.com/google.com";
+  other_auth_.origin = GURL("https://www.example.com/");
   other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
   EXPECT_TRUE(CheckCredentialAvailability(other_auth_,
                                           GURL("https://www.example.com/"),
                                           PasswordForm::SCHEME_HTML, nullptr));
 }
 
+TEST_F(NativeBackendLibsecretTest, FetchFederatedCredentialOnLocalhost) {
+  other_auth_.signon_realm = "federation://localhost/google.com";
+  other_auth_.origin = GURL("http://localhost:8080/");
+  other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
+  EXPECT_TRUE(CheckCredentialAvailability(other_auth_,
+                                          GURL("http://localhost:8080/"),
+                                          PasswordForm::SCHEME_HTML, nullptr));
+}
+
 TEST_F(NativeBackendLibsecretTest, DontFetchFederatedCredentialOnHTTP) {
   other_auth_.signon_realm = "federation://www.example.com/google.com";
+  other_auth_.origin = GURL("https://www.example.com/");
   other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
   EXPECT_FALSE(CheckCredentialAvailability(other_auth_,
                                            GURL("http://www.example.com/"),
@@ -711,6 +725,7 @@ TEST_F(NativeBackendLibsecretTest, DontFetchFederatedCredentialOnHTTP) {
 
 TEST_F(NativeBackendLibsecretTest, FetchPSLMatchedFederatedCredentialOnHTTPS) {
   other_auth_.signon_realm = "federation://www.sub.example.com/google.com";
+  other_auth_.origin = GURL("https://www.sub.example.com/");
   other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
   EXPECT_TRUE(CheckCredentialAvailability(other_auth_,
                                           GURL("https://www.example.com/"),
@@ -720,6 +735,7 @@ TEST_F(NativeBackendLibsecretTest, FetchPSLMatchedFederatedCredentialOnHTTPS) {
 TEST_F(NativeBackendLibsecretTest,
        DontFetchPSLMatchedFederatedCredentialOnHTTP) {
   other_auth_.signon_realm = "federation://www.sub.example.com/google.com";
+  other_auth_.origin = GURL("https://www.sub.example.com/");
   other_auth_.federation_origin = url::Origin(GURL("https://google.com/"));
   EXPECT_FALSE(CheckCredentialAvailability(other_auth_,
                                            GURL("http://www.example.com/"),

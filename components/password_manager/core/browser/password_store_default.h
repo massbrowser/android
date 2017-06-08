@@ -13,6 +13,8 @@
 #include "components/password_manager/core/browser/login_database.h"
 #include "components/password_manager/core/browser/password_store.h"
 
+class PrefService;
+
 namespace password_manager {
 
 // Simple password store implementation that delegates everything to
@@ -26,7 +28,8 @@ class PasswordStoreDefault : public PasswordStore {
       scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner,
       std::unique_ptr<LoginDatabase> login_db);
 
-  bool Init(const syncer::SyncableService::StartSyncFlare& flare) override;
+  bool Init(const syncer::SyncableService::StartSyncFlare& flare,
+            PrefService* prefs) override;
 
   void ShutdownOnUIThread() override;
 
@@ -72,6 +75,7 @@ class PasswordStoreDefault : public PasswordStore {
       std::vector<std::unique_ptr<autofill::PasswordForm>>* forms) override;
   void AddSiteStatsImpl(const InteractionsStats& stats) override;
   void RemoveSiteStatsImpl(const GURL& origin_domain) override;
+  std::vector<InteractionsStats> GetAllSiteStatsImpl() override;
   std::vector<InteractionsStats> GetSiteStatsImpl(
       const GURL& origin_domain) override;
 

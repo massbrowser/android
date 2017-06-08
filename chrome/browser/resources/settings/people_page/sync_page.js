@@ -35,13 +35,6 @@ var SyncPrefsIndividualDataTypes = [
 /**
  * @fileoverview
  * 'settings-sync-page' is the settings page containing sync settings.
- *
- * Example:
- *
- *    <iron-animated-pages>
- *      <settings-sync-page></settings-sync-page>
- *      ... other pages ...
- *    </iron-animated-pages>
  */
 Polymer({
   is: 'settings-sync-page',
@@ -53,7 +46,7 @@ Polymer({
 
   properties: {
     /** @private */
-    pages: {
+    pages_: {
       type: Object,
       value: settings.PageStatus,
       readOnly: true,
@@ -75,15 +68,6 @@ Polymer({
      * @type {settings.SyncPrefs|undefined}
      */
     syncPrefs: {
-      type: Object,
-    },
-
-    /**
-     * Caches the individually selected synced data types. This is used to
-     * be able to restore the selections after checking and unchecking Sync All.
-     * @private
-     */
-    cachedSyncPrefs_: {
       type: Object,
     },
 
@@ -124,25 +108,29 @@ Polymer({
       type: String,
       value: '',
     },
+  },
 
-    /** @private {!settings.SyncBrowserProxy} */
-    browserProxy_: {
-      type: Object,
-      value: function() {
-        return settings.SyncBrowserProxyImpl.getInstance();
-      },
-    },
+  /** @private {?settings.SyncBrowserProxy} */
+  browserProxy_: null,
 
-    /**
-     * The unload callback is needed because the sign-in flow needs to know
-     * if the user has closed the tab with the sync settings. This property is
-     * non-null if the user is currently navigated on the sync settings route.
-     * @private {Function}
-     */
-    unloadCallback_: {
-      type: Object,
-      value: null,
-    },
+  /**
+   * The unload callback is needed because the sign-in flow needs to know
+   * if the user has closed the tab with the sync settings. This property is
+   * non-null if the user is currently navigated on the sync settings route.
+   * @private {?Function}
+   */
+  unloadCallback_: null,
+
+  /**
+   * Caches the individually selected synced data types. This is used to
+   * be able to restore the selections after checking and unchecking Sync All.
+   * @private {?Object}
+   */
+  cachedSyncPrefs_: null,
+
+  /** @override */
+  created: function() {
+    this.browserProxy_ = settings.SyncBrowserProxyImpl.getInstance();
   },
 
   /** @override */
@@ -225,6 +213,16 @@ Polymer({
     // Hide the new passphrase box if the sync data has been encrypted.
     if (this.syncPrefs.encryptAllData)
       this.creatingNewPassphrase_ = false;
+
+    // Focus the password input box if password is needed to start sync.
+    if (this.syncPrefs.passphraseRequired) {
+      // Async to allow the dom-if templates to render first.
+      this.async(function() {
+        var input = /** @type {!PaperInputElement} */ (
+            this.$$('#existingPassphraseInput'));
+        input.inputElement.focus();
+      }.bind(this));
+    }
   },
 
   /**
@@ -267,8 +265,8 @@ Polymer({
   },
 
   /** @private */
-  onManageSyncedDataTap_: function() {
-    window.open(loadTimeData.getString('syncDashboardUrl'));
+  onActivityControlsTap_: function() {
+    this.browserProxy_.openActivityControlsUrl();
   },
 
   /**
@@ -345,7 +343,7 @@ Polymer({
           settings.navigateTo(settings.Route.PEOPLE);
         return;
       case settings.PageStatus.PASSPHRASE_FAILED:
-        if (this.pageStatus_ == this.pages.CONFIGURE &&
+        if (this.pageStatus_ == this.pages_.CONFIGURE &&
             this.syncPrefs && this.syncPrefs.passphraseRequired) {
           this.$$('#existingPassphraseInput').invalid = true;
         }

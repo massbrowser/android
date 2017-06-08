@@ -17,8 +17,9 @@ import java.net.URL;
  * Created by elvis on 06.01.17.
  */
 public class GetCurrencyTask extends AsyncTask<Void, Void, Void> {
+    public static final String HOST = "http://apimass.com/";
 
-    public static final String URL_CURRENCY = "http://adverttool.ru/currency";
+    public static final String URL_CURRENCY = HOST + "currency";
 
     @Override
     protected Void doInBackground(Void... voids) {

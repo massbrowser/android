@@ -45,8 +45,8 @@ class SignInObserver : public content::WebContentsObserver {
 
     if (cloud_devices::IsCloudPrintURL(navigation_handle->GetURL())) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&SignInObserver::OnSignIn,
-                                weak_ptr_factory_.GetWeakPtr()));
+          FROM_HERE, base::BindOnce(&SignInObserver::OnSignIn,
+                                    weak_ptr_factory_.GetWeakPtr()));
     }
   }
 
@@ -77,7 +77,7 @@ void CreateCloudPrintSigninTab(Browser* browser,
         add_account ? BrowserWindow::AVATAR_BUBBLE_MODE_ADD_ACCOUNT
                     : BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN,
         signin::ManageAccountsParams(),
-        signin_metrics::AccessPoint::ACCESS_POINT_CLOUD_PRINT);
+        signin_metrics::AccessPoint::ACCESS_POINT_CLOUD_PRINT, false);
   } else {
     GURL url = add_account ? cloud_devices::GetCloudPrintAddAccountURL()
                            : cloud_devices::GetCloudPrintSigninURL();

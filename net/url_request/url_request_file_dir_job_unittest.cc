@@ -12,12 +12,14 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/test/scoped_task_scheduler.h"
 #include "net/base/filename_util.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/test/gtest_util.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -41,8 +43,8 @@ class TestJobFactory : public URLRequestJobFactory {
       const std::string& scheme,
       URLRequest* request,
       NetworkDelegate* network_delegate) const override {
-    URLRequestJob* job = new URLRequestFileDirJob(
-        request, network_delegate, path_, base::ThreadTaskRunnerHandle::Get());
+    URLRequestJob* job =
+        new URLRequestFileDirJob(request, network_delegate, path_);
 
     return job;
   }
@@ -61,10 +63,6 @@ class TestJobFactory : public URLRequestJobFactory {
 
   bool IsHandledProtocol(const std::string& scheme) const override {
     return scheme == "file";
-  }
-
-  bool IsHandledURL(const GURL& url) const override {
-    return IsHandledProtocol(url.scheme());
   }
 
   bool IsSafeRedirectTarget(const GURL& location) const override {
@@ -97,9 +95,12 @@ class TestDirectoryURLRequestDelegate : public TestDelegate {
 
 class URLRequestFileDirTest : public testing::Test {
  public:
-  URLRequestFileDirTest() : buffer_(new IOBuffer(kBufferSize)) {}
+  URLRequestFileDirTest()
+      : scoped_task_scheduler_(base::MessageLoop::current()),
+        buffer_(new IOBuffer(kBufferSize)) {}
 
  protected:
+  base::test::ScopedTaskScheduler scoped_task_scheduler_;
   TestURLRequestContext context_;
   TestDirectoryURLRequestDelegate delegate_;
   scoped_refptr<IOBuffer> buffer_;
@@ -115,7 +116,7 @@ TEST_F(URLRequestFileDirTest, ListCompletionOnNoPending) {
   std::unique_ptr<URLRequest> request(context_.CreateRequest(
       FilePathToFileURL(
           directory.GetPath().AppendASCII("this_path_does_not_exist")),
-      DEFAULT_PRIORITY, &delegate_));
+      DEFAULT_PRIORITY, &delegate_, TRAFFIC_ANNOTATION_FOR_TESTS));
 
   request->Start();
   ASSERT_TRUE(directory.Delete());
@@ -144,8 +145,9 @@ TEST_F(URLRequestFileDirTest, DirectoryWithASingleFileSync) {
   TestJobFactory factory(directory.GetPath());
   context_.set_job_factory(&factory);
 
-  std::unique_ptr<URLRequest> request(context_.CreateRequest(
-      FilePathToFileURL(path), DEFAULT_PRIORITY, &delegate_));
+  std::unique_ptr<URLRequest> request(
+      context_.CreateRequest(FilePathToFileURL(path), DEFAULT_PRIORITY,
+                             &delegate_, TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
   EXPECT_TRUE(request->is_pending());
 
@@ -177,8 +179,9 @@ TEST_F(URLRequestFileDirTest, DirectoryWithASingleFileAsync) {
   context_.set_job_factory(&factory);
 
   TestDelegate delegate;
-  std::unique_ptr<URLRequest> request(context_.CreateRequest(
-      FilePathToFileURL(path), DEFAULT_PRIORITY, &delegate));
+  std::unique_ptr<URLRequest> request(
+      context_.CreateRequest(FilePathToFileURL(path), DEFAULT_PRIORITY,
+                             &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
   EXPECT_TRUE(request->is_pending());
 
@@ -209,8 +212,9 @@ TEST_F(URLRequestFileDirTest, DirectoryWithAFileAndSubdirectory) {
   context_.set_job_factory(&factory);
 
   TestDelegate delegate;
-  std::unique_ptr<URLRequest> request(context_.CreateRequest(
-      FilePathToFileURL(path), DEFAULT_PRIORITY, &delegate));
+  std::unique_ptr<URLRequest> request(
+      context_.CreateRequest(FilePathToFileURL(path), DEFAULT_PRIORITY,
+                             &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
   EXPECT_TRUE(request->is_pending());
 
@@ -236,7 +240,8 @@ TEST_F(URLRequestFileDirTest, EmptyDirectory) {
 
   TestDelegate delegate;
   std::unique_ptr<URLRequest> request(context_.CreateRequest(
-      FilePathToFileURL(directory.GetPath()), DEFAULT_PRIORITY, &delegate));
+      FilePathToFileURL(directory.GetPath()), DEFAULT_PRIORITY, &delegate,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
   EXPECT_TRUE(request->is_pending());
 

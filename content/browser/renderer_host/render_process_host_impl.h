@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <queue>
+#include <set>
 #include <string>
 
 #include "base/macros.h"
@@ -22,21 +23,25 @@
 #include "build/build_config.h"
 #include "content/browser/child_process_launcher.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
-#include "content/browser/renderer_host/offscreen_canvas_compositor_frame_sink_provider_impl.h"
+#include "content/browser/renderer_host/frame_sink_provider_impl.h"
+#include "content/browser/renderer_host/offscreen_canvas_provider_impl.h"
 #include "content/browser/webrtc/webrtc_eventlog_host.h"
+#include "content/common/associated_interface_registry_impl.h"
 #include "content/common/associated_interfaces.mojom.h"
 #include "content/common/content_export.h"
 #include "content/common/indexed_db/indexed_db.mojom.h"
 #include "content/common/renderer.mojom.h"
+#include "content/common/storage_partition_service.mojom.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/service_manager_connection.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_platform_file.h"
 #include "media/media_features.h"
+#include "mojo/edk/embedder/pending_process_connection.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/associated_binding_set.h"
 #include "mojo/public/cpp/bindings/interface_ptr.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/interfaces/service.mojom.h"
 #include "services/ui/public/interfaces/gpu.mojom.h"
 #include "ui/gfx/gpu_memory_buffer.h"
@@ -59,23 +64,20 @@ class ChildConnection;
 class GpuClient;
 class IndexedDBDispatcherHost;
 class InProcessChildThreadParams;
-class MessagePortMessageFilter;
 class NotificationMessageFilter;
 #if BUILDFLAG(ENABLE_WEBRTC)
 class P2PSocketDispatcherHost;
 #endif
 class PermissionServiceContext;
 class PeerConnectionTrackerHost;
+class PushMessagingManager;
 class RenderFrameMessageFilter;
 class RenderWidgetHelper;
 class RenderWidgetHost;
+class RenderWidgetHostImpl;
 class ResourceMessageFilter;
 class StoragePartition;
 class StoragePartitionImpl;
-
-namespace mojom {
-class StoragePartitionService;
-}  // namespace mojom
 
 typedef base::Thread* (*RendererMainThreadFactoryFunction)(
     const InProcessChildThreadParams& params);
@@ -123,7 +125,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void WidgetRestored() override;
   void WidgetHidden() override;
   int VisibleWidgetCount() const override;
-  void AudioStateChanged() override;
   bool IsForGuestsOnly() const override;
   StoragePartition* GetStoragePartition() const override;
   bool Shutdown(int exit_code, bool wait) override;
@@ -139,6 +140,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void Cleanup() override;
   void AddPendingView() override;
   void RemovePendingView() override;
+  void AddWidget(RenderWidgetHost* widget) override;
+  void RemoveWidget(RenderWidgetHost* widget) override;
   void SetSuddenTerminationAllowed(bool enabled) override;
   bool SuddenTerminationAllowed() const override;
   IPC::ChannelProxy* GetChannel() override;
@@ -152,6 +155,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void DisableAudioDebugRecordings() override;
   bool StartWebRTCEventLog(const base::FilePath& file_path) override;
   bool StopWebRTCEventLog() override;
+  void SetEchoCanceller3(bool enable) override;
   void SetWebRtcLogMessageCallback(
       base::Callback<void(const std::string&)> callback) override;
   void ClearWebRtcLogMessageCallback() override;
@@ -161,7 +165,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
       const WebRtcRtpPacketCallback& packet_callback) override;
 #endif
   void ResumeDeferredNavigation(const GlobalRequestID& request_id) override;
-  service_manager::InterfaceProvider* GetRemoteInterfaces() override;
+  void BindInterface(const std::string& interface_name,
+                     mojo::ScopedMessagePipeHandle interface_pipe) override;
+  const service_manager::Identity& GetChildIdentity() const override;
   std::unique_ptr<base::SharedPersistentMemoryAllocator> TakeMetricsAllocator()
       override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
@@ -259,10 +265,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
     return render_frame_message_filter_.get();
   }
 
-  MessagePortMessageFilter* message_port_message_filter() const {
-    return message_port_message_filter_.get();
-  }
-
   NotificationMessageFilter* notification_message_filter() const {
     return notification_message_filter_.get();
   }
@@ -277,15 +279,18 @@ class CONTENT_EXPORT RenderProcessHostImpl
     is_for_guests_only_ = is_for_guests_only;
   }
 
-  void GetAudioOutputControllers(
-      const GetAudioOutputControllersCallback& callback) const override;
-
 #if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
   // Launch the zygote early in the browser startup.
   static void EarlyZygoteLaunch();
 #endif  // defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
 
   void RecomputeAndUpdateWebKitPreferences();
+
+  // Called when an audio stream is added or removed and used to determine if
+  // the process should be backgrounded or not.
+  void OnAudioStreamAdded() override;
+  void OnAudioStreamRemoved() override;
+  int get_audio_stream_count_for_testing() const { return audio_stream_count_; }
 
  protected:
   // A proxy for our IPC::Channel that lives on the IO thread.
@@ -337,11 +342,18 @@ class CONTENT_EXPORT RenderProcessHostImpl
       const std::string& name,
       mojom::AssociatedInterfaceAssociatedRequest request) override;
 
-  void CreateMusGpuRequest(ui::mojom::GpuRequest request);
-  void CreateOffscreenCanvasCompositorFrameSinkProvider(
-      blink::mojom::OffscreenCanvasCompositorFrameSinkProviderRequest request);
+  void BindRouteProvider(mojom::RouteProviderAssociatedRequest request);
+
+  void CreateMusGpuRequest(const service_manager::BindSourceInfo& source_info,
+                           ui::mojom::GpuRequest request);
+  void CreateOffscreenCanvasProvider(
+      const service_manager::BindSourceInfo& source_info,
+      blink::mojom::OffscreenCanvasProviderRequest request);
+  void BindFrameSinkProvider(const service_manager::BindSourceInfo& source_info,
+                             mojom::FrameSinkProviderRequest request);
   void CreateStoragePartitionService(
-      mojo::InterfaceRequest<mojom::StoragePartitionService> request);
+      const service_manager::BindSourceInfo& source_info,
+      mojom::StoragePartitionServiceRequest request);
 
   // Control message handlers.
   void OnShutdownRequest();
@@ -394,7 +406,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   template <typename InterfaceType>
   using AddInterfaceCallback =
-      base::Callback<void(mojo::InterfaceRequest<InterfaceType>)>;
+      base::Callback<void(const service_manager::BindSourceInfo&,
+                          mojo::InterfaceRequest<InterfaceType>)>;
 
   template <typename CallbackType>
   struct InterfaceGetter;
@@ -404,10 +417,11 @@ class CONTENT_EXPORT RenderProcessHostImpl
     static void GetInterfaceOnUIThread(
         base::WeakPtr<RenderProcessHostImpl> weak_host,
         const AddInterfaceCallback<InterfaceType>& callback,
+        const service_manager::BindSourceInfo& source_info,
         mojo::InterfaceRequest<InterfaceType> request) {
       if (!weak_host)
         return;
-      callback.Run(std::move(request));
+      callback.Run(source_info, std::move(request));
     }
   };
 
@@ -415,7 +429,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // the render process currently hosted by the RPHI. Callbacks added by this
   // method will never run beyond the next invocation of Cleanup().
   template <typename CallbackType>
-  void AddUIThreadInterface(service_manager::InterfaceRegistry* registry,
+  void AddUIThreadInterface(service_manager::BinderRegistry* registry,
                             const CallbackType& callback) {
     registry->AddInterface(
         base::Bind(&InterfaceGetter<CallbackType>::GetInterfaceOnUIThread,
@@ -423,7 +437,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
         BrowserThread::GetTaskRunnerForThread(BrowserThread::UI));
   }
 
-  std::string child_token_;
+  std::unique_ptr<mojo::edk::PendingProcessConnection> pending_connection_;
 
   std::unique_ptr<ChildConnection> child_connection_;
   int connection_filter_id_ =
@@ -450,14 +464,22 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // delete ourselves.
   IDMap<IPC::Listener*> listeners_;
 
+  // Mojo interfaces provided to the child process are registered here if they
+  // need consistent delivery ordering with legacy IPC, and are process-wide in
+  // nature (e.g. metrics, memory usage).
+  std::unique_ptr<AssociatedInterfaceRegistryImpl> associated_interfaces_;
+
   mojo::AssociatedBinding<mojom::RouteProvider> route_provider_binding_;
-  mojo::AssociatedBindingSet<mojom::AssociatedInterfaceProvider>
+  mojo::AssociatedBindingSet<mojom::AssociatedInterfaceProvider, int32_t>
       associated_interface_provider_bindings_;
 
   // The count of currently visible widgets.  Since the host can be a container
   // for multiple widgets, it uses this count to determine when it should be
   // backgrounded.
   int32_t visible_widgets_;
+
+  // The set of widgets in this RenderProcessHostImpl.
+  std::set<RenderWidgetHostImpl*> widgets_;
 
   // Whether this process currently has backgrounded priority. Tracked so that
   // UpdateProcessPriority() can avoid redundantly setting the priority.
@@ -468,9 +490,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   scoped_refptr<RenderWidgetHelper> widget_helper_;
 
   scoped_refptr<RenderFrameMessageFilter> render_frame_message_filter_;
-
-  // The filter for MessagePort messages coming from the renderer.
-  scoped_refptr<MessagePortMessageFilter> message_port_message_filter_;
 
   // The filter for Web Notification messages coming from the renderer. Holds a
   // closure per notification that must be freed when the notification closes.
@@ -506,7 +525,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // called.
   int instance_id_ = 1;
 
-  BrowserContext* browser_context_;
+  BrowserContext* const browser_context_;
 
   // Owned by |browser_context_|.
   StoragePartitionImpl* storage_partition_impl_;
@@ -576,7 +595,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // The memory allocator, if any, in which the renderer will write its metrics.
   std::unique_ptr<base::SharedPersistentMemoryAllocator> metrics_allocator_;
 
-  scoped_refptr<IndexedDBDispatcherHost> indexed_db_factory_;
+  std::unique_ptr<IndexedDBDispatcherHost, BrowserThread::DeleteOnIOThread>
+      indexed_db_factory_;
 
   bool channel_connected_;
   bool sent_render_process_ready_;
@@ -592,17 +612,24 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   scoped_refptr<ResourceMessageFilter> resource_message_filter_;
   std::unique_ptr<GpuClient, BrowserThread::DeleteOnIOThread> gpu_client_;
+  std::unique_ptr<PushMessagingManager, BrowserThread::DeleteOnIOThread>
+      push_messaging_manager_;
 
-  std::unique_ptr<OffscreenCanvasCompositorFrameSinkProviderImpl>
-      offscreen_canvas_provider_;
+  std::unique_ptr<OffscreenCanvasProviderImpl> offscreen_canvas_provider_;
 
   mojom::RouteProviderAssociatedPtr remote_route_provider_;
   mojom::RendererAssociatedPtr renderer_interface_;
+
+  // Tracks active audio streams within the render process; used to determine if
+  // if a process should be backgrounded.
+  int audio_stream_count_ = 0;
 
   // A WeakPtrFactory which is reset every time Cleanup() runs. Used to vend
   // WeakPtrs which are invalidated any time the RPHI is recycled.
   std::unique_ptr<base::WeakPtrFactory<RenderProcessHostImpl>>
       instance_weak_factory_;
+
+  FrameSinkProviderImpl frame_sink_provider_;
 
   base::WeakPtrFactory<RenderProcessHostImpl> weak_factory_;
 

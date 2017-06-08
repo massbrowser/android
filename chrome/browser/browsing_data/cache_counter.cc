@@ -26,10 +26,14 @@ CacheCounter::~CacheCounter() {
 }
 
 const char* CacheCounter::GetPrefName() const {
-  return browsing_data::prefs::kDeleteCache;
+  return GetTab() == browsing_data::ClearBrowsingDataTab::BASIC
+             ? browsing_data::prefs::kDeleteCacheBasic
+             : browsing_data::prefs::kDeleteCache;
 }
 
 void CacheCounter::Count() {
+  // Cancel existing requests.
+  weak_ptr_factory_.InvalidateWeakPtrs();
   base::WeakPtr<browsing_data::ConditionalCacheCountingHelper> counter =
       browsing_data::ConditionalCacheCountingHelper::CreateForRange(
           content::BrowserContext::GetDefaultStoragePartition(profile_),

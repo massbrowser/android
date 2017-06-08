@@ -113,8 +113,8 @@ public class AccountSigninActivity extends AppCompatActivity
 
         setContentView(mView);
 
-        SigninManager.logSigninStartAccessPoint(getAccessPoint());
-        recordSigninStartedUserAction();
+//        SigninManager.logSigninStartAccessPoint(getAccessPoint());
+//        recordSigninStartedUserAction();
     }
 
     @Override
@@ -150,23 +150,23 @@ public class AccountSigninActivity extends AppCompatActivity
 
     @Override
     public void onAccountSelected(final String accountName, final boolean settingsClicked) {
-        final Context context = this;
-        SigninManager.get(this).signIn(accountName, this, new SignInCallback(){
-
-            @Override
-            public void onSignInComplete() {
-                if (settingsClicked) {
-                    Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                            context, AccountManagementFragment.class.getName());
-                    startActivity(intent);
-                }
-
-                finish();
-            }
-
-            @Override
-            public void onSignInAborted() {}
-        });
+//        final Context context = this;
+//        SigninManager.get(this).signIn(accountName, this, new SignInCallback(){
+//
+//            @Override
+//            public void onSignInComplete() {
+//                if (settingsClicked) {
+//                    Intent intent = PreferencesLauncher.createIntentForSettingsPage(
+//                            context, AccountManagementFragment.class.getName());
+//                    startActivity(intent);
+//                }
+//
+//                finish();
+//            }
+//
+//            @Override
+//            public void onSignInAborted() {}
+//        });
     }
 
     @Override

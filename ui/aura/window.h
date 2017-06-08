@@ -27,7 +27,6 @@
 #include "ui/events/event_target.h"
 #include "ui/events/event_targeter.h"
 #include "ui/events/gestures/gesture_types.h"
-#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/wm/public/window_types.h"
@@ -80,8 +79,11 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
 
   typedef std::vector<Window*> Windows;
 
-  explicit Window(WindowDelegate* delegate);
-  Window(WindowDelegate* delegate, std::unique_ptr<WindowPort> port);
+  explicit Window(WindowDelegate* delegate,
+                  ui::wm::WindowType type = ui::wm::WINDOW_TYPE_UNKNOWN);
+  Window(WindowDelegate* delegate,
+         std::unique_ptr<WindowPort> port,
+         ui::wm::WindowType type = ui::wm::WINDOW_TYPE_UNKNOWN);
   ~Window() override;
 
   // Initializes the window. This creates the window's layer.
@@ -108,6 +110,10 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   void SetTitle(const base::string16& title);
 
   bool transparent() const { return transparent_; }
+
+  // Note: Setting a window transparent has significant performance impact,
+  // especially on low-end Chrome OS devices. Please ensure you are not
+  // adding unnecessary overdraw. When in doubt, talk to the graphics team.
   void SetTransparent(bool transparent);
 
   // See description in Layer::SetFillsBoundsCompletely.
@@ -168,7 +174,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // LayoutManager may adjust the bounds.
   void SetBounds(const gfx::Rect& new_bounds);
 
-  // Changes the bounds of the window in the screen coordintates.
+  // Changes the bounds of the window in the screen coordinates.
   // If present, the window's parent's LayoutManager may adjust the bounds.
   void SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen_coords,
                          const display::Display& dst_display);
@@ -233,16 +239,6 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   void set_ignore_events(bool ignore_events) { ignore_events_ = ignore_events; }
   bool ignore_events() const { return ignore_events_; }
 
-  // Sets the window to grab hits for an area extending |insets| pixels inside
-  // its bounds (even if that inner region overlaps a child window). This can be
-  // used to create an invisible non-client area that overlaps the client area.
-  void set_hit_test_bounds_override_inner(const gfx::Insets& insets) {
-    hit_test_bounds_override_inner_ = insets;
-  }
-  gfx::Insets hit_test_bounds_override_inner() const {
-    return hit_test_bounds_override_inner_;
-  }
-
   // Returns true if the |point_in_root| in root window's coordinate falls
   // within this window's bounds. Returns false if the window is detached
   // from root window.
@@ -255,9 +251,6 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Returns the Window that most closely encloses |local_point| for the
   // purposes of event targeting.
   Window* GetEventHandlerForPoint(const gfx::Point& local_point);
-
-  // Returns the topmost Window with a delegate containing |local_point|.
-  Window* GetTopWindowContainingPoint(const gfx::Point& local_point);
 
   // Returns this window's toplevel window (the highest-up-the-tree ancestor
   // that has a delegate set).  The toplevel window may be |this|.
@@ -346,12 +339,8 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Schedules a paint for the Window's entire bounds.
   void SchedulePaint();
 
-  // Asks the delegate to paint the window and invokes PaintLayerlessChildren()
-  // to paint any children with no layers.
+  // Asks the delegate to paint the window.
   void Paint(const ui::PaintContext& context);
-
-  // Paints any layerless children to |canvas|.
-  void PaintLayerlessChildren(const ui::PaintContext& context);
 
   // Gets a Window (either this one or a subwindow) containing |local_point|.
   // If |return_tightest| is true, returns the tightest-containing (i.e.
@@ -473,7 +462,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
 
   int id_;
 
-  // Whether layer is initialized as non-opaque.
+  // Whether layer is initialized as non-opaque. Defaults to false.
   bool transparent_;
 
   std::unique_ptr<LayoutManager> layout_manager_;
@@ -481,9 +470,6 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
 
   // Makes the window pass all events through to any windows behind it.
   bool ignore_events_;
-
-  // See set_hit_test_bounds_override_inner().
-  gfx::Insets hit_test_bounds_override_inner_;
 
   base::ObserverList<WindowObserver, true> observers_;
 

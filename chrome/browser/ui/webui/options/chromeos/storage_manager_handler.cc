@@ -10,6 +10,7 @@
 
 #include "base/files/file_util.h"
 #include "base/sys_info.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_cache_storage_helper.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_service_worker_helper.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
@@ -34,7 +34,6 @@
 #include "components/drive/chromeos/file_system_interface.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/bytes_formatting.h"
@@ -43,9 +42,9 @@ namespace chromeos {
 namespace options {
 namespace {
 
-void GetSizeStatOnBlockingPool(const base::FilePath& mount_path,
-                               int64_t* total_size,
-                               int64_t* available_size) {
+void GetSizeStatAsync(const base::FilePath& mount_path,
+                      int64_t* total_size,
+                      int64_t* available_size) {
   int64_t size = base::SysInfo::AmountOfTotalDiskSpace(mount_path);
   if (size >= 0)
     *total_size = size;
@@ -212,15 +211,11 @@ void StorageManagerHandler::UpdateSizeStat() {
 
   int64_t* total_size = new int64_t(0);
   int64_t* available_size = new int64_t(0);
-  content::BrowserThread::PostBlockingPoolTaskAndReply(
-      FROM_HERE,
-      base::Bind(&GetSizeStatOnBlockingPool,
-                 downloads_path,
-                 total_size,
-                 available_size),
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::Bind(&GetSizeStatAsync, downloads_path, total_size, available_size),
       base::Bind(&StorageManagerHandler::OnGetSizeStat,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Owned(total_size),
+                 weak_ptr_factory_.GetWeakPtr(), base::Owned(total_size),
                  base::Owned(available_size)));
 }
 
@@ -253,9 +248,8 @@ void StorageManagerHandler::UpdateDownloadsSize() {
   const base::FilePath downloads_path =
       file_manager::util::GetDownloadsFolderForProfile(profile);
 
-  base::PostTaskAndReplyWithResult(
-      content::BrowserThread::GetBlockingPool(),
-      FROM_HERE,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&base::ComputeDirectorySize, downloads_path),
       base::Bind(&StorageManagerHandler::OnGetDownloadsSize,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -265,7 +259,7 @@ void StorageManagerHandler::OnGetDownloadsSize(int64_t size) {
   updating_downloads_size_ = false;
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.StorageManager.setDownloadsSize",
-      base::StringValue(ui::FormatBytes(size)));
+      base::Value(ui::FormatBytes(size)));
 }
 
 void StorageManagerHandler::UpdateDriveCacheSize() {
@@ -290,7 +284,7 @@ void StorageManagerHandler::OnGetDriveCacheSize(int64_t size) {
   updating_drive_cache_size_ = false;
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.StorageManager.setDriveCacheSize",
-      base::StringValue(ui::FormatBytes(size)));
+      base::Value(ui::FormatBytes(size)));
 }
 
 void StorageManagerHandler::UpdateBrowsingDataSize() {
@@ -361,8 +355,7 @@ void StorageManagerHandler::OnGetBrowsingDataSize(bool is_site_data,
     }
     updating_browsing_data_size_ = false;
     web_ui()->CallJavascriptFunctionUnsafe(
-        "options.StorageManager.setBrowsingDataSize",
-        base::StringValue(size_string));
+        "options.StorageManager.setBrowsingDataSize", base::Value(size_string));
   }
 }
 
@@ -389,7 +382,7 @@ void StorageManagerHandler::UpdateOtherUsersSize() {
     updating_other_users_size_ = false;
     web_ui()->CallJavascriptFunctionUnsafe(
         "options.StorageManager.setOtherUsersSize",
-        base::StringValue(ui::FormatBytes(0)));
+        base::Value(ui::FormatBytes(0)));
   }
 }
 
@@ -407,8 +400,7 @@ void StorageManagerHandler::OnGetOtherUserSize(bool success, int64_t size) {
     }
     updating_other_users_size_ = false;
     web_ui()->CallJavascriptFunctionUnsafe(
-        "options.StorageManager.setOtherUsersSize",
-        base::StringValue(size_string));
+        "options.StorageManager.setOtherUsersSize", base::Value(size_string));
   }
 }
 
@@ -418,9 +410,8 @@ void StorageManagerHandler::UpdateArcSize() {
   updating_arc_size_ = true;
 
   Profile* const profile = Profile::FromWebUI(web_ui());
-  if (!arc::IsArcAllowedForProfile(profile) ||
-      arc::IsArcOptInVerificationDisabled() ||
-      !arc::ArcSessionManager::Get()->IsArcEnabled()) {
+  if (!arc::IsArcPlayStoreEnabledForProfile(profile) ||
+      arc::IsArcOptInVerificationDisabled()) {
     return;
   }
 
@@ -448,7 +439,7 @@ void StorageManagerHandler::OnGetArcSize(bool succeeded,
   }
   updating_arc_size_ = false;
   web_ui()->CallJavascriptFunctionUnsafe("options.StorageManager.setArcSize",
-                                         base::StringValue(size_string));
+                                         base::Value(size_string));
 }
 
 void StorageManagerHandler::OnClearDriveCacheDone(bool success) {

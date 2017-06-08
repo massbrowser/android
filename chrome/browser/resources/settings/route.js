@@ -18,8 +18,16 @@ cr.define('settings', function() {
     /** @type {number} */
     this.depth = 0;
 
+    /**
+     * @type {boolean} Whether this route corresponds to a navigable
+     *     dialog. Those routes don't belong to a "section".
+     */
+    this.isNavigableDialog = false;
+
     // Below are all legacy properties to provide compatibility with the old
-    // routing system. TODO(tommycli): Remove once routing refactor complete.
+    // routing system.
+
+    /** @type {string} */
     this.section = '';
   };
 
@@ -94,14 +102,20 @@ cr.define('settings', function() {
   // Navigable dialogs. These are the only non-section children of root pages.
   // These are disfavored. If we add anymore, we should add explicit support.
   r.IMPORT_DATA = r.BASIC.createChild('/importData');
+  r.IMPORT_DATA.isNavigableDialog = true;
   r.SIGN_OUT = r.BASIC.createChild('/signOut');
+  r.SIGN_OUT.isNavigableDialog = true;
   r.CLEAR_BROWSER_DATA = r.ADVANCED.createChild('/clearBrowserData');
+  r.CLEAR_BROWSER_DATA.isNavigableDialog = true;
   r.RESET_DIALOG = r.ADVANCED.createChild('/resetProfileSettings');
+  r.RESET_DIALOG.isNavigableDialog = true;
   r.TRIGGERED_RESET_DIALOG =
       r.ADVANCED.createChild('/triggeredResetProfileSettings');
+  r.TRIGGERED_RESET_DIALOG.isNavigableDialog = true;
 
 // <if expr="chromeos">
   r.INTERNET = r.BASIC.createSection('/internet', 'internet');
+  r.INTERNET_NETWORKS = r.INTERNET.createChild('/networks');
   r.NETWORK_DETAIL = r.INTERNET.createChild('/networkDetail');
   r.KNOWN_NETWORKS = r.INTERNET.createChild('/knownNetworks');
   r.BLUETOOTH = r.BASIC.createSection('/bluetooth', 'bluetooth');
@@ -119,6 +133,7 @@ cr.define('settings', function() {
 
 // <if expr="chromeos">
   r.ANDROID_APPS = r.BASIC.createSection('/androidApps', 'androidApps');
+  r.ANDROID_APPS_DETAILS = r.ANDROID_APPS.createChild('/androidApps/details');
 // </if>
 
   r.ON_STARTUP = r.BASIC.createSection('/onStartup', 'onStartup');
@@ -132,22 +147,27 @@ cr.define('settings', function() {
   r.CHANGE_PICTURE = r.PEOPLE.createChild('/changePicture');
   r.ACCOUNTS = r.PEOPLE.createChild('/accounts');
   r.LOCK_SCREEN = r.PEOPLE.createChild('/lockScreen');
+  r.FINGERPRINT = r.LOCK_SCREEN.createChild('/lockScreen/fingerprint');
 
   r.DEVICE = r.BASIC.createSection('/device', 'device');
   r.POINTERS = r.DEVICE.createChild('/pointer-overlay');
   r.KEYBOARD = r.DEVICE.createChild('/keyboard-overlay');
-  r.DISPLAY = r.DEVICE.createChild('/display');
   r.STYLUS = r.DEVICE.createChild('/stylus');
+  r.DISPLAY = r.DEVICE.createChild('/display');
   r.STORAGE = r.DEVICE.createChild('/storage');
+  r.POWER = r.DEVICE.createChild('/power');
 // </if>
 
   r.PRIVACY = r.ADVANCED.createSection('/privacy', 'privacy');
   r.CERTIFICATES = r.PRIVACY.createChild('/certificates');
 
   r.SITE_SETTINGS = r.PRIVACY.createChild('/content');
-  r.SITE_SETTINGS_ALL = r.SITE_SETTINGS.createChild('all');
-  r.SITE_SETTINGS_SITE_DETAILS =
-      r.SITE_SETTINGS_ALL.createChild('/content/siteDetails');
+
+  if (loadTimeData.getBoolean('enableSiteSettings')) {
+    r.SITE_SETTINGS_ALL = r.SITE_SETTINGS.createChild('all');
+    r.SITE_SETTINGS_SITE_DETAILS =
+        r.SITE_SETTINGS_ALL.createChild('/content/siteDetails');
+  }
 
   r.SITE_SETTINGS_HANDLERS = r.SITE_SETTINGS.createChild('/handlers');
 
@@ -169,9 +189,14 @@ cr.define('settings', function() {
   r.SITE_SETTINGS_POPUPS = r.SITE_SETTINGS.createChild('popups');
   r.SITE_SETTINGS_UNSANDBOXED_PLUGINS =
       r.SITE_SETTINGS.createChild('unsandboxedPlugins');
+  r.SITE_SETTINGS_MIDI_DEVICES = r.SITE_SETTINGS.createChild('midiDevices');
   r.SITE_SETTINGS_USB_DEVICES = r.SITE_SETTINGS.createChild('usbDevices');
   r.SITE_SETTINGS_ZOOM_LEVELS = r.SITE_SETTINGS.createChild('zoomLevels');
   r.SITE_SETTINGS_PDF_DOCUMENTS = r.SITE_SETTINGS.createChild('pdfDocuments');
+  r.SITE_SETTINGS_PROTECTED_CONTENT =
+      r.SITE_SETTINGS.createChild('protectedContent');
+  r.SITE_SETTINGS_SUBRESOURCE_FILTER =
+      r.SITE_SETTINGS.createChild('subresourceFilter');
 
 // <if expr="chromeos">
   r.DATETIME = r.ADVANCED.createSection('/dateTime', 'dateTime');
@@ -200,7 +225,9 @@ cr.define('settings', function() {
 // </if>
 
   r.ACCESSIBILITY = r.ADVANCED.createSection('/accessibility', 'a11y');
+// <if expr="chromeos">
   r.MANAGE_ACCESSIBILITY = r.ACCESSIBILITY.createChild('/manageAccessibility');
+// </if>
 
   r.SYSTEM = r.ADVANCED.createSection('/system', 'system');
   r.RESET = r.ADVANCED.createSection('/reset', 'reset');
@@ -347,6 +374,11 @@ cr.define('settings', function() {
    *     parameter during navigation. Defaults to false.
    */
   var navigateTo = function(route, opt_dynamicParameters, opt_removeSearch) {
+    // The ADVANCED route only serves as a parent of subpages, and should not
+    // be possible to navigate to it directly.
+    if (route == settings.Route.ADVANCED)
+      route = settings.Route.BASIC;
+
     var params = opt_dynamicParameters || new URLSearchParams();
     var removeSearch = !!opt_removeSearch;
 

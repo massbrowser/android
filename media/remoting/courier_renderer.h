@@ -19,15 +19,14 @@
 #include "media/base/pipeline_status.h"
 #include "media/base/renderer.h"
 #include "media/mojo/interfaces/remoting.mojom.h"
-#include "media/remoting/interstitial.h"
 #include "media/remoting/metrics.h"
 #include "media/remoting/rpc_broker.h"
 #include "mojo/public/cpp/system/data_pipe.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 
 namespace media {
 
 class RendererClient;
+class VideoRendererSink;
 
 namespace remoting {
 
@@ -37,10 +36,6 @@ class RendererController;
 // A media::Renderer implementation that proxies all operations to a remote
 // renderer via RPCs. The CourierRenderer is instantiated by
 // AdaptiveRendererFactory when media remoting is meant to take place.
-//
-// While the media content is rendered remotely, the CourierRenderer emits
-// interstitial frames locally, to the VideoRendererSink, to indicate to the
-// user that remoting is taking place.
 class CourierRenderer : public Renderer {
  public:
   // The whole class except for constructor and GetMediaTime() runs on
@@ -71,15 +66,6 @@ class CourierRenderer : public Renderer {
       scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
       base::WeakPtr<CourierRenderer> self,
       std::unique_ptr<pb::RpcMessage> message);
-
-  // Callback when remoting interstitial needs to be updated. Will post task to
-  // media thread to avoid threading race condition.
-  static void RequestUpdateInterstitialOnMainThread(
-      scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
-      base::WeakPtr<CourierRenderer> self,
-      const base::Optional<SkBitmap>& background_image,
-      const gfx::Size& canvas_size,
-      InterstitialType interstitial_type);
 
  public:
   // media::Renderer implementation.
@@ -133,12 +119,6 @@ class CourierRenderer : public Renderer {
   void OnStatisticsUpdate(std::unique_ptr<pb::RpcMessage> message);
   void OnDurationChange(std::unique_ptr<pb::RpcMessage> message);
 
-  // Called to update the remoting interstitial. Update
-  // |interstitial_background_| if |background_image| is set.
-  void UpdateInterstitial(const base::Optional<SkBitmap>& background_image,
-                          const gfx::Size& canvas_size,
-                          InterstitialType interstitial_type);
-
   // Called when |current_media_time_| is updated.
   void OnMediaTimeUpdated();
 
@@ -190,11 +170,6 @@ class CourierRenderer : public Renderer {
   base::Closure flush_cb_;
 
   VideoRendererSink* const video_renderer_sink_;  // Outlives this class.
-  // The background image for remoting interstitial. When |this| is destructed,
-  // |interstitial_background_| will be paint to clear the cast messages on
-  // the interstitial.
-  SkBitmap interstitial_background_;
-  gfx::Size canvas_size_;
 
   // Current playback rate.
   double playback_rate_ = 0;

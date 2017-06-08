@@ -9,7 +9,7 @@
 #include <set>
 
 #include "base/macros.h"
-#include "ui/aura/env_observer.h"
+#include "ui/aura/mus/focus_synchronizer_observer.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
 #include "ui/aura/window_observer.h"
 #include "ui/views/mus/mus_client_observer.h"
@@ -28,14 +28,14 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
     : public DesktopWindowTreeHost,
       public MusClientObserver,
       public WidgetObserver,
+      public aura::FocusSynchronizerObserver,
       public aura::WindowObserver,
-      public aura::WindowTreeHostMus,
-      public aura::EnvObserver {
+      public aura::WindowTreeHostMus {
  public:
   DesktopWindowTreeHostMus(
+      aura::WindowTreeHostMusInitParams init_params,
       internal::NativeWidgetDelegate* native_widget_delegate,
-      DesktopNativeWidgetAura* desktop_native_widget_aura,
-      const std::map<std::string, std::vector<uint8_t>>* mus_properties);
+      DesktopNativeWidgetAura* desktop_native_widget_aura);
   ~DesktopWindowTreeHostMus() override;
 
   // Called when the window was deleted on the server.
@@ -47,8 +47,6 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
   }
 
  private:
-  bool IsDocked() const;
-
   void SendClientAreaToServer();
   void SendHitTestMaskToServer();
 
@@ -124,12 +122,17 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
   void SizeConstraintsChanged() override;
   bool ShouldUpdateWindowTransparency() const override;
   bool ShouldUseDesktopNativeCursorManager() const override;
+  bool ShouldCreateVisibilityController() const override;
 
   // MusClientObserver:
   void OnWindowManagerFrameValuesChanged() override;
 
   // WidgetObserver:
   void OnWidgetActivationChanged(Widget* widget, bool active) override;
+
+  // aura::FocusSynchronizerObserver:
+  void OnActiveFocusClientChanged(aura::client::FocusClient* focus_client,
+                                  aura::Window* focus_client_root) override;
 
   // aura::WindowObserver:
   void OnWindowPropertyChanged(aura::Window* window,
@@ -140,11 +143,6 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
   void ShowImpl() override;
   void HideImpl() override;
   void SetBoundsInPixels(const gfx::Rect& bounds_in_pixels) override;
-
-  // aura::EnvObserver:
-  void OnWindowInitialized(aura::Window* window) override;
-  void OnActiveFocusClientChanged(aura::client::FocusClient* focus_client,
-                                  aura::Window* window) override;
 
   internal::NativeWidgetDelegate* native_widget_delegate_;
 

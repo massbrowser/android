@@ -30,7 +30,6 @@
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
-#include "extensions/common/feature_switch.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using extensions::Extension;
@@ -87,15 +86,16 @@ class ExtensionInstalledBubbleObserver
       // views created which we can inspect for the purpose of previewing of
       // pointing to them.
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&ExtensionInstalledBubbleObserver::Initialize,
-                                weak_factory_.GetWeakPtr()));
+          FROM_HERE,
+          base::BindOnce(&ExtensionInstalledBubbleObserver::Initialize,
+                         weak_factory_.GetWeakPtr()));
     }
   }
 
   void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) override {
+      extensions::UnloadedExtensionReason reason) override {
     if (extension == bubble_->extension()) {
       // Extension is going away.
       delete this;
@@ -123,8 +123,9 @@ class ExtensionInstalledBubbleObserver
     }
     if (animation_wait_retries_++ < kAnimationWaitRetries) {
       base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE, base::Bind(&ExtensionInstalledBubbleObserver::Show,
-                                weak_factory_.GetWeakPtr()),
+          FROM_HERE,
+          base::BindOnce(&ExtensionInstalledBubbleObserver::Show,
+                         weak_factory_.GetWeakPtr()),
           base::TimeDelta::FromMilliseconds(kAnimationWaitMs));
     } else {
       // Retries are over; won't try again.
@@ -248,17 +249,12 @@ base::string16 ExtensionInstalledBubble::GetHowToUseDescription() const {
 }
 
 void ExtensionInstalledBubble::Initialize() {
-  bool extension_action_redesign_on =
-      extensions::FeatureSwitch::extension_action_redesign()->IsEnabled();
-
   const extensions::ActionInfo* action_info = nullptr;
   if ((action_info = extensions::ActionInfo::GetBrowserActionInfo(
            extension_)) != nullptr) {
     type_ = BROWSER_ACTION;
   } else if ((action_info = extensions::ActionInfo::GetPageActionInfo(
-                  extension_)) != nullptr &&
-             (extensions::ActionInfo::IsVerboseInstallMessage(extension_) ||
-              extension_action_redesign_on)) {
+                  extension_)) != nullptr) {
     type_ = PAGE_ACTION;
   } else if (!extensions::OmniboxInfo::GetKeyword(extension_).empty()) {
     type_ = OMNIBOX_KEYWORD;
@@ -288,14 +284,7 @@ void ExtensionInstalledBubble::Initialize() {
         options_ |= HOW_TO_MANAGE;
       }
 
-      if (type_ == BROWSER_ACTION || extension_action_redesign_on) {
-        // If the toolbar redesign is enabled, all bubbles for extensions point
-        // to their toolbar action.
-        anchor_position_ = ANCHOR_BROWSER_ACTION;
-      } else {
-        DCHECK_EQ(type_, PAGE_ACTION);
-        anchor_position_ = ANCHOR_PAGE_ACTION;
-      }
+      anchor_position_ = ANCHOR_ACTION;
       break;
     case OMNIBOX_KEYWORD:
       options_ |= HOW_TO_USE | HOW_TO_MANAGE;

@@ -6,8 +6,8 @@ package org.chromium.chrome.browser.payments;
 
 import static java.util.Arrays.asList;
 
-import android.content.Context;
 import android.os.Handler;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.CheckBox;
@@ -15,6 +15,7 @@ import android.widget.EditText;
 import android.widget.Spinner;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
@@ -42,6 +43,7 @@ import org.chromium.payments.mojom.PaymentMethodData;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -126,8 +128,10 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         mCanMakePaymentQueryResponded = new CallbackHelper();
         mViewCoreRef = new AtomicReference<>();
         mWebContentsRef = new AtomicReference<>();
-        mTestFilePath = UrlUtils.getIsolatedTestFilePath(
-                String.format("chrome/test/data/payments/%s", testFileName));
+        mTestFilePath = testFileName.startsWith("data:")
+                ? testFileName
+                : UrlUtils.getIsolatedTestFilePath(
+                          String.format("chrome/test/data/payments/%s", testFileName));
     }
 
     @Override
@@ -157,6 +161,17 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
 
     protected void openPageAndClickNodeAndWait(String nodeId, CallbackHelper helper)
             throws InterruptedException, ExecutionException, TimeoutException {
+        openPage();
+        clickNodeAndWait(nodeId, helper);
+    }
+
+    protected void openPageAndClickNode(String nodeId)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        openPage();
+        DOMUtils.clickNode(mViewCoreRef.get(), nodeId);
+    }
+
+    private void openPage() throws InterruptedException, ExecutionException, TimeoutException {
         onMainActivityStarted();
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -169,7 +184,6 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
             }
         });
         assertWaitForPageScaleFactorMatch(1);
-        clickNodeAndWait(nodeId, helper);
     }
 
     protected void reTriggerUIAndWait(
@@ -183,7 +197,7 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
     protected void clickNodeAndWait(String nodeId, CallbackHelper helper)
             throws InterruptedException, ExecutionException, TimeoutException {
         int callCount = helper.getCallCount();
-        DOMUtils.clickNode(this, mViewCoreRef.get(), nodeId);
+        DOMUtils.clickNode(mViewCoreRef.get(), nodeId);
         helper.waitForCallback(callCount);
     }
 
@@ -277,6 +291,21 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
             @Override
             public void run() {
                 mUI.getEditorView().findViewById(resourceId).performClick();
+            }
+        });
+        helper.waitForCallback(callCount);
+    }
+
+    protected void clickAndroidBackButtonInEditorAndWait(CallbackHelper helper)
+            throws InterruptedException, TimeoutException {
+        int callCount = helper.getCallCount();
+        ThreadUtils.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mUI.getEditorView().dispatchKeyEvent(
+                        new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));
+                mUI.getEditorView().dispatchKeyEvent(
+                        new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK));
             }
         });
         helper.waitForCallback(callCount);
@@ -422,6 +451,28 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
             public void run() {
                 ((OptionSection) mUI.getPaymentMethodSectionForTest())
                         .getOptionLabelsForTest(suggestionIndex)
+                        .performClick();
+            }
+        });
+        helper.waitForCallback(callCount);
+    }
+
+    /**
+     *  Clicks on the edit icon corresponding to the payment method suggestion at the specified
+     *  |suggestionIndex|.
+     */
+    protected void clickOnPaymentMethodSuggestionEditIconAndWait(
+            final int suggestionIndex, CallbackHelper helper)
+            throws ExecutionException, TimeoutException, InterruptedException {
+        assert (suggestionIndex < getNumberOfPaymentInstruments());
+
+        int callCount = helper.getCallCount();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                ((OptionSection) mUI.getPaymentMethodSectionForTest())
+                        .getOptionRowAtIndex(suggestionIndex)
+                        .getEditIconForTest()
                         .performClick();
             }
         });
@@ -690,6 +741,21 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         });
     }
 
+    /**
+     * Asserts that only the specified reason for abort is logged.
+     *
+     * @param abortReason The only bucket in the abort histogram that should have a record.
+     */
+    protected void assertOnlySpecificAbortMetricLogged(int abortReason) {
+        for (int i = 0; i < PaymentRequestMetrics.ABORT_REASON_MAX; ++i) {
+            assertEquals(
+                    String.format(Locale.getDefault(), "Found %d instead of %d", i, abortReason),
+                    (i == abortReason ? 1 : 0),
+                    RecordHistogram.getHistogramValueCountForTesting(
+                            "PaymentRequest.CheckoutFunnel.Aborted", i));
+        }
+    }
+
     @Override
     public void onPaymentRequestReadyForInput(PaymentRequestUI ui) {
         ThreadUtils.assertOnUiThread();
@@ -805,7 +871,7 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         /**
          * Called when the UI is ready for input.
          *
-         * @param ui The UI that is ready for input.
+         * @param target The UI that is ready for input.
          */
         public void notifyCalled(T target) {
             ThreadUtils.assertOnUiThread();
@@ -821,10 +887,9 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
      *                           or HAVE_INSTRUMENTS.
      * @param responseSpeed      How quickly the app will respond to "get instruments" query. Either
      *                           IMMEDIATE_RESPONSE or DELAYED_RESPONSE.
-     * @return The installed payment app.
      */
-    protected TestPay installPaymentApp(final int instrumentPresence, final int responseSpeed) {
-        return installPaymentApp("https://bobpay.com", instrumentPresence, responseSpeed);
+    protected void installPaymentApp(int instrumentPresence, int responseSpeed) {
+        installPaymentApp("https://bobpay.com", instrumentPresence, responseSpeed);
     }
 
     /**
@@ -835,11 +900,9 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
      *                           or HAVE_INSTRUMENTS.
      * @param responseSpeed      How quickly the app will respond to "get instruments" query. Either
      *                           IMMEDIATE_RESPONSE or DELAYED_RESPONSE.
-     * @return The installed payment app.
      */
-    protected TestPay installPaymentApp(final String methodName, final int instrumentPresence,
-            final int responseSpeed) {
-        return installPaymentApp(methodName, instrumentPresence, responseSpeed, IMMEDIATE_CREATION);
+    protected void installPaymentApp(String methodName, int instrumentPresence, int responseSpeed) {
+        installPaymentApp(methodName, instrumentPresence, responseSpeed, IMMEDIATE_CREATION);
     }
 
     /**
@@ -852,21 +915,19 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
      *                           IMMEDIATE_RESPONSE or DELAYED_RESPONSE.
      * @param creationSpeed      How quickly the app factory will create this app. Either
      *                           IMMEDIATE_CREATION or DELAYED_CREATION.
-     * @return The installed payment app.
      */
-    protected TestPay installPaymentApp(final String methodName, final int instrumentPresence,
-            final int responseSpeed, final int creationSpeed) {
-        return installPaymentApp(new ArrayList<String>(asList(methodName)), instrumentPresence,
-                responseSpeed, creationSpeed);
+    protected void installPaymentApp(
+            String methodName, int instrumentPresence, int responseSpeed, int creationSpeed) {
+        installPaymentApp(asList(methodName), instrumentPresence, responseSpeed, creationSpeed);
     }
 
-    protected TestPay installPaymentApp(final List<String> methodNames,
+    protected void installPaymentApp(final List<String> appMethodNames,
             final int instrumentPresence, final int responseSpeed, final int creationSpeed) {
-        final TestPay app = new TestPay(methodNames, instrumentPresence, responseSpeed);
         PaymentAppFactory.getInstance().addAdditionalFactory(new PaymentAppFactoryAddition() {
             @Override
-            public void create(Context context, WebContents webContents, Set<String> methodNames,
+            public void create(WebContents webContents, Set<String> methodNames,
                     final PaymentAppFactory.PaymentAppCreatedCallback callback) {
+                final TestPay app = new TestPay(appMethodNames, instrumentPresence, responseSpeed);
                 if (creationSpeed == IMMEDIATE_CREATION) {
                     callback.onPaymentAppCreated(app);
                     callback.onAllPaymentAppsCreated();
@@ -881,7 +942,6 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
                 }
             }
         });
-        return app;
     }
 
     /** A payment app implementation for test. */
@@ -899,7 +959,8 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
 
         @Override
         public void getInstruments(Map<String, PaymentMethodData> methodData, String origin,
-                byte[][] certificateChain, InstrumentsCallback instrumentsCallback) {
+                String iframeOrigin, byte[][] certificateChain,
+                InstrumentsCallback instrumentsCallback) {
             mCallback = instrumentsCallback;
             respond();
         }
@@ -964,7 +1025,8 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         }
 
         @Override
-        public void invokePaymentApp(String merchantName, String origin, byte[][] certificateChain,
+        public void invokePaymentApp(String id, String merchantName, String origin,
+                String iframeOrigin, byte[][] certificateChain,
                 Map<String, PaymentMethodData> methodData, PaymentItem total,
                 List<PaymentItem> displayItems, Map<String, PaymentDetailsModifier> modifiers,
                 InstrumentDetailsCallback detailsCallback) {

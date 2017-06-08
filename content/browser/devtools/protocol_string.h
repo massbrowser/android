@@ -52,6 +52,17 @@ class CONTENT_EXPORT StringUtil {
       s = "0" + s;
     return s;
   }
+  static double toDouble(const char* s, size_t len, bool* ok) {
+    double v = 0.0;
+    *ok = base::StringToDouble(std::string(s, len), &v);
+    return *ok ? v : 0.0;
+  }
+  static size_t find(const String& s, const char* needle) {
+    return s.find(needle);
+  }
+  static size_t find(const String& s, const String& needle) {
+    return s.find(needle);
+  }
   static const size_t kNotFound = static_cast<size_t>(-1);
   static void builderAppend(StringBuilder& builder, const String& s) {
     builder.append(s);

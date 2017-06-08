@@ -17,8 +17,8 @@
 #include "components/ntp_snippets/category_rankers/click_based_category_ranker.h"
 #include "components/ntp_snippets/content_suggestions_service.h"
 #include "components/ntp_snippets/remote/remote_suggestions_provider_impl.h"
+#include "components/ntp_snippets/remote/remote_suggestions_scheduler_impl.h"
 #include "components/ntp_snippets/remote/request_throttler.h"
-#include "components/ntp_snippets/remote/scheduling_remote_suggestions_provider.h"
 #include "components/ntp_snippets/user_classifier.h"
 #include "components/ntp_tiles/most_visited_sites.h"
 #include "components/ntp_tiles/popular_sites_impl.h"
@@ -33,8 +33,8 @@
 #include "components/ssl_config/ssl_config_service_manager.h"
 #include "components/strings/grit/components_locale_settings.h"
 #include "components/sync/base/sync_prefs.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
-#include "components/translate/core/common/translate_pref_names.h"
 #include "components/update_client/update_client.h"
 #include "components/variations/service/variations_service.h"
 #include "components/web_resource/web_resource_pref_names.h"
@@ -101,9 +101,8 @@ void RegisterBrowserStatePrefs(user_prefs::PrefRegistrySyncable* registry) {
   ntp_snippets::ClickBasedCategoryRanker::RegisterProfilePrefs(registry);
   ntp_snippets::ContentSuggestionsService::RegisterProfilePrefs(registry);
   ntp_snippets::RemoteSuggestionsProviderImpl::RegisterProfilePrefs(registry);
+  ntp_snippets::RemoteSuggestionsSchedulerImpl::RegisterProfilePrefs(registry);
   ntp_snippets::RequestThrottler::RegisterProfilePrefs(registry);
-  ntp_snippets::SchedulingRemoteSuggestionsProvider::RegisterProfilePrefs(
-      registry);
   ntp_snippets::UserClassifier::RegisterProfilePrefs(registry);
   ntp_tiles::MostVisitedSites::RegisterProfilePrefs(registry);
   ntp_tiles::PopularSitesImpl::RegisterProfilePrefs(registry);

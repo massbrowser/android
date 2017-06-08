@@ -25,12 +25,14 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
 import org.chromium.base.ResourceExtractor;
+import org.chromium.base.SysUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.annotations.RemovableInRelease;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeStrictMode;
 import org.chromium.chrome.browser.ChromeSwitches;
@@ -52,7 +54,6 @@ import org.chromium.chrome.browser.init.adblocktask.DownloadTrackingProtectionDa
 import org.chromium.chrome.browser.init.ADBlockUtils;
 import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.BrowserStartupController;
-import org.chromium.content.browser.ChildProcessCreationParams;
 import org.chromium.content.browser.DeviceUtils;
 import org.chromium.content.browser.SpeechRecognition;
 import org.chromium.net.NetworkChangeNotifier;
@@ -70,7 +71,7 @@ import java.util.Locale;
  */
 public class ChromeBrowserInitializer {
     private static final String TAG = "BrowserInitializer";
-    private static ChromeBrowserInitializer sChromeBrowserInitiliazer;
+    private static ChromeBrowserInitializer sChromeBrowserInitializer;
 
     private final Handler mHandler;
     private final ChromeApplication mApplication;
@@ -104,10 +105,10 @@ public class ChromeBrowserInitializer {
      * @return The singleton instance of {@link ChromeBrowserInitializer}.
      */
     public static ChromeBrowserInitializer getInstance(Context context) {
-        if (sChromeBrowserInitiliazer == null) {
-            sChromeBrowserInitiliazer = new ChromeBrowserInitializer(context);
+        if (sChromeBrowserInitializer == null) {
+            sChromeBrowserInitializer = new ChromeBrowserInitializer(context);
         }
-        return sChromeBrowserInitiliazer;
+        return sChromeBrowserInitializer;
     }
 
     private ChromeBrowserInitializer(Context context) {
@@ -129,9 +130,26 @@ public class ChromeBrowserInitializer {
      * @throws ProcessInitException if there is a problem with the native library.
      */
     public void handleSynchronousStartup() throws ProcessInitException {
-        assert ThreadUtils.runningOnUiThread() : "Tried to start the browser on the wrong thread";
+        handleSynchronousStartupInternal(false);
+    }
 
-        BrowserParts parts = new EmptyBrowserParts();
+    /**
+     * Initializes the Chrome browser process synchronously with GPU process warmup.
+     */
+    public void handleSynchronousStartupWithGpuWarmUp() throws ProcessInitException {
+        handleSynchronousStartupInternal(true);
+    }
+
+    private void handleSynchronousStartupInternal(final boolean startGpuProcess)
+            throws ProcessInitException {
+        ThreadUtils.checkUiThread();
+
+        BrowserParts parts = new EmptyBrowserParts() {
+            @Override
+            public boolean shouldStartGpuProcess() {
+                return startGpuProcess;
+            }
+        };
         handlePreNativeStartup(parts);
         handlePostNativeStartup(false, parts);
     }
@@ -143,7 +161,7 @@ public class ChromeBrowserInitializer {
      *              initialization tasks.
      */
     public void handlePreNativeStartup(final BrowserParts parts) {
-        assert ThreadUtils.runningOnUiThread() : "Tried to start the browser on the wrong thread";
+        ThreadUtils.checkUiThread();
 
         ProcessInitializationHandler.getInstance().initializePreNative();
         preInflationStartup();
@@ -164,7 +182,7 @@ public class ChromeBrowserInitializer {
         // Domain reliability uses significant enough memory that we should disable it on low memory
         // devices for now.
         // TODO(zbowling): remove this after domain reliability is refactored. (crbug.com/495342)
-        if (DeviceClassManager.disableDomainReliability()) {
+        if (SysUtils.isLowEndDevice()) {
             CommandLine.getInstance().appendSwitch(ChromeSwitches.DISABLE_DOMAIN_RELIABILITY);
         }
     }
@@ -327,15 +345,6 @@ public class ChromeBrowserInitializer {
             }
         });
 
-        // See crbug.com/593250. This can be removed after N SDK is released, crbug.com/592722.
-        ChildProcessCreationParams creationParams = mApplication.getChildProcessCreationParams();
-        // WebAPK uses this code path to initialize Chrome's native code, and the
-        // ChildProcessCreationParams has been set in {@link WebApkActivity}. We have to prevent
-        // resetting with a wrong parameter here. TODO(hanxi): Remove the entire if block after
-        // N SDK is released, since it breaks WebAPKs on N+.
-        if (creationParams != null && ChildProcessCreationParams.get() != null) {
-            ChildProcessCreationParams.set(creationParams);
-        }
         if (isAsync) {
             // We want to start this queue once the C++ startup tasks have run; allow the
             // C++ startup to run asynchonously, and set it up to start the Java queue once
@@ -371,7 +380,7 @@ public class ChromeBrowserInitializer {
           new DownloadTrackingProtectionDataAsyncTask(mApplication).execute();
           new DownloadAdBlockDataAsyncTask(mApplication).execute();
           new DownloadHTTPSDataAsyncTask(mApplication).execute();
-          new DownloadWhiteListTask(mApplication).execute();
+//          new DownloadWhiteListTask(mApplication).execute();
     }
 
 
@@ -409,7 +418,7 @@ public class ChromeBrowserInitializer {
         ThreadUtils.assertOnUiThread();
         TraceEvent.begin("NetworkChangeNotifier.init");
         // Enable auto-detection of network connectivity state changes.
-        NetworkChangeNotifier.init(context);
+        NetworkChangeNotifier.init();
         NetworkChangeNotifier.setAutoDetectConnectivityState(true);
         TraceEvent.end("NetworkChangeNotifier.init");
     }
@@ -419,7 +428,7 @@ public class ChromeBrowserInitializer {
         if (mNativeInitializationComplete) return;
         // The policies are used by browser startup, so we need to register the policy providers
         // before starting the browser process.
-        mApplication.registerPolicyProviders(CombinedPolicyProvider.get());
+        AppHooks.get().registerPolicyProviders(CombinedPolicyProvider.get());
 
         SpeechRecognition.initialize(mApplication);
     }
@@ -470,5 +479,13 @@ public class ChromeBrowserInitializer {
                 }
             }
         };
+    }
+
+    /**
+     * For unit testing of clients.
+     * @param initializer The (dummy or mocked) initializer to use.
+     */
+    public static void setForTesting(ChromeBrowserInitializer initializer) {
+        sChromeBrowserInitializer = initializer;
     }
 }

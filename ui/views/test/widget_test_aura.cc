@@ -71,7 +71,7 @@ BOOL CALLBACK FindAllWindowsCallback(HWND hwnd, LPARAM param) {
 
 #endif  // OS_WIN
 
-std::vector<aura::Window*> GetAllTopLeveLWindows() {
+std::vector<aura::Window*> GetAllTopLevelWindows() {
   std::vector<aura::Window*> roots;
 #if defined(USE_X11) && !defined(OS_CHROMEOS)
   roots = DesktopWindowTreeHostX11::GetAllOpenWindows();
@@ -146,8 +146,8 @@ gfx::Size WidgetTest::GetNativeWidgetMinimumContentSize(Widget* widget) {
 }
 
 // static
-ui::EventProcessor* WidgetTest::GetEventProcessor(Widget* widget) {
-  return widget->GetNativeWindow()->GetHost()->event_processor();
+ui::EventSink* WidgetTest::GetEventSink(Widget* widget) {
+  return widget->GetNativeWindow()->GetHost()->event_sink();
 }
 
 // static
@@ -163,10 +163,9 @@ bool WidgetTest::IsNativeWindowTransparent(gfx::NativeWindow window) {
 
 // static
 Widget::Widgets WidgetTest::GetAllWidgets() {
-  std::vector<aura::Window*> toplevel = GetAllTopLeveLWindows();
   Widget::Widgets all_widgets;
-  for (aura::Window* root : toplevel)
-    Widget::GetAllChildWidgets(root, &all_widgets);
+  for (aura::Window* window : GetAllTopLevelWindows())
+    Widget::GetAllChildWidgets(window->GetRootWindow(), &all_widgets);
   return all_widgets;
 }
 

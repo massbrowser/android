@@ -6,18 +6,17 @@ package org.chromium.chrome.browser.customtabs;
 
 import android.content.Context;
 import android.net.Uri;
+import android.support.annotation.NonNull;
 import android.support.customtabs.CustomTabsService;
 import android.support.customtabs.CustomTabsSessionToken;
 import android.support.customtabs.PostMessageServiceConnection;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.VisibleForTesting;
+import org.chromium.chrome.browser.customtabs.OriginVerifier.OriginVerificationListener;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content.browser.AppWebMessagePort;
-import org.chromium.content.browser.AppWebMessagePortService;
-import org.chromium.content.browser.AppWebMessagePortService.MessageChannelObserver;
-import org.chromium.content.browser.PostMessageSender;
-import org.chromium.content.browser.PostMessageSender.PostMessageSenderDelegate;
 import org.chromium.content_public.browser.MessagePort;
 import org.chromium.content_public.browser.MessagePort.MessageCallback;
 import org.chromium.content_public.browser.WebContents;
@@ -26,22 +25,16 @@ import org.chromium.content_public.browser.WebContentsObserver;
 /**
  * A class that handles postMessage communications with a designated {@link CustomTabsSessionToken}.
  */
-public class PostMessageHandler extends PostMessageServiceConnection {
-    private static AppWebMessagePortService sService;
-
+public class PostMessageHandler
+        extends PostMessageServiceConnection implements OriginVerificationListener {
     private final MessageCallback mMessageCallback;
+    private OriginVerifier mOriginVerifier;
     private WebContents mWebContents;
     private boolean mMessageChannelCreated;
     private boolean mBoundToService;
     private AppWebMessagePort[] mChannel;
-    private PostMessageSender mPostMessageSender;
-    private PostMessageSenderDelegate mSenderDelegate;
     private Uri mOrigin;
-
-    private static AppWebMessagePortService getAppWebMessagePortService() {
-        if (sService == null) sService = new AppWebMessagePortService();
-        return sService;
-    }
+    private String mPackageName;
 
     /**
      * Basic constructor. Everytime the given {@link CustomTabsSessionToken} is associated with a
@@ -59,6 +52,14 @@ public class PostMessageHandler extends PostMessageServiceConnection {
                 if (mBoundToService) postMessage(message, null);
             }
         };
+    }
+
+    /**
+     * Sets the package name unique to the session.
+     * @param packageName The package name for the client app for the owning session.
+     */
+    void setPackageName(@NonNull String packageName) {
+        mPackageName = packageName;
     }
 
     /**
@@ -82,10 +83,12 @@ public class PostMessageHandler extends PostMessageServiceConnection {
             private boolean mNavigatedOnce;
 
             @Override
-            public void didNavigateMainFrame(String url, String baseUrl,
-                    boolean isNavigationToDifferentPage, boolean isFragmentNavigation,
-                    int statusCode) {
-                if (mNavigatedOnce && isNavigationToDifferentPage && mChannel != null) {
+            public void didFinishNavigation(String url, boolean isInMainFrame, boolean isErrorPage,
+                    boolean hasCommitted, boolean isSameDocument, boolean isFragmentNavigation,
+                    Integer pageTransition, int errorCode, String errorDescription,
+                    int httpStatusCode) {
+                if (mNavigatedOnce && hasCommitted && isInMainFrame && !isSameDocument
+                        && mChannel != null) {
                     webContents.removeObserver(this);
                     disconnectChannel();
                     unbindFromContext(ContextUtils.getApplicationContext());
@@ -109,52 +112,20 @@ public class PostMessageHandler extends PostMessageServiceConnection {
     }
 
     private void initializeWithWebContents(final WebContents webContents) {
-        final AppWebMessagePortService service = getAppWebMessagePortService();
-        mChannel = (AppWebMessagePort[]) webContents.createMessageChannel(service);
+        mChannel = (AppWebMessagePort[]) webContents.createMessageChannel();
         mChannel[0].setMessageCallback(mMessageCallback, null);
-        mSenderDelegate = new PostMessageSenderDelegate() {
-            @Override
-            public void postMessageToWeb(
-                    String frameName, String message, String targetOrigin,
-                    int[] sentPortIds) {
-                if (webContents.isDestroyed()) {
-                    disconnectChannel();
-                    unbindFromContext(ContextUtils.getApplicationContext());
-                    return;
-                }
-                webContents.postMessageToFrame(
-                        frameName, message, mOrigin.toString(), targetOrigin, sentPortIds);
-            }
 
-            @Override
-            public void onPostMessageQueueEmpty() {}
+        webContents.postMessageToFrame(
+                null, "", mOrigin.toString(), "", new AppWebMessagePort[] {mChannel[1]});
 
-            @Override
-            public boolean isPostMessageSenderReady() {
-                return true;
-            }
-        };
-        mPostMessageSender = new PostMessageSender(
-                mSenderDelegate, getAppWebMessagePortService());
-        service.addObserver(new MessageChannelObserver() {
-            @Override
-            public void onMessageChannelCreated() {
-                service.removeObserver(this);
-                if (mChannel == null) return;
-                mPostMessageSender.postMessage(
-                        null, "", "", new AppWebMessagePort[] {mChannel[1]});
-                mMessageChannelCreated = true;
-                if (mBoundToService) notifyMessageChannelReady(null);
-            }
-        });
+        mMessageChannelCreated = true;
+        if (mBoundToService) notifyMessageChannelReady(null);
     }
 
     private void disconnectChannel() {
         if (mChannel == null) return;
         mChannel[0].close();
         mChannel = null;
-        mSenderDelegate = null;
-        mPostMessageSender = null;
         mWebContents = null;
     }
 
@@ -167,6 +138,22 @@ public class PostMessageHandler extends PostMessageServiceConnection {
         if (mWebContents != null && !mWebContents.isDestroyed()) {
             initializeWithWebContents(mWebContents);
         }
+    }
+
+    /**
+     * Asynchronously verify the postMessage origin for the given package name and initialize with
+     * it if the result is a success. Can be called multiple times. If so, the previous requests
+     * will be overridden.
+     * @param origin The origin to verify for.
+     */
+    public void verifyAndInitializeWithOrigin(final Uri origin) {
+        if (mOriginVerifier == null) mOriginVerifier = new OriginVerifier(this, mPackageName);
+        ThreadUtils.postOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mOriginVerifier.start(origin);
+            }
+        });
     }
 
     /**
@@ -208,5 +195,28 @@ public class PostMessageHandler extends PostMessageServiceConnection {
     @Override
     public void onPostMessageServiceDisconnected() {
         mBoundToService = false;
+    }
+
+    @Override
+    public void onOriginVerified(String packageName, Uri origin, boolean result) {
+        if (!result) return;
+        initializeWithOrigin(origin);
+    }
+
+    /**
+     * @return The origin that has been declared for this handler.
+     */
+    @VisibleForTesting
+    Uri getOriginForTesting() {
+        return mOrigin;
+    }
+
+    /**
+     * Cleans up any dependencies that this handler might have.
+     * @param context Context to use for unbinding if necessary.
+     */
+    void cleanup(Context context) {
+        if (mBoundToService) super.unbindFromContext(context);
+        if (mOriginVerifier != null) mOriginVerifier.cleanUp();
     }
 }

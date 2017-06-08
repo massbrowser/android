@@ -4,6 +4,7 @@
 
 #include "components/offline_pages/core/downloads/download_notifying_observer.h"
 
+#include "base/memory/ptr_util.h"
 #include "components/offline_pages/core/background/request_coordinator.h"
 #include "components/offline_pages/core/background/save_page_request.h"
 #include "components/offline_pages/core/client_policy_controller.h"
@@ -36,11 +37,11 @@ void DownloadNotifyingObserver::CreateAndStartObserving(
     std::unique_ptr<OfflinePageDownloadNotifier> notifier) {
   DCHECK(request_coordinator);
   DCHECK(notifier.get());
-  DownloadNotifyingObserver* observer = new DownloadNotifyingObserver(
-      std::move(notifier), request_coordinator->GetPolicyController());
-  request_coordinator->AddObserver(observer);
-  // |request_coordinator| takes ownership of observer here.
-  request_coordinator->SetUserData(&kUserDataKey, observer);
+  std::unique_ptr<DownloadNotifyingObserver> observer =
+      base::WrapUnique(new DownloadNotifyingObserver(
+          std::move(notifier), request_coordinator->GetPolicyController()));
+  request_coordinator->AddObserver(observer.get());
+  request_coordinator->SetUserData(&kUserDataKey, std::move(observer));
 }
 
 void DownloadNotifyingObserver::OnAdded(const SavePageRequest& request) {
@@ -62,6 +63,13 @@ void DownloadNotifyingObserver::OnChanged(const SavePageRequest& request) {
   if (!IsVisibleInUI(request.client_id()))
     return;
   NotifyRequestStateChange(request);
+}
+
+void DownloadNotifyingObserver::OnNetworkProgress(
+    const SavePageRequest& request,
+    int64_t received_bytes) {
+  // TODO(dimich): Enable this back in M59. See bug 704049 for more info and
+  // what was temporarily (for M58) reverted.
 }
 
 void DownloadNotifyingObserver::OnCompleted(

@@ -44,7 +44,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "net/http/http_response_headers.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -70,7 +70,12 @@ const char* const kValidHttpMethodsForPrerendering[] = {
 };
 
 void ResumeThrottles(
-    std::vector<base::WeakPtr<PrerenderResourceThrottle> > throttles) {
+    std::vector<base::WeakPtr<PrerenderResourceThrottle>> throttles,
+    std::vector<base::WeakPtr<PrerenderResourceThrottle>> idle_resources) {
+  for (auto resource : idle_resources) {
+    if (resource)
+      resource->ResetResourcePriority();
+  }
   for (size_t i = 0; i < throttles.size(); i++) {
     if (throttles[i])
       throttles[i]->ResumeHandler();
@@ -139,7 +144,7 @@ class PrerenderContents::WebContentsDelegateImpl
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
-      WindowContainerType window_container_type,
+      content::mojom::WindowContainerType window_container_type,
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
@@ -231,7 +236,7 @@ bool PrerenderContents::IsValidHttpMethod(const std::string& method) {
   // |method| has been canonicalized to upper case at this point so we can just
   // compare them.
   DCHECK_EQ(method, base::ToUpperASCII(method));
-  for (const auto& valid_method : kValidHttpMethods) {
+  for (auto* valid_method : kValidHttpMethods) {
     if (method == valid_method)
       return true;
   }
@@ -239,7 +244,7 @@ bool PrerenderContents::IsValidHttpMethod(const std::string& method) {
   if (prerender_mode() == PREFETCH_ONLY)
     return false;
 
-  for (const auto& valid_method : kValidHttpMethodsForPrerendering) {
+  for (auto* valid_method : kValidHttpMethodsForPrerendering) {
     if (method == valid_method)
       return true;
   }
@@ -553,8 +558,10 @@ void PrerenderContents::DocumentLoadedInFrame(
 
 void PrerenderContents::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->IsInMainFrame() || navigation_handle->IsSamePage())
+  if (!navigation_handle->IsInMainFrame() ||
+      navigation_handle->IsSameDocument()) {
     return;
+  }
 
   if (!CheckURL(navigation_handle->GetURL()))
     return;
@@ -755,10 +762,10 @@ void PrerenderContents::PrepareForUse() {
   NotifyPrerenderStop();
 
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&ResumeThrottles, resource_throttles_));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&ResumeThrottles, resource_throttles_, idle_resources_));
   resource_throttles_.clear();
+  idle_resources_.clear();
 }
 
 void PrerenderContents::CancelPrerenderForPrinting() {
@@ -766,6 +773,7 @@ void PrerenderContents::CancelPrerenderForPrinting() {
 }
 
 void PrerenderContents::OnPrerenderCancelerRequest(
+    const service_manager::BindSourceInfo& source_info,
     chrome::mojom::PrerenderCancelerRequest request) {
   if (!prerender_canceler_binding_.is_bound())
     prerender_canceler_binding_.Bind(std::move(request));
@@ -776,8 +784,15 @@ void PrerenderContents::AddResourceThrottle(
   resource_throttles_.push_back(throttle);
 }
 
+void PrerenderContents::AddIdleResource(
+    const base::WeakPtr<PrerenderResourceThrottle>& throttle) {
+  idle_resources_.push_back(throttle);
+}
+
 void PrerenderContents::AddNetworkBytes(int64_t bytes) {
   network_bytes_ += bytes;
+  for (Observer& observer : observer_list_)
+    observer.OnPrerenderNetworkBytesChanged(this);
 }
 
 }  // namespace prerender

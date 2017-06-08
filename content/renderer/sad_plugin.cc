@@ -25,11 +25,10 @@ void PaintSadPlugin(blink::WebCanvas* webcanvas,
   // Add a translation so that it appears at the origin of plugin rect.
   canvas->translate(plugin_rect.x(), plugin_rect.y());
 
-  cc::PaintFlags paint;
-  paint.setStyle(cc::PaintFlags::kFill_Style);
-  paint.setColor(SK_ColorBLACK);
-  canvas->drawRectCoords(0, 0, SkIntToScalar(width), SkIntToScalar(height),
-                         paint);
+  cc::PaintFlags flags;
+  flags.setStyle(cc::PaintFlags::kFill_Style);
+  flags.setColor(SK_ColorBLACK);
+  canvas->drawRect(SkRect::MakeIWH(width, height), flags);
   canvas->drawBitmap(
       sad_plugin_bitmap,
       SkIntToScalar(std::max(0, (width - sad_plugin_bitmap.width()) / 2)),

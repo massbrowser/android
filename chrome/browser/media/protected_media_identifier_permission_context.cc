@@ -5,6 +5,7 @@
 #include "chrome/browser/media/protected_media_identifier_permission_context.h"
 
 #include "base/command_line.h"
+#include "base/metrics/user_metrics.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/permissions/permission_util.h"
@@ -12,9 +13,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #if defined(OS_CHROMEOS)
 #include <utility>
@@ -37,7 +36,6 @@ using chromeos::attestation::PlatformVerificationDialog;
 ProtectedMediaIdentifierPermissionContext::
     ProtectedMediaIdentifierPermissionContext(Profile* profile)
     : PermissionContextBase(profile,
-                            content::PermissionType::PROTECTED_MEDIA_IDENTIFIER,
                             CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER)
 #if defined(OS_CHROMEOS)
       ,
@@ -85,6 +83,7 @@ void ProtectedMediaIdentifierPermissionContext::DecidePermission(
 
 ContentSetting
 ProtectedMediaIdentifierPermissionContext::GetPermissionStatusInternal(
+    content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     const GURL& embedding_origin) const {
   DVLOG(1) << __func__ << ": (" << requesting_origin.spec() << ", "
@@ -96,8 +95,8 @@ ProtectedMediaIdentifierPermissionContext::GetPermissionStatusInternal(
   }
 
   ContentSetting content_setting =
-      PermissionContextBase::GetPermissionStatusInternal(requesting_origin,
-                                                         embedding_origin);
+      PermissionContextBase::GetPermissionStatusInternal(
+          render_frame_host, requesting_origin, embedding_origin);
   DCHECK(content_setting == CONTENT_SETTING_ALLOW ||
          content_setting == CONTENT_SETTING_BLOCK ||
          content_setting == CONTENT_SETTING_ASK);
@@ -146,9 +145,12 @@ void ProtectedMediaIdentifierPermissionContext::UpdateTabContext(
   }
 }
 
-bool
-ProtectedMediaIdentifierPermissionContext::IsRestrictedToSecureOrigins() const {
-  return false;
+bool ProtectedMediaIdentifierPermissionContext::IsRestrictedToSecureOrigins()
+    const {
+  // EME is not supported on insecure origins, see https://goo.gl/Ks5zf7
+  // Note that origins whitelisted by --unsafely-treat-insecure-origin-as-secure
+  // flag will be treated as "secure" so they will not be affected.
+  return true;
 }
 
 // TODO(xhwang): We should consolidate the "protected content" related pref
@@ -213,14 +215,14 @@ void ProtectedMediaIdentifierPermissionContext::
       break;
     case PlatformVerificationDialog::CONSENT_RESPONSE_ALLOW:
       VLOG(1) << "Platform verification accepted by user.";
-      content::RecordAction(
+      base::RecordAction(
           base::UserMetricsAction("PlatformVerificationAccepted"));
       content_setting = CONTENT_SETTING_ALLOW;
       persist = true;
       break;
     case PlatformVerificationDialog::CONSENT_RESPONSE_DENY:
       VLOG(1) << "Platform verification denied by user.";
-      content::RecordAction(
+      base::RecordAction(
           base::UserMetricsAction("PlatformVerificationRejected"));
       content_setting = CONTENT_SETTING_BLOCK;
       persist = true;

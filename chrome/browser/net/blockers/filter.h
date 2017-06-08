@@ -18,8 +18,10 @@ enum FilterType {
   FTException = 0200,
   FTEmpty = 0400,
   FTHostOnly = 01000,
+  FTHTMLFiltering = 02000,
   FTListTypesMask = FTException|FTElementHiding|
-    FTElementHidingException|FTEmpty|FTComment,
+    FTElementHidingException|FTEmpty|FTComment|
+    FTHTMLFiltering,
 };
 
 enum FilterOption {
@@ -39,8 +41,10 @@ enum FilterOption {
   FOElemHide = 010000,
   FOThirdParty = 020000,  // Used internally only, do not use
   FONotThirdParty = 040000,  // Used internally only, do not use
+  FOPing = 0100000,
   FOResourcesOnly = FOScript|FOImage|FOStylesheet|FOObject|FOXmlHttpRequest|
-    FOObjectSubrequest|FOSubdocument|FODocument|FOOther|FOXBL
+    FOObjectSubrequest|FOSubdocument|FODocument|FOOther|FOXBL,
+  FOUnsupported = FOPing
 };
 
 class Filter {
@@ -77,6 +81,7 @@ friend class ABPFilterParser;
 
   // Nothing needs to be updated when a filter is added multiple times
   void update(const Filter &) {}
+  bool hasUnsupportedOptions() const;
 
   // Checks to see if the filter options match for the passed in data
   bool matchesOptions(const char *input, FilterOption contextOption,
@@ -149,5 +154,9 @@ bool isThirdPartyHost(const char *baseContextHost,
     int baseContextHostLen,
     const char *testHost,
     int testHostLen);
+
+static inline bool isEndOfLine(char c) {
+  return c == '\r' || c == '\n';
+}
 
 #endif // FILTER_H_

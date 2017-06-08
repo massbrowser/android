@@ -55,8 +55,7 @@ class BluetoothLowEnergyWeaveClientConnection
  public:
   class Factory {
    public:
-    static std::unique_ptr<BluetoothLowEnergyWeaveClientConnection>
-    NewInstance(
+    static std::unique_ptr<Connection> NewInstance(
         const RemoteDevice& remote_device,
         const std::string& device_address,
         scoped_refptr<device::BluetoothAdapter> adapter,
@@ -64,12 +63,11 @@ class BluetoothLowEnergyWeaveClientConnection
         BluetoothThrottler* bluetooth_throttler);
 
     // Exposed for testing.
-    static void SetInstanceForTesting(std::shared_ptr<Factory> factory);
+    static void SetInstanceForTesting(Factory* factory);
 
    protected:
     // Exposed for testing.
-    virtual std::unique_ptr<BluetoothLowEnergyWeaveClientConnection>
-    BuildInstance(
+    virtual std::unique_ptr<Connection> BuildInstance(
         const RemoteDevice& remote_device,
         const std::string& device_address,
         scoped_refptr<device::BluetoothAdapter> adapter,
@@ -77,7 +75,7 @@ class BluetoothLowEnergyWeaveClientConnection
         BluetoothThrottler* bluetooth_throttler);
 
    private:
-    static std::shared_ptr<Factory> factory_instance_;
+    static Factory* factory_instance_;
   };
 
   // The sub-state of a BluetoothLowEnergyWeaveClientConnection
@@ -114,6 +112,9 @@ class BluetoothLowEnergyWeaveClientConnection
 
  protected:
   // Exposed for testing.
+  // NOTE: This method may indirectly cause this object's destructor to be
+  // called. Do not perform any operations that touch the internals of this
+  // class after calling this method.
   void DestroyConnection();
 
   // Exposed for testing.

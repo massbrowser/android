@@ -27,6 +27,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import argparse
 import os
 import os.path as path
 import re
@@ -114,6 +115,12 @@ application_descriptors = [
     'heap_snapshot_worker.json',
     'utility_shared_worker.json',
 ]
+
+skipped_namespaces = {
+    'Console',  # Closure uses Console as a namespace item so we cannot override it right now.
+    'Gonzales',  # third party module defined in front_end/externs.js
+    'Terminal',  # third party module defined in front_end/externs.js
+}
 
 
 def has_errors(output):
@@ -238,7 +245,7 @@ common_closure_args = [
     'SIMPLE_OPTIMIZATIONS',
     '--warning_level',
     'VERBOSE',
-    '--language_in=ES6_STRICT',
+    '--language_in=ECMASCRIPT_NEXT',
     '--language_out=ES5_STRICT',
     '--extra_annotation_name',
     'suppressReceiverCheck',
@@ -259,7 +266,7 @@ def check_conditional_dependencies(modules_by_name):
     return errors_found
 
 
-def prepare_closure_frontend_compile(temp_devtools_path, descriptors):
+def prepare_closure_frontend_compile(temp_devtools_path, descriptors, namespace_externs_path):
     temp_frontend_path = path.join(temp_devtools_path, 'front_end')
     checker = dependency_preprocessor.DependencyPreprocessor(descriptors, temp_frontend_path, devtools_frontend_path)
     checker.enforce_dependencies()
@@ -267,6 +274,8 @@ def prepare_closure_frontend_compile(temp_devtools_path, descriptors):
     command = common_closure_args + [
         '--externs',
         to_platform_path(global_externs_file),
+        '--externs',
+        namespace_externs_path,
         '--js',
         runtime_file,
     ]
@@ -287,11 +296,44 @@ def prepare_closure_frontend_compile(temp_devtools_path, descriptors):
     return compiler_args_file.name
 
 
+def generate_namespace_externs(modules_by_name):
+    special_case_namespaces_path = path.join(path.dirname(path.abspath(__file__)), 'special_case_namespaces.json')
+    with open(special_case_namespaces_path) as json_file:
+        special_case_namespaces = json.load(json_file)
+
+    def map_module_to_namespace(module):
+        return special_case_namespaces.get(module, to_camel_case(module))
+
+    def to_camel_case(snake_string):
+        components = snake_string.split('_')
+        return ''.join(x.title() for x in components)
+
+    all_namespaces = [map_module_to_namespace(module) for module in modules_by_name]
+    namespaces = [namespace for namespace in all_namespaces if namespace not in skipped_namespaces]
+    namespaces.sort()
+    namespace_externs_file = tempfile.NamedTemporaryFile(mode='wt', delete=False)
+    try:
+        for namespace in namespaces:
+            namespace_externs_file.write('/** @type {!Object} */\n')
+            namespace_externs_file.write('var %s = {};\n' % namespace)
+    finally:
+        namespace_externs_file.close()
+    namespace_externs_path = to_platform_path(namespace_externs_file.name)
+    return namespace_externs_path
+
+
 def main():
+    global protocol_externs_file
     errors_found = False
-    generate_protocol_externs.generate_protocol_externs(protocol_externs_file,
-                                                        path.join(inspector_path, 'browser_protocol.json'),
-                                                        path.join(v8_inspector_path, 'js_protocol.json'))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--protocol-externs-file')
+    args, _ = parser.parse_known_args()
+    if args.protocol_externs_file:
+        protocol_externs_file = args.protocol_externs_file
+    else:
+        generate_protocol_externs.generate_protocol_externs(protocol_externs_file,
+                                                            path.join(inspector_path, 'browser_protocol.json'),
+                                                            path.join(v8_inspector_path, 'js_protocol.json'))
     loader = modular_build.DescriptorLoader(devtools_frontend_path)
     descriptors = loader.load_applications(application_descriptors)
     modules_by_name = descriptors.modules
@@ -301,7 +343,8 @@ def main():
 
     print 'Compiling frontend...'
     temp_devtools_path = tempfile.mkdtemp()
-    compiler_args_file_path = prepare_closure_frontend_compile(temp_devtools_path, descriptors)
+    namespace_externs_path = generate_namespace_externs(modules_by_name)
+    compiler_args_file_path = prepare_closure_frontend_compile(temp_devtools_path, descriptors, namespace_externs_path)
     frontend_compile_proc = popen(
         java_exec + ['-jar', closure_runner_jar, '--compiler-args-file', to_platform_path_exact(compiler_args_file_path)])
 
@@ -331,6 +374,7 @@ def main():
     errors_found |= has_errors(frontend_compile_out)
 
     os.remove(protocol_externs_file)
+    os.remove(namespace_externs_path)
     os.remove(compiler_args_file_path)
     shutil.rmtree(temp_devtools_path, True)
 

@@ -39,7 +39,7 @@ namespace {
 // A lazily created thread local storage for quick access to a thread's message
 // loop, if one exists.
 base::ThreadLocalPointer<MessageLoop>* GetTLSMessageLoop() {
-  static auto lazy_tls_ptr = new base::ThreadLocalPointer<MessageLoop>();
+  static auto* lazy_tls_ptr = new base::ThreadLocalPointer<MessageLoop>();
   return lazy_tls_ptr;
 }
 MessageLoop::MessagePumpFactory* message_pump_for_ui_factory_ = NULL;
@@ -75,8 +75,6 @@ MessageLoop::TaskObserver::~TaskObserver() {
 MessageLoop::DestructionObserver::~DestructionObserver() {
 }
 
-MessageLoop::NestingObserver::~NestingObserver() {}
-
 //------------------------------------------------------------------------------
 
 MessageLoop::MessageLoop(Type type)
@@ -85,7 +83,7 @@ MessageLoop::MessageLoop(Type type)
 }
 
 MessageLoop::MessageLoop(std::unique_ptr<MessagePump> pump)
-    : MessageLoop(TYPE_CUSTOM, Bind(&ReturnPump, Passed(&pump))) {
+    : MessageLoop(TYPE_CUSTOM, BindOnce(&ReturnPump, Passed(&pump))) {
   BindToCurrentThread();
 }
 
@@ -138,6 +136,8 @@ MessageLoop::~MessageLoop() {
   // OK, now make it so that no one can find us.
   if (current() == this)
     GetTLSMessageLoop()->Set(nullptr);
+
+  RunLoop::ResetTLSState();
 }
 
 // static
@@ -168,7 +168,7 @@ std::unique_ptr<MessagePump> MessageLoop::CreateMessagePumpForType(Type type) {
 
 #if defined(OS_IOS) || defined(OS_MACOSX)
 #define MESSAGE_PUMP_UI std::unique_ptr<MessagePump>(MessagePumpMac::Create())
-#elif defined(OS_NACL)
+#elif defined(OS_NACL) || defined(OS_AIX)
 // Currently NaCl doesn't have a UI MessageLoop.
 // TODO(abarth): Figure out if we need this.
 #define MESSAGE_PUMP_UI std::unique_ptr<MessagePump>()
@@ -214,18 +214,6 @@ void MessageLoop::RemoveDestructionObserver(
   destruction_observers_.RemoveObserver(destruction_observer);
 }
 
-void MessageLoop::AddNestingObserver(NestingObserver* observer) {
-  DCHECK_EQ(this, current());
-  CHECK(allow_nesting_);
-  nesting_observers_.AddObserver(observer);
-}
-
-void MessageLoop::RemoveNestingObserver(NestingObserver* observer) {
-  DCHECK_EQ(this, current());
-  CHECK(allow_nesting_);
-  nesting_observers_.RemoveObserver(observer);
-}
-
 void MessageLoop::QuitWhenIdle() {
   DCHECK_EQ(this, current());
   if (run_loop_) {
@@ -259,7 +247,7 @@ Closure MessageLoop::QuitWhenIdleClosure() {
 
 void MessageLoop::SetNestableTasksAllowed(bool allowed) {
   if (allowed) {
-    CHECK(allow_nesting_);
+    CHECK(base::RunLoop::IsNestingAllowedOnCurrentThread());
 
     // Kick the native pump just in case we enter a OS-driven nested message
     // loop.
@@ -272,10 +260,9 @@ bool MessageLoop::NestableTasksAllowed() const {
   return nestable_tasks_allowed_;
 }
 
-bool MessageLoop::IsNested() {
-  return run_loop_->run_depth_ > 1;
-}
-
+// TODO(gab): Migrate TaskObservers to RunLoop as part of separating concerns
+// between MessageLoop and RunLoop and making MessageLoop a swappable
+// implementation detail. http://crbug.com/703346
 void MessageLoop::AddTaskObserver(TaskObserver* task_observer) {
   DCHECK_EQ(this, current());
   CHECK(allow_task_observers_);
@@ -286,11 +273,6 @@ void MessageLoop::RemoveTaskObserver(TaskObserver* task_observer) {
   DCHECK_EQ(this, current());
   CHECK(allow_task_observers_);
   task_observers_.RemoveObserver(task_observer);
-}
-
-bool MessageLoop::is_running() const {
-  DCHECK_EQ(this, current());
-  return run_loop_ != NULL;
 }
 
 bool MessageLoop::HasHighResolutionTasks() {
@@ -309,7 +291,7 @@ bool MessageLoop::IsIdleForTesting() {
 std::unique_ptr<MessageLoop> MessageLoop::CreateUnbound(
     Type type,
     MessagePumpFactoryCallback pump_factory) {
-  return WrapUnique(new MessageLoop(type, pump_factory));
+  return WrapUnique(new MessageLoop(type, std::move(pump_factory)));
 }
 
 MessageLoop::MessageLoop(Type type, MessagePumpFactoryCallback pump_factory)
@@ -319,8 +301,9 @@ MessageLoop::MessageLoop(Type type, MessagePumpFactoryCallback pump_factory)
       in_high_res_mode_(false),
 #endif
       nestable_tasks_allowed_(true),
-      pump_factory_(pump_factory),
-      run_loop_(NULL),
+      pump_factory_(std::move(pump_factory)),
+      run_loop_(nullptr),
+      current_pending_task_(nullptr),
       incoming_task_queue_(new internal::IncomingTaskQueue(this)),
       unbound_task_runner_(
           new internal::MessageLoopTaskRunner(incoming_task_queue_)),
@@ -333,7 +316,7 @@ MessageLoop::MessageLoop(Type type, MessagePumpFactoryCallback pump_factory)
 void MessageLoop::BindToCurrentThread() {
   DCHECK(!pump_);
   if (!pump_factory_.is_null())
-    pump_ = pump_factory_.Run();
+    pump_ = std::move(pump_factory_).Run();
   else
     pump_ = CreateMessagePumpForType(type_);
 
@@ -382,12 +365,11 @@ void MessageLoop::SetThreadTaskRunnerHandle() {
 void MessageLoop::RunHandler() {
   DCHECK_EQ(this, current());
   DCHECK(run_loop_);
-  CHECK(allow_nesting_ || run_loop_->run_depth_ == 1);
   pump_->Run(this);
 }
 
 bool MessageLoop::ProcessNextDelayedNonNestableTask() {
-  if (run_loop_->run_depth_ != 1)
+  if (is_nested_)
     return false;
 
   if (deferred_non_nestable_work_queue_.empty())
@@ -403,6 +385,7 @@ bool MessageLoop::ProcessNextDelayedNonNestableTask() {
 
 void MessageLoop::RunTask(PendingTask* pending_task) {
   DCHECK(nestable_tasks_allowed_);
+  current_pending_task_ = pending_task;
 
 #if defined(OS_WIN)
   if (pending_task->is_high_res) {
@@ -423,17 +406,19 @@ void MessageLoop::RunTask(PendingTask* pending_task) {
     observer.DidProcessTask(*pending_task);
 
   nestable_tasks_allowed_ = true;
+
+  current_pending_task_ = nullptr;
 }
 
 bool MessageLoop::DeferOrRunPendingTask(PendingTask pending_task) {
-  if (pending_task.nestable || run_loop_->run_depth_ == 1) {
+  if (pending_task.nestable || !is_nested_) {
     RunTask(&pending_task);
     // Show that we ran a task (Note: a new one might arrive as a
     // consequence!).
     return true;
   }
 
-  // We couldn't run the task now because we're in a nested message loop
+  // We couldn't run the task now because we're in a nested run loop
   // and the task isn't nestable.
   deferred_non_nestable_work_queue_.push(std::move(pending_task));
   return false;
@@ -490,11 +475,6 @@ void MessageLoop::ReloadWorkQueue() {
 
 void MessageLoop::ScheduleWork() {
   pump_->ScheduleWork();
-}
-
-void MessageLoop::NotifyBeginNestedLoop() {
-  for (auto& observer : nesting_observers_)
-    observer.OnBeginNestedMessageLoop();
 }
 
 bool MessageLoop::DoWork() {
@@ -589,7 +569,7 @@ bool MessageLoop::DoIdleWork() {
 // MessageLoopForUI
 
 MessageLoopForUI::MessageLoopForUI(std::unique_ptr<MessagePump> pump)
-    : MessageLoop(TYPE_UI, Bind(&ReturnPump, Passed(&pump))) {}
+    : MessageLoop(TYPE_UI, BindOnce(&ReturnPump, std::move(pump))) {}
 
 #if defined(OS_ANDROID)
 void MessageLoopForUI::Start() {

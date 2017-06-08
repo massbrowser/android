@@ -17,21 +17,25 @@ class ABPFilterParser {
       const char *contextDomain = nullptr);
   // Serializes a the parsed data and bloom filter data into a single buffer.
   // The returned buffer should be deleted.
-  char * serialize(int *size, bool ignoreHTMLFilters = true);
+   char * serialize(int *size,
+        bool ignoreCosmeticFilters = true,
+        bool ignoreHtmlFilters = true);
   // Deserializes the buffer, a size is not needed since a serialized
   // buffer is self described
-  void deserialize(char *buffer);
+  bool deserialize(char *buffer);
 
   void enableBadFingerprintDetection();
 
   Filter *filters;
-  Filter *htmlRuleFilters;
+  Filter *cosmeticFilters;
+  Filter *htmlFilters;
   Filter *exceptionFilters;
   Filter *noFingerprintFilters;
   Filter *noFingerprintExceptionFilters;
 
   int numFilters;
-  int numHtmlRuleFilters;
+  int numCosmeticFilters;
+  int numHtmlFilters;
   int numExceptionFilters;
   int numNoFingerprintFilters;
   int numNoFingerprintExceptionFilters;
@@ -57,9 +61,11 @@ class ABPFilterParser {
   // the input
   bool hasMatchingFilters(Filter *filter, int numFilters, const char *input,
       int inputLen, FilterOption contextOption, const char *contextDomain,
-      BloomFilter *inputBloomFilter, const char *inputHost, int inputHostLen);
+      BloomFilter *inputBloomFilter, const char *inputHost, int inputHostLen,
+      Filter **matchingFilter = nullptr);
   void initBloomFilter(BloomFilter**, const char *buffer, int len);
-  void initHashSet(HashSet<Filter>**, char *buffer, int len);
+  bool initHashSet(HashSet<Filter>**, char *buffer, int len);
+  char *deserializedBuffer;
 };
 
 // Fast hash function applicable to 2 byte char checks

@@ -7,8 +7,9 @@
 
 #include "platform/geometry/FloatRect.h"
 #include "platform/graphics/Color.h"
-#include "platform/graphics/paint/PaintRecord.h"
 #include "testing/gmock/include/gmock/gmock.h"
+
+class SkPicture;
 
 namespace blink {
 
@@ -20,18 +21,18 @@ class FloatRect;
 // requested.
 // Note that clips which appear outside of a transform are not currently
 // supported.
-::testing::Matcher<const PaintRecord&> drawsRectangle(const FloatRect&, Color);
+::testing::Matcher<const SkPicture&> DrawsRectangle(const FloatRect&, Color);
 
 struct RectWithColor {
-  RectWithColor(const FloatRect& rectArg, const Color& colorArg)
-      : rect(rectArg), color(colorArg) {}
+  RectWithColor(const FloatRect& rect_arg, const Color& color_arg)
+      : rect(rect_arg), color(color_arg) {}
   FloatRect rect;
   Color color;
 };
 
 // Same as above, but matches a number of rectangles equal to the size of the
 // given vector.
-::testing::Matcher<const PaintRecord&> drawsRectangles(
+::testing::Matcher<const SkPicture&> DrawsRectangles(
     const Vector<RectWithColor>&);
 
 }  // namespace blink

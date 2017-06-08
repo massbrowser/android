@@ -10,30 +10,27 @@
 
 namespace blink {
 
-void PaintGeneratedImage::draw(PaintCanvas* canvas,
-                               const PaintFlags& paint,
-                               const FloatRect& destRect,
-                               const FloatRect& srcRect,
+void PaintGeneratedImage::Draw(PaintCanvas* canvas,
+                               const PaintFlags& flags,
+                               const FloatRect& dest_rect,
+                               const FloatRect& src_rect,
                                RespectImageOrientationEnum,
-                               ImageClampingMode,
-                               const ColorBehavior& colorBehavior) {
-  // TODO(ccameron): This function should not ignore |colorBehavior|.
-  // https://crbug.com/672306
+                               ImageClampingMode) {
   PaintCanvasAutoRestore ar(canvas, true);
-  canvas->clipRect(destRect);
-  canvas->translate(destRect.x(), destRect.y());
-  if (destRect.size() != srcRect.size())
-    canvas->scale(destRect.width() / srcRect.width(),
-                  destRect.height() / srcRect.height());
-  canvas->translate(-srcRect.x(), -srcRect.y());
-  canvas->drawPicture(m_picture.get(), nullptr, &paint);
+  canvas->clipRect(dest_rect);
+  canvas->translate(dest_rect.X(), dest_rect.Y());
+  if (dest_rect.Size() != src_rect.Size())
+    canvas->scale(dest_rect.Width() / src_rect.Width(),
+                  dest_rect.Height() / src_rect.Height());
+  canvas->translate(-src_rect.X(), -src_rect.Y());
+  SkRect bounds = record_->cullRect();
+  canvas->saveLayer(&bounds, &flags);
+  canvas->drawPicture(record_);
 }
 
-void PaintGeneratedImage::drawTile(GraphicsContext& context,
-                                   const FloatRect& srcRect) {
-  // TODO(ccameron): This function should not ignore |context|'s color behavior.
-  // https://crbug.com/672306
-  context.drawPicture(m_picture.get());
+void PaintGeneratedImage::DrawTile(GraphicsContext& context,
+                                   const FloatRect& src_rect) {
+  context.DrawRecord(record_);
 }
 
 }  // namespace blink

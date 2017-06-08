@@ -4,7 +4,9 @@
 
 #import "ios/showcase/toolbar/sc_toolbar_coordinator.h"
 
-#import "ios/clean/chrome/browser/ui/commands/toolbar_commands.h"
+#import "ios/clean/chrome/browser/ui/commands/navigation_commands.h"
+#import "ios/clean/chrome/browser/ui/commands/tab_grid_commands.h"
+#import "ios/clean/chrome/browser/ui/commands/tools_menu_commands.h"
 #import "ios/clean/chrome/browser/ui/toolbar/toolbar_view_controller.h"
 #import "ios/showcase/common/protocol_alerter.h"
 
@@ -26,8 +28,10 @@ CGFloat kToolbarHeight = 50.0f;
 @synthesize alerter = _alerter;
 
 - (void)start {
-  self.alerter = [[ProtocolAlerter alloc]
-      initWithProtocols:@[ @protocol(ToolbarCommands) ]];
+  self.alerter = [[ProtocolAlerter alloc] initWithProtocols:@[
+    @protocol(NavigationCommands), @protocol(TabGridCommands),
+    @protocol(ToolsMenuCommands)
+  ]];
   self.alerter.baseViewController = self.baseViewController;
 
   UIViewController* containerViewController = [[UIViewController alloc] init];
@@ -41,10 +45,11 @@ CGFloat kToolbarHeight = 50.0f;
 
   ToolbarViewController* toolbarViewController =
       [[ToolbarViewController alloc] init];
-  toolbarViewController.toolbarCommandHandler =
-      static_cast<id<ToolbarCommands>>(self.alerter);
-  toolbarViewController.view.translatesAutoresizingMaskIntoConstraints = NO;
+  toolbarViewController.dispatcher =
+      static_cast<id<NavigationCommands, TabGridCommands, ToolsMenuCommands>>(
+          self.alerter);
   [containerViewController addChildViewController:toolbarViewController];
+  toolbarViewController.view.frame = containerView.frame;
   [containerView addSubview:toolbarViewController.view];
   [toolbarViewController didMoveToParentViewController:containerViewController];
 
@@ -56,14 +61,6 @@ CGFloat kToolbarHeight = 50.0f;
         constraintEqualToAnchor:containerViewController.view.trailingAnchor],
     [containerView.centerYAnchor
         constraintEqualToAnchor:containerViewController.view.centerYAnchor],
-    [toolbarViewController.view.topAnchor
-        constraintEqualToAnchor:containerView.topAnchor],
-    [toolbarViewController.view.bottomAnchor
-        constraintEqualToAnchor:containerView.bottomAnchor],
-    [toolbarViewController.view.leadingAnchor
-        constraintEqualToAnchor:containerView.leadingAnchor],
-    [toolbarViewController.view.trailingAnchor
-        constraintEqualToAnchor:containerView.trailingAnchor],
   ]];
 
   [self.baseViewController pushViewController:containerViewController

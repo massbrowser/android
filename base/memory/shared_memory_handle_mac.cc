@@ -12,6 +12,7 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/mach_logging.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/unguessable_token.h"
 
 namespace base {
 
@@ -19,10 +20,12 @@ SharedMemoryHandle::SharedMemoryHandle()
     : type_(MACH), memory_object_(MACH_PORT_NULL) {}
 
 SharedMemoryHandle::SharedMemoryHandle(
-    const base::FileDescriptor& file_descriptor)
-    : type_(POSIX), file_descriptor_(file_descriptor) {}
+    const base::FileDescriptor& file_descriptor,
+    const base::UnguessableToken& guid)
+    : type_(POSIX), file_descriptor_(file_descriptor), guid_(guid) {}
 
-SharedMemoryHandle::SharedMemoryHandle(mach_vm_size_t size) {
+SharedMemoryHandle::SharedMemoryHandle(mach_vm_size_t size,
+                                       const base::UnguessableToken& guid) {
   type_ = MACH;
   mach_port_t named_right;
   kern_return_t kr = mach_make_memory_entry_64(
@@ -39,32 +42,18 @@ SharedMemoryHandle::SharedMemoryHandle(mach_vm_size_t size) {
 
   memory_object_ = named_right;
   size_ = size;
-  pid_ = GetCurrentProcId();
   ownership_passes_to_ipc_ = false;
+  guid_ = guid;
 }
 
 SharedMemoryHandle::SharedMemoryHandle(mach_port_t memory_object,
                                        mach_vm_size_t size,
-                                       base::ProcessId pid)
+                                       const base::UnguessableToken& guid)
     : type_(MACH),
       memory_object_(memory_object),
       size_(size),
-      pid_(pid),
-      ownership_passes_to_ipc_(false) {}
-
-SharedMemoryHandle::SharedMemoryHandle(const SharedMemoryHandle& handle) {
-  CopyRelevantData(handle);
-}
-
-SharedMemoryHandle& SharedMemoryHandle::operator=(
-    const SharedMemoryHandle& handle) {
-  if (this == &handle)
-    return *this;
-
-  type_ = handle.type_;
-  CopyRelevantData(handle);
-  return *this;
-}
+      ownership_passes_to_ipc_(false),
+      guid_(guid) {}
 
 SharedMemoryHandle SharedMemoryHandle::Duplicate() const {
   switch (type_) {
@@ -74,11 +63,11 @@ SharedMemoryHandle SharedMemoryHandle::Duplicate() const {
       int duped_fd = HANDLE_EINTR(dup(file_descriptor_.fd));
       if (duped_fd < 0)
         return SharedMemoryHandle();
-      return SharedMemoryHandle(FileDescriptor(duped_fd, true));
+      return SharedMemoryHandle(FileDescriptor(duped_fd, true), guid_);
     }
     case MACH: {
       if (!IsValid())
-        return SharedMemoryHandle(MACH_PORT_NULL, 0, 0);
+        return SharedMemoryHandle();
 
       // Increment the ref count.
       kern_return_t kr = mach_port_mod_refs(mach_task_self(), memory_object_,
@@ -89,26 +78,6 @@ SharedMemoryHandle SharedMemoryHandle::Duplicate() const {
       return handle;
     }
   }
-}
-
-bool SharedMemoryHandle::operator==(const SharedMemoryHandle& handle) const {
-  if (!IsValid() && !handle.IsValid())
-    return true;
-
-  if (type_ != handle.type_)
-    return false;
-
-  switch (type_) {
-    case POSIX:
-      return file_descriptor_.fd == handle.file_descriptor_.fd;
-    case MACH:
-      return memory_object_ == handle.memory_object_ && size_ == handle.size_ &&
-             pid_ == handle.pid_;
-  }
-}
-
-bool SharedMemoryHandle::operator!=(const SharedMemoryHandle& handle) const {
-  return !(*this == handle);
 }
 
 bool SharedMemoryHandle::IsValid() const {
@@ -157,7 +126,6 @@ bool SharedMemoryHandle::MapAt(off_t offset,
                      MAP_SHARED, file_descriptor_.fd, offset);
       return *memory != MAP_FAILED;
     case SharedMemoryHandle::MACH:
-      DCHECK_EQ(pid_, GetCurrentProcId());
       kern_return_t kr = mach_vm_map(
           mach_task_self(),
           reinterpret_cast<mach_vm_address_t*>(memory),    // Output parameter
@@ -199,21 +167,6 @@ void SharedMemoryHandle::SetOwnershipPassesToIPC(bool ownership_passes) {
 bool SharedMemoryHandle::OwnershipPassesToIPC() const {
   DCHECK_EQ(type_, MACH);
   return ownership_passes_to_ipc_;
-}
-
-void SharedMemoryHandle::CopyRelevantData(const SharedMemoryHandle& handle) {
-  type_ = handle.type_;
-  switch (type_) {
-    case POSIX:
-      file_descriptor_ = handle.file_descriptor_;
-      break;
-    case MACH:
-      memory_object_ = handle.memory_object_;
-      size_ = handle.size_;
-      pid_ = handle.pid_;
-      ownership_passes_to_ipc_ = handle.ownership_passes_to_ipc_;
-      break;
-  }
 }
 
 }  // namespace base

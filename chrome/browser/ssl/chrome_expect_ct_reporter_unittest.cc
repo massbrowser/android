@@ -35,16 +35,15 @@ const char kFailureHistogramName[] = "SSL.ExpectCTReportFailure2";
 // serialized report to be sent.
 class TestCertificateReportSender : public net::ReportSender {
  public:
-  TestCertificateReportSender()
-      : ReportSender(nullptr, net::ReportSender::DO_NOT_SEND_COOKIES) {}
+  TestCertificateReportSender() : ReportSender(nullptr) {}
   ~TestCertificateReportSender() override {}
 
-  void Send(
-      const GURL& report_uri,
-      base::StringPiece content_type,
-      base::StringPiece serialized_report,
-      const base::Callback<void()>& success_callback,
-      const base::Callback<void(const GURL&, int)>& error_callback) override {
+  void Send(const GURL& report_uri,
+            base::StringPiece content_type,
+            base::StringPiece serialized_report,
+            const base::Callback<void()>& success_callback,
+            const base::Callback<void(const GURL&, int, int)>& error_callback)
+      override {
     latest_report_uri_ = report_uri;
     serialized_report.CopyToString(&latest_serialized_report_);
     content_type.CopyToString(&latest_content_type_);
@@ -325,7 +324,9 @@ class ChromeExpectCTReporterWaitTest : public ::testing::Test {
     base::RunLoop run_loop;
     network_delegate_.set_url_request_destroyed_callback(
         run_loop.QuitClosure());
-    reporter->OnExpectCTFailed(host_port, report_uri, ssl_info);
+    reporter->OnExpectCTFailed(host_port, report_uri, ssl_info.cert.get(),
+                               ssl_info.unverified_cert.get(),
+                               ssl_info.signed_certificate_timestamps);
     run_loop.Run();
   }
 
@@ -341,6 +342,9 @@ class ChromeExpectCTReporterWaitTest : public ::testing::Test {
 
 // Test that no report is sent when the feature is not enabled.
 TEST(ChromeExpectCTReporterTest, FeatureDisabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(features::kExpectCTReporting);
+
   base::MessageLoop message_loop;
   base::HistogramTester histograms;
   histograms.ExpectTotalCount(kSendHistogramName, 0);
@@ -361,7 +365,9 @@ TEST(ChromeExpectCTReporterTest, FeatureDisabled) {
   net::HostPortPair host_port("example.test", 443);
   GURL report_uri("http://example-report.test");
 
-  reporter.OnExpectCTFailed(host_port, report_uri, ssl_info);
+  reporter.OnExpectCTFailed(host_port, report_uri, ssl_info.cert.get(),
+                            ssl_info.unverified_cert.get(),
+                            ssl_info.signed_certificate_timestamps);
   EXPECT_TRUE(sender->latest_report_uri().is_empty());
   EXPECT_TRUE(sender->latest_serialized_report().empty());
 
@@ -374,9 +380,6 @@ TEST(ChromeExpectCTReporterTest, EmptyReportURI) {
   base::HistogramTester histograms;
   histograms.ExpectTotalCount(kSendHistogramName, 0);
 
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kExpectCTReporting);
-
   TestCertificateReportSender* sender = new TestCertificateReportSender();
   net::TestURLRequestContext context;
   ChromeExpectCTReporter reporter(&context);
@@ -384,8 +387,8 @@ TEST(ChromeExpectCTReporterTest, EmptyReportURI) {
   EXPECT_TRUE(sender->latest_report_uri().is_empty());
   EXPECT_TRUE(sender->latest_serialized_report().empty());
 
-  reporter.OnExpectCTFailed(net::HostPortPair("example.test", 443), GURL(),
-                            net::SSLInfo());
+  reporter.OnExpectCTFailed(net::HostPortPair(), GURL(), nullptr, nullptr,
+                            net::SignedCertificateTimestampAndStatusList());
   EXPECT_TRUE(sender->latest_report_uri().is_empty());
   EXPECT_TRUE(sender->latest_serialized_report().empty());
 
@@ -394,9 +397,6 @@ TEST(ChromeExpectCTReporterTest, EmptyReportURI) {
 
 // Test that if a report fails to send, the UMA metric is recorded.
 TEST_F(ChromeExpectCTReporterWaitTest, SendReportFailure) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kExpectCTReporting);
-
   base::HistogramTester histograms;
   histograms.ExpectTotalCount(kFailureHistogramName, 0);
   histograms.ExpectTotalCount(kSendHistogramName, 0);
@@ -428,9 +428,6 @@ TEST(ChromeExpectCTReporterTest, SendReport) {
   base::HistogramTester histograms;
   histograms.ExpectTotalCount(kFailureHistogramName, 0);
   histograms.ExpectTotalCount(kSendHistogramName, 0);
-
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kExpectCTReporting);
 
   TestCertificateReportSender* sender = new TestCertificateReportSender();
   net::TestURLRequestContext context;
@@ -489,7 +486,9 @@ TEST(ChromeExpectCTReporterTest, SendReport) {
   GURL report_uri("http://example-report.test");
 
   // Check that the report is sent and contains the correct information.
-  reporter.OnExpectCTFailed(host_port, report_uri, ssl_info);
+  reporter.OnExpectCTFailed(host_port, report_uri, ssl_info.cert.get(),
+                            ssl_info.unverified_cert.get(),
+                            ssl_info.signed_certificate_timestamps);
   EXPECT_EQ(report_uri, sender->latest_report_uri());
   EXPECT_FALSE(sender->latest_serialized_report().empty());
   EXPECT_EQ("application/json; charset=utf-8", sender->latest_content_type());

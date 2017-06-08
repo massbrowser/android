@@ -5,9 +5,11 @@
 #include "chrome/browser/ui/views/conflicting_module_view_win.h"
 
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
@@ -16,7 +18,6 @@
 #include "chrome/grit/theme_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/user_metrics.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -52,6 +53,8 @@ ConflictingModuleView::ConflictingModuleView(views::View* anchor_view,
       GetLayoutConstant(LOCATION_BAR_BUBBLE_ANCHOR_VERTICAL_INSET), 0));
 
   observer_.Add(EnumerateModulesModel::GetInstance());
+
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::CONFLICTING_MODULE);
 }
 
 // static
@@ -110,7 +113,7 @@ void ConflictingModuleView::ShowBubble() {
 
 void ConflictingModuleView::OnWidgetClosing(views::Widget* widget) {
   views::BubbleDialogDelegateView::OnWidgetClosing(widget);
-  content::RecordAction(
+  base::RecordAction(
       UserMetricsAction("ConflictingModuleNotificationDismissed"));
 }
 
@@ -150,8 +153,7 @@ void ConflictingModuleView::Init() {
       IDS_CONFLICTING_MODULE_BUBBLE_WIDTH_CHARS));
   AddChildView(explanation);
 
-  content::RecordAction(
-      UserMetricsAction("ConflictingModuleNotificationShown"));
+  base::RecordAction(UserMetricsAction("ConflictingModuleNotificationShown"));
 
   UMA_HISTOGRAM_ENUMERATION("ConflictingModule.UserSelection",
       EnumerateModulesModel::ACTION_BUBBLE_SHOWN,

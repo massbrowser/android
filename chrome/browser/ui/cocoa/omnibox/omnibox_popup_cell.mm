@@ -148,13 +148,13 @@ NSAttributedString* CreateAnswerStringHelper(const base::string16& text,
       break;
     case SuggestionAnswer::ANSWER_TEXT_MEDIUM:
       answer_style = @{
-        NSForegroundColorAttributeName : ContentTextColor(is_dark_theme),
+        NSForegroundColorAttributeName : DimTextColor(is_dark_theme),
         NSFontAttributeName : FieldFont()
       };
       break;
     case SuggestionAnswer::ANSWER_TEXT_LARGE:
       answer_style = @{
-        NSForegroundColorAttributeName : ContentTextColor(is_dark_theme),
+        NSForegroundColorAttributeName : DimTextColor(is_dark_theme),
         NSFontAttributeName : LargeFont()
       };
       break;
@@ -492,7 +492,7 @@ NSAttributedString* CreateClassifiedAttributedString(
       NSMakePoint(kMaterialTextStartOffset + [tableView contentLeftPadding],
                   kVerticalTextPadding);
   if ([cellData matchType] == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
-    // Infinite suggestions are rendered with a prefix (usually ellipsis), which
+    // Tail suggestions are rendered with a prefix (usually ellipsis), which
     // appear vertically stacked.
     origin.x += [self drawMatchPrefixWithFrame:cellFrame
                                      tableView:tableView
@@ -569,7 +569,7 @@ NSAttributedString* CreateClassifiedAttributedString(
     // Ideally the offset should be |contentsOffset_|. If the max total width
     // (|prefixWidth| + |maxMatchContentsWidth|) from offset will exceed the
     // |remainingWidth|, then we shift the offset to the left , so that all
-    // postfix suggestions are visible.
+    // tail suggestions are visible.
     // We have to render the prefix, so offset has to be at least |prefixWidth|.
     offset =
         std::max(prefixWidth,

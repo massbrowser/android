@@ -40,24 +40,12 @@ const char kDisableOfflineAutoReload[] = "disable-offline-auto-reload";
 // Disable the Payment Request API.
 const char kDisablePaymentRequest[] = "disable-payment-request";
 
-// Disables the QR Code scanner.
-const char kDisableQRScanner[] = "disable-qr-scanner";
-
-// Disables the Spotlight actions.
-const char kDisableSpotlightActions[] = "disable-spotlight-actions";
-
 // Disables the tab strip auto scroll new tabs.
 const char kDisableTabStripAutoScrollNewTabs[] =
     "disable-tab-strip-autoscroll-new-tabs";
 
-// Disables the tab switcher.
-const char kDisableTabSwitcher[] = "disable-tab-switcher";
-
 // Disables Physical Web scanning for nearby URLs.
 const char kDisableIOSPhysicalWeb[] = "disable-ios-physical-web";
-
-// Disables the string change from "Save Image" to "Download Image".
-const char kDisableDownloadImageRenaming[] = "disable-download-image-renaming";
 
 // Disables the Suggestions UI
 const char kDisableSuggestionsUI[] = "disable-suggestions-ui";
@@ -90,23 +78,14 @@ const char kEnableOfflineAutoReload[] = "enable-offline-auto-reload";
 // Enable the Payment Request API.
 const char kEnablePaymentRequest[] = "enable-payment-request";
 
-// Enables the QR Code scanner.
-const char kEnableQRScanner[] = "enable-qr-scanner";
-
 // Enables context-sensitive reader mode button in the toolbar.
 const char kEnableReaderModeToolbarIcon[] = "enable-reader-mode-toolbar-icon";
 
 // Enables the Spotlight actions.
 const char kEnableSpotlightActions[] = "enable-spotlight-actions";
 
-// Enables the tab switcher.
-const char kEnableTabSwitcher[] = "enable-tab-switcher";
-
 // Enables Physical Web scanning for nearby URLs.
 const char kEnableIOSPhysicalWeb[] = "enable-ios-physical-web";
-
-// Enables the string change from "Save Image" to "Download Image".
-const char kEnableDownloadImageRenaming[] = "enable-download-image-renaming";
 
 // Enables the Suggestions UI
 const char kEnableSuggestionsUI[] = "enable-suggestions-ui";
@@ -135,8 +114,5 @@ const char kIOSIgnoreCertificateErrors[] = "ignore-certificate-errors";
 // Allows for forcing socket connections to http/https to use fixed ports.
 const char kIOSTestingFixedHttpPort[] = "testing-fixed-http-port";
 const char kIOSTestingFixedHttpsPort[] = "testing-fixed-https-port";
-
-// Enables grouping websites by domain and filtering them by period.
-const char kHistoryEnableGroupByDomain[] = "enable-grouped-history";
 
 }  // namespace switches

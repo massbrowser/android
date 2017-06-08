@@ -25,17 +25,12 @@
 #include "net/log/net_log.h"
 
 using net::SHA256HashValue;
-using net::ct::LogEntry;
 using net::ct::MerkleAuditProof;
 using net::ct::MerkleTreeLeaf;
 using net::ct::SignedCertificateTimestamp;
 using net::ct::SignedTreeHead;
 
 // Overview of the process for auditing CT log entries
-//
-// A CT log entry, represented by net::ct::LogEntry, is made up of the
-// end-entity certificate and the Signed Certificate Timestamp associated with
-// it.
 //
 // In this file, obsered CT log entries are audited for inclusion in the CT log.
 // A pre-requirement for auditing a log entry is having a Signed Tree Head (STH)
@@ -218,6 +213,27 @@ struct SingleTreeTracker::EntryAuditState {
   explicit EntryAuditState(AuditState state) : state(state) {}
 };
 
+class SingleTreeTracker::NetworkObserver
+    : public net::NetworkChangeNotifier::NetworkChangeObserver {
+ public:
+  explicit NetworkObserver(SingleTreeTracker* parent) : parent_(parent) {
+    net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+  }
+
+  ~NetworkObserver() override {
+    net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+  }
+
+  // net::NetworkChangeNotifier::NetworkChangeObserver implementation.
+  void OnNetworkChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override {
+    parent_->ResetPendingQueue();
+  }
+
+ private:
+  SingleTreeTracker* parent_;
+};
+
 // Orders entries by the SCT timestamp. In case of tie, which is very unlikely
 // as it requires two SCTs issued from a log at exactly the same time, order
 // by leaf hash.
@@ -240,12 +256,13 @@ SingleTreeTracker::SingleTreeTracker(
       net_log_(net::NetLogWithSource::Make(
           net_log,
           net::NetLogSourceType::CT_TREE_STATE_TRACKER)),
+      network_observer_(new NetworkObserver(this)),
       weak_factory_(this) {
   memory_pressure_listener_.reset(new base::MemoryPressureListener(base::Bind(
       &SingleTreeTracker::OnMemoryPressure, base::Unretained(this))));
 }
 
-SingleTreeTracker::~SingleTreeTracker() {}
+SingleTreeTracker::~SingleTreeTracker() = default;
 
 void SingleTreeTracker::OnSCTVerified(net::X509Certificate* cert,
                                       const SignedCertificateTimestamp* sct) {
@@ -346,6 +363,10 @@ void SingleTreeTracker::NewSTHObserved(const SignedTreeHead& sth) {
     return;
 
   ProcessPendingEntries();
+}
+
+void SingleTreeTracker::ResetPendingQueue() {
+  pending_entries_.clear();
 }
 
 SingleTreeTracker::SCTInclusionStatus

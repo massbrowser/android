@@ -4,6 +4,7 @@
 
 package org.chromium.chromoting.jni;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 
 import org.chromium.base.ContextUtils;
@@ -26,6 +27,7 @@ public class JniInterface {
     private static final String LIBRARY_NAME = "remoting_client_jni";
 
     // Used to fetch auth token for native client.
+    @SuppressLint("StaticFieldLeak")
     private static OAuthTokenConsumer sLoggerTokenConsumer;
 
     private static String sAccount;
@@ -59,7 +61,11 @@ public class JniInterface {
     @CalledByNative
     private static void fetchAuthToken() {
         if (sAccount == null) {
-            throw new IllegalStateException("Account is not set before fetching the auth token.");
+            // It is safe to ignore this request since setAccountForLogging() will be called later
+            // and will request the auth token. Logs will be queued up and sent once the auth token
+            // is set.
+            Log.w(TAG, "Account is not set before fetching the auth token.");
+            return;
         }
         sLoggerTokenConsumer.consume(sAccount, new OAuthTokenFetcher.Callback() {
             @Override

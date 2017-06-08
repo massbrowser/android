@@ -399,7 +399,7 @@ public class ShieldsConfig {
 
     @CalledByNative
     public static void setBlockedInfo(String url) {
-        StatisticLogger.getInstance(ContextUtils.getApplicationContext()).log("blocked url:" + url);
+//        StatisticLogger.getInstance(ContextUtils.getApplicationContext()).log("blocked url:" + url);
     }
 
     private native void nativeInit();

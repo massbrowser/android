@@ -44,12 +44,13 @@ const int MenuButton::kMenuMarkerPaddingRight = -1;
 ////////////////////////////////////////////////////////////////////////////////
 
 MenuButton::PressedLock::PressedLock(MenuButton* menu_button)
-    : PressedLock(menu_button, false) {}
+    : PressedLock(menu_button, false, nullptr) {}
 
 MenuButton::PressedLock::PressedLock(MenuButton* menu_button,
-                                     bool is_sibling_menu_show)
+                                     bool is_sibling_menu_show,
+                                     const ui::LocatedEvent* event)
     : menu_button_(menu_button->weak_factory_.GetWeakPtr()) {
-  menu_button_->IncrementPressedLocked(is_sibling_menu_show);
+  menu_button_->IncrementPressedLocked(is_sibling_menu_show, event);
 }
 
 MenuButton::PressedLock::~PressedLock() {
@@ -345,7 +346,7 @@ bool MenuButton::ShouldEnterPushedState(const ui::Event& event) {
   return IsTriggerableEventType(event);
 }
 
-void MenuButton::StateChanged() {
+void MenuButton::StateChanged(ButtonState old_state) {
   if (pressed_lock_count_ != 0) {
     // The button's state was changed while it was supposed to be locked in a
     // pressed state. This shouldn't happen, but conceivably could if a caller
@@ -356,7 +357,7 @@ void MenuButton::StateChanged() {
     else if (state() == STATE_DISABLED)
       should_disable_after_press_ = true;
   } else {
-    LabelButton::StateChanged();
+    LabelButton::StateChanged(old_state);
   }
 }
 
@@ -366,7 +367,8 @@ void MenuButton::NotifyClick(const ui::Event& event) {
   Activate(&event);
 }
 
-void MenuButton::IncrementPressedLocked(bool snap_ink_drop_to_activated) {
+void MenuButton::IncrementPressedLocked(bool snap_ink_drop_to_activated,
+                                        const ui::LocatedEvent* event) {
   ++pressed_lock_count_;
   if (increment_pressed_lock_called_)
     *increment_pressed_lock_called_ = true;
@@ -375,7 +377,7 @@ void MenuButton::IncrementPressedLocked(bool snap_ink_drop_to_activated) {
     if (snap_ink_drop_to_activated)
       GetInkDrop()->SnapToActivated();
     else
-      AnimateInkDrop(InkDropState::ACTIVATED, nullptr /* event */);
+      AnimateInkDrop(InkDropState::ACTIVATED, event);
   }
   SetState(STATE_PRESSED);
 }

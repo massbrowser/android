@@ -79,7 +79,7 @@ public class AccountFirstRunFragment extends FirstRunPage implements AccountSign
 
         RecordUserAction.record("MobileFre.SignInShown");
         RecordUserAction.record("Signin_Signin_FromStartPage");
-        SigninManager.logSigninStartAccessPoint(SigninAccessPoint.START_PAGE);
+//        SigninManager.logSigninStartAccessPoint(SigninAccessPoint.START_PAGE);
     }
 
     // FirstRunPage:

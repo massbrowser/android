@@ -5,26 +5,31 @@
 #include "chrome/browser/ui/views/passwords/manage_passwords_bubble_view.h"
 
 #include "base/macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/passwords/password_dialog_prompts.h"
 #include "chrome/browser/ui/passwords/passwords_model_delegate.h"
-#include "chrome/browser/ui/views/desktop_ios_promotion/desktop_ios_promotion_view.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/passwords/credentials_item_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_selection_view.h"
 #include "chrome/browser/ui/views/passwords/manage_password_items_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_views.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
-#include "content/public/browser/user_metrics.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_features.h"
+#include "ui/gfx/color_palette.h"
+#include "ui/gfx/image/image_skia.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/link.h"
@@ -36,6 +41,14 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
+
+#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#endif
+
+#if defined(OS_WIN)
+#include "chrome/browser/ui/views/desktop_ios_promotion/desktop_ios_promotion_bubble_view.h"
+#endif
 
 int ManagePasswordsBubbleView::auto_signin_toast_timeout_ = 3;
 
@@ -216,11 +229,17 @@ ManagePasswordsBubbleView::AutoSigninView::AutoSigninView(
       observed_browser_(this) {
   SetLayoutManager(new views::FillLayout);
   const autofill::PasswordForm& form = parent_->model()->pending_password();
-  CredentialsItemView* credential = new CredentialsItemView(
-      this, base::string16(),
-      l10n_util::GetStringFUTF16(IDS_MANAGE_PASSWORDS_AUTO_SIGNIN_TITLE,
-                                 form.username_value),
-      kButtonHoverColor, &form,
+  CredentialsItemView* credential;
+  base::string16 upper_text, lower_text = form.username_value;
+  if (ChromeLayoutProvider::Get()->IsHarmonyMode()) {
+    upper_text =
+        l10n_util::GetStringUTF16(IDS_MANAGE_PASSWORDS_AUTO_SIGNIN_TITLE_MD);
+  } else {
+    lower_text = l10n_util::GetStringFUTF16(
+        IDS_MANAGE_PASSWORDS_AUTO_SIGNIN_TITLE, lower_text);
+  }
+  credential = new CredentialsItemView(
+      this, upper_text, lower_text, kButtonHoverColor, &form,
       parent_->model()->GetProfile()->GetRequestContext());
   credential->SetEnabled(false);
   AddChildView(credential);
@@ -229,10 +248,15 @@ ManagePasswordsBubbleView::AutoSigninView::AutoSigninView(
   Browser* browser =
       chrome::FindBrowserWithWebContents(parent_->web_contents());
   DCHECK(browser);
+
+// Sign-in dialogs opened for inactive browser windows do not auto-close on
+// MacOS. This matches existing Cocoa bubble behavior.
+// TODO(varkha): Remove the limitation as part of http://crbug/671916 .
+#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
   observed_browser_.Add(browser_view->GetWidget());
-
-  if (browser_view->IsActive())
+#endif
+  if (browser->window()->IsActive())
     timer_.Start(FROM_HERE, GetTimeout(), this, &AutoSigninView::OnTimer);
 }
 
@@ -514,7 +538,7 @@ void ManagePasswordsBubbleView::SaveConfirmationView::StyledLabelLinkClicked(
     const gfx::Range& range,
     int event_flags) {
   DCHECK_EQ(range, parent_->model()->save_confirmation_link_range());
-  parent_->model()->OnManageLinkClicked();
+  parent_->model()->OnNavigateToPasswordManagerAccountDashboardLinkClicked();
   parent_->CloseBubble();
 }
 
@@ -567,7 +591,7 @@ ManagePasswordsBubbleView::SignInPromoView::SignInPromoView(
   layout->AddView(no_button_);
 
   parent_->set_initially_focused_view(signin_button_);
-  content::RecordAction(
+  base::RecordAction(
       base::UserMetricsAction("Signin_Impression_FromPasswordBubble"));
 }
 
@@ -691,6 +715,7 @@ void ManagePasswordsBubbleView::UpdatePendingView::StyledLabelLinkClicked(
 ManagePasswordsBubbleView* ManagePasswordsBubbleView::manage_passwords_bubble_ =
     NULL;
 
+#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 // static
 void ManagePasswordsBubbleView::ShowBubble(
     content::WebContents* web_contents,
@@ -712,8 +737,9 @@ void ManagePasswordsBubbleView::ShowBubble(
           browser_view->GetLocationBarView()->manage_passwords_icon_view();
     }
   }
-  manage_passwords_bubble_ = new ManagePasswordsBubbleView(
-      web_contents, anchor_view, reason);
+  new ManagePasswordsBubbleView(web_contents, anchor_view, gfx::Point(),
+                                reason);
+  DCHECK(manage_passwords_bubble_);
 
   if (is_fullscreen)
     manage_passwords_bubble_->set_parent_window(web_contents->GetNativeView());
@@ -733,6 +759,7 @@ void ManagePasswordsBubbleView::ShowBubble(
 
   manage_passwords_bubble_->ShowForReason(reason);
 }
+#endif  // !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 
 // static
 void ManagePasswordsBubbleView::CloseCurrentBubble() {
@@ -754,18 +781,20 @@ content::WebContents* ManagePasswordsBubbleView::web_contents() const {
 ManagePasswordsBubbleView::ManagePasswordsBubbleView(
     content::WebContents* web_contents,
     views::View* anchor_view,
+    const gfx::Point& anchor_point,
     DisplayReason reason)
-    : LocationBarBubbleDelegateView(anchor_view, web_contents),
+    : LocationBarBubbleDelegateView(anchor_view, anchor_point, web_contents),
       model_(PasswordsModelDelegateFromWebContents(web_contents),
              reason == AUTOMATIC ? ManagePasswordsBubbleModel::AUTOMATIC
                                  : ManagePasswordsBubbleModel::USER_ACTION),
       initially_focused_view_(nullptr) {
   mouse_handler_.reset(new WebContentMouseHandler(this, this->web_contents()));
+  manage_passwords_bubble_ = this;
 }
 
 ManagePasswordsBubbleView::~ManagePasswordsBubbleView() {
   if (manage_passwords_bubble_ == this)
-    manage_passwords_bubble_ = NULL;
+    manage_passwords_bubble_ = nullptr;
 }
 
 views::View* ManagePasswordsBubbleView::GetInitiallyFocusedView() {
@@ -787,11 +816,26 @@ base::string16 ManagePasswordsBubbleView::GetWindowTitle() const {
   return model_.title();
 }
 
+gfx::ImageSkia ManagePasswordsBubbleView::GetWindowIcon() {
+#if defined(OS_WIN)
+  if (model_.state() == password_manager::ui::CHROME_DESKTOP_IOS_PROMO_STATE) {
+    return desktop_ios_promotion::GetPromoImage(
+        GetNativeTheme()->GetSystemColor(
+            ui::NativeTheme::kColorId_TextfieldDefaultColor));
+  }
+#endif
+  return gfx::ImageSkia();
+}
+
 bool ManagePasswordsBubbleView::ShouldShowWindowTitle() const {
   // Since bubble titles don't support links, fall back to a custom title view
   // if we need to show a link. Only use the normal title path if there's no
   // link.
   return model_.title_brand_link_range().is_empty();
+}
+
+bool ManagePasswordsBubbleView::ShouldShowWindowIcon() const {
+  return model_.state() == password_manager::ui::CHROME_DESKTOP_IOS_PROMO_STATE;
 }
 
 bool ManagePasswordsBubbleView::ShouldShowCloseButton() const {
@@ -804,11 +848,19 @@ void ManagePasswordsBubbleView::Refresh() {
   RemoveAllChildViews(true);
   initially_focused_view_ = NULL;
   CreateChild();
-
   // Show/hide the close button.
   GetWidget()->non_client_view()->ResetWindowControls();
+  GetWidget()->UpdateWindowIcon();
   GetWidget()->UpdateWindowTitle();
-  SizeToContents();
+  if (model_.state() == password_manager::ui::CHROME_DESKTOP_IOS_PROMO_STATE) {
+    // Update the height and keep the existing width.
+    gfx::Rect bubble_bounds = GetWidget()->GetWindowBoundsInScreen();
+    bubble_bounds.set_height(
+        GetWidget()->GetRootView()->GetHeightForWidth(bubble_bounds.width()));
+    GetWidget()->SetBounds(bubble_bounds);
+  } else {
+    SizeToContents();
+  }
 }
 
 void ManagePasswordsBubbleView::CreateChild() {
@@ -824,10 +876,13 @@ void ManagePasswordsBubbleView::CreateChild() {
   } else if (model_.state() ==
              password_manager::ui::CHROME_SIGN_IN_PROMO_STATE) {
     AddChildView(new SignInPromoView(this));
+#if defined(OS_WIN)
   } else if (model_.state() ==
              password_manager::ui::CHROME_DESKTOP_IOS_PROMO_STATE) {
-    AddChildView(new DesktopIOSPromotionView(
+    AddChildView(new DesktopIOSPromotionBubbleView(
+        model_.GetProfile(),
         desktop_ios_promotion::PromotionEntryPoint::SAVE_PASSWORD_BUBBLE));
+#endif
   } else {
     AddChildView(new ManageView(this));
   }

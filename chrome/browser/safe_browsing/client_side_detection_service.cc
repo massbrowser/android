@@ -21,10 +21,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safebrowsing_messages.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "components/safe_browsing_db/safe_browsing_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -166,9 +166,10 @@ void ClientSideDetectionService::SendClientReportPhishingRequest(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&ClientSideDetectionService::StartClientReportPhishingRequest,
-                 weak_factory_.GetWeakPtr(), verdict, is_extended_reporting,
-                 callback));
+      base::BindOnce(
+          &ClientSideDetectionService::StartClientReportPhishingRequest,
+          weak_factory_.GetWeakPtr(), verdict, is_extended_reporting,
+          callback));
 }
 
 void ClientSideDetectionService::SendClientReportMalwareRequest(
@@ -177,8 +178,9 @@ void ClientSideDetectionService::SendClientReportMalwareRequest(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&ClientSideDetectionService::StartClientReportMalwareRequest,
-                 weak_factory_.GetWeakPtr(), verdict, callback));
+      base::BindOnce(
+          &ClientSideDetectionService::StartClientReportMalwareRequest,
+          weak_factory_.GetWeakPtr(), verdict, callback));
 }
 
 bool ClientSideDetectionService::IsPrivateIPAddress(

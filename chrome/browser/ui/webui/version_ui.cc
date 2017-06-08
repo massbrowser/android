@@ -17,6 +17,7 @@
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/install_static/install_details.h"
 #include "components/grit/components_resources.h"
 #include "components/strings/grit/components_chromium_strings.h"
 #include "components/strings/grit/components_strings.h"
@@ -93,6 +94,8 @@ WebUIDataSource* CreateVersionUIDataSource() {
   html_source->AddLocalizedString(version_ui::kPlatform, IDS_PLATFORM_LABEL);
   html_source->AddLocalizedString(version_ui::kCustomizationId,
                                   IDS_VERSION_UI_CUSTOMIZATION_ID);
+  html_source->AddLocalizedString(version_ui::kFirmwareVersion,
+                                  IDS_VERSION_UI_FIRMWARE_VERSION);
 #else
   html_source->AddLocalizedString(version_ui::kOSName, IDS_VERSION_UI_OS);
   html_source->AddString(version_ui::kOSType, version_info::GetOSType());
@@ -101,6 +104,9 @@ WebUIDataSource* CreateVersionUIDataSource() {
 #if defined(OS_ANDROID)
   html_source->AddString(version_ui::kOSVersion,
                          AndroidAboutAppInfo::GetOsInfo());
+  html_source->AddLocalizedString(version_ui::kGmsName, IDS_VERSION_UI_GMS);
+  html_source->AddString(version_ui::kGmsVersion,
+                         AndroidAboutAppInfo::GetGmsInfo());
 #else
   html_source->AddString(version_ui::kFlashPlugin, "Flash");
   // Note that the Flash version is retrieve asynchronously and returned in
@@ -151,6 +157,14 @@ WebUIDataSource* CreateVersionUIDataSource() {
 #else
   html_source->AddString(version_ui::kCompiler, "Unknown");
 #endif
+
+  base::string16 update_cohort_name =
+      install_static::InstallDetails::Get().update_cohort_name();
+  if (!update_cohort_name.empty()) {
+    html_source->AddString(version_ui::kUpdateCohortName,
+                           l10n_util::GetStringFUTF16(
+                               IDS_VERSION_UI_COHORT_NAME, update_cohort_name));
+  }
 #endif  // defined(OS_WIN)
 
   html_source->SetJsonPath("strings.js");

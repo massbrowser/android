@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "content/browser/speech/endpointer/endpointer.h"
 #include "content/browser/speech/speech_recognition_engine.h"
 #include "content/browser/speech/speech_recognizer.h"
@@ -20,7 +21,7 @@
 
 namespace media {
 class AudioBus;
-class AudioManager;
+class AudioSystem;
 }
 
 namespace content {
@@ -42,9 +43,12 @@ class CONTENT_EXPORT SpeechRecognizerImpl
   static const int kNoSpeechTimeoutMs;
   static const int kEndpointerEstimationTimeMs;
 
-  static void SetAudioManagerForTesting(media::AudioManager* audio_manager);
+  static void SetAudioEnvironmentForTesting(media::AudioSystem* audio_system,
+                                            media::AudioManager* audio_manager);
 
   SpeechRecognizerImpl(SpeechRecognitionEventListener* listener,
+                       media::AudioSystem* audio_system,
+                       media::AudioManager* audio_manager,
                        int session_id,
                        bool continuous,
                        bool provisional_results,
@@ -62,6 +66,7 @@ class CONTENT_EXPORT SpeechRecognizerImpl
 
   enum FSMState {
     STATE_IDLE = 0,
+    STATE_PREPARING,
     STATE_STARTING,
     STATE_ESTIMATING_ENVIRONMENT,
     STATE_WAITING_FOR_SPEECH,
@@ -73,6 +78,7 @@ class CONTENT_EXPORT SpeechRecognizerImpl
 
   enum FSMEvent {
     EVENT_ABORT = 0,
+    EVENT_PREPARE,
     EVENT_START,
     EVENT_STOP_CAPTURE,
     EVENT_AUDIO_DATA,
@@ -105,7 +111,11 @@ class CONTENT_EXPORT SpeechRecognizerImpl
   // Process a new audio chunk in the audio pipeline (endpointer, vumeter, etc).
   void ProcessAudioPipeline(const AudioChunk& raw_audio);
 
+  // Callback from AudioSystem.
+  void OnDeviceInfo(const media::AudioParameters& params);
+
   // The methods below handle transitions of the recognizer FSM.
+  FSMState PrepareRecognition(const FSMEventArgs&);
   FSMState StartRecording(const FSMEventArgs& event_args);
   FSMState StartRecognitionEngine(const FSMEventArgs& event_args);
   FSMState WaitEnvironmentEstimationCompletion(const FSMEventArgs& event_args);
@@ -153,8 +163,14 @@ class CONTENT_EXPORT SpeechRecognizerImpl
   void OnSpeechRecognitionEngineError(
       const SpeechRecognitionError& error) override;
 
-  static media::AudioManager* audio_manager_for_tests_;
+  media::AudioSystem* GetAudioSystem();
+  media::AudioManager* GetAudioManager();
 
+  // Substitutes the real audio system in browser tests.
+  static media::AudioSystem* audio_system_for_tests_;
+  static media::AudioManager* audio_manager_for_tests_;
+  media::AudioSystem* audio_system_;
+  media::AudioManager* audio_manager_;
   std::unique_ptr<SpeechRecognitionEngine> recognition_engine_;
   Endpointer endpointer_;
   scoped_refptr<media::AudioInputController> audio_controller_;
@@ -166,6 +182,7 @@ class CONTENT_EXPORT SpeechRecognizerImpl
   bool end_of_utterance_;
   FSMState state_;
   std::string device_id_;
+  media::AudioParameters device_params_;
 
   class OnDataConverter;
 
@@ -173,6 +190,7 @@ class CONTENT_EXPORT SpeechRecognizerImpl
   // output format.
   std::unique_ptr<SpeechRecognizerImpl::OnDataConverter> audio_converter_;
 
+  base::WeakPtrFactory<SpeechRecognizerImpl> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(SpeechRecognizerImpl);
 };
 

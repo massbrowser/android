@@ -8,6 +8,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/values.h"
 #include "services/service_manager/background/tests/test.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/service.h"
@@ -25,12 +26,6 @@ class ServiceImpl : public Service {
  public:
   ServiceImpl() {}
   ~ServiceImpl() override {}
-
-  // Service:
-  bool OnConnect(const ServiceInfo& remote_info,
-                 InterfaceRegistry* registry) override {
-    return false;
-  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ServiceImpl);

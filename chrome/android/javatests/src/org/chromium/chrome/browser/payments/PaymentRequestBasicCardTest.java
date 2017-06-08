@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.payments;
 import android.content.DialogInterface;
 import android.support.test.filters.MediumTest;
 
-import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
@@ -20,10 +19,10 @@ import java.util.concurrent.TimeoutException;
 /**
  * A payment integration test for "basic-card" payment method.
  */
-@CommandLineFlags.Add("enable-blink-features=PaymentRequestBasicCard")
 public class PaymentRequestBasicCardTest extends PaymentRequestTestBase {
     public PaymentRequestBasicCardTest() {
         super("payment_request_basic_card_test.html");
+        PaymentRequestImpl.setIsLocalCanMakePaymentQueryQuotaEnforcedForTest();
     }
 
     @Override
@@ -44,7 +43,7 @@ public class PaymentRequestBasicCardTest extends PaymentRequestTestBase {
     public void testCanPayWithBasicCard() throws InterruptedException,
             ExecutionException, TimeoutException {
         openPageAndClickNodeAndWait("checkBasicCard", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"true"});
+        expectResultContains(new String[] {"true"});
 
         clickNodeAndWait("buyBasicCard", mReadyForInput);
     }
@@ -54,7 +53,7 @@ public class PaymentRequestBasicCardTest extends PaymentRequestTestBase {
     public void testIgnoreCardType() throws InterruptedException,
             ExecutionException, TimeoutException {
         openPageAndClickNodeAndWait("checkBasicDebit", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"true"});
+        expectResultContains(new String[] {"true"});
 
         clickNodeAndWait("buyBasicDebit", mReadyForInput);
     }
@@ -64,42 +63,37 @@ public class PaymentRequestBasicCardTest extends PaymentRequestTestBase {
     public void testCannotMakeActivePaymentWithBasicMasterCard() throws InterruptedException,
             ExecutionException, TimeoutException {
         openPageAndClickNodeAndWait("checkBasicMasterCard", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"false"});
+        expectResultContains(new String[] {"false"});
 
         reTriggerUIAndWait("buyBasicMasterCard", mReadyForInput);
     }
 
-    /**
-     * To prevent fingerprinting the user, repeated queries for "basic-card" payment method return
-     * cached results, even if the queries were performed with different sets of "supportedNetworks"
-     * and "supportedTypes" every time.
-     */
     @MediumTest
     @Feature({"Payments"})
-    public void testReturnsCachedResultForBasiCard() throws InterruptedException,
-            ExecutionException, TimeoutException {
+    public void testSupportedNetworksMustMatchForCanMakePayment()
+            throws InterruptedException, ExecutionException, TimeoutException {
         openPageAndClickNodeAndWait("checkBasicVisa", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"true"});
+        expectResultContains(new String[] {"true"});
+
+        clickNodeAndWait("checkBasicMasterCard", mCanMakePaymentQueryResponded);
+        expectResultContains(new String[] {"Not allowed to check whether can make payment"});
 
         clickNodeAndWait("checkBasicVisa", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"true"});
+        expectResultContains(new String[] {"true"});
+    }
 
-        // Cached result for "basic-card" is "true", even though the user does not have a MasterCard
-        // on file.
-        clickNodeAndWait("checkBasicMasterCard", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"true"});
+    @MediumTest
+    @Feature({"Payments"})
+    public void testSupportedTypesMustMatchForCanMakePayment()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        openPageAndClickNodeAndWait("checkBasicVisa", mCanMakePaymentQueryResponded);
+        expectResultContains(new String[] {"true"});
 
-        // Cached result for "basic-card" is "true".
         clickNodeAndWait("checkBasicDebit", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"true"});
+        expectResultContains(new String[] {"Not allowed to check whether can make payment"});
 
-        // Checking for "visa" immediately after "basic-card" triggers throttling.
-        clickNodeAndWait("checkVisa", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"Query quota exceeded"});
-
-        // Checking for "mastercard" immediately after "basic-card" triggers throttling.
-        clickNodeAndWait("checkMasterCard", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"Query quota exceeded"});
+        clickNodeAndWait("checkBasicVisa", mCanMakePaymentQueryResponded);
+        expectResultContains(new String[] {"true"});
     }
 
     /**
@@ -112,7 +106,7 @@ public class PaymentRequestBasicCardTest extends PaymentRequestTestBase {
     public void testPayWithBasicCard()  throws InterruptedException, ExecutionException,
             TimeoutException {
         openPageAndClickNodeAndWait("checkBasicVisa", mCanMakePaymentQueryResponded);
-        expectResultContains(new String[]{"true"});
+        expectResultContains(new String[] {"true"});
 
         reTriggerUIAndWait("buy", mReadyToPay);
         clickAndWait(R.id.button_primary, mReadyForUnmaskInput);

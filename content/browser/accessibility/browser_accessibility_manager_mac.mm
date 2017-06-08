@@ -111,8 +111,7 @@ BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
     const ui::AXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory) {
-  return new BrowserAccessibilityManagerMac(
-      NULL, initial_tree, delegate, factory);
+  return new BrowserAccessibilityManagerMac(initial_tree, delegate, factory);
 }
 
 BrowserAccessibilityManagerMac*
@@ -121,12 +120,10 @@ BrowserAccessibilityManager::ToBrowserAccessibilityManagerMac() {
 }
 
 BrowserAccessibilityManagerMac::BrowserAccessibilityManagerMac(
-    NSView* parent_view,
     const ui::AXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory)
-    : BrowserAccessibilityManager(delegate, factory),
-      parent_view_(parent_view) {
+    : BrowserAccessibilityManager(delegate, factory) {
   Initialize(initial_tree);
 }
 
@@ -214,8 +211,7 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
       mac_notification = NSAccessibilityInvalidStatusChangedNotification;
       break;
     case ui::AX_EVENT_SELECTED_CHILDREN_CHANGED:
-      if (node->GetRole() == ui::AX_ROLE_GRID ||
-          node->GetRole() == ui::AX_ROLE_TABLE) {
+      if (node->IsTableLikeRole()) {
         mac_notification = NSAccessibilitySelectedRowsChangedNotification;
       } else {
         mac_notification = NSAccessibilitySelectedChildrenChangedNotification;
@@ -408,6 +404,18 @@ void BrowserAccessibilityManagerMac::OnNodeDataWillChange(
   }
 }
 
+void BrowserAccessibilityManagerMac::OnStateChanged(ui::AXTree* tree,
+                                                    ui::AXNode* ax_node,
+                                                    ui::AXState state,
+                                                    bool new_value) {
+  if (state != ui::AX_STATE_PRESSED)
+    return;
+
+  BrowserAccessibility* node = GetFromID(ax_node->id());
+  NotifyAccessibilityEvent(BrowserAccessibilityEvent::FromTreeChange,
+                           ui::AX_EVENT_CHECKED_STATE_CHANGED, node);
+}
+
 NSDictionary* BrowserAccessibilityManagerMac::
     GetUserInfoForSelectedTextChangedNotification() {
   NSMutableDictionary* user_info = [[[NSMutableDictionary alloc] init]
@@ -471,6 +479,10 @@ BrowserAccessibilityManagerMac::GetUserInfoForValueChangedNotification(
     NSAccessibilityTextChangeValues : changes,
     NSAccessibilityTextChangeElement : native_node
   };
+}
+
+NSView* BrowserAccessibilityManagerMac::GetParentView() {
+  return delegate() ? delegate()->AccessibilityGetAcceleratedWidget() : nullptr;
 }
 
 }  // namespace content

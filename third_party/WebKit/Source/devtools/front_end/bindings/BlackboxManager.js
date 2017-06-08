@@ -132,7 +132,7 @@ Bindings.BlackboxManager = class {
 
   /**
    * @param {!SDK.Script} script
-   * @param {?SDK.TextSourceMap} sourceMap
+   * @param {?SDK.SourceMap} sourceMap
    * @return {!Promise<undefined>}
    */
   sourceMapLoaded(script, sourceMap) {
@@ -142,7 +142,7 @@ Bindings.BlackboxManager = class {
     if (!previousScriptState)
       return Promise.resolve();
 
-    var hasBlackboxedMappings = sourceMap.sourceURLs().some((url) => this.isBlackboxedURL(url));
+    var hasBlackboxedMappings = sourceMap.sourceURLs().some(url => this.isBlackboxedURL(url));
     var mappings = hasBlackboxedMappings ? sourceMap.mappings().slice() : [];
     if (!mappings.length) {
       if (previousScriptState.length > 0)
@@ -276,10 +276,8 @@ Bindings.BlackboxManager = class {
     var promises = [];
     for (var debuggerModel of SDK.targetManager.models(SDK.DebuggerModel)) {
       promises.push(this._setBlackboxPatterns(debuggerModel));
-      for (var scriptId in debuggerModel.scripts) {
-        var script = debuggerModel.scripts[scriptId];
+      for (var script of debuggerModel.scripts())
         promises.push(this._addScript(script).then(loadSourceMap.bind(this, script)));
-      }
     }
     Promise.all(promises).then(() => {
       var listeners = Array.from(this._listeners);

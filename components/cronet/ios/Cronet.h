@@ -31,6 +31,10 @@ typedef BOOL (^RequestFilterBlock)(NSURLRequest* request);
 GRPC_SUPPORT_EXPORT
 @interface Cronet : NSObject
 
+// Sets the HTTP Accept-Language header.  This method only has any effect before
+// |start| is called.
++ (void)setAcceptLanguages:(NSString*)acceptLanguages;
+
 // Sets whether HTTP/2 should be supported by CronetEngine. This method only has
 // any effect before |start| is called.
 + (void)setHttp2Enabled:(BOOL)http2Enabled;
@@ -47,6 +51,11 @@ GRPC_SUPPORT_EXPORT
 // Adds hint that host supports QUIC on altPort. This method only has any effect
 // before |start| is called.
 + (void)addQuicHint:(NSString*)host port:(int)port altPort:(int)altPort;
+
+// Set experimental Cronet options.  Argument is a JSON string; see
+// |URLRequestContextConfig| for more details.  This method only has
+// any effect before |start| is called.
++ (void)setExperimentalOptions:(NSString*)experimentalOptions;
 
 // Sets the User-Agent request header string to be sent with all requests.
 // If |partial| is set to YES, then actual user agent value is based on device

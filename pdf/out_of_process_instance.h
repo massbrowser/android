@@ -68,9 +68,8 @@ class OutOfProcessInstance : public pp::Instance,
   // pp::Printing_Dev implementation.
   uint32_t QuerySupportedPrintOutputFormats() override;
   int32_t PrintBegin(const PP_PrintSettings_Dev& print_settings) override;
-  pp::Resource PrintPages(
-      const PP_PrintPageNumberRange_Dev* page_ranges,
-      uint32_t page_range_count) override;
+  pp::Resource PrintPages(const PP_PrintPageNumberRange_Dev* page_ranges,
+                          uint32_t page_range_count) override;
   void PrintEnd() override;
   bool IsPrintScalingDisabled() override;
 
@@ -164,10 +163,7 @@ class OutOfProcessInstance : public pp::Instance,
   // Draws a rectangle with the specified dimensions and color in our buffer.
   void FillRect(const pp::Rect& rect, uint32_t color);
 
-  void LoadUrl(const std::string& url);
-  void LoadPreviewUrl(const std::string& url);
-  void LoadUrlInternal(const std::string& url, pp::URLLoader* loader,
-                       void (OutOfProcessInstance::* method)(int32_t));
+  void LoadUrl(const std::string& url, bool is_print_preview);
 
   // Creates a URL loader and allows it to access all urls, i.e. not just the
   // frame's origin.
@@ -204,9 +200,9 @@ class OutOfProcessInstance : public pp::Instance,
   // Process the preview page data information. |src_url| specifies the preview
   // page data location. The |src_url| is in the format:
   // chrome://print/id/page_number/print.pdf
-  // |dst_page_index| specifies the blank page index that needs to be replaced
+  // |dest_page_index| specifies the blank page index that needs to be replaced
   // with the new page data.
-  void ProcessPreviewPageInfo(const std::string& src_url, int dst_page_index);
+  void ProcessPreviewPageInfo(const std::string& src_url, int dest_page_index);
   // Load the next available preview page into the blank page.
   void LoadAvailablePreviewPage();
 
@@ -217,13 +213,10 @@ class OutOfProcessInstance : public pp::Instance,
   pp::ImageData image_data_;
   // Used when the plugin is embedded in a page and we have to create the loader
   // ourself.
-  pp::CompletionCallbackFactory<OutOfProcessInstance> loader_factory_;
   pp::URLLoader embed_loader_;
   pp::URLLoader embed_preview_loader_;
 
   PP_CursorType_Dev cursor_;  // The current cursor.
-
-  pp::CompletionCallbackFactory<OutOfProcessInstance> timer_factory_;
 
   // Size, in pixels, of plugin rectangle.
   pp::Size plugin_size_;
@@ -249,14 +242,13 @@ class OutOfProcessInstance : public pp::Instance,
 
   // Current zoom factor.
   double zoom_;
-  double initial_zoom_ratio_;
   // True if we request a new bitmap rendering.
   bool needs_reraster_;
-  // Scroll position at the start of a pinch zoom.
-  pp::FloatPoint starting_scroll_offset_;
+  // The scroll position for the last raster, before any transformations are
+  // applied.
+  pp::FloatPoint scroll_offset_at_last_raster_;
   // True if last bitmap was smaller than screen.
   bool last_bitmap_smaller_;
-  double last_zoom_when_smaller_;
   // Current device scale factor.
   float device_scale_;
   // True if the plugin is full-page.
@@ -271,9 +263,7 @@ class OutOfProcessInstance : public pp::Instance,
   std::vector<BackgroundPart> background_parts_;
 
   struct PrintSettings {
-    PrintSettings() {
-      Clear();
-    }
+    PrintSettings() { Clear(); }
     void Clear() {
       is_printing = false;
       print_pages_called_ = false;
@@ -304,11 +294,9 @@ class OutOfProcessInstance : public pp::Instance,
   std::string url_;
 
   // Used for submitting forms.
-  pp::CompletionCallbackFactory<OutOfProcessInstance> form_factory_;
   pp::URLLoader form_loader_;
 
-  // Used for printing without re-entrancy issues.
-  pp::CompletionCallbackFactory<OutOfProcessInstance> print_callback_factory_;
+  pp::CompletionCallbackFactory<OutOfProcessInstance> callback_factory_;
 
   // The callback for receiving the password from the page.
   std::unique_ptr<pp::CompletionCallbackWithOutput<pp::Var>> password_callback_;

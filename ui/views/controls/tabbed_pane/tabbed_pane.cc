@@ -49,11 +49,7 @@ const int kHarmonyTabStripTabHeight = 40;
 class TabLabel : public Label {
  public:
   explicit TabLabel(const base::string16& tab_title)
-      : Label(tab_title,
-              ui::ResourceBundle::GetSharedInstance().GetFontListWithDelta(
-                  ui::kLabelFontSizeDelta,
-                  gfx::Font::NORMAL,
-                  kActiveWeight)) {}
+      : Label(tab_title, style::CONTEXT_LABEL, style::STYLE_TAB_ACTIVE) {}
 
   // Label:
   void GetAccessibleNodeData(ui::AXNodeData* data) override {
@@ -340,9 +336,9 @@ const char* TabStrip::GetClassName() const {
 }
 
 void TabStrip::OnPaintBorder(gfx::Canvas* canvas) {
-  cc::PaintFlags paint;
-  paint.setColor(kTabBorderColor);
-  paint.setStrokeWidth(kTabBorderThickness);
+  cc::PaintFlags fill_flags;
+  fill_flags.setColor(kTabBorderColor);
+  fill_flags.setStrokeWidth(kTabBorderThickness);
   SkScalar line_y = SkIntToScalar(height()) - (kTabBorderThickness / 2);
   SkScalar line_end = SkIntToScalar(width());
   int selected_tab_index = GetSelectedTabIndex();
@@ -361,13 +357,13 @@ void TabStrip::OnPaintBorder(gfx::Canvas* canvas) {
     path.rLineTo(0, tab_height);
     path.lineTo(line_end, line_y);
 
-    cc::PaintFlags paint;
-    paint.setStyle(cc::PaintFlags::kStroke_Style);
-    paint.setColor(kTabBorderColor);
-    paint.setStrokeWidth(kTabBorderThickness);
-    canvas->DrawPath(path, paint);
+    cc::PaintFlags fill_flags;
+    fill_flags.setStyle(cc::PaintFlags::kStroke_Style);
+    fill_flags.setColor(kTabBorderColor);
+    fill_flags.setStrokeWidth(kTabBorderThickness);
+    canvas->DrawPath(path, fill_flags);
   } else {
-    canvas->sk_canvas()->drawLine(0, line_y, line_end, line_y, paint);
+    canvas->sk_canvas()->drawLine(0, line_y, line_end, line_y, fill_flags);
   }
 }
 

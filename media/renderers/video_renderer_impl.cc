@@ -25,29 +25,99 @@
 #include "media/renderers/gpu_video_accelerator_factories.h"
 #include "media/video/gpu_memory_buffer_video_frame_pool.h"
 
+namespace {
+
+// Used for UMA stats, only add numbers to end!
+enum VideoFrameColorSpaceUMA {
+  Unknown = 0,
+  UnknownRGB = 1,
+  UnknownHDR = 2,
+  REC601 = 3,
+  REC709 = 4,
+  JPEG = 5,
+  PQ = 6,
+  HLG = 7,
+  SCRGB = 8,
+  MAX = SCRGB
+};
+
+VideoFrameColorSpaceUMA ColorSpaceUMAHelper(
+    const gfx::ColorSpace& color_space) {
+  if (!color_space.IsHDR()) {
+    if (color_space == gfx::ColorSpace::CreateREC709())
+      return VideoFrameColorSpaceUMA::REC709;
+
+    // TODO: Check for both PAL & NTSC rec601
+    if (color_space == gfx::ColorSpace::CreateREC601())
+      return VideoFrameColorSpaceUMA::REC601;
+
+    if (color_space == gfx::ColorSpace::CreateJpeg())
+      return VideoFrameColorSpaceUMA::JPEG;
+
+    if (color_space == color_space.GetAsFullRangeRGB())
+      return VideoFrameColorSpaceUMA::UnknownRGB;
+
+    return VideoFrameColorSpaceUMA::Unknown;
+  }
+
+  if (color_space == gfx::ColorSpace(gfx::ColorSpace::PrimaryID::BT2020,
+                                     gfx::ColorSpace::TransferID::SMPTEST2084,
+                                     gfx::ColorSpace::MatrixID::BT709,
+                                     gfx::ColorSpace::RangeID::LIMITED)) {
+    return VideoFrameColorSpaceUMA::PQ;
+  }
+
+  if (color_space == gfx::ColorSpace(gfx::ColorSpace::PrimaryID::BT2020,
+                                     gfx::ColorSpace::TransferID::SMPTEST2084,
+                                     gfx::ColorSpace::MatrixID::BT2020_NCL,
+                                     gfx::ColorSpace::RangeID::LIMITED)) {
+    return VideoFrameColorSpaceUMA::PQ;
+  }
+
+  if (color_space == gfx::ColorSpace(gfx::ColorSpace::PrimaryID::BT2020,
+                                     gfx::ColorSpace::TransferID::ARIB_STD_B67,
+                                     gfx::ColorSpace::MatrixID::BT709,
+                                     gfx::ColorSpace::RangeID::LIMITED)) {
+    return VideoFrameColorSpaceUMA::HLG;
+  }
+
+  if (color_space == gfx::ColorSpace(gfx::ColorSpace::PrimaryID::BT2020,
+                                     gfx::ColorSpace::TransferID::ARIB_STD_B67,
+                                     gfx::ColorSpace::MatrixID::BT2020_NCL,
+                                     gfx::ColorSpace::RangeID::LIMITED)) {
+    return VideoFrameColorSpaceUMA::HLG;
+  }
+
+  if (color_space == gfx::ColorSpace::CreateSCRGBLinear())
+    return VideoFrameColorSpaceUMA::SCRGB;
+
+  return VideoFrameColorSpaceUMA::UnknownHDR;
+}
+};
+
 namespace media {
 
 VideoRendererImpl::VideoRendererImpl(
     const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
     const scoped_refptr<base::TaskRunner>& worker_task_runner,
     VideoRendererSink* sink,
-    ScopedVector<VideoDecoder> decoders,
+    const CreateVideoDecodersCB& create_video_decoders_cb,
     bool drop_frames,
     GpuVideoAcceleratorFactories* gpu_factories,
-    const scoped_refptr<MediaLog>& media_log)
+    MediaLog* media_log)
     : task_runner_(media_task_runner),
       sink_(sink),
       sink_started_(false),
       client_(nullptr),
-      video_frame_stream_(new VideoFrameStream(media_task_runner,
-                                               std::move(decoders),
-                                               media_log)),
       gpu_memory_buffer_pool_(nullptr),
       media_log_(media_log),
       low_delay_(false),
       received_end_of_stream_(false),
       rendered_end_of_stream_(false),
       state_(kUninitialized),
+      create_video_decoders_cb_(create_video_decoders_cb),
+      gpu_factories_(gpu_factories),
+      worker_task_runner_(worker_task_runner),
       pending_read_(false),
       drop_frames_(drop_frames),
       buffering_state_(BUFFERING_HAVE_NOTHING),
@@ -63,11 +133,7 @@ VideoRendererImpl::VideoRendererImpl(
       max_buffered_frames_(limits::kMaxVideoFrames),
       weak_factory_(this),
       frame_callback_weak_factory_(this) {
-  if (gpu_factories &&
-      gpu_factories->ShouldUseGpuMemoryBuffersForVideoFrames()) {
-    gpu_memory_buffer_pool_.reset(new GpuMemoryBufferVideoFramePool(
-        media_task_runner, worker_task_runner, gpu_factories));
-  }
+  DCHECK(create_video_decoders_cb_);
 }
 
 VideoRendererImpl::~VideoRendererImpl() {
@@ -91,6 +157,7 @@ void VideoRendererImpl::Flush(const base::Closure& callback) {
     StopSink();
 
   base::AutoLock auto_lock(lock_);
+
   DCHECK_EQ(state_, kPlaying);
   flush_cb_ = callback;
   state_ = kFlushing;
@@ -150,10 +217,23 @@ void VideoRendererImpl::Initialize(
   DCHECK_EQ(stream->type(), DemuxerStream::VIDEO);
   DCHECK(!init_cb.is_null());
   DCHECK(!wall_clock_time_cb.is_null());
-  DCHECK_EQ(kUninitialized, state_);
+  DCHECK(kUninitialized == state_ || kFlushed == state_);
   DCHECK(!was_background_rendering_);
   DCHECK(!time_progressing_);
-  DCHECK(!have_renderered_frames_);
+
+  video_frame_stream_.reset(new VideoFrameStream(
+      task_runner_, create_video_decoders_cb_, media_log_));
+
+  // Always re-initialize or reset the |gpu_memory_buffer_pool_| in case we are
+  // switching between video tracks with incompatible video formats (e.g. 8-bit
+  // H.264 to 10-bit H264 or vice versa).
+  if (gpu_factories_ &&
+      gpu_factories_->ShouldUseGpuMemoryBuffersForVideoFrames()) {
+    gpu_memory_buffer_pool_.reset(new GpuMemoryBufferVideoFramePool(
+        task_runner_, worker_task_runner_, gpu_factories_));
+  } else {
+    gpu_memory_buffer_pool_.reset();
+  }
 
   low_delay_ = (stream->liveness() == DemuxerStream::LIVENESS_LIVE);
   UMA_HISTOGRAM_BOOLEAN("Media.VideoRenderer.LowDelay", low_delay_);
@@ -250,7 +330,7 @@ void VideoRendererImpl::OnVideoFrameStreamInitialized(bool success) {
   // frames yet.
   state_ = kFlushed;
 
-  algorithm_.reset(new VideoRendererAlgorithm(wall_clock_time_cb_));
+  algorithm_.reset(new VideoRendererAlgorithm(wall_clock_time_cb_, media_log_));
   if (!drop_frames_)
     algorithm_->disable_frame_dropping();
 
@@ -368,7 +448,6 @@ void VideoRendererImpl::FrameReady(VideoFrameStream::Status status,
                                    const scoped_refptr<VideoFrame>& frame) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   base::AutoLock auto_lock(lock_);
-
   DCHECK_EQ(state_, kPlaying);
   CHECK(pending_read_);
   pending_read_ = false;
@@ -387,6 +466,10 @@ void VideoRendererImpl::FrameReady(VideoFrameStream::Status status,
     DCHECK_EQ(status, VideoFrameStream::DEMUXER_READ_ABORTED);
     return;
   }
+
+  UMA_HISTOGRAM_ENUMERATION("Media.VideoFrame.ColorSpace",
+                            ColorSpaceUMAHelper(frame->ColorSpace()),
+                            static_cast<int>(VideoFrameColorSpaceUMA::MAX) + 1);
 
   if (frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM)) {
     DCHECK(!received_end_of_stream_);

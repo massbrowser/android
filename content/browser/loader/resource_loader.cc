@@ -11,7 +11,6 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
@@ -114,8 +113,8 @@ void PopulateResourceResponse(ResourceRequestInfoImpl* info,
           request->ssl_info().cert->os_cert_handle(), &encoded);
       DCHECK(rv);
       response->head.certificate.push_back(encoded);
-      for (auto& cert :
-               request->ssl_info().cert->GetIntermediateCertificates()) {
+      for (auto* cert :
+           request->ssl_info().cert->GetIntermediateCertificates()) {
         rv = net::X509Certificate::GetDEREncoded(cert, &encoded);
         DCHECK(rv);
         response->head.certificate.push_back(encoded);
@@ -447,7 +446,7 @@ void ResourceLoader::OnReadCompleted(net::URLRequest* unused, int bytes_read) {
 
 void ResourceLoader::CancelSSLRequest(int error,
                                       const net::SSLInfo* ssl_info) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(thread_checker_.CalledOnValidThread());
 
   // The request can be NULL if it was cancelled by the renderer (as the
   // request of the user navigating to a new page from the location bar).
@@ -463,7 +462,7 @@ void ResourceLoader::CancelSSLRequest(int error,
 }
 
 void ResourceLoader::ContinueSSLRequest() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(thread_checker_.CalledOnValidThread());
 
   DVLOG(1) << "ContinueSSLRequest() url: " << request_->url().spec();
 
@@ -513,10 +512,20 @@ void ResourceLoader::Resume(bool called_from_resource_controller) {
       // was called from Resume().
       FollowDeferredRedirectInternal();
       break;
+    case DEFERRED_ON_WILL_READ:
+      // Always post a task, as synchronous resumes don't go through this
+      // method.
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE,
+          base::Bind(&ResourceLoader::ReadMore, weak_ptr_factory_.GetWeakPtr(),
+                     false /* handle_result_asynchronously */));
+      break;
     case DEFERRED_READ:
       if (called_from_resource_controller) {
-        // TODO(mmenke):  Call ReadMore instead?  Strange that this is the only
-        // path which calls different methods, depending on the path.
+        // TODO(mmenke):  Call PrepareToReadMore instead?  Strange that this is
+        // the only case which calls different methods, depending on the path.
+        // ResumeReading does check for cancellation. Should other paths do that
+        // as well?
         base::ThreadTaskRunnerHandle::Get()->PostTask(
             FROM_HERE, base::Bind(&ResourceLoader::ResumeReading,
                                   weak_ptr_factory_.GetWeakPtr()));
@@ -524,7 +533,7 @@ void ResourceLoader::Resume(bool called_from_resource_controller) {
         // If this was called as a result of a handler succeeding synchronously,
         // force the result of the next read to be handled asynchronously, to
         // avoid blocking the IO thread.
-        ReadMore(true /* handle_result_asynchronously */);
+        PrepareToReadMore(true /* handle_result_asynchronously */);
       }
       break;
     case DEFERRED_RESPONSE_COMPLETE:
@@ -635,54 +644,49 @@ void ResourceLoader::CompleteResponseStarted() {
   scoped_refptr<ResourceResponse> response = new ResourceResponse();
   PopulateResourceResponse(info, request_.get(), response.get());
 
-  delegate_->DidReceiveResponse(this);
-
-  // TODO(darin): Remove ScopedTracker below once crbug.com/475761 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("475761 OnResponseStarted()"));
+  delegate_->DidReceiveResponse(this, response.get());
 
   read_deferral_start_time_ = base::TimeTicks::Now();
   // Using a ScopedDeferral here would result in calling ReadMore(true) on sync
-  // success. Calling ReadMore(false) here instead allows small responses to be
-  // handled completely synchronously, if no ResourceHandler defers handling of
-  // the response.
+  // success. Calling PrepareToReadMore(false) here instead allows small
+  // responses to be handled completely synchronously, if no ResourceHandler
+  // defers handling of the response.
   deferred_stage_ = DEFERRED_SYNC;
   handler_->OnResponseStarted(response.get(),
                               base::MakeUnique<Controller>(this));
   if (is_deferred()) {
     deferred_stage_ = DEFERRED_READ;
   } else {
-    ReadMore(false);
+    PrepareToReadMore(false);
+  }
+}
+
+void ResourceLoader::PrepareToReadMore(bool handle_result_async) {
+  TRACE_EVENT_WITH_FLOW0("loading", "ResourceLoader::PrepareToReadMore", this,
+                         TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
+  DCHECK(!is_deferred());
+
+  deferred_stage_ = DEFERRED_SYNC;
+
+  handler_->OnWillRead(&read_buffer_, &read_buffer_size_,
+                       base::MakeUnique<Controller>(this));
+
+  if (is_deferred()) {
+    deferred_stage_ = DEFERRED_ON_WILL_READ;
+  } else {
+    ReadMore(handle_result_async);
   }
 }
 
 void ResourceLoader::ReadMore(bool handle_result_async) {
-  TRACE_EVENT_WITH_FLOW0("loading", "ResourceLoader::ReadMore", this,
-                         TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
-  DCHECK(!is_deferred());
+  DCHECK(read_buffer_.get());
+  DCHECK_GT(read_buffer_size_, 0);
 
-  // Make sure we track the buffer in at least one place.  This ensures it gets
-  // deleted even in the case the request has already finished its job and
-  // doesn't use the buffer.
-  scoped_refptr<net::IOBuffer> buf;
-  int buf_size;
-  {
-    // TODO(darin): Remove ScopedTracker below once crbug.com/475761 is fixed.
-    tracked_objects::ScopedTracker tracking_profile2(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION("475761 OnWillRead()"));
-
-    if (!handler_->OnWillRead(&buf, &buf_size)) {
-      // Cancel the request, which will then call back into |this| to inform it
-      // of a "read error".
-      Cancel();
-      return;
-    }
-  }
-
-  DCHECK(buf.get());
-  DCHECK(buf_size > 0);
-
-  int result = request_->Read(buf.get(), buf_size);
+  int result = request_->Read(read_buffer_.get(), read_buffer_size_);
+  // Have to do this after the Read call, to ensure it still has an outstanding
+  // reference.
+  read_buffer_ = nullptr;
+  read_buffer_size_ = 0;
 
   if (result == net::ERR_IO_PENDING)
     return;
@@ -708,7 +712,7 @@ void ResourceLoader::ResumeReading() {
     read_deferral_start_time_ = base::TimeTicks();
   }
   if (request_->status().is_success()) {
-    ReadMore(false /* handle_result_asynchronously */);
+    PrepareToReadMore(false /* handle_result_asynchronously */);
   } else {
     ResponseCompleted();
   }
@@ -721,10 +725,6 @@ void ResourceLoader::CompleteRead(int bytes_read) {
   DCHECK(bytes_read >= 0);
   DCHECK(request_->status().is_success());
 
-  // TODO(darin): Remove ScopedTracker below once crbug.com/475761 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("475761 OnReadCompleted()"));
-
   ScopedDeferral scoped_deferral(
       this, bytes_read > 0 ? DEFERRED_READ : DEFERRED_RESPONSE_COMPLETE);
   handler_->OnReadCompleted(bytes_read, base::MakeUnique<Controller>(this));
@@ -736,10 +736,6 @@ void ResourceLoader::ResponseCompleted() {
 
   DVLOG(1) << "ResponseCompleted: " << request_->url().spec();
   RecordHistograms();
-
-  // TODO(darin): Remove ScopedTracker below once crbug.com/475761 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("475761 OnResponseCompleted()"));
 
   ScopedDeferral scoped_deferral(this, DEFERRED_FINISH);
   handler_->OnResponseCompleted(request_->status(),

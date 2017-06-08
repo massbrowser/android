@@ -1,4 +1,13 @@
-Test that putImageData(getImageData) pair leaves canvas ImageData the same.
+This is a testharness.js-based test.
+Harness Error. harness_status.status = 1 , harness_status.message = 1 duplicate test name: "GetPutImageDataTestCase "
+PASS GetPutImageDataTestCase  
+PASS GetPutImageDataTestCase  
+PASS GetPutImageDataTestCase  
+PASS GetPutImageDataTestCase  
+PASS GetPutImageDataTestCase  
+PASS GetPutImageDataTestCase  
+PASS GetPutImageDataTestCase  
+PASS GetPutImageDataTestCase  
+PASS GetPutImageDataTestCase  
+Harness: the test ran to completion.
 
- 
-Result: PASS

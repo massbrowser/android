@@ -165,6 +165,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       initWithType:ItemTypeOtherDevicesHeader] autorelease];
   otherDevicesHeader.text =
       l10n_util::GetNSString(IDS_IOS_OPTIONS_CONTINUITY_LABEL);
+  otherDevicesHeader.textColor = [[MDCPalette greyPalette] tint500];
   [model setHeader:otherDevicesHeader
       forSectionWithIdentifier:SectionIdentifierOtherDevices];
   [model addItem:[self handoffDetailItem]
@@ -176,6 +177,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       initWithType:ItemTypeWebServicesHeader] autorelease];
   webServicesHeader.text =
       l10n_util::GetNSString(IDS_IOS_OPTIONS_WEB_SERVICES_LABEL);
+  webServicesHeader.textColor = [[MDCPalette greyPalette] tint500];
   [model setHeader:webServicesHeader
       forSectionWithIdentifier:SectionIdentifierWebServices];
   _showSuggestionsItem.reset([[self showSuggestionsSwitchItem] retain]);
@@ -187,10 +189,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
         toSectionWithIdentifier:SectionIdentifierWebServices];
   }
 
-#if defined(GOOGLE_CHROME_BUILD)
   [model addItem:[self sendUsageDetailItem]
       toSectionWithIdentifier:SectionIdentifierWebServices];
-#endif
 
   if (web::IsDoNotTrackSupported()) {
     [model addItem:[self doNotTrackDetailItem]
@@ -340,21 +340,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
   return cell;
 }
 
-- (UICollectionReusableView*)collectionView:(UICollectionView*)collectionView
-          viewForSupplementaryElementOfKind:(NSString*)kind
-                                atIndexPath:(NSIndexPath*)indexPath {
-  UICollectionReusableView* view = [super collectionView:collectionView
-                       viewForSupplementaryElementOfKind:kind
-                                             atIndexPath:indexPath];
-
-  MDCCollectionViewTextCell* textCell =
-      base::mac::ObjCCast<MDCCollectionViewTextCell>(view);
-  if (textCell) {
-    textCell.textLabel.textColor = [[MDCPalette greyPalette] tint500];
-  }
-  return view;
-}
-
 #pragma mark UICollectionViewDelegate
 - (void)collectionView:(UICollectionView*)collectionView
     didSelectItemAtIndexPath:(NSIndexPath*)indexPath {
@@ -462,8 +447,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   _showSuggestionsItem.get().on = [_suggestionsEnabled value];
 
   // Update the cell.
-  [self reconfigureCellsForItems:@[ _showSuggestionsItem ]
-         inSectionWithIdentifier:SectionIdentifierWebServices];
+  [self reconfigureCellsForItems:@[ _showSuggestionsItem ]];
 }
 
 #pragma mark - Actions
@@ -495,8 +479,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
             ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
             : l10n_util::GetNSString(IDS_IOS_SETTING_OFF);
     _handoffDetailItem.get().detailText = detailText;
-    [self reconfigureCellsForItems:@[ _handoffDetailItem ]
-           inSectionWithIdentifier:SectionIdentifierOtherDevices];
+    [self reconfigureCellsForItems:@[ _handoffDetailItem ]];
     return;
   }
 
@@ -509,8 +492,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
     _sendUsageDetailItem.get().detailText = detailText;
 
-    [self reconfigureCellsForItems:@[ _sendUsageDetailItem ]
-           inSectionWithIdentifier:SectionIdentifierWebServices];
+    [self reconfigureCellsForItems:@[ _sendUsageDetailItem ]];
     return;
   }
 }

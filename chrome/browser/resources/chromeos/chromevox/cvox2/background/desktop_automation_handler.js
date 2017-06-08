@@ -12,7 +12,6 @@ goog.require('AutomationObjectConstructorInstaller');
 goog.require('BaseAutomationHandler');
 goog.require('ChromeVoxState');
 goog.require('CustomAutomationEvent');
-goog.require('Stubs');
 goog.require('editing.TextEditHandler');
 
 goog.scope(function() {
@@ -55,7 +54,7 @@ DesktopAutomationHandler = function(node) {
   this.addListener_(EventType.CHECKED_STATE_CHANGED,
                     this.onCheckedStateChanged);
   this.addListener_(EventType.CHILDREN_CHANGED,
-                    this.onActiveDescendantChanged);
+                    this.onChildrenChanged);
   this.addListener_(EventType.EXPANDED_CHANGED,
                     this.onEventIfInRange);
   this.addListener_(EventType.FOCUS,
@@ -256,6 +255,24 @@ DesktopAutomationHandler.prototype = {
     var event = new CustomAutomationEvent(
         EventType.CHECKED_STATE_CHANGED, evt.target, evt.eventFrom);
     this.onEventIfInRange(event);
+  },
+
+  /**
+   * @param {!AutomationEvent} evt
+   */
+  onChildrenChanged: function(evt) {
+    if (!this.shouldOutput_(evt))
+      return;
+
+    var curRange = ChromeVoxState.instance.currentRange;
+
+    // Always refresh the braille contents.
+    if (curRange && curRange.equals(cursors.Range.fromNode(evt.target))) {
+      new Output().withBraille(curRange, curRange, Output.EventType.NAVIGATE)
+          .go();
+    }
+
+    this.onActiveDescendantChanged(evt);
   },
 
   /**

@@ -13,10 +13,10 @@ function test()
 
     function addMessageWithFixedTimestamp(messageText, timestamp)
     {
-        var message = new SDK.ConsoleMessage(
-            InspectorTest.consoleModel.target(),
-            SDK.ConsoleMessage.MessageSource.Other, // source
-            SDK.ConsoleMessage.MessageLevel.Info, // level
+        var message = new ConsoleModel.ConsoleMessage(
+            InspectorTest.runtimeModel,
+            ConsoleModel.ConsoleMessage.MessageSource.Other, // source
+            ConsoleModel.ConsoleMessage.MessageLevel.Info, // level
             messageText,
             undefined, // type
             undefined, // url
@@ -37,19 +37,15 @@ function test()
     InspectorTest.dumpConsoleMessages();
 
     InspectorTest.addResult("Console messages with timestamps enabled:");
-    Common.settingForTest("consoleTimestampFormat").set(Console.ConsoleViewMessage.TimestampFormat.Full);
+    Common.settingForTest("consoleTimestampsEnabled").set(true);
 
     addMessageWithFixedTimestamp("<After>", baseTimestamp + 1000);
     addMessageWithFixedTimestamp("<After>", baseTimestamp + 1000);
     addMessageWithFixedTimestamp("<After>", baseTimestamp + 1456);
 
-    Common.settingForTest("consoleTimestampFormat").set(Console.ConsoleViewMessage.TimestampFormat.None);
-    Common.settingForTest("consoleTimestampFormat").set(Console.ConsoleViewMessage.TimestampFormat.Full);
+    Common.settingForTest("consoleTimestampsEnabled").set(false);
+    Common.settingForTest("consoleTimestampsEnabled").set(true);
 
-    InspectorTest.dumpConsoleMessages();
-
-    InspectorTest.addResult("Console messages with short timestamps:");
-    Common.settingForTest("consoleTimestampFormat").set(Console.ConsoleViewMessage.TimestampFormat.Short);
     InspectorTest.dumpConsoleMessages();
     InspectorTest.completeTest();
 }

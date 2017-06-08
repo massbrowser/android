@@ -21,7 +21,6 @@ import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.widget.RoundedIconGenerator;
 import org.chromium.chrome.browser.widget.TintedImageButton;
-import org.chromium.chrome.browser.widget.displaystyle.MarginResizer;
 import org.chromium.chrome.browser.widget.selection.SelectableItemView;
 
 /**
@@ -44,6 +43,7 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
     private final int mEndPadding;
 
     private boolean mRemoveButtonVisible;
+    private boolean mIsItemRemoved;
 
     public HistoryItemView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -80,12 +80,19 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
 
     @Override
     public void setItem(HistoryItem item) {
-        if (getItem() == item) return;
+        if (getItem() == item) {
+            // If the item is being set again, it means the HistoryAdapter contents have likely
+            // changed. This item may have changed group positions, so the background should be
+            // updated.
+            setBackgroundResourceForGroupPosition();
+            return;
+        }
 
         super.setItem(item);
 
         mTitle.setText(item.getTitle());
         mDomain.setText(item.getDomain());
+        mIsItemRemoved = false;
 
         if (item.wasBlockedVisit()) {
             if (mBlockedVisitDrawable == null) {
@@ -116,16 +123,16 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
 
         mHistoryManager = manager;
         if (!getItem().wasBlockedVisit()) requestIcon();
-
-        MarginResizer.createWithViewAdapter(this,
-                mHistoryManager.getSelectableListLayout().getUiConfig(),
-                mHistoryManager.getDefaultLateralListItemMarginPx(), 0);
     }
 
     /**
      * Removes the item associated with this view.
      */
     public void remove() {
+        // If the remove button is double tapped, this method may be called twice.
+        if (getItem() == null || mIsItemRemoved) return;
+
+        mIsItemRemoved = true;
         getItem().remove();
     }
 
@@ -191,20 +198,7 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
      * Sets the background resource for this view using the item's positioning in its group.
      */
     public void setBackgroundResourceForGroupPosition() {
-        int backgroundResource;
-
-        boolean isLastInGroup =  getItem().isLastInGroup();
-        boolean isFirstInGroup = getItem().isFirstInGroup();
-        if (!isLastInGroup && !isFirstInGroup) {
-            backgroundResource = R.drawable.list_item_middle;
-        } else if (!isLastInGroup) {
-            backgroundResource = R.drawable.list_item_top;
-        } else if (!isFirstInGroup) {
-            backgroundResource = R.drawable.list_item_bottom;
-        } else {
-            backgroundResource = R.drawable.list_item_single;
-        }
-
-        setBackgroundResource(backgroundResource);
+        setBackgroundResourceForGroupPosition(
+                getItem().isFirstInGroup(), getItem().isLastInGroup());
     }
 }

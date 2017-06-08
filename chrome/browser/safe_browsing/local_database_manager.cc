@@ -17,6 +17,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -552,9 +553,18 @@ bool LocalSafeBrowsingDatabaseManager::CheckBrowseUrl(const GURL& url,
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::OnCheckDone, this, check));
+      base::BindOnce(&LocalSafeBrowsingDatabaseManager::OnCheckDone, this,
+                     check));
 
   return false;
+}
+
+bool LocalSafeBrowsingDatabaseManager::CheckUrlForSubresourceFilter(
+    const GURL& url,
+    Client* client) {
+  // The check for the Subresource Filter in only implemented for pver4.
+  NOTREACHED();
+  return true;
 }
 
 void LocalSafeBrowsingDatabaseManager::CancelCheck(Client* client) {
@@ -611,8 +621,9 @@ void LocalSafeBrowsingDatabaseManager::GetChunks(GetChunksCallback callback) {
   DCHECK(!callback.is_null());
   safe_browsing_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::GetAllChunksFromDatabase,
-                 this, callback));
+      base::BindOnce(
+          &LocalSafeBrowsingDatabaseManager::GetAllChunksFromDatabase, this,
+          callback));
 }
 
 void LocalSafeBrowsingDatabaseManager::AddChunks(
@@ -624,8 +635,8 @@ void LocalSafeBrowsingDatabaseManager::AddChunks(
   DCHECK(!callback.is_null());
   safe_browsing_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::AddDatabaseChunks, this,
-                 list, base::Passed(&chunks), callback));
+      base::BindOnce(&LocalSafeBrowsingDatabaseManager::AddDatabaseChunks, this,
+                     list, base::Passed(&chunks), callback));
 }
 
 void LocalSafeBrowsingDatabaseManager::DeleteChunks(
@@ -634,8 +645,8 @@ void LocalSafeBrowsingDatabaseManager::DeleteChunks(
   DCHECK(enabled_);
   safe_browsing_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::DeleteDatabaseChunks, this,
-                 base::Passed(&chunk_deletes)));
+      base::BindOnce(&LocalSafeBrowsingDatabaseManager::DeleteDatabaseChunks,
+                     this, base::Passed(&chunk_deletes)));
 }
 
 void LocalSafeBrowsingDatabaseManager::UpdateStarted() {
@@ -652,8 +663,9 @@ void LocalSafeBrowsingDatabaseManager::UpdateFinished(bool update_succeeded) {
     update_in_progress_ = false;
     safe_browsing_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&LocalSafeBrowsingDatabaseManager::DatabaseUpdateFinished,
-                   this, update_succeeded));
+        base::BindOnce(
+            &LocalSafeBrowsingDatabaseManager::DatabaseUpdateFinished, this,
+            update_succeeded));
   }
 }
 
@@ -662,7 +674,7 @@ void LocalSafeBrowsingDatabaseManager::ResetDatabase() {
   DCHECK(enabled_);
   safe_browsing_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::OnResetDatabase, this));
+      base::BindOnce(&LocalSafeBrowsingDatabaseManager::OnResetDatabase, this));
 }
 
 void LocalSafeBrowsingDatabaseManager::StartOnIOThread(
@@ -762,7 +774,8 @@ void LocalSafeBrowsingDatabaseManager::DoStopOnIOThread() {
     closing_database_ = true;
     safe_browsing_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&LocalSafeBrowsingDatabaseManager::OnCloseDatabase, this));
+        base::BindOnce(&LocalSafeBrowsingDatabaseManager::OnCloseDatabase,
+                       this));
   }
 
   // Delete pending checks, calling back any clients with 'SB_THREAT_TYPE_SAFE'.
@@ -789,9 +802,10 @@ bool LocalSafeBrowsingDatabaseManager::MakeDatabaseAvailable() {
   if (DatabaseAvailable())
     return true;
   safe_browsing_task_runner_->PostTask(
-      FROM_HERE, base::Bind(base::IgnoreResult(
-                                &LocalSafeBrowsingDatabaseManager::GetDatabase),
-                            this));
+      FROM_HERE,
+      base::BindOnce(
+          base::IgnoreResult(&LocalSafeBrowsingDatabaseManager::GetDatabase),
+          this));
   return false;
 }
 
@@ -818,8 +832,8 @@ SafeBrowsingDatabase* LocalSafeBrowsingDatabaseManager::GetDatabase() {
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::DatabaseLoadComplete,
-                 this));
+      base::BindOnce(&LocalSafeBrowsingDatabaseManager::DatabaseLoadComplete,
+                     this));
 
   UMA_HISTOGRAM_TIMES("SB2.DatabaseOpen", base::TimeTicks::Now() - before);
   return database_;
@@ -864,8 +878,8 @@ void LocalSafeBrowsingDatabaseManager::OnCheckDone(SafeBrowsingCheck* check) {
 
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&LocalSafeBrowsingDatabaseManager::OnRequestFullHash, this,
-                   check));
+        base::BindOnce(&LocalSafeBrowsingDatabaseManager::OnRequestFullHash,
+                       this, check));
   } else {
     // We may have cached results for previous GetHash queries.  Since
     // this data comes from cache, don't histogram hits.
@@ -879,8 +893,8 @@ void LocalSafeBrowsingDatabaseManager::OnRequestFullHash(
   check->extended_reporting_level = GetExtendedReporting();
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::RequestFullHash, this,
-                 check));
+      base::BindOnce(&LocalSafeBrowsingDatabaseManager::RequestFullHash, this,
+                     check));
 }
 
 ExtendedReportingLevel
@@ -933,7 +947,7 @@ void LocalSafeBrowsingDatabaseManager::GetAllChunksFromDatabase(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &LocalSafeBrowsingDatabaseManager::BeforeGetAllChunksFromDatabase,
           this, lists, database_error, callback));
 }
@@ -948,9 +962,9 @@ void LocalSafeBrowsingDatabaseManager::BeforeGetAllChunksFromDatabase(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::OnGetAllChunksFromDatabase,
-                 this, lists, database_error, extended_reporting_level,
-                 callback));
+      base::BindOnce(
+          &LocalSafeBrowsingDatabaseManager::OnGetAllChunksFromDatabase, this,
+          lists, database_error, extended_reporting_level, callback));
 }
 
 void LocalSafeBrowsingDatabaseManager::OnGetAllChunksFromDatabase(
@@ -1009,8 +1023,8 @@ void LocalSafeBrowsingDatabaseManager::AddDatabaseChunks(
     GetDatabase()->InsertChunks(list_name, *chunks);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::OnAddChunksComplete, this,
-                 callback));
+      base::BindOnce(&LocalSafeBrowsingDatabaseManager::OnAddChunksComplete,
+                     this, callback));
 }
 
 void LocalSafeBrowsingDatabaseManager::DeleteDatabaseChunks(
@@ -1028,7 +1042,7 @@ void LocalSafeBrowsingDatabaseManager::DatabaseUpdateFinished(
   database_update_in_progress_ = false;
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &LocalSafeBrowsingDatabaseManager::NotifyDatabaseUpdateFinished, this,
           update_succeeded));
 }
@@ -1239,8 +1253,8 @@ void LocalSafeBrowsingDatabaseManager::StartSafeBrowsingCheck(
                  check_ptr->weak_ptr_factory_->GetWeakPtr(), check_ptr));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&LocalSafeBrowsingDatabaseManager::TimeoutCallback,
-                 check_ptr->weak_ptr_factory_->GetWeakPtr(), check_ptr),
+      base::BindOnce(&LocalSafeBrowsingDatabaseManager::TimeoutCallback,
+                     check_ptr->weak_ptr_factory_->GetWeakPtr(), check_ptr),
       check_timeout_);
 }
 

@@ -37,14 +37,16 @@ namespace media {
 
 InterfaceFactoryImpl::InterfaceFactoryImpl(
     service_manager::mojom::InterfaceProviderPtr interfaces,
-    scoped_refptr<MediaLog> media_log,
+    MediaLog* media_log,
     std::unique_ptr<service_manager::ServiceContextRef> connection_ref,
     MojoMediaClient* mojo_media_client)
     :
+#if defined(ENABLE_MOJO_RENDERER)
+      media_log_(media_log),
+#endif
 #if defined(ENABLE_MOJO_CDM)
       interfaces_(std::move(interfaces)),
 #endif
-      media_log_(media_log),
       connection_ref_(std::move(connection_ref)),
       mojo_media_client_(mojo_media_client) {
   DVLOG(1) << __func__;
@@ -115,15 +117,15 @@ void InterfaceFactoryImpl::CreateRenderer(
 
   MojoRendererService* mojo_renderer_service_ptr = mojo_renderer_service.get();
 
-  StrongBindingSet<mojom::Renderer>::BindingId binding_id =
-      renderer_bindings_.AddBinding(std::move(mojo_renderer_service),
-                                    std::move(request));
+  mojo::BindingId binding_id = renderer_bindings_.AddBinding(
+      std::move(mojo_renderer_service), std::move(request));
 
   // base::Unretained() is safe because the callback will be fired by
   // |mojo_renderer_service|, which is owned by |renderer_bindings_|.
-  mojo_renderer_service_ptr->set_bad_message_cb(base::Bind(
-      base::IgnoreResult(&StrongBindingSet<mojom::Renderer>::RemoveBinding),
-      base::Unretained(&renderer_bindings_), binding_id));
+  mojo_renderer_service_ptr->set_bad_message_cb(
+      base::Bind(base::IgnoreResult(
+                     &mojo::StrongBindingSet<mojom::Renderer>::RemoveBinding),
+                 base::Unretained(&renderer_bindings_), binding_id));
 #endif  // defined(ENABLE_MOJO_RENDERER)
 }
 

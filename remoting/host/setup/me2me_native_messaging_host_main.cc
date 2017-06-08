@@ -80,15 +80,12 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   // Initialize Breakpad as early as possible. On Mac the command-line needs to
   // be initialized first, so that the preference for crash-reporting can be
   // looked up in the config file.
-  // TODO(nicholss): Commenting out Breakpad. See crbug.com/637884
-  // if (IsUsageStatsAllowed()) {
-  //   InitializeCrashReporting();
-  // }
+  if (IsUsageStatsAllowed()) {
+    InitializeCrashReporting();
+  }
 #endif  // defined(REMOTING_ENABLE_BREAKPAD)
 
-  // TODO(sergeyu): Consider adding separate pools for different task classes.
-  const int kMaxBackgroundThreads = 5;
-  base::TaskScheduler::CreateAndSetSimpleTaskScheduler(kMaxBackgroundThreads);
+  base::TaskScheduler::CreateAndStartWithDefaultParams("Me2Me");
 
   // Mac OS X requires that the main thread be a UI message loop in order to
   // receive distributed notifications from the System Preferences pane. An
@@ -269,6 +266,10 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
 
   // Run the loop until channel is alive.
   run_loop.Run();
+
+  // Block until tasks blocking shutdown have completed their execution.
+  base::TaskScheduler::GetInstance()->Shutdown();
+
   return kSuccessExitCode;
 }
 

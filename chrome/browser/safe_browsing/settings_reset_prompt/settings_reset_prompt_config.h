@@ -13,20 +13,18 @@
 
 #include "base/feature_list.h"
 #include "base/macros.h"
+#include "base/time/time.h"
 
 class GURL;
 
 namespace safe_browsing {
 
-// Exposed for testing.
 extern const base::Feature kSettingsResetPrompt;
 
 // Encapsulates the state of the reset prompt experiment as well as
 // associated data.
 class SettingsResetPromptConfig {
  public:
-  // Returns true if the settings reset prompt study is enabled.
-  static bool IsPromptEnabled();
   // Factory method for creating instances of SettingsResetPromptConfig.
   // Returns nullptr if |IsPromptEnabled()| is false or if something is wrong
   // with the config parameters.
@@ -40,9 +38,16 @@ class SettingsResetPromptConfig {
   // for and can be used for metrics reporting.
   virtual int UrlToResetDomainId(const GURL& url) const;
 
-  // TODO(alito): parameterize the set of things that we want to reset
-  // for so that we can control it from the finch config. For example,
-  // with functions like HomepageResetAllowed() etc.
+  // The delay before showing the reset prompt after Chrome startup.
+  base::TimeDelta delay_before_prompt() const;
+  // Integer that identifies the current prompt wave. This number will increase
+  // with each new prompt wave.
+  int prompt_wave() const;
+  // The minimum time that must pass since the last time the prompt was shown
+  // before a new prompt can be shown. Applies only to prompts shown during the
+  // same prompt wave.
+  base::TimeDelta time_between_prompts() const;
+
  protected:
   SettingsResetPromptConfig();
 
@@ -58,6 +63,15 @@ class SettingsResetPromptConfig {
 
   // Map of 32 byte SHA256 hashes to integer domain IDs.
   std::unordered_map<SHA256Hash, int, SHA256HashHasher> domain_hashes_;
+
+  // Other feature parameters.
+  //
+  // If you add any required feature parameters, make sure to update the field
+  // trial testing configuration for the "SettingsResetPrompt" feature in
+  // src/testing/variations/fieldtrial_testing_config.json
+  base::TimeDelta delay_before_prompt_;
+  int prompt_wave_ = 0;
+  base::TimeDelta time_between_prompts_;
 
   DISALLOW_COPY_AND_ASSIGN(SettingsResetPromptConfig);
 };

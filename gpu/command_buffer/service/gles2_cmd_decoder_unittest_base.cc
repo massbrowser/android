@@ -90,7 +90,7 @@ void NormalizeInitState(gpu::gles2::GLES2DecoderTestBase::InitState* init) {
 const uint32_t kMaxColorAttachments = 16;
 const uint32_t kMaxDrawBuffers = 16;
 
-}  // namespace Anonymous
+}  // namespace
 
 namespace gpu {
 namespace gles2 {
@@ -193,17 +193,19 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
     feature_info = new FeatureInfo(*command_line, gpu_driver_bug_workaround);
   }
 
-  group_ = scoped_refptr<ContextGroup>(new ContextGroup(
-      gpu_preferences_, NULL, memory_tracker_,
-      new ShaderTranslatorCache(gpu_preferences_),
-      new FramebufferCompletenessCache, feature_info,
-      normalized_init.bind_generates_resource, nullptr, nullptr));
+  group_ = scoped_refptr<ContextGroup>(
+      new ContextGroup(gpu_preferences_, NULL, memory_tracker_,
+                       new ShaderTranslatorCache(gpu_preferences_),
+                       new FramebufferCompletenessCache, feature_info,
+                       normalized_init.bind_generates_resource, nullptr,
+                       nullptr, GpuFeatureInfo()));
   bool use_default_textures = normalized_init.bind_generates_resource;
 
   InSequence sequence;
 
   surface_ = new gl::GLSurfaceStub;
   surface_->SetSize(gfx::Size(kBackBufferWidth, kBackBufferHeight));
+  surface_->set_supports_draw_rectangle(surface_supports_draw_rectangle_);
 
   // Context needs to be created before initializing ContextGroup, which will
   // in turn initialize FeatureInfo, which needs a context to determine
@@ -1902,8 +1904,7 @@ void GLES2DecoderTestBase::SetupShader(
 
   TestHelper::SetShaderStates(gl_.get(), GetShader(vertex_shader_client_id),
                               true, nullptr, nullptr, &shader_language_version_,
-                              nullptr, nullptr, nullptr, nullptr, nullptr,
-                              nullptr);
+                              nullptr, nullptr, nullptr, nullptr, nullptr);
 
   OutputVariableList frag_output_variable_list;
   frag_output_variable_list.push_back(TestHelper::ConstructOutputVariable(
@@ -1913,7 +1914,7 @@ void GLES2DecoderTestBase::SetupShader(
   TestHelper::SetShaderStates(gl_.get(), GetShader(fragment_shader_client_id),
                               true, nullptr, nullptr, &shader_language_version_,
                               nullptr, nullptr, nullptr, nullptr,
-                              &frag_output_variable_list, nullptr);
+                              &frag_output_variable_list);
 
   cmds::AttachShader attach_cmd;
   attach_cmd.Init(program_client_id, vertex_shader_client_id);
@@ -2050,6 +2051,10 @@ void GLES2DecoderTestBase::SetupTexture() {
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   DoTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                kSharedMemoryId, kSharedMemoryOffset);
+};
+
+void GLES2DecoderTestBase::SetupSampler() {
+  DoBindSampler(0, client_sampler_id_, kServiceSamplerId);
 };
 
 void GLES2DecoderTestBase::DeleteVertexBuffer() {

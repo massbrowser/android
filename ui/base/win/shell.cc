@@ -109,11 +109,11 @@ bool PreventWindowFromPinning(HWND hwnd) {
     return false;
 
   return base::win::SetBooleanValueForPropertyStore(
-      pps.get(), PKEY_AppUserModel_PreventPinning, true);
+      pps.Get(), PKEY_AppUserModel_PreventPinning, true);
 }
 
 // TODO(calamity): investigate moving this out of the UI thread as COM
-// operations may spawn nested message loops which can cause issues.
+// operations may spawn nested run loops which can cause issues.
 void SetAppDetailsForWindow(const base::string16& app_id,
                             const base::FilePath& app_icon_path,
                             int app_icon_index,
@@ -132,24 +132,24 @@ void SetAppDetailsForWindow(const base::string16& app_id,
     return;
 
   if (!app_id.empty())
-    base::win::SetAppIdForPropertyStore(pps.get(), app_id.c_str());
+    base::win::SetAppIdForPropertyStore(pps.Get(), app_id.c_str());
   if (!app_icon_path.empty()) {
     // Always add the icon index explicitly to prevent bad interaction with the
     // index notation when file path has commas.
     base::win::SetStringValueForPropertyStore(
-        pps.get(), PKEY_AppUserModel_RelaunchIconResource,
+        pps.Get(), PKEY_AppUserModel_RelaunchIconResource,
         base::StringPrintf(L"%ls,%d", app_icon_path.value().c_str(),
                            app_icon_index)
             .c_str());
   }
   if (!relaunch_command.empty()) {
     base::win::SetStringValueForPropertyStore(
-        pps.get(), PKEY_AppUserModel_RelaunchCommand,
+        pps.Get(), PKEY_AppUserModel_RelaunchCommand,
         relaunch_command.c_str());
   }
   if (!relaunch_display_name.empty()) {
     base::win::SetStringValueForPropertyStore(
-        pps.get(), PKEY_AppUserModel_RelaunchDisplayNameResource,
+        pps.Get(), PKEY_AppUserModel_RelaunchDisplayNameResource,
         relaunch_display_name.c_str());
   }
 }

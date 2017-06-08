@@ -58,21 +58,23 @@ public class PaymentRequestCanMakePaymentMetricsTest extends PaymentRequestTestB
         expectResultContains(new String[] {"Request cancelled"});
 
         // CanMakePayment was queried.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Usage",
-                                PaymentRequestJourneyLogger.CAN_MAKE_PAYMENT_USED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Usage",
+                        JourneyLogger.CAN_MAKE_PAYMENT_USED));
 
         // The CanMakePayment effect on show should be recorded as being false and shown.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Used.EffetOnShow",
-                                PaymentRequestJourneyLogger.CMP_SHOW_DID_SHOW));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Used.EffectOnShow",
+                        JourneyLogger.CMP_SHOW_DID_SHOW));
 
         // There should be a record for an abort when CanMakePayment is false but the PR is shown to
         // the user.
-        assertEquals(
-                1, RecordHistogram.getHistogramValueCountForTesting(
-                           "PaymentRequest.CanMakePayment.Used.FalseWithShowEffectOnCompletion",
-                           PaymentRequestJourneyLogger.CMP_EFFECT_ON_COMPLETION_ABORTED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Used.FalseWithShowEffectOnCompletion",
+                        JourneyLogger.COMPLETION_STATUS_USER_ABORTED));
     }
 
     /**
@@ -99,21 +101,23 @@ public class PaymentRequestCanMakePaymentMetricsTest extends PaymentRequestTestB
         clickCardUnmaskButtonAndWait(DialogInterface.BUTTON_POSITIVE, mDismissed);
 
         // CanMakePayment was queried.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Usage",
-                                PaymentRequestJourneyLogger.CAN_MAKE_PAYMENT_USED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Usage",
+                        JourneyLogger.CAN_MAKE_PAYMENT_USED));
 
         // The CanMakePayment effect on show should be recorded as being false and shown.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Used.EffetOnShow",
-                                PaymentRequestJourneyLogger.CMP_SHOW_DID_SHOW));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Used.EffectOnShow",
+                        JourneyLogger.CMP_SHOW_DID_SHOW));
 
         // There should be a record for a completion when CanMakePayment is false but the PR is
         // shown to the user.
-        assertEquals(
-                1, RecordHistogram.getHistogramValueCountForTesting(
-                           "PaymentRequest.CanMakePayment.Used.FalseWithShowEffectOnCompletion",
-                           PaymentRequestJourneyLogger.CMP_EFFECT_ON_COMPLETION_COMPLETED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Used.FalseWithShowEffectOnCompletion",
+                        JourneyLogger.COMPLETION_STATUS_COMPLETED));
     }
 
     /**
@@ -143,21 +147,24 @@ public class PaymentRequestCanMakePaymentMetricsTest extends PaymentRequestTestB
         expectResultContains(new String[] {"Request cancelled"});
 
         // CanMakePayment was queried.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Usage",
-                                PaymentRequestJourneyLogger.CAN_MAKE_PAYMENT_USED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Usage",
+                        JourneyLogger.CAN_MAKE_PAYMENT_USED));
 
         // The CanMakePayment effect on show should be recorded as being false and shown.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Used.EffetOnShow",
-                                PaymentRequestJourneyLogger.CMP_SHOW_DID_SHOW
-                                        | PaymentRequestJourneyLogger.CMP_SHOW_COULD_MAKE_PAYMENT));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Used.EffectOnShow",
+                        JourneyLogger.CMP_SHOW_DID_SHOW
+                                | JourneyLogger.CMP_SHOW_COULD_MAKE_PAYMENT));
 
         // There should be a record for an abort when CanMakePayment is false but the PR is shown to
         // the user.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Used.TrueWithShowEffectOnCompletion",
-                                PaymentRequestJourneyLogger.CMP_EFFECT_ON_COMPLETION_ABORTED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Used.TrueWithShowEffectOnCompletion",
+                        JourneyLogger.COMPLETION_STATUS_USER_ABORTED));
     }
 
     /**
@@ -177,21 +184,24 @@ public class PaymentRequestCanMakePaymentMetricsTest extends PaymentRequestTestB
         clickAndWait(R.id.button_primary, mDismissed);
 
         // CanMakePayment was queried.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Usage",
-                                PaymentRequestJourneyLogger.CAN_MAKE_PAYMENT_USED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Usage",
+                        JourneyLogger.CAN_MAKE_PAYMENT_USED));
 
         // The CanMakePayment effect on show should be recorded as being false and shown.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Used.EffetOnShow",
-                                PaymentRequestJourneyLogger.CMP_SHOW_DID_SHOW
-                                        | PaymentRequestJourneyLogger.CMP_SHOW_COULD_MAKE_PAYMENT));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Used.EffectOnShow",
+                        JourneyLogger.CMP_SHOW_DID_SHOW
+                                | JourneyLogger.CMP_SHOW_COULD_MAKE_PAYMENT));
 
         // There should be a record for an abort when CanMakePayment is false but the PR is shown to
         // the user.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Used.TrueWithShowEffectOnCompletion",
-                                PaymentRequestJourneyLogger.CMP_EFFECT_ON_COMPLETION_COMPLETED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Used.TrueWithShowEffectOnCompletion",
+                        JourneyLogger.COMPLETION_STATUS_COMPLETED));
     }
 
     /**
@@ -217,15 +227,17 @@ public class PaymentRequestCanMakePaymentMetricsTest extends PaymentRequestTestB
         expectResultContains(new String[] {"Request cancelled"});
 
         // CanMakePayment was not queried.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Usage",
-                                PaymentRequestJourneyLogger.CAN_MAKE_PAYMENT_NOT_USED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Usage",
+                        JourneyLogger.CAN_MAKE_PAYMENT_NOT_USED));
 
         // There should be a record for an abort when CanMakePayment is not called but the PR is
         // shown to the user.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.NotUsed.WithShowEffectOnCompletion",
-                                PaymentRequestJourneyLogger.CMP_EFFECT_ON_COMPLETION_ABORTED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.NotUsed.WithShowEffectOnCompletion",
+                        JourneyLogger.COMPLETION_STATUS_USER_ABORTED));
     }
 
     /**
@@ -244,14 +256,16 @@ public class PaymentRequestCanMakePaymentMetricsTest extends PaymentRequestTestB
         clickAndWait(R.id.button_primary, mDismissed);
 
         // CanMakePayment was not queried.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.Usage",
-                                PaymentRequestJourneyLogger.CAN_MAKE_PAYMENT_NOT_USED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.Usage",
+                        JourneyLogger.CAN_MAKE_PAYMENT_NOT_USED));
 
         // There should be a record for a completion when CanMakePayment is not called but the PR is
         // shown to the user.
-        assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
-                                "PaymentRequest.CanMakePayment.NotUsed.WithShowEffectOnCompletion",
-                                PaymentRequestJourneyLogger.CMP_EFFECT_ON_COMPLETION_COMPLETED));
+        assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "PaymentRequest.CanMakePayment.NotUsed.WithShowEffectOnCompletion",
+                        JourneyLogger.COMPLETION_STATUS_COMPLETED));
     }
 }

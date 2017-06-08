@@ -5,7 +5,7 @@
 #ifndef UI_EVENTS_BLINK_INPUT_HANDLER_PROXY_CLIENT_H_
 #define UI_EVENTS_BLINK_INPUT_HANDLER_PROXY_CLIENT_H_
 
-#include "third_party/WebKit/public/platform/WebCoalescedInputEvent.h"
+#include "ui/events/blink/web_input_event_traits.h"
 
 namespace blink {
 class WebGestureCurve;
@@ -32,12 +32,12 @@ class InputHandlerProxyClient {
   // passive event listeners. If the target has blocking event listeners
   // |TransferActiveWheelFlingAnimation| will be used instead.
   virtual void DispatchNonBlockingEventToMainThread(
-      blink::WebScopedInputEvent event,
+      WebScopedInputEvent event,
       const ui::LatencyInfo& latency_info) = 0;
 
   // Creates a new fling animation curve instance for device |device_source|
   // with |velocity| and already scrolled |cumulative_scroll| pixels.
-  virtual blink::WebGestureCurve* CreateFlingAnimationCurve(
+  virtual std::unique_ptr<blink::WebGestureCurve> CreateFlingAnimationCurve(
       blink::WebGestureDevice device_source,
       const blink::WebFloatPoint& velocity,
       const blink::WebSize& cumulative_scroll) = 0;

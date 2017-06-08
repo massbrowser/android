@@ -9,10 +9,12 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/unguessable_token.h"
 #include "components/exo/surface_delegate.h"
 #include "components/exo/surface_observer.h"
 #include "components/exo/wm_helper.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/events/event_constants.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -102,6 +104,12 @@ class Pointer : public ui::EventHandler,
 
   // The current cursor.
   ui::Cursor cursor_;
+
+  // Source used for cursor capture copy output requests.
+  const base::UnguessableToken cursor_capture_source_id_;
+
+  // Last received event type.
+  ui::EventType last_event_type_ = ui::ET_UNKNOWN;
 
   // Weak pointer factory used for cursor capture callbacks.
   base::WeakPtrFactory<Pointer> cursor_capture_weak_ptr_factory_;

@@ -154,10 +154,6 @@ void ExtensionOptionsGuest::OnPreferredSizeChanged(const gfx::Size& pref_size) {
       options.ToValue()));
 }
 
-bool ExtensionOptionsGuest::ShouldHandleFindRequestsForEmbedder() const {
-  return true;
-}
-
 WebContents* ExtensionOptionsGuest::OpenURLFromTab(
     WebContents* source,
     const content::OpenURLParams& params) {
@@ -198,7 +194,7 @@ bool ExtensionOptionsGuest::ShouldCreateWebContents(
     int32_t route_id,
     int32_t main_frame_route_id,
     int32_t main_frame_widget_route_id,
-    WindowContainerType window_container_type,
+    content::mojom::WindowContainerType window_container_type,
     const GURL& opener_url,
     const std::string& frame_name,
     const GURL& target_url,

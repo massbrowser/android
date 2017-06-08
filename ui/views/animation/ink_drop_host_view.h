@@ -53,6 +53,20 @@ class VIEWS_EXPORT InkDropHostView : public View, public InkDropHost {
   // subclasses/clients to specify the flavor of ink drop.
   void SetInkDropMode(InkDropMode ink_drop_mode);
 
+  void set_ink_drop_visible_opacity(float visible_opacity) {
+    ink_drop_visible_opacity_ = visible_opacity;
+  }
+  float ink_drop_visible_opacity() const { return ink_drop_visible_opacity_; }
+
+  // Animates |ink_drop_| to the desired |ink_drop_state|. Caches |event| as the
+  // last_ripple_triggering_event().
+  //
+  // *** NOTE ***: |event| has been plumbed through on a best effort basis for
+  // the purposes of centering ink drop ripples on located Events.  Thus nullptr
+  // has been used by clients who do not have an Event instance available to
+  // them.
+  void AnimateInkDrop(InkDropState state, const ui::LocatedEvent* event);
+
  protected:
   static constexpr int kInkDropSmallCornerRadius = 2;
   static constexpr int kInkDropLargeCornerRadius = 4;
@@ -63,11 +77,6 @@ class VIEWS_EXPORT InkDropHostView : public View, public InkDropHost {
   // Returns a large ink drop size based on the |small_size| that works well
   // with the SquareInkDropRipple animation durations.
   static gfx::Size CalculateLargeInkDropSize(const gfx::Size& small_size);
-
-  void set_ink_drop_visible_opacity(float visible_opacity) {
-    ink_drop_visible_opacity_ = visible_opacity;
-  }
-  float ink_drop_visible_opacity() const { return ink_drop_visible_opacity_; }
 
   // Returns the default InkDropRipple centered on |center_point|.
   std::unique_ptr<InkDropRipple> CreateDefaultInkDropRipple(
@@ -84,15 +93,6 @@ class VIEWS_EXPORT InkDropHostView : public View, public InkDropHost {
   // Returns the point of the |last_ripple_triggering_event_| if it was a
   // LocatedEvent, otherwise the center point of the local bounds is returned.
   gfx::Point GetInkDropCenterBasedOnLastEvent() const;
-
-  // Animates |ink_drop_| to the desired |ink_drop_state|. Caches |event| as the
-  // last_ripple_triggering_event().
-  //
-  // *** NOTE ***: |event| has been plumbed through on a best effort basis for
-  // the purposes of centering ink drop ripples on located Events.  Thus nullptr
-  // has been used by clients who do not have an Event instance available to
-  // them.
-  void AnimateInkDrop(InkDropState state, const ui::LocatedEvent* event);
 
   // View:
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
@@ -114,6 +114,12 @@ class VIEWS_EXPORT InkDropHostView : public View, public InkDropHost {
   // subclasses should be able to call SetInkDropMode() during construction.
   InkDrop* GetInkDrop();
 
+  // Initializes and sets a mask on |ink_drop_layer|. No-op if
+  // CreateInkDropMask() returns null.
+  void InstallInkDropMask(ui::Layer* ink_drop_layer);
+
+  void ResetInkDropMask();
+
   // Returns an InkDropImpl configured to work well with a
   // flood-fill ink drop ripple.
   std::unique_ptr<InkDropImpl> CreateDefaultFloodFillInkDropImpl();
@@ -121,8 +127,6 @@ class VIEWS_EXPORT InkDropHostView : public View, public InkDropHost {
   // Returns an InkDropImpl with default configuration. The base implementation
   // of CreateInkDrop() delegates to this function.
   std::unique_ptr<InkDropImpl> CreateDefaultInkDropImpl();
-
-  InkDropMode ink_drop_mode() const { return ink_drop_mode_; }
 
  private:
   class InkDropGestureHandler;

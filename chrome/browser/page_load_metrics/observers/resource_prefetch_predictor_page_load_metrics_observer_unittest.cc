@@ -37,16 +37,18 @@ class ResourcePrefetchPredictorPageLoadMetricsObserverTest
         base::MakeUnique<testing::StrictMock<MockResourcePrefetchPredictor>>(
             config, profile());
     timing_.navigation_start = base::Time::FromDoubleT(1);
-    timing_.first_paint = base::TimeDelta::FromSeconds(2);
-    timing_.first_contentful_paint = base::TimeDelta::FromSeconds(3);
-    timing_.first_meaningful_paint = base::TimeDelta::FromSeconds(4);
+    timing_.paint_timing.first_paint = base::TimeDelta::FromSeconds(2);
+    timing_.paint_timing.first_contentful_paint =
+        base::TimeDelta::FromSeconds(3);
+    timing_.paint_timing.first_meaningful_paint =
+        base::TimeDelta::FromSeconds(4);
     PopulateRequiredTimingFields(&timing_);
   }
 
   void RegisterObservers(page_load_metrics::PageLoadTracker* tracker) override {
     tracker->AddObserver(
         base::MakeUnique<ResourcePrefetchPredictorPageLoadMetricsObserver>(
-            predictor_.get()));
+            predictor_.get(), web_contents()));
   }
 
   std::unique_ptr<testing::StrictMock<MockResourcePrefetchPredictor>>

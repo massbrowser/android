@@ -13,9 +13,34 @@ public interface PastePopupMenu {
      */
     public interface PastePopupMenuDelegate {
         /**
-         * Called to initiate a paste after the popup has been tapped.
+         * Called to initiate a paste after the paste option has been tapped.
          */
         void paste();
+
+        /**
+         * Called to initiate a paste as plain text after the popup has been tapped.
+         */
+        void pasteAsPlainText();
+
+        /**
+         * @return Whether clipboard is nonempty.
+         */
+        boolean canPaste();
+
+        /**
+         * Called to initiate a select all after the select all option has been tapped.
+         */
+        void selectAll();
+
+        /**
+         * @return Whether the select all option should be shown.
+         */
+        boolean canSelectAll();
+
+        /**
+         * @return Whether paste as plain text is needed.
+         */
+        boolean canPasteAsPlainText();
     }
 
     /**
@@ -27,9 +52,4 @@ public interface PastePopupMenu {
      * Hides the paste popup.
      */
     public void hide();
-
-    /**
-     * @return Whether the popup is active and showing.
-     */
-    public boolean isShowing();
 }

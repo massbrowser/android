@@ -25,6 +25,7 @@
 /** @const */ var SCREEN_CREATE_SUPERVISED_USER_FLOW =
     'supervised-user-creation';
 /** @const */ var SCREEN_APP_LAUNCH_SPLASH = 'app-launch-splash';
+/** @const */ var SCREEN_ARC_KIOSK_SPLASH = 'arc-kiosk-splash';
 /** @const */ var SCREEN_CONFIRM_PASSWORD = 'confirm-password';
 /** @const */ var SCREEN_FATAL_ERROR = 'fatal-error';
 /** @const */ var SCREEN_KIOSK_ENABLE = 'kiosk-enable';
@@ -42,7 +43,6 @@
 /** @const */ var ACCELERATOR_ENABLE_DEBBUGING = 'debugging';
 /** @const */ var ACCELERATOR_TOGGLE_EASY_BOOTSTRAP = 'toggle_easy_bootstrap';
 /** @const */ var ACCELERATOR_ENROLLMENT = 'enrollment';
-/** @const */ var ACCELERATOR_ENROLLMENT_AD = 'enrollment_ad';
 /** @const */ var ACCELERATOR_KIOSK_ENABLE = 'kiosk_enable';
 /** @const */ var ACCELERATOR_VERSION = 'version';
 /** @const */ var ACCELERATOR_RESET = 'reset';
@@ -89,6 +89,7 @@
   LOCK: 'lock',
   USER_ADDING: 'user-adding',
   APP_LAUNCH_SPLASH: 'app-launch-splash',
+  ARC_KIOSK_SPLASH: 'arc-kiosk-splash',
   DESKTOP_USER_MANAGER: 'login-add-user'
 };
 
@@ -102,7 +103,7 @@ cr.define('cr.ui.login', function() {
    * The value is used as the duration for ensureTransitionEndEvent below.
    * It needs to be inline with the step screen transition duration time
    * defined in css file. The current value in css is 200ms. To avoid emulated
-   * webkitTransitionEnd fired before real one, 250ms is used.
+   * transitionend fired before real one, 250ms is used.
    * @const
    */
   var MAX_SCREEN_TRANSITION_DURATION = 250;
@@ -266,11 +267,6 @@ cr.define('cr.ui.login', function() {
       $('login-header-bar').hidden = hidden;
     },
 
-    set pinHidden(hidden) {
-      this.virtualKeyboardShown = hidden;
-      $('pod-row').setFocusedPodPinVisibility(!hidden);
-    },
-
     /**
      * Sets the current size of the client area (display size).
      * @param {number} width client area width
@@ -346,10 +342,7 @@ cr.define('cr.ui.login', function() {
                 currentStepId) != -1) {
           chrome.send('toggleEnableDebuggingScreen');
         }
-      } else if (name == ACCELERATOR_ENROLLMENT ||
-                 name == ACCELERATOR_ENROLLMENT_AD) {
-        if (name == ACCELERATOR_ENROLLMENT_AD)
-          chrome.send('toggleEnrollmentAd');
+      } else if (name == ACCELERATOR_ENROLLMENT) {
         if (currentStepId == SCREEN_GAIA_SIGNIN ||
             currentStepId == SCREEN_ACCOUNT_PICKER) {
           chrome.send('toggleEnrollmentScreen');
@@ -387,6 +380,8 @@ cr.define('cr.ui.login', function() {
       } else if (name == ACCELERATOR_APP_LAUNCH_BAILOUT) {
         if (currentStepId == SCREEN_APP_LAUNCH_SPLASH)
           chrome.send('cancelAppLaunch');
+        if (currentStepId == SCREEN_ARC_KIOSK_SPLASH)
+          chrome.send('cancelArcKioskLaunch');
       } else if (name == ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG) {
         if (currentStepId == SCREEN_APP_LAUNCH_SPLASH)
           chrome.send('networkConfigRequest');
@@ -535,8 +530,8 @@ cr.define('cr.ui.login', function() {
           !oldStep.classList.contains('hidden')) {
         if (oldStep.classList.contains('animated')) {
           innerContainer.classList.add('animation');
-          oldStep.addEventListener('webkitTransitionEnd', function f(e) {
-            oldStep.removeEventListener('webkitTransitionEnd', f);
+          oldStep.addEventListener('transitionend', function f(e) {
+            oldStep.removeEventListener('transitionend', f);
             if (oldStep.classList.contains('faded') ||
                 oldStep.classList.contains('left') ||
                 oldStep.classList.contains('right')) {
@@ -562,8 +557,8 @@ cr.define('cr.ui.login', function() {
         if (this.isOobeUI() && innerContainer.classList.contains('down')) {
           innerContainer.classList.remove('down');
           innerContainer.addEventListener(
-              'webkitTransitionEnd', function f(e) {
-                innerContainer.removeEventListener('webkitTransitionEnd', f);
+              'transitionend', function f(e) {
+                innerContainer.removeEventListener('transitionend', f);
                 outerContainer.classList.remove('down');
                 $('progress-dots').classList.remove('down');
                 chrome.send('loginVisible', ['oobe']);

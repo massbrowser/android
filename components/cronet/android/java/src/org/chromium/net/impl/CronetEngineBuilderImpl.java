@@ -83,10 +83,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
     private boolean mQuicEnabled;
     private boolean mHttp2Enabled;
     private boolean mSdchEnabled;
-    private String mDataReductionProxyKey;
-    private String mDataReductionProxyPrimaryProxy;
-    private String mDataReductionProxyFallbackProxy;
-    private String mDataReductionProxySecureProxyCheckUrl;
+    private boolean mBrotiEnabled;
     private boolean mDisableCache;
     private int mHttpCacheMode;
     private long mHttpCacheMaxSize;
@@ -104,6 +101,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
         enableQuic(false);
         enableHttp2(true);
         enableSdch(false);
+        enableBrotli(false);
         enableHttpCache(HTTP_CACHE_DISABLED, 0);
         enableNetworkQualityEstimator(false);
         enablePublicKeyPinningBypassForLocalTrustAnchors(true);
@@ -188,38 +186,13 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
     }
 
     @Override
-    public CronetEngineBuilderImpl enableDataReductionProxy(String key) {
-        mDataReductionProxyKey = key;
+    public CronetEngineBuilderImpl enableBrotli(boolean value) {
+        mBrotiEnabled = value;
         return this;
     }
 
-    String dataReductionProxyKey() {
-        return mDataReductionProxyKey;
-    }
-
-    @Override
-    public CronetEngineBuilderImpl setDataReductionProxyOptions(
-            String primaryProxy, String fallbackProxy, String secureProxyCheckUrl) {
-        if (primaryProxy.isEmpty() || fallbackProxy.isEmpty() || secureProxyCheckUrl.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Primary and fallback proxies and check url must be set");
-        }
-        mDataReductionProxyPrimaryProxy = primaryProxy;
-        mDataReductionProxyFallbackProxy = fallbackProxy;
-        mDataReductionProxySecureProxyCheckUrl = secureProxyCheckUrl;
-        return this;
-    }
-
-    String dataReductionProxyPrimaryProxy() {
-        return mDataReductionProxyPrimaryProxy;
-    }
-
-    String dataReductionProxyFallbackProxy() {
-        return mDataReductionProxyFallbackProxy;
-    }
-
-    String dataReductionProxySecureProxyCheckUrl() {
-        return mDataReductionProxySecureProxyCheckUrl;
+    boolean brotliEnabled() {
+        return mBrotiEnabled;
     }
 
     @IntDef({

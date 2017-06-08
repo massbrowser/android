@@ -25,6 +25,7 @@
 
 #include "core/editing/DragCaret.h"
 
+#include "core/editing/CaretDisplayItemClient.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/frame/Settings.h"
 #include "core/layout/api/LayoutViewItem.h"
@@ -32,99 +33,84 @@
 
 namespace blink {
 
-DragCaret::DragCaret() : m_caretBase(new CaretDisplayItemClient()) {}
+DragCaret::DragCaret() : display_item_client_(new CaretDisplayItemClient()) {}
 
 DragCaret::~DragCaret() = default;
 
-DragCaret* DragCaret::create() {
+DragCaret* DragCaret::Create() {
   return new DragCaret;
 }
 
-bool DragCaret::hasCaretIn(const LayoutBlock& layoutBlock) const {
-  Node* node = m_position.anchorNode();
-  if (!node)
-    return false;
-  if (layoutBlock != CaretDisplayItemClient::caretLayoutObject(node))
-    return false;
-  return rootEditableElementOf(m_position.position());
+void DragCaret::ClearPreviousVisualRect(const LayoutBlock& block) {
+  display_item_client_->ClearPreviousVisualRect(block);
 }
 
-bool DragCaret::isContentRichlyEditable() const {
-  return isRichlyEditablePosition(m_position.position());
+void DragCaret::LayoutBlockWillBeDestroyed(const LayoutBlock& block) {
+  display_item_client_->LayoutBlockWillBeDestroyed(block);
 }
 
-void DragCaret::invalidateCaretRect(Node* node,
-                                    const LayoutRect& caretLocalRect) {
-  // TODO(editing-dev): The use of updateStyleAndLayout
-  // needs to be audited.  See http://crbug.com/590369 for more details.
-  // In the long term we should use idle time spell checker to prevent
-  // synchronous layout caused by spell checking (see crbug.com/517298).
-  node->document().updateStyleAndLayoutTree();
-  if (!hasEditableStyle(*node))
-    return;
-  m_caretBase->invalidateLocalCaretRect(node, caretLocalRect);
+void DragCaret::UpdateStyleAndLayoutIfNeeded() {
+  display_item_client_->UpdateStyleAndLayoutIfNeeded(
+      RootEditableElementOf(position_.GetPosition()) ? position_
+                                                     : PositionWithAffinity());
 }
 
-void DragCaret::setCaretPosition(const PositionWithAffinity& position) {
-  // for querying Layer::compositingState()
-  // This code is probably correct, since it doesn't occur in a stack that
-  // involves updating compositing state.
-  DisableCompositingQueryAsserts disabler;
+void DragCaret::InvalidatePaint(const LayoutBlock& block,
+                                const PaintInvalidatorContext& context) {
+  display_item_client_->InvalidatePaint(block, context);
+}
 
-  if (Node* node = m_position.anchorNode())
-    invalidateCaretRect(node, m_caretLocalRect);
-  m_position = createVisiblePosition(position).toPositionWithAffinity();
+bool DragCaret::IsContentRichlyEditable() const {
+  return IsRichlyEditablePosition(position_.GetPosition());
+}
+
+void DragCaret::SetCaretPosition(const PositionWithAffinity& position) {
+  position_ = CreateVisiblePosition(position).ToPositionWithAffinity();
   Document* document = nullptr;
-  if (Node* node = m_position.anchorNode()) {
-    invalidateCaretRect(node, m_caretLocalRect);
-    document = &node->document();
-    setContext(document);
-  }
-  if (m_position.isNull()) {
-    m_caretLocalRect = LayoutRect();
-  } else {
-    DCHECK(!m_position.isOrphan());
-    document->updateStyleAndLayoutTree();
-    m_caretLocalRect = CaretDisplayItemClient::computeCaretRect(m_position);
+  if (Node* node = position_.AnchorNode()) {
+    document = &node->GetDocument();
+    SetContext(document);
   }
 }
 
-void DragCaret::nodeChildrenWillBeRemoved(ContainerNode& container) {
-  if (!hasCaret() || !container.inActiveDocument())
+void DragCaret::NodeChildrenWillBeRemoved(ContainerNode& container) {
+  if (!HasCaret() || !container.InActiveDocument())
     return;
-  Node* const anchorNode = m_position.position().anchorNode();
-  if (!anchorNode || anchorNode == container)
+  Node* const anchor_node = position_.GetPosition().AnchorNode();
+  if (!anchor_node || anchor_node == container)
     return;
-  if (!container.isShadowIncludingInclusiveAncestorOf(anchorNode))
+  if (!container.IsShadowIncludingInclusiveAncestorOf(anchor_node))
     return;
-  m_position.document()->layoutViewItem().clearSelection();
-  clear();
+  Clear();
 }
 
-void DragCaret::nodeWillBeRemoved(Node& node) {
-  if (!hasCaret() || !node.inActiveDocument())
+void DragCaret::NodeWillBeRemoved(Node& node) {
+  if (!HasCaret() || !node.InActiveDocument())
     return;
-  Node* const anchorNode = m_position.position().anchorNode();
-  if (!anchorNode)
+  Node* const anchor_node = position_.GetPosition().AnchorNode();
+  if (!anchor_node)
     return;
-  if (!node.isShadowIncludingInclusiveAncestorOf(anchorNode))
+  if (!node.IsShadowIncludingInclusiveAncestorOf(anchor_node))
     return;
-  m_position.document()->layoutViewItem().clearSelection();
-  clear();
+  Clear();
 }
 
 DEFINE_TRACE(DragCaret) {
-  visitor->trace(m_position);
-  SynchronousMutationObserver::trace(visitor);
+  visitor->Trace(position_);
+  SynchronousMutationObserver::Trace(visitor);
 }
 
-void DragCaret::paintDragCaret(LocalFrame* frame,
+bool DragCaret::ShouldPaintCaret(const LayoutBlock& block) const {
+  return display_item_client_->ShouldPaintCaret(block);
+}
+
+void DragCaret::PaintDragCaret(const LocalFrame* frame,
                                GraphicsContext& context,
-                               const LayoutPoint& paintOffset) const {
-  if (m_position.anchorNode()->document().frame() == frame) {
-    m_caretBase->paintCaret(m_position.anchorNode(), context, m_caretLocalRect,
-                            paintOffset, DisplayItem::kDragCaret);
-  }
+                               const LayoutPoint& paint_offset) const {
+  if (position_.AnchorNode()->GetDocument().GetFrame() != frame)
+    return;
+  display_item_client_->PaintCaret(context, paint_offset,
+                                   DisplayItem::kDragCaret);
 }
 
 }  // namespace blink

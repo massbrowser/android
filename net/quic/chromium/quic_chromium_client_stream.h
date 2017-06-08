@@ -22,6 +22,7 @@
 #include "net/http/http_stream.h"
 #include "net/log/net_log_with_source.h"
 #include "net/quic/core/quic_spdy_stream.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
 
@@ -48,9 +49,6 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
 
     // Called when the stream is closed because of an error.
     virtual void OnError(int error) = 0;
-
-    // Returns true if sending of headers has completed.
-    virtual bool HasSendHeadersComplete() = 0;
 
    protected:
     virtual ~Delegate() {}
@@ -88,7 +86,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
   // of client-side streams should be able to set the priority.
   using QuicSpdyStream::SetPriority;
 
-  int WriteStreamData(base::StringPiece data,
+  int WriteStreamData(QuicStringPiece data,
                       bool fin,
                       const CompletionCallback& callback);
   // Same as WriteStreamData except it writes data from a vector of IOBuffers,
@@ -107,12 +105,6 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
   // Reads at most |buf_len| bytes into |buf|. Returns the number of bytes read.
   int Read(IOBuffer* buf, int buf_len);
 
-  // Returns true if the stream can possible write data.  (The socket may
-  // turn out to be write blocked, of course).  If the stream can not write,
-  // this method returns false, and |callback| will be invoked when
-  // it becomes writable.
-  bool CanWrite(const CompletionCallback& callback);
-
   const NetLogWithSource& net_log() const { return net_log_; }
 
   // Prevents this stream from migrating to a new network. May cause other
@@ -125,6 +117,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
   bool IsFirstStream();
 
   using QuicSpdyStream::HasBufferedData;
+  using QuicStream::sequencer;
 
  private:
   void NotifyDelegateOfHeadersCompleteLater(SpdyHeaderBlock headers,
@@ -140,7 +133,12 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream : public QuicSpdyStream {
 
   bool headers_delivered_;
 
-  CompletionCallback callback_;
+  // True when initial headers have been sent.
+  bool initial_headers_sent_;
+
+  // Callback to be invoked when WriteStreamData or WritevStreamData completes
+  // asynchronously.
+  CompletionCallback write_callback_;
 
   QuicClientSessionBase* session_;
 

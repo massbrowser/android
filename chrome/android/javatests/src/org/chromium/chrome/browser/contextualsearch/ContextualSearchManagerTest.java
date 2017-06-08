@@ -41,11 +41,11 @@ import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchBarControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchCaptionControl;
-import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchIconSpriteControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchImageControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchQuickActionControl;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchFakeServer.FakeSlowResolveSearch;
+import org.chromium.chrome.browser.contextualsearch.ContextualSearchInternalStateController.InternalState;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.gsa.GSAContextDisplaySelection;
@@ -98,6 +98,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     // is fully supported.
     private static final String NORMAL_PRIORITY_SEARCH_ENDPOINT = "/search?";
     private static final String LOW_PRIORITY_SEARCH_ENDPOINT = "/s?";
+    private static final String LOW_PRIORITY_INVALID_SEARCH_ENDPOINT = "/s/invalid";
     private static final String CONTEXTUAL_SEARCH_PREFETCH_PARAM = "&pf=c";
     // The number of ms to delay startup for all tests.
     private static final int ACTIVITY_STARTUP_DELAY_MS = 1000;
@@ -109,6 +110,8 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     private ContextualSearchPolicy mPolicy;
     private ContextualSearchSelectionController mSelectionController;
     private EmbeddedTestServer mTestServer;
+
+    private float mDpToPx;
 
     // State for an individual test.
     FakeSlowResolveSearch mLatestSlowResolveSearch;
@@ -154,6 +157,8 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         filter.addDataScheme("market");
         mActivityMonitor = getInstrumentation().addMonitor(
                 filter, new Instrumentation.ActivityResult(Activity.RESULT_OK, null), true);
+
+        mDpToPx = getActivity().getResources().getDisplayMetrics().density;
     }
 
     @Override
@@ -200,7 +205,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     public void longPressNodeWithoutWaiting(String nodeId)
             throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        DOMUtils.longPressNode(this, tab.getContentViewCore(), nodeId);
+        DOMUtils.longPressNode(tab.getContentViewCore(), nodeId);
     }
 
     /**
@@ -218,7 +223,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
      */
     public void clickNode(String nodeId) throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        DOMUtils.clickNode(this, tab.getContentViewCore(), nodeId);
+        DOMUtils.clickNode(tab.getContentViewCore(), nodeId);
     }
 
     /**
@@ -261,6 +266,25 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
                 return search.didFinishSearchTermResolution();
             }
         }, TEST_TIMEOUT, DEFAULT_POLLING_INTERVAL);
+    }
+
+    /**
+     * Waits for a Normal priority URL to be loaded, or asserts that the load never happened.
+     * This is needed when we test with a live internet connection and an invalid url fails to
+     * load (as expected.  See crbug.com/682953 for background.
+     */
+    private void waitForNormalPriorityUrlLoaded() {
+        CriteriaHelper.pollInstrumentationThread(
+                new Criteria("Normal priority URL was not loaded: "
+                        + String.valueOf(mFakeServer.getLoadedUrl())) {
+                    @Override
+                    public boolean isSatisfied() {
+                        return mFakeServer.getLoadedUrl() != null
+                                && mFakeServer.getLoadedUrl().contains(
+                                           NORMAL_PRIORITY_SEARCH_ENDPOINT);
+                    }
+                },
+                TEST_TIMEOUT, DEFAULT_POLLING_INTERVAL);
     }
 
     /**
@@ -584,24 +608,32 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         assertTrue("Expected to find searchTerm '" + searchTerm + "', " + message, doesMatch);
     }
 
+    /**
+     * Asserts that the given parameters are present in the most recently loaded URL.
+     */
     private void assertContainsParameters(String searchTerm, String alternateTerm) {
         assertTrue(mFakeServer.getSearchTermRequested() == null
                 || mFakeServer.getLoadedUrl().contains(searchTerm)
                         && mFakeServer.getLoadedUrl().contains(alternateTerm));
     }
 
-    private void assertContainsNoParameters() {
-        assertTrue(mFakeServer.getLoadedUrl() == null);
-    }
-
+    /**
+     * Asserts that a Search Term has been requested.
+     */
     private void assertSearchTermRequested() {
         assertNotNull(mFakeServer.getSearchTermRequested());
     }
 
+    /**
+     * Asserts that there has not been any Search Term requested.
+     */
     private void assertSearchTermNotRequested() {
         assertNull(mFakeServer.getSearchTermRequested());
     }
 
+    /**
+     * Asserts that the panel is currently closed or in an undefined state.
+     */
     private void assertPanelClosedOrUndefined() {
         boolean success = false;
         if (mPanel == null) {
@@ -613,15 +645,24 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         assertTrue(success);
     }
 
+    /**
+     * Asserts that the panel is currently in the "peeking" state (just showing the Bar).
+     */
     private void assertPanelPeeked() {
         assertTrue(mPanel.getPanelState() == PanelState.PEEKED);
     }
 
+    /**
+     * Asserts that no URL has been loaded in the Overlay Panel.
+     */
     private void assertLoadedNoUrl() {
         assertTrue("Requested a search or preload when none was expected!",
                 mFakeServer.getLoadedUrl() == null);
     }
 
+    /**
+     * Asserts that a low-priority URL has been loaded in the Overlay Panel.
+     */
     private void assertLoadedLowPriorityUrl() {
         String message = "Expected a low priority search request URL, but got "
                 + (mFakeServer.getLoadedUrl() != null ? mFakeServer.getLoadedUrl() : "null");
@@ -632,6 +673,24 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
                         && mFakeServer.getLoadedUrl().contains(CONTEXTUAL_SEARCH_PREFETCH_PARAM));
     }
 
+    /**
+     * Asserts that a low-priority URL that is intentionally invalid has been loaded in the Overlay
+     * Panel (in order to produce an error).
+     */
+    private void assertLoadedLowPriorityInvalidUrl() {
+        String message = "Expected a low priority invalid search request URL, but got "
+                + (String.valueOf(mFakeServer.getLoadedUrl()));
+        assertTrue(message, mFakeServer.getLoadedUrl() != null
+                        && mFakeServer.getLoadedUrl().contains(
+                                   LOW_PRIORITY_INVALID_SEARCH_ENDPOINT));
+        assertTrue("Low priority request does not have the required prefetch parameter!",
+                mFakeServer.getLoadedUrl() != null
+                        && mFakeServer.getLoadedUrl().contains(CONTEXTUAL_SEARCH_PREFETCH_PARAM));
+    }
+
+    /**
+     * Asserts that a normal priority URL has been loaded in the Overlay Panel.
+     */
     private void assertLoadedNormalPriorityUrl() {
         String message = "Expected a normal priority search request URL, but got "
                 + (mFakeServer.getLoadedUrl() != null ? mFakeServer.getLoadedUrl() : "null");
@@ -642,6 +701,9 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
                         && !mFakeServer.getLoadedUrl().contains(CONTEXTUAL_SEARCH_PREFETCH_PARAM));
     }
 
+    /**
+     * Asserts that no URLs have been loaded in the Overlay Panel since the last {@link reset}.
+     */
     private void assertNoSearchesLoaded() {
         assertEquals(0, mFakeServer.getLoadedUrlCount());
         assertLoadedNoUrl();
@@ -763,7 +825,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         waitForGestureProcessing();
         waitForPanelToClose();
         assertPanelClosedOrUndefined();
-        assertNull(getSelectedText());
+        assertTrue(TextUtils.isEmpty(getSelectedText()));
     }
 
     /**
@@ -911,17 +973,13 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     }
 
     /**
-     * Generate a click in the panel's bar.
+     * Generate a click in the middle of panel's bar.
      * TODO(donnd): Replace this method with panelBarClick since this appears to be unreliable.
-     * @barHeight The vertical position where the click should take place as a percentage
-     *            of the screen size.
      */
-    private void clickPanelBar(float barPositionVertical) {
+    private void clickPanelBar() {
         View root = getActivity().getWindow().getDecorView().getRootView();
-        float w = root.getWidth();
-        float h = root.getHeight();
-        float tapX = w / 2f;
-        float tapY = h * barPositionVertical;
+        float tapX = ((mPanel.getOffsetX() + mPanel.getWidth()) / 2f) * mDpToPx;
+        float tapY = (mPanel.getOffsetY() + (mPanel.getBarContainerHeight() / 2f)) * mDpToPx;
 
         TouchCommon.singleClickView(root, (int) tapX, (int) tapY);
     }
@@ -930,7 +988,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
      * Taps the peeking bar to expand the panel
      */
     private void tapPeekingBarToExpandAndAssert() throws InterruptedException {
-        clickPanelBar(0.95f);
+        clickPanelBar();
         waitForPanelToExpand();
     }
 
@@ -1035,8 +1093,9 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     /**
      * Tests whether the contextual search panel hides when omnibox is clicked.
      */
-    @SmallTest
-    @Feature({"ContextualSearch"})
+    //@SmallTest
+    //@Feature({"ContextualSearch"})
+    @DisabledTest
     public void testHidesWhenOmniboxFocused() throws InterruptedException, TimeoutException {
         clickWordNode("intelligence");
 
@@ -1215,7 +1274,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         assertLoadedLowPriorityUrl();
         assertEquals(1, mFakeServer.getLoadedUrlCount());
 
-        // When the second request fails, we should not issue a new request.
+        // When the second request fails, we should not automatically issue a new request.
         fakeContentViewDidNavigate(true);
         assertLoadedLowPriorityUrl();
         assertEquals(1, mFakeServer.getLoadedUrlCount());
@@ -1223,6 +1282,38 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         // Once the bar opens, we make a new request at normal priority.
         tapPeekingBarToExpandAndAssert();
         assertLoadedNormalPriorityUrl();
+        assertEquals(2, mFakeServer.getLoadedUrlCount());
+    }
+
+    /**
+     * Tests that a live request that fails (for an invalid URL) does a failover to a
+     * normal priority request once the user triggers the failover by opening the panel.
+     */
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    public void testLivePrefetchFailoverRequestMadeAfterOpen()
+            throws InterruptedException, TimeoutException {
+        mFakeServer.reset();
+        mFakeServer.setLowPriorityPathInvalid();
+        simulateTapSearch("search");
+        assertLoadedLowPriorityInvalidUrl();
+        assertTrue(mFakeServer.didAttemptLoadInvalidUrl());
+
+        // we should not automatically issue a new request.
+        assertEquals(1, mFakeServer.getLoadedUrlCount());
+
+        // Fake a navigation error if offline.
+        // When connected to the Internet this error may already have happened due to actually
+        // trying to load the invalid URL.  But on test bots that are not online we need to
+        // fake that a navigation happened with an error. See crbug.com/682953 for details.
+        if (!mManager.isOnline()) {
+            boolean isFailure = true;
+            fakeContentViewDidNavigate(isFailure);
+        }
+
+        // Once the bar opens, we make a new request at normal priority.
+        tapPeekingBarToExpandAndAssert();
+        waitForNormalPriorityUrlLoaded();
         assertEquals(2, mFakeServer.getLoadedUrlCount());
     }
 
@@ -1236,7 +1327,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
 
         assertSearchTermRequested();
         fakeResponse(false, 200, "Intelligence", "display-text", "alternate-term", true);
-        assertContainsNoParameters();
+        assertLoadedNoUrl();
         waitForPanelToPeek();
         assertLoadedNoUrl();
     }
@@ -1256,7 +1347,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         clickNode("question-mark");
         waitForGestureProcessing();
         waitForPanelToCloseAndSelectionEmpty();
-        assertNull(getSelectedText());
+        assertTrue(TextUtils.isEmpty(getSelectedText()));
         assertLoadedNoUrl();
     }
 
@@ -1273,7 +1364,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         waitForPanelToPeek();
         assertLoadedLowPriorityUrl();
         clickNode("question-mark");
-        waitForGestureProcessing();
+        waitForPanelToClose();
         assertNull(getSelectedText());
     }
 
@@ -1305,7 +1396,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         assertLoadedLowPriorityUrl();
         scrollBasePage();
         assertPanelClosedOrUndefined();
-        assertNull(mSelectionController.getSelectedText());
+        assertTrue(TextUtils.isEmpty(mSelectionController.getSelectedText()));
     }
 
     /**
@@ -1318,8 +1409,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         clickWordNode("states-far");
         waitForPanelToPeek();
         clickNode("question-mark");
-        waitForGestureProcessing();
-        assertPanelClosedOrUndefined();
+        waitForPanelToClose();
         assertNull(mSelectionController.getSelectedText());
     }
 
@@ -1348,9 +1438,8 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         assertEquals("States", getSelectedText());
         waitForPanelToPeek();
         clickNode("states-far");
-        waitForGestureProcessing();
+        waitForPanelToClose();
         assertNull(getSelectedText());
-        assertPanelClosedOrUndefined();
         clickNode("states-far");
         waitForGestureProcessing();
         waitForPanelToPeek();
@@ -2483,7 +2572,6 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
      */
     @SmallTest
     @Feature({"ContextualSearch"})
-    @CommandLineFlags.Add(ContextualSearchFieldTrial.ENABLE_TRANSLATION + "=true")
     public void testTapWithLanguage() throws InterruptedException, TimeoutException {
         // Tapping a German word should trigger translation.
         simulateTapSearch("german");
@@ -2495,11 +2583,24 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     }
 
     /**
+     * Tests translation with a simple Tap can be disabled.
+     */
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    @CommandLineFlags.Add(ContextualSearchFieldTrial.DISABLE_TRANSLATION + "=true")
+    public void testTapDisabled() throws InterruptedException, TimeoutException {
+        // Tapping a German word would normally trigger translation, but not with the above flag.
+        simulateTapSearch("german");
+
+        // Make sure we did not try to trigger translate.
+        assertFalse(mManager.getRequest().isTranslationForced());
+    }
+
+    /**
      * Tests that a simple Tap without language determination does not trigger translation.
      */
     @SmallTest
     @Feature({"ContextualSearch"})
-    @CommandLineFlags.Add(ContextualSearchFieldTrial.ENABLE_TRANSLATION + "=true")
     public void testTapWithoutLanguage() throws InterruptedException, TimeoutException {
         // Tapping an English word should NOT trigger translation.
         simulateTapSearch("search");
@@ -2509,27 +2610,10 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     }
 
     /**
-     * Tests that the server-controlled-onebox flag can override behavior on a simple Tap
-     * without language determination.
-     */
-    @SmallTest
-    @Feature({"ContextualSearch"})
-    @CommandLineFlags.Add({ContextualSearchFieldTrial.ENABLE_TRANSLATION + "=true",
-            ContextualSearchFieldTrial.ENABLE_SERVER_CONTROLLED_ONEBOX + "=true"})
-    public void testTapWithoutLanguageCanBeForced() throws InterruptedException, TimeoutException {
-        // Tapping an English word should trigger translation.
-        simulateTapSearch("search");
-
-        // Make sure we did try to trigger translate.
-        assertTrue(mManager.getRequest().isTranslationForced());
-    }
-
-    /**
      * Tests that a long-press does trigger translation.
      */
     @SmallTest
     @Feature({"ContextualSearch"})
-    @CommandLineFlags.Add(ContextualSearchFieldTrial.ENABLE_TRANSLATION + "=true")
     public void testLongpressTranslates() throws InterruptedException, TimeoutException {
         // LongPress on any word should trigger translation.
         simulateLongPressSearch("search");
@@ -2539,31 +2623,14 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     }
 
     /**
-     * Tests that a long-press does NOT trigger translation when auto-detect is disabled.
+     * Tests that a long-press does NOT trigger translation when disabled.
      */
     @SmallTest
     @Feature({"ContextualSearch"})
-    @CommandLineFlags.Add({ContextualSearchFieldTrial.ENABLE_TRANSLATION + "=true",
-            ContextualSearchFieldTrial.DISABLE_AUTO_DETECT_TRANSLATION_ONEBOX + "=true"})
-    public void testLongpressAutoDetectDisabledDoesNotTranslate()
-            throws InterruptedException, TimeoutException {
-        // Unless disabled, LongPress on any word should trigger translation.
-        simulateLongPressSearch("search");
-
-        // Make sure we did not try to trigger translate.
-        assertFalse(mManager.getRequest().isTranslationForced());
-    }
-
-    /**
-     * Tests that a long-press does NOT trigger translation when general one-box is disabled.
-     */
-    @SmallTest
-    @Feature({"ContextualSearch"})
-    @CommandLineFlags.Add({ContextualSearchFieldTrial.ENABLE_TRANSLATION + "=true",
-            ContextualSearchFieldTrial.DISABLE_FORCE_TRANSLATION_ONEBOX + "=true"})
+    @CommandLineFlags.Add(ContextualSearchFieldTrial.DISABLE_TRANSLATION + "=true")
     public void testLongpressTranslateDisabledDoesNotTranslate()
             throws InterruptedException, TimeoutException {
-        // Unless disabled, LongPress on any word should trigger translation.
+        // When disabled, LongPress on any word should not trigger translation.
         simulateLongPressSearch("search");
 
         // Make sure we did not try to trigger translate.
@@ -2633,10 +2700,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         simulateTapSearch("search");
 
         final ContextualSearchImageControl imageControl = mPanel.getImageControl();
-        final ContextualSearchIconSpriteControl iconSpriteControl =
-                imageControl.getIconSpriteControl();
 
-        assertTrue(iconSpriteControl.isVisible());
         assertFalse(imageControl.getThumbnailVisible());
         assertTrue(TextUtils.isEmpty(imageControl.getThumbnailUrl()));
 
@@ -2651,23 +2715,13 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         assertTrue(imageControl.getThumbnailVisible());
         assertEquals(imageControl.getThumbnailUrl(), "http://someimageurl.com/image.png");
 
-        // The switch between the icon sprite and thumbnail is animated. Poll the UI thread to
-        // check that the icon sprite is hidden at the end of the animation.
-        CriteriaHelper.pollUiThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return !iconSpriteControl.isVisible();
-            }
-        });
-
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                imageControl.hideStaticImage(false);
+                imageControl.hideCustomImage(false);
             }
         });
 
-        assertTrue(iconSpriteControl.isVisible());
         assertFalse(imageControl.getThumbnailVisible());
         assertTrue(TextUtils.isEmpty(imageControl.getThumbnailUrl()));
     }
@@ -2721,8 +2775,6 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         ContextualSearchBarControl barControl = mPanel.getSearchBarControl();
         ContextualSearchQuickActionControl quickActionControl = barControl.getQuickActionControl();
         ContextualSearchImageControl imageControl = mPanel.getImageControl();
-        final ContextualSearchIconSpriteControl iconSpriteControl =
-                imageControl.getIconSpriteControl();
 
         // Check that the peeking bar is showing the quick action data.
         assertTrue(quickActionControl.hasQuickAction());
@@ -2730,7 +2782,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         assertEquals(getActivity().getResources().getString(
                 R.string.contextual_search_quick_action_caption_phone),
                 barControl.getCaptionText());
-        assertEquals(1.f, imageControl.getStaticImageVisibilityPercentage());
+        assertEquals(1.f, imageControl.getCustomImageVisibilityPercentage());
 
         // Expand the bar.
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -2746,8 +2798,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         assertEquals(getActivity().getResources().getString(
                 ContextualSearchCaptionControl.EXPANED_CAPTION_ID),
                 barControl.getCaptionText());
-        assertEquals(0.f, imageControl.getStaticImageVisibilityPercentage());
-        assertTrue(iconSpriteControl.isVisible());
+        assertEquals(0.f, imageControl.getCustomImageVisibilityPercentage());
 
         // Go back to peeking.
         swipePanelDown();
@@ -2758,7 +2809,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         assertEquals(getActivity().getResources().getString(
                 R.string.contextual_search_quick_action_caption_phone),
                 barControl.getCaptionText());
-        assertEquals(1.f, imageControl.getStaticImageVisibilityPercentage());
+        assertEquals(1.f, imageControl.getCustomImageVisibilityPercentage());
     }
 
     /**
@@ -2785,9 +2836,98 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         });
 
         // Tap on the portion of the bar that should trigger the quick action intent to be fired.
-        clickPanelBar(0.95f);
+        clickPanelBar();
 
         // Assert that an intent was fired.
         assertEquals(1, mActivityMonitor.getHits());
+    }
+
+    /**
+     * Tests that the current tab is navigated to the quick action URI for
+     * QuickActionCategory#WEBSITE.
+     */
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    public void testQuickActionUrl() throws InterruptedException, TimeoutException {
+        final String testUrl = mTestServer.getURL("/chrome/test/data/android/google.html");
+
+        // Simulate a tap to show the Bar, then set the quick action data.
+        simulateTapSearch("search");
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mPanel.onSearchTermResolved("search", null, testUrl, QuickActionCategory.WEBSITE);
+            }
+        });
+
+        // Tap on the portion of the bar that should trigger the quick action.
+        clickPanelBar();
+
+        // Assert that the URL was loaded.
+        ChromeTabUtils.waitForTabPageLoaded(getActivity().getActivityTab(), testUrl);
+    }
+
+    /**
+     * Tests accessibility mode: Tap and Long-press don't activate CS.
+     */
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    public void testAccesibilityMode() throws InterruptedException, TimeoutException {
+        mManager.onAccessibilityModeChanged(true);
+
+        // Simulate a tap that resolves to show the Bar.
+        clickNode("intelligence");
+        assertNoContentViewCore();
+        assertNoSearchesLoaded();
+
+        // Simulate a Long-press.
+        longPressNodeWithoutWaiting("states");
+        assertNoContentViewCore();
+        assertNoSearchesLoaded();
+    }
+
+    /**
+     * Tests that the Manager cycles through all the expected Internal States on Tap that Resolves.
+     */
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    public void testAllInternalStatesVisitedResolvingTap()
+            throws InterruptedException, TimeoutException {
+        // Set up a tracking version of the Internal State Controller.
+        ContextualSearchInternalStateControllerWrapper internalStateControllerWrapper =
+                ContextualSearchInternalStateControllerWrapper
+                        .makeNewInternalStateControllerWrapper(mManager);
+        mManager.setContextualSearchInternalStateController(internalStateControllerWrapper);
+
+        // Simulate a tap that resolves to show the Bar.
+        simulateTapSearch("search");
+        assertEquals(InternalState.SHOWING_TAP_SEARCH, internalStateControllerWrapper.getState());
+
+        assertEquals(internalStateControllerWrapper.getStartedStates(),
+                internalStateControllerWrapper.getFinishedStates());
+        assertEquals(ContextualSearchInternalStateControllerWrapper.EXPECTED_TAP_RESOLVE_SEQUENCE,
+                internalStateControllerWrapper.getFinishedStates());
+    }
+
+    /**
+     * Tests that the Manager cycles through all the expected Internal States on a Long-press.
+     */
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    public void testAllInternalStatesVisitedLongpress()
+            throws InterruptedException, TimeoutException {
+        // Set up a tracking version of the Internal State Controller.
+        ContextualSearchInternalStateControllerWrapper internalStateControllerWrapper =
+                ContextualSearchInternalStateControllerWrapper
+                        .makeNewInternalStateControllerWrapper(mManager);
+        mManager.setContextualSearchInternalStateController(internalStateControllerWrapper);
+
+        // Simulate a Long-press to show the Bar.
+        simulateLongPressSearch("search");
+
+        assertEquals(internalStateControllerWrapper.getStartedStates(),
+                internalStateControllerWrapper.getFinishedStates());
+        assertEquals(ContextualSearchInternalStateControllerWrapper.EXPECTED_LONGPRESS_SEQUENCE,
+                internalStateControllerWrapper.getFinishedStates());
     }
 }

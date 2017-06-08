@@ -11,12 +11,16 @@
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/message_center/message_center_style.h"
+#include "ui/message_center/views/message_center_controller.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/painter.h"
 
 namespace message_center {
+
+// static
+const char CustomNotificationView::kViewClassName[] = "CustomNotificationView";
 
 CustomNotificationView::CustomNotificationView(
     MessageCenterController* controller,
@@ -37,8 +41,6 @@ CustomNotificationView::CustomNotificationView(
     background_view()->background()->SetNativeControlColor(
         contents_view_->background()->get_color());
   }
-
-  AddChildView(small_image());
 
   focus_painter_ = views::Painter::CreateSolidFocusPainter(
       kFocusBorderColor, gfx::Insets(0, 1, 3, 2));
@@ -73,23 +75,20 @@ void CustomNotificationView::RequestFocusOnCloseButton() {
     contents_view_delegate_->RequestFocusOnCloseButton();
 }
 
-bool CustomNotificationView::IsPinned() const {
-  if (!contents_view_delegate_)
-    return false;
-  return contents_view_delegate_->IsPinned();
+const char* CustomNotificationView::GetClassName() const {
+  return kViewClassName;
+}
+
+void CustomNotificationView::UpdateControlButtonsVisibility() {
+  if (contents_view_delegate_)
+    contents_view_delegate_->UpdateControlButtonsVisibility();
 }
 
 gfx::Size CustomNotificationView::GetPreferredSize() const {
   const gfx::Insets insets = GetInsets();
   const int contents_width = kNotificationWidth - insets.width();
   const int contents_height = contents_view_->GetHeightForWidth(contents_width);
-
-  constexpr int kMaxContentHeight = 256;
-  constexpr int kMinContentHeight = 64;
-  return gfx::Size(kNotificationWidth,
-                   std::max(kMinContentHeight + insets.height(),
-                            std::min(kMaxContentHeight + insets.height(),
-                                     contents_height + insets.height())));
+  return gfx::Size(kNotificationWidth, contents_height + insets.height());
 }
 
 void CustomNotificationView::Layout() {
@@ -142,6 +141,20 @@ bool CustomNotificationView::OnKeyPressed(const ui::KeyEvent& event) {
   }
 
   return MessageView::OnKeyPressed(event);
+}
+
+void CustomNotificationView::ChildPreferredSizeChanged(View* child) {
+  // Notify MessageCenterController when the custom content changes size,
+  // as it may need to relayout.
+  if (controller())
+    controller()->UpdateNotificationSize(notification_id());
+}
+
+bool CustomNotificationView::HandleAccessibleAction(
+    const ui::AXActionData& action) {
+  if (contents_view_)
+    return contents_view_->HandleAccessibleAction(action);
+  return false;
 }
 
 }  // namespace message_center

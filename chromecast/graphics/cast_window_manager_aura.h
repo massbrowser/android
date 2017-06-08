@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "chromecast/graphics/cast_vsync_settings.h"
 #include "chromecast/graphics/cast_window_manager.h"
+#include "ui/aura/client/window_parenting_client.h"
 
 namespace aura {
 namespace client {
@@ -23,22 +23,25 @@ class CastFocusClientAura;
 class CastWindowTreeHost;
 
 class CastWindowManagerAura : public CastWindowManager,
-                              private CastVSyncSettings::Observer {
+                              public aura::client::WindowParentingClient {
  public:
   ~CastWindowManagerAura() override;
 
   // CastWindowManager implementation:
   void TearDown() override;
   void AddWindow(gfx::NativeView window) override;
+  gfx::NativeView GetRootWindow() override;
+  void SetWindowId(gfx::NativeView window, WindowId window_id) override;
+
+  // aura::client::WindowParentingClient implementation:
+  aura::Window* GetDefaultParent(aura::Window* window,
+                                 const gfx::Rect& bounds) override;
 
  private:
   friend class CastWindowManager;
 
   // This class should only be instantiated by CastWindowManager::Create.
   explicit CastWindowManagerAura(bool enable_input);
-
-  // CastVSyncSettings::Observer implementation:
-  void OnVSyncIntervalChanged(base::TimeDelta interval) override;
 
   void Setup();
 

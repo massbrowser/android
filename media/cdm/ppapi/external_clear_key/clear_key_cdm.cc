@@ -99,24 +99,30 @@ static scoped_refptr<media::DecoderBuffer> CopyDecoderBufferFrom(
   // TODO(xhwang): Get rid of this copy.
   scoped_refptr<media::DecoderBuffer> output_buffer =
       media::DecoderBuffer::CopyFrom(input_buffer.data, input_buffer.data_size);
-
-  std::vector<media::SubsampleEntry> subsamples;
-  for (uint32_t i = 0; i < input_buffer.num_subsamples; ++i) {
-    subsamples.push_back(
-        media::SubsampleEntry(input_buffer.subsamples[i].clear_bytes,
-                              input_buffer.subsamples[i].cipher_bytes));
-  }
-
-  std::unique_ptr<media::DecryptConfig> decrypt_config(new media::DecryptConfig(
-      std::string(reinterpret_cast<const char*>(input_buffer.key_id),
-                  input_buffer.key_id_size),
-      std::string(reinterpret_cast<const char*>(input_buffer.iv),
-                  input_buffer.iv_size),
-      subsamples));
-
-  output_buffer->set_decrypt_config(std::move(decrypt_config));
   output_buffer->set_timestamp(
       base::TimeDelta::FromMicroseconds(input_buffer.timestamp));
+
+  // TODO(xhwang): Unify how to check whether a buffer is encrypted.
+  // See http://crbug.com/675003
+  if (input_buffer.iv_size != 0) {
+    DCHECK_GT(input_buffer.key_id_size, 0u);
+    std::vector<media::SubsampleEntry> subsamples;
+    for (uint32_t i = 0; i < input_buffer.num_subsamples; ++i) {
+      subsamples.push_back(
+          media::SubsampleEntry(input_buffer.subsamples[i].clear_bytes,
+                                input_buffer.subsamples[i].cipher_bytes));
+    }
+
+    std::unique_ptr<media::DecryptConfig> decrypt_config(
+        new media::DecryptConfig(
+            std::string(reinterpret_cast<const char*>(input_buffer.key_id),
+                        input_buffer.key_id_size),
+            std::string(reinterpret_cast<const char*>(input_buffer.iv),
+                        input_buffer.iv_size),
+            subsamples));
+
+    output_buffer->set_decrypt_config(std::move(decrypt_config));
+  }
 
   return output_buffer;
 }
@@ -266,22 +272,33 @@ static bool g_verify_host_files_result = false;
 // Makes sure files and corresponding signature files are readable but not
 // writable.
 bool VerifyCdmHost_0(const cdm::HostFile* host_files, uint32_t num_files) {
-  DVLOG(1) << __func__;
+  DVLOG(1) << __func__ << ": " << num_files;
+
+  // We should always have the CDM and CDM adapter and at lease one common file.
+  // The common CDM host file (e.g. chrome) might not exist since we are running
+  // in browser_tests.
+  const uint32_t kMinNumHostFiles = 3;
 
   // We should always have the CDM and CDM adapter.
-  // We might not have any common CDM host file (e.g. chrome) since we are
-  // running in browser_tests.
-  if (num_files < 2) {
+  const int kNumCdmFiles = 2;
+
+  if (num_files < kMinNumHostFiles) {
     LOG(ERROR) << "Too few host files: " << num_files;
     g_verify_host_files_result = false;
     return true;
   }
 
+  int num_opened_files = 0;
   for (uint32_t i = 0; i < num_files; ++i) {
     const int kBytesToRead = 10;
     std::vector<char> buffer(kBytesToRead);
 
     base::File file(static_cast<base::PlatformFile>(host_files[i].file));
+    if (!file.IsValid())
+      continue;
+
+    num_opened_files++;
+
     int bytes_read = file.Read(0, buffer.data(), buffer.size());
     if (bytes_read != kBytesToRead) {
       LOG(ERROR) << "File bytes read: " << bytes_read;
@@ -291,6 +308,13 @@ bool VerifyCdmHost_0(const cdm::HostFile* host_files, uint32_t num_files) {
 
     // TODO(xhwang): Check that the files are not writable.
     // TODO(xhwang): Also verify the signature file when it's available.
+  }
+
+  // We should always have CDM files opened.
+  if (num_opened_files < kNumCdmFiles) {
+    LOG(ERROR) << "Too few opened files: " << num_opened_files;
+    g_verify_host_files_result = false;
+    return true;
   }
 
   g_verify_host_files_result = true;
@@ -306,7 +330,8 @@ ClearKeyCdm::ClearKeyCdm(ClearKeyCdmHost* host,
           origin,
           base::Bind(&ClearKeyCdm::OnSessionMessage, base::Unretained(this)),
           base::Bind(&ClearKeyCdm::OnSessionClosed, base::Unretained(this)),
-          base::Bind(&ClearKeyCdm::OnSessionKeysChange,
+          base::Bind(&ClearKeyCdm::OnSessionKeysChange, base::Unretained(this)),
+          base::Bind(&ClearKeyCdm::OnSessionExpirationUpdate,
                      base::Unretained(this)))),
       host_(host),
       key_system_(key_system),
@@ -465,19 +490,8 @@ void ClearKeyCdm::RemoveSession(uint32_t promise_id,
   std::string web_session_str(session_id, session_id_length);
 
   // RemoveSession only allowed for the loadable session.
-  if (web_session_str == std::string(kLoadableSessionId)) {
+  if (web_session_str == std::string(kLoadableSessionId))
     web_session_str = session_id_for_emulated_loadsession_;
-  } else {
-    // TODO(jrummell): This should be a DCHECK once blink does the proper
-    // checks.
-    std::string message("Not supported for non-persistent sessions.");
-    host_->OnRejectPromise(promise_id,
-                           cdm::kInvalidAccessError,
-                           0,
-                           message.data(),
-                           message.length());
-    return;
-  }
 
   std::unique_ptr<media::SimpleCdmPromise> promise(
       new media::CdmCallbackPromise<>(
@@ -729,7 +743,10 @@ cdm::Status ClearKeyCdm::DecryptToMediaDecoderBuffer(
   scoped_refptr<media::DecoderBuffer> buffer =
       CopyDecoderBufferFrom(encrypted_buffer);
 
-  if (buffer->end_of_stream()) {
+  // TODO(xhwang): Unify how to check whether a buffer is encrypted.
+  // See http://crbug.com/675003
+  if (buffer->end_of_stream() || !buffer->decrypt_config() ||
+      !buffer->decrypt_config()->is_encrypted()) {
     *decrypted_buffer = buffer;
     return cdm::kSuccess;
   }
@@ -863,6 +880,15 @@ void ClearKeyCdm::OnSessionClosed(const std::string& session_id) {
   if (new_session_id == session_id_for_emulated_loadsession_)
     new_session_id = std::string(kLoadableSessionId);
   host_->OnSessionClosed(new_session_id.data(), new_session_id.length());
+}
+
+void ClearKeyCdm::OnSessionExpirationUpdate(const std::string& session_id,
+                                            base::Time new_expiry_time) {
+  std::string new_session_id = session_id;
+  if (new_session_id == session_id_for_emulated_loadsession_)
+    new_session_id = std::string(kLoadableSessionId);
+  host_->OnExpirationChange(new_session_id.data(), new_session_id.length(),
+                            new_expiry_time.ToDoubleT());
 }
 
 void ClearKeyCdm::OnSessionCreated(uint32_t promise_id,

@@ -15,7 +15,6 @@
 #include "mojo/public/cpp/bindings/interface_ptr_set.h"
 #include "services/service_manager/connect_params.h"
 #include "services/service_manager/public/cpp/identity.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
 #include "services/service_manager/public/cpp/interface_provider_spec.h"
 #include "services/service_manager/public/interfaces/connector.mojom.h"
 #include "services/service_manager/public/interfaces/interface_provider.mojom.h"
@@ -71,6 +70,10 @@ class ServiceManager {
   // by |params|, exchanging InterfaceProviders between them. If no existing
   // instance of the target application is running, one will be loaded.
   void Connect(std::unique_ptr<ConnectParams> params);
+
+  // Directly requests that the Service Manager start a new instance for
+  // |identity| if one is not already running.
+  void StartService(const Identity& identity);
 
   // Creates a service instance for |identity|. This is intended for use by the
   // Service Manager's embedder to register instances directly, without
@@ -132,7 +135,7 @@ class ServiceManager {
 
   Instance* CreateInstance(const Identity& source,
                            const Identity& target,
-                           const InterfaceProviderSpecMap& specs);
+                           InterfaceProviderSpecMap specs);
 
   // Called from the instance implementing mojom::ServiceManager.
   void AddListener(mojom::ServiceManagerListenerPtr listener);
@@ -188,8 +191,6 @@ class ServiceManager {
 
   DISALLOW_COPY_AND_ASSIGN(ServiceManager);
 };
-
-mojom::Connector::ConnectCallback EmptyConnectCallback();
 
 }  // namespace service_manager
 

@@ -10,7 +10,6 @@ from gpu_tests import gpu_integration_test
 from gpu_tests import context_lost_expectations
 from gpu_tests import path_util
 
-import py_utils
 from telemetry.core import exceptions
 
 data_path = os.path.join(
@@ -98,8 +97,8 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
     return context_lost_expectations.ContextLostExpectations()
 
   @classmethod
-  def setUpClass(cls):
-    super(cls, ContextLostIntegrationTest).setUpClass()
+  def SetUpProcess(cls):
+    super(cls, ContextLostIntegrationTest).SetUpProcess()
     cls.CustomizeOptions()
     cls.SetBrowserOptions(cls._finder_options)
     cls.StartBrowser()
@@ -107,8 +106,8 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
 
   def _WaitForPageToFinish(self, tab):
     try:
-      py_utils.WaitFor(lambda: tab.EvaluateJavaScript(
-        'window.domAutomationController._finished'), wait_timeout)
+      tab.WaitForJavaScriptCondition(
+        'window.domAutomationController._finished', timeout=wait_timeout)
       return True
     except exceptions.TimeoutException:
       return False
@@ -129,8 +128,8 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       # If we're running the GPU process crash test, we need the test
       # to have fully reset before crashing the GPU process.
       if check_crash_count:
-        py_utils.WaitFor(lambda: tab.EvaluateJavaScript(
-          'window.domAutomationController._finished'), wait_timeout)
+        tab.WaitForJavaScriptCondition(
+          'window.domAutomationController._finished', timeout=wait_timeout)
 
       # Crash the GPU process.
       gpucrash_tab = tab.browser.tabs.New()

@@ -41,9 +41,8 @@ class AudioSyncReader : public media::AudioOutputController::SyncReader {
       const media::AudioParameters& params);
 
   base::SharedMemory* shared_memory() const { return shared_memory_.get(); }
-  base::CancelableSyncSocket* foreign_socket() const {
-    return foreign_socket_.get();
-  }
+
+  std::unique_ptr<base::CancelableSyncSocket> TakeForeignSocket();
 
   // media::AudioOutputController::SyncReader implementations.
   void RequestMoreData(base::TimeDelta delay,
@@ -67,6 +66,10 @@ class AudioSyncReader : public media::AudioOutputController::SyncReader {
   // Mutes all incoming samples. This is used to prevent audible sound
   // during automated testing.
   const bool mute_audio_;
+
+  // Denotes that the most recent socket error has been logged. Used to avoid
+  // log spam.
+  bool had_socket_error_;
 
   // Socket for transmitting audio data.
   std::unique_ptr<base::CancelableSyncSocket> socket_;

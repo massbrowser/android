@@ -32,7 +32,7 @@
 #include "ui/base/ime/input_method.h"
 #include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/display/screen.h"
-#include "ui/events/event_processor.h"
+#include "ui/events/event_sink.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/wm/core/base_focus_rules.h"
@@ -128,7 +128,7 @@ class ShellNativeCursorManager : public wm::NativeCursorManager {
     if (visible) {
       SetCursor(delegate->GetCursor(), delegate);
     } else {
-      gfx::NativeCursor invisible_cursor(ui::kCursorNone);
+      gfx::NativeCursor invisible_cursor(ui::CursorType::kNone);
       image_cursors_->SetPlatformCursor(&invisible_cursor);
       ApplyCursor(invisible_cursor);
     }
@@ -240,7 +240,6 @@ void ShellDesktopControllerAura::CloseAppWindows() {
 }
 
 aura::Window* ShellDesktopControllerAura::GetDefaultParent(
-    aura::Window* context,
     aura::Window* window,
     const gfx::Rect& bounds) {
   return host_->window();
@@ -281,7 +280,7 @@ ui::EventDispatchDetails ShellDesktopControllerAura::DispatchKeyEventPostIME(
 
   // Send the event on to the host.
   ui::EventDispatchDetails details =
-      host_->event_processor()->OnEventFromSource(key_event);
+      host_->event_sink()->OnEventFromSource(key_event);
 
   // Clear the handler's PostIME flag for the next event.
   if (!details.dispatcher_destroyed)
@@ -309,7 +308,7 @@ void ShellDesktopControllerAura::InitWindowManager() {
           new ShellNativeCursorManager(host_.get()))));
   cursor_manager_->SetDisplay(
       display::Screen::GetScreen()->GetPrimaryDisplay());
-  cursor_manager_->SetCursor(ui::kCursorPointer);
+  cursor_manager_->SetCursor(ui::CursorType::kPointer);
   aura::client::SetCursorClient(host_->window(), cursor_manager_.get());
 
   user_activity_detector_.reset(new ui::UserActivityDetector);

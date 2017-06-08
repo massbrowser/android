@@ -12,6 +12,7 @@
 #include "net/log/test_net_log.h"
 #include "net/log/test_net_log_entry.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
 
@@ -73,7 +74,8 @@ void TestNetworkQualityEstimator::RunOneRequest() {
   context.set_network_quality_estimator(this);
   context.Init();
   std::unique_ptr<URLRequest> request(
-      context.CreateRequest(GetEchoURL(), DEFAULT_PRIORITY, &test_delegate));
+      context.CreateRequest(GetEchoURL(), DEFAULT_PRIORITY, &test_delegate,
+                            TRAFFIC_ANNOTATION_FOR_TESTS));
   request->SetLoadFlags(request->load_flags() | LOAD_MAIN_FRAME_DEPRECATED);
   request->Start();
   base::RunLoop().Run();
@@ -180,6 +182,19 @@ bool TestNetworkQualityEstimator::GetRecentDownlinkThroughputKbps(
   }
   return NetworkQualityEstimator::GetRecentDownlinkThroughputKbps(start_time,
                                                                   kbps);
+}
+
+base::TimeDelta TestNetworkQualityEstimator::GetRTTEstimateInternal(
+    const std::vector<NetworkQualityObservationSource>&
+        disallowed_observation_sources,
+    base::TimeTicks start_time,
+    const base::Optional<NetworkQualityEstimator::Statistic>& statistic,
+    int percentile) const {
+  if (rtt_estimate_internal_)
+    return rtt_estimate_internal_.value();
+
+  return NetworkQualityEstimator::GetRTTEstimateInternal(
+      disallowed_observation_sources, start_time, statistic, percentile);
 }
 
 void TestNetworkQualityEstimator::SetAccuracyRecordingIntervals(

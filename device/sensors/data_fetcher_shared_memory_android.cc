@@ -5,18 +5,15 @@
 #include "device/sensors/data_fetcher_shared_memory.h"
 
 #include "base/logging.h"
-#include "device/sensors/public/cpp/device_light_hardware_buffer.h"
 #include "device/sensors/public/cpp/device_motion_hardware_buffer.h"
 #include "device/sensors/public/cpp/device_orientation_hardware_buffer.h"
 #include "device/sensors/sensor_manager_android.h"
 
 namespace device {
 
-DataFetcherSharedMemory::DataFetcherSharedMemory() {
-}
+DataFetcherSharedMemory::DataFetcherSharedMemory() {}
 
-DataFetcherSharedMemory::~DataFetcherSharedMemory() {
-}
+DataFetcherSharedMemory::~DataFetcherSharedMemory() {}
 
 bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
   DCHECK(buffer);
@@ -31,13 +28,9 @@ bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
           static_cast<DeviceOrientationHardwareBuffer*>(buffer));
       return true;
     case CONSUMER_TYPE_ORIENTATION_ABSOLUTE:
-      SensorManagerAndroid::GetInstance()->
-          StartFetchingDeviceOrientationAbsoluteData(
+      SensorManagerAndroid::GetInstance()
+          ->StartFetchingDeviceOrientationAbsoluteData(
               static_cast<DeviceOrientationHardwareBuffer*>(buffer));
-      return true;
-    case CONSUMER_TYPE_LIGHT:
-      SensorManagerAndroid::GetInstance()->StartFetchingDeviceLightData(
-          static_cast<DeviceLightHardwareBuffer*>(buffer));
       return true;
     default:
       NOTREACHED();
@@ -56,9 +49,6 @@ bool DataFetcherSharedMemory::Stop(ConsumerType consumer_type) {
     case CONSUMER_TYPE_ORIENTATION_ABSOLUTE:
       SensorManagerAndroid::GetInstance()
           ->StopFetchingDeviceOrientationAbsoluteData();
-      return true;
-    case CONSUMER_TYPE_LIGHT:
-      SensorManagerAndroid::GetInstance()->StopFetchingDeviceLightData();
       return true;
     default:
       NOTREACHED();

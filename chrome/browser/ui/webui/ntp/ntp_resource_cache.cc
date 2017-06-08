@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -32,6 +32,7 @@
 #include "chrome/browser/ui/webui/app_launcher_login_handler.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
@@ -62,6 +63,7 @@
 #include "ui/gfx/color_utils.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/strings/grit/ash_strings.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chromeos/chromeos_switches.h"
 #endif
@@ -89,27 +91,6 @@ const char kLearnMoreGuestSessionUrl[] =
 #else
     "https://support.google.com/chrome/?p=ui_guest";
 #endif
-
-std::string SkColorToRGBAString(SkColor color) {
-  // We convert the alpha using DoubleToString because StringPrintf will use
-  // locale specific formatters (e.g., use , instead of . in German).
-  return base::StringPrintf(
-      "rgba(%d,%d,%d,%s)",
-      SkColorGetR(color),
-      SkColorGetG(color),
-      SkColorGetB(color),
-      base::DoubleToString(SkColorGetA(color) / 255.0).c_str());
-}
-
-// Creates an rgb string for an SkColor, but leaves the alpha blank so that the
-// css can fill it in.
-std::string SkColorToRGBComponents(SkColor color) {
-  return base::StringPrintf(
-      "%d,%d,%d",
-      SkColorGetR(color),
-      SkColorGetG(color),
-      SkColorGetB(color));
-}
 
 SkColor GetThemeColor(const ui::ThemeProvider& tp, int id) {
   SkColor color = tp.GetColor(id);
@@ -293,52 +274,56 @@ void NTPResourceCache::Invalidate() {
 }
 
 void NTPResourceCache::CreateNewTabIncognitoHTML() {
-  base::DictionaryValue localized_strings;
-  localized_strings.SetString("title",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
-  int new_tab_description_ids = IDS_NEW_TAB_OTR_DESCRIPTION;
-  int new_tab_heading_ids = IDS_NEW_TAB_OTR_HEADING;
-  int new_tab_link_ids = IDS_NEW_TAB_OTR_LEARN_MORE_LINK;
-  int new_tab_warning_ids = IDS_NEW_TAB_OTR_MESSAGE_WARNING;
-  int new_tab_html_idr = IDR_INCOGNITO_TAB_HTML;
-  const char* new_tab_link = kLearnMoreIncognitoUrl;
+  const bool is_md_incognito_ntp_enabled =
+      base::FeatureList::IsEnabled(features::kMaterialDesignIncognitoNTP);
 
-  if (profile_->IsGuestSession()) {
-    localized_strings.SetString("guestTabDescription",
-        l10n_util::GetStringUTF16(new_tab_description_ids));
-    localized_strings.SetString("guestTabHeading",
-        l10n_util::GetStringUTF16(new_tab_heading_ids));
+  ui::TemplateReplacements replacements;
+  // Note: there's specific rules in CSS that look for this attribute's content
+  // being equal to "true" as a string.
+  replacements["bookmarkbarattached"] =
+      profile_->GetPrefs()->GetBoolean(bookmarks::prefs::kShowBookmarkBar)
+          ? "true"
+          : "false";
+
+  if (is_md_incognito_ntp_enabled) {
+    replacements["incognitoTabDescription"] =
+        l10n_util::GetStringUTF8(IDS_NEW_TAB_OTR_SUBTITLE);
+    replacements["incognitoTabHeading"] =
+        l10n_util::GetStringUTF8(IDS_NEW_TAB_OTR_TITLE);
+    replacements["incognitoTabWarning"] =
+        l10n_util::GetStringUTF8(IDS_NEW_TAB_OTR_VISIBLE);
+    replacements["learnMore"] =
+        l10n_util::GetStringUTF8(IDS_NEW_TAB_OTR_LEARN_MORE_LINK);
+    replacements["incognitoTabFeatures"] =
+        l10n_util::GetStringUTF8(IDS_NEW_TAB_OTR_NOT_SAVED);
   } else {
-    localized_strings.SetString("incognitoTabDescription",
-        l10n_util::GetStringUTF16(new_tab_description_ids));
-    localized_strings.SetString("incognitoTabHeading",
-        l10n_util::GetStringUTF16(new_tab_heading_ids));
-    localized_strings.SetString("incognitoTabWarning",
-        l10n_util::GetStringUTF16(new_tab_warning_ids));
+    replacements["incognitoTabDescription"] =
+        l10n_util::GetStringUTF8(IDS_NEW_TAB_OTR_DESCRIPTION);
+    replacements["incognitoTabHeading"] =
+        l10n_util::GetStringUTF8(IDS_NEW_TAB_OTR_HEADING);
+    replacements["incognitoTabWarning"] =
+        l10n_util::GetStringUTF8(IDS_NEW_TAB_OTR_MESSAGE_WARNING);
+    replacements["learnMore"] =
+        l10n_util::GetStringUTF8(IDS_NEW_TAB_OTR_LEARN_MORE_LINK);
   }
-
-  localized_strings.SetString("learnMore",
-      l10n_util::GetStringUTF16(new_tab_link_ids));
-  localized_strings.SetString("learnMoreLink", new_tab_link);
-
-  bool bookmark_bar_attached =
-      profile_->GetPrefs()->GetBoolean(bookmarks::prefs::kShowBookmarkBar);
-  localized_strings.SetBoolean("bookmarkbarattached", bookmark_bar_attached);
+  replacements["learnMoreLink"] = kLearnMoreIncognitoUrl;
+  replacements["title"] = l10n_util::GetStringUTF8(IDS_NEW_TAB_TITLE);
 
   const ui::ThemeProvider& tp =
       ThemeService::GetThemeProviderForProfile(profile_);
-  localized_strings.SetBoolean("hasCustomBackground",
-                               tp.HasCustomImage(IDR_THEME_NTP_BACKGROUND));
+  replacements["hasCustomBackground"] =
+      tp.HasCustomImage(IDR_THEME_NTP_BACKGROUND) ? "true" : "false";
 
   const std::string& app_locale = g_browser_process->GetApplicationLocale();
-  webui::SetLoadTimeDataDefaults(app_locale, &localized_strings);
+  webui::SetLoadTimeDataDefaults(app_locale, &replacements);
 
   static const base::StringPiece incognito_tab_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          new_tab_html_idr));
+          is_md_incognito_ntp_enabled ? IDR_MD_INCOGNITO_TAB_HTML
+                                      : IDR_INCOGNITO_TAB_HTML));
 
-  std::string full_html = webui::GetI18nTemplateHtml(
-      incognito_tab_html, &localized_strings);
+  std::string full_html =
+      ui::ReplaceTemplateExpressions(incognito_tab_html, replacements);
 
   new_tab_incognito_html_ = base::RefCountedString::TakeString(&full_html);
 }
@@ -360,12 +345,13 @@ void NTPResourceCache::CreateNewTabGuestHTML() {
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   std::string enterprise_domain = connector->GetEnterpriseDomain();
 
+  // TODO(jamescook): What about Active Directory managed devices?
   if (!enterprise_domain.empty()) {
     // Device is enterprise enrolled.
     localized_strings.SetString("enterpriseInfoVisible", "true");
-    base::string16 enterprise_info = l10n_util::GetStringFUTF16(
-        IDS_DEVICE_OWNED_BY_NOTICE,
-        base::UTF8ToUTF16(enterprise_domain));
+    base::string16 enterprise_info =
+        l10n_util::GetStringFUTF16(IDS_ASH_ENTERPRISE_DEVICE_MANAGED_BY,
+                                   base::UTF8ToUTF16(enterprise_domain));
     localized_strings.SetString("enterpriseInfoMessage", enterprise_info);
     localized_strings.SetString("enterpriseLearnMore",
         l10n_util::GetStringUTF16(IDS_LEARN_MORE));
@@ -390,8 +376,17 @@ void NTPResourceCache::CreateNewTabGuestHTML() {
   static const base::StringPiece guest_tab_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(guest_tab_ids));
 
+#if defined(OS_CHROMEOS)
+  // TODO(dbeam): convert c/b/resources/chromeos/guest_session_tab.html from
+  // i18n-* to $i18n{}.
   std::string full_html = webui::GetI18nTemplateHtml(
       guest_tab_html, &localized_strings);
+#else
+  ui::TemplateReplacements replacements;
+  ui::TemplateReplacementsFromDictionaryValue(localized_strings, &replacements);
+  std::string full_html =
+      ui::ReplaceTemplateExpressions(guest_tab_html, replacements);
+#endif
 
   new_tab_guest_html_ = base::RefCountedString::TakeString(&full_html);
 }
@@ -403,8 +398,9 @@ void NTPResourceCache::CreateNewTabHTML() {
   // profile is not the default.
   PrefService* prefs = profile_->GetPrefs();
   base::DictionaryValue load_time_data;
-  load_time_data.SetBoolean("bookmarkbarattached",
-      prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar));
+  load_time_data.SetString(
+      "bookmarkbarattached",
+      prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar) ? "true" : "false");
   load_time_data.SetBoolean("showAppLauncherPromo",
       ShouldShowAppLauncherPromo());
   load_time_data.SetString("title",
@@ -520,7 +516,8 @@ void NTPResourceCache::CreateNewTabIncognitoCSS() {
       profile_->GetPrefs()->GetString(prefs::kCurrentThemeID);
 
   // Colors.
-  substitutions["colorBackground"] = SkColorToRGBAString(color_background);
+  substitutions["colorBackground"] =
+      color_utils::SkColorToRgbaString(color_background);
   substitutions["backgroundBarDetached"] = GetNewTabBackgroundCSS(tp, false);
   substitutions["backgroundBarAttached"] = GetNewTabBackgroundCSS(tp, true);
   substitutions["backgroundTiling"] = GetNewTabBackgroundTilingCSS(tp);
@@ -572,15 +569,17 @@ void NTPResourceCache::CreateNewTabCSS() {
       profile_->GetPrefs()->GetString(prefs::kCurrentThemeID);
 
   // Colors.
-  substitutions["colorBackground"] = SkColorToRGBAString(color_background);
+  substitutions["colorBackground"] =
+      color_utils::SkColorToRgbaString(color_background);
   substitutions["backgroundBarDetached"] = GetNewTabBackgroundCSS(tp, false);
   substitutions["backgroundBarAttached"] = GetNewTabBackgroundCSS(tp, true);
   substitutions["backgroundTiling"] = GetNewTabBackgroundTilingCSS(tp);
-  substitutions["colorTextRgba"] = SkColorToRGBAString(color_text);
-  substitutions["colorTextLight"] = SkColorToRGBAString(color_text_light);
+  substitutions["colorTextRgba"] = color_utils::SkColorToRgbaString(color_text);
+  substitutions["colorTextLight"] =
+      color_utils::SkColorToRgbaString(color_text_light);
   substitutions["colorSectionBorder"] =
-      SkColorToRGBComponents(color_section_border);
-  substitutions["colorText"] = SkColorToRGBComponents(color_text);
+      color_utils::SkColorToRgbString(color_section_border);
+  substitutions["colorText"] = color_utils::SkColorToRgbString(color_text);
 
   // For themes that right-align the background, we flip the attribution to the
   // left to avoid conflicts.

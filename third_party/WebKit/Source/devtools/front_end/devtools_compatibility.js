@@ -64,10 +64,14 @@
      */
     addExtensions(extensions) {
       // Support for legacy front-ends (<M41).
-      if (window['WebInspector'] && window['WebInspector']['addExtensions'])
+      if (window['WebInspector'] && window['WebInspector']['addExtensions']) {
         window['WebInspector']['addExtensions'](extensions);
-      else
+      } else if (window['InspectorFrontendAPI']) {
+        // The addExtensions command is sent as the onload event happens for
+        // DevTools front-end. In case of hosted mode, this
+        // happens before the InspectorFrontendAPI is initialized.
         this._dispatchOnInspectorFrontendAPI('addExtensions', [extensions]);
+      }
     }
 
     /**
@@ -154,6 +158,13 @@
     }
 
     /**
+     * @param {!{r: number, g: number, b: number, a: number}} color
+     */
+    eyeDropperPickedColor(color) {
+      this._dispatchOnInspectorFrontendAPI('eyeDropperPickedColor', [color]);
+    }
+
+    /**
      * @param {!Array.<!{fileSystemName: string, rootURL: string, fileSystemPath: string}>} fileSystems
      */
     fileSystemsLoaded(fileSystems) {
@@ -176,9 +187,18 @@
 
     /**
      * @param {!Array<string>} changedPaths
+     * @param {!Array<string>} addedPaths
+     * @param {!Array<string>} removedPaths
      */
-    fileSystemFilesChanged(changedPaths) {
-      this._dispatchOnInspectorFrontendAPI('fileSystemFilesChanged', [changedPaths]);
+    fileSystemFilesChangedAddedRemoved(changedPaths, addedPaths, removedPaths) {
+      // Support for legacy front-ends (<M58)
+      if (window['InspectorFrontendAPI'] && window['InspectorFrontendAPI']['fileSystemFilesChanged']) {
+        this._dispatchOnInspectorFrontendAPI(
+            'fileSystemFilesChanged', [changedPaths.concat(addedPaths).concat(removedPaths)]);
+      } else {
+        this._dispatchOnInspectorFrontendAPI(
+            'fileSystemFilesChangedAddedRemoved', [changedPaths, addedPaths, removedPaths]);
+      }
     }
 
     /**
@@ -604,6 +624,14 @@
      */
     setWhitelistedShortcuts(shortcuts) {
       DevToolsAPI.sendMessageToEmbedder('setWhitelistedShortcuts', [shortcuts], null);
+    }
+
+    /**
+     * @override
+     * @param {boolean} active
+     */
+    setEyeDropperActive(active) {
+      DevToolsAPI.sendMessageToEmbedder('setEyeDropperActive', [active], null);
     }
 
     /**

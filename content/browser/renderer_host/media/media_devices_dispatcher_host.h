@@ -18,6 +18,10 @@
 
 using ::mojom::MediaDeviceType;
 
+namespace service_manager {
+struct BindSourceInfo;
+}
+
 namespace url {
 class Origin;
 }
@@ -40,18 +44,18 @@ class CONTENT_EXPORT MediaDevicesDispatcherHost
                      int render_frame_id,
                      const std::string& device_id_salt,
                      MediaStreamManager* media_stream_manager,
+                     const service_manager::BindSourceInfo& source_info,
                      ::mojom::MediaDevicesDispatcherHostRequest request);
 
   // ::mojom::MediaDevicesDispatcherHost implementation.
-  void EnumerateDevices(
-      bool request_audio_input,
-      bool request_video_input,
-      bool request_audio_output,
-      const url::Origin& security_origin,
-      const EnumerateDevicesCallback& client_callback) override;
+  void EnumerateDevices(bool request_audio_input,
+                        bool request_video_input,
+                        bool request_audio_output,
+                        const url::Origin& security_origin,
+                        EnumerateDevicesCallback client_callback) override;
   void GetVideoInputCapabilities(
       const url::Origin& security_origin,
-      const GetVideoInputCapabilitiesCallback& client_callback) override;
+      GetVideoInputCapabilitiesCallback client_callback) override;
   void SubscribeDeviceChangeNotifications(
       MediaDeviceType type,
       uint32_t subscription_id,
@@ -73,24 +77,24 @@ class CONTENT_EXPORT MediaDevicesDispatcherHost
   void DoEnumerateDevices(
       const MediaDevicesManager::BoolDeviceTypes& requested_types,
       const url::Origin& security_origin,
-      const EnumerateDevicesCallback& client_callback,
+      EnumerateDevicesCallback client_callback,
       const MediaDevicesManager::BoolDeviceTypes& permissions);
 
   void DevicesEnumerated(
       const MediaDevicesManager::BoolDeviceTypes& requested_types,
       const url::Origin& security_origin,
-      const EnumerateDevicesCallback& client_callback,
+      EnumerateDevicesCallback client_callback,
       const MediaDevicesManager::BoolDeviceTypes& has_permissions,
       const MediaDeviceEnumeration& enumeration);
 
   void GotDefaultVideoInputDeviceID(
       const url::Origin& security_origin,
-      const GetVideoInputCapabilitiesCallback& client_callback,
+      GetVideoInputCapabilitiesCallback client_callback,
       const std::string& default_device_id);
 
   void FinalizeGetVideoInputCapabilities(
       const url::Origin& security_origin,
-      const GetVideoInputCapabilitiesCallback& client_callback,
+      GetVideoInputCapabilitiesCallback client_callback,
       const std::string& default_device_id,
       const media::VideoCaptureDeviceDescriptors& device_descriptors);
 

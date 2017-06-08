@@ -77,12 +77,14 @@ class CC_EXPORT TileDrawInfo {
     return resource_ ? IsResourceFormatCompressed(resource_->format()) : false;
   }
 
+  bool is_checker_imaged() const {
+    DCHECK(!resource_is_checker_imaged_ || resource_);
+    return resource_is_checker_imaged_;
+  }
+
   void SetSolidColorForTesting(SkColor color) { set_solid_color(color); }
 
   void AsValueInto(base::trace_event::TracedValue* state) const;
-
-  void set_was_ever_used_to_draw() { was_ever_used_to_draw_ = true; }
-  void set_was_a_prepaint_tile() { was_a_prepaint_tile_ = true; }
 
  private:
   friend class Tile;
@@ -90,15 +92,18 @@ class CC_EXPORT TileDrawInfo {
 
   const Resource* resource() const { return resource_; }
 
-  void set_resource(Resource* resource) {
+  void set_resource(Resource* resource, bool resource_is_checker_imaged) {
+    DCHECK(!resource_is_checker_imaged || resource)
+        << "Need to have a resource for it to be checker-imaged";
+
     mode_ = RESOURCE_MODE;
     is_resource_ready_to_draw_ = false;
+    resource_is_checker_imaged_ = resource_is_checker_imaged;
     resource_ = resource;
   }
 
   void set_resource_ready_for_draw() {
     is_resource_ready_to_draw_ = true;
-    was_ever_ready_to_draw_ = true;
   }
 
   Resource* TakeResource();
@@ -106,7 +111,6 @@ class CC_EXPORT TileDrawInfo {
   void set_solid_color(const SkColor& color) {
     mode_ = SOLID_COLOR_MODE;
     solid_color_ = color;
-    was_ever_ready_to_draw_ = true;
   }
 
   void set_oom() { mode_ = OOM_MODE; }
@@ -117,10 +121,9 @@ class CC_EXPORT TileDrawInfo {
   bool contents_swizzled_ = false;
   bool is_resource_ready_to_draw_ = false;
 
-  // Used for gathering UMA stats.
-  bool was_ever_ready_to_draw_ : 1;
-  bool was_ever_used_to_draw_ : 1;
-  bool was_a_prepaint_tile_ : 1;
+  // Set to true if |resource_| was rasterized with checker-imaged content. The
+  // flag can only be true iff we have a valid |resource_|.
+  bool resource_is_checker_imaged_ = false;
 };
 
 }  // namespace cc

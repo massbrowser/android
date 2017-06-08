@@ -49,6 +49,7 @@
 #include "net/nqe/network_quality_estimator_test_util.h"
 #include "net/proxy/proxy_server.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request.h"
@@ -87,6 +88,7 @@ class DataReductionProxyConfigTest : public testing::Test {
 
   void SetUp() override {
     net::NetworkChangeNotifier::SetTestNotificationsOnly(true);
+    base::RunLoop().RunUntilIdle();
     network_change_notifier_.reset(net::NetworkChangeNotifier::CreateMock());
 
     test_context_ = DataReductionProxyTestContext::Builder()
@@ -164,17 +166,6 @@ class DataReductionProxyConfigTest : public testing::Test {
         1);
   }
 
-  void WarmupURLFetchedCallBack() const {
-    warmup_url_fetched_run_loop_->Quit();
-  }
-
-  void WarmUpURLFetchedRunLoop() {
-    warmup_url_fetched_run_loop_.reset(new base::RunLoop());
-    // |warmup_url_fetched_run_loop_| will run until WarmupURLFetchedCallBack()
-    // is called.
-    warmup_url_fetched_run_loop_->Run();
-  }
-
   void RunUntilIdle() {
     test_context_->RunUntilIdle();
   }
@@ -212,7 +203,6 @@ class DataReductionProxyConfigTest : public testing::Test {
   std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   base::MessageLoopForIO message_loop_;
-  std::unique_ptr<base::RunLoop> warmup_url_fetched_run_loop_;
   std::unique_ptr<DataReductionProxyTestContext> test_context_;
   std::unique_ptr<TestDataReductionProxyParams> expected_params_;
 };
@@ -374,31 +364,44 @@ TEST_F(DataReductionProxyConfigTest, WarmupURL) {
         new net::TestURLRequestContextGetter(task_runner());
     config.InitializeOnIOThread(request_context_getter_.get(),
                                 request_context_getter_.get());
-    config.SetWarmupURLFetcherCallbackForTesting(
-        base::Bind(&DataReductionProxyConfigTest::WarmupURLFetchedCallBack,
-                   base::Unretained(this)));
+
+    // Set the connection type to WiFi so that warm up URL is fetched even if
+    // the test device does not have connectivity.
+    config.connection_type_ = net::NetworkChangeNotifier::CONNECTION_WIFI;
     config.SetProxyConfig(test.data_reduction_proxy_enabled, true);
     bool warmup_url_enabled =
         test.data_reduction_proxy_enabled && test.enabled_via_field_trial;
 
     if (warmup_url_enabled) {
-      // Block until warm up URL is fetched successfully.
-      WarmUpURLFetchedRunLoop();
       histogram_tester.ExpectUniqueSample(
           "DataReductionProxy.WarmupURL.FetchInitiated", 1, 1);
-      histogram_tester.ExpectUniqueSample(
-          "DataReductionProxy.WarmupURL.FetchSuccessful", 1, 1);
     }
 
-    config.OnIPAddressChanged();
+    // Set the connection type to 4G so that warm up URL is fetched even if
+    // the test device does not have connectivity.
+    net::NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
+        net::NetworkChangeNotifier::CONNECTION_4G);
+    RunUntilIdle();
 
     if (warmup_url_enabled) {
-      // Block until warm up URL is fetched successfully.
-      WarmUpURLFetchedRunLoop();
       histogram_tester.ExpectUniqueSample(
           "DataReductionProxy.WarmupURL.FetchInitiated", 1, 2);
+    } else {
+      histogram_tester.ExpectTotalCount(
+          "DataReductionProxy.WarmupURL.FetchInitiated", 0);
+      histogram_tester.ExpectTotalCount(
+          "DataReductionProxy.WarmupURL.FetchSuccessful", 0);
+    }
+
+    // Warm up URL should not be fetched since the device does not have
+    // connectivity.
+    net::NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
+        net::NetworkChangeNotifier::CONNECTION_NONE);
+    RunUntilIdle();
+
+    if (warmup_url_enabled) {
       histogram_tester.ExpectUniqueSample(
-          "DataReductionProxy.WarmupURL.FetchSuccessful", 1, 2);
+          "DataReductionProxy.WarmupURL.FetchInitiated", 1, 2);
     } else {
       histogram_tester.ExpectTotalCount(
           "DataReductionProxy.WarmupURL.FetchInitiated", 0);
@@ -914,11 +917,11 @@ TEST_F(DataReductionProxyConfigTest, LoFiOn) {
     base::HistogramTester histogram_tester;
     net::TestURLRequestContext context_;
     net::TestDelegate delegate_;
-    std::unique_ptr<net::URLRequest> request =
-        context_.CreateRequest(GURL(), net::IDLE, &delegate_);
+    std::unique_ptr<net::URLRequest> request = context_.CreateRequest(
+        GURL(), net::IDLE, &delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
     request->SetLoadFlags(request->load_flags() |
                           net::LOAD_MAIN_FRAME_DEPRECATED);
-    bool should_enable_lofi = config()->ShouldEnableLoFiMode(*request.get());
+    bool should_enable_lofi = config()->ShouldEnableLoFi(*request.get());
     if (tests[i].expect_bucket_count != 0) {
       histogram_tester.ExpectBucketCount(
           "DataReductionProxy.AutoLoFiRequestHeaderState.Unknown",
@@ -957,6 +960,11 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParams) {
                                          "Enabled");
   base::FieldTrialList::CreateFieldTrial(params::GetLoFiFlagFieldTrialName(),
                                          "Enabled");
+
+  scoped_refptr<net::URLRequestContextGetter> request_context_getter =
+      new net::TestURLRequestContextGetter(task_runner());
+  config.InitializeOnIOThread(request_context_getter.get(),
+                              request_context_getter.get());
 
   const struct {
     bool lofi_flag_group;
@@ -1022,7 +1030,12 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParams) {
       &test_network_quality_estimator));
 
   // Change in connection type changes the network quality despite hysteresis.
-  config.connection_type_ = net::NetworkChangeNotifier::CONNECTION_WIFI;
+  EXPECT_FALSE(config.connection_type_changed_);
+  net::NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
+      net::NetworkChangeNotifier::CONNECTION_WIFI);
+  RunUntilIdle();
+
+  EXPECT_TRUE(config.connection_type_changed_);
   EXPECT_TRUE(config.IsNetworkQualityProhibitivelySlow(
       &test_network_quality_estimator));
   }
@@ -1059,6 +1072,10 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParamsSlowConnectionsFlag) {
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxyLoFi,
       switches::kDataReductionProxyLoFiValueSlowConnectionsOnly);
+  scoped_refptr<net::URLRequestContextGetter> request_context_getter =
+      new net::TestURLRequestContextGetter(task_runner());
+  config.InitializeOnIOThread(request_context_getter.get(),
+                              request_context_getter.get());
 
   config.PopulateAutoLoFiParams();
 
@@ -1100,7 +1117,12 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParamsSlowConnectionsFlag) {
       &test_network_quality_estimator));
 
   // Change in connection type changes the network quality despite hysteresis.
-  config.connection_type_ = net::NetworkChangeNotifier::CONNECTION_WIFI;
+  EXPECT_FALSE(config.connection_type_changed_);
+  net::NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
+      net::NetworkChangeNotifier::CONNECTION_WIFI);
+  RunUntilIdle();
+
+  EXPECT_TRUE(config.connection_type_changed_);
   EXPECT_TRUE(config.IsNetworkQualityProhibitivelySlow(
       &test_network_quality_estimator));
 }

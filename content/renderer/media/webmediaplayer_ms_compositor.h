@@ -11,12 +11,14 @@
 #include <memory>
 #include <vector>
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "cc/layers/video_frame_provider.h"
 #include "content/common/content_export.h"
+#include "media/base/media_log.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -64,8 +66,8 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   // Statistical data
   gfx::Size GetCurrentSize();
   base::TimeDelta GetCurrentTime();
-  size_t total_frame_count() const;
-  size_t dropped_frame_count() const;
+  size_t total_frame_count();
+  size_t dropped_frame_count();
 
   // VideoFrameProvider implementation.
   void SetVideoFrameProviderClient(
@@ -121,6 +123,11 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   base::MessageLoop* main_message_loop_;
 
   base::WeakPtr<WebMediaPlayerMS> player_;
+
+  // TODO(qiangchen, emircan): It might be nice to use a real MediaLog here from
+  // the WebMediaPlayerMS instance, but it owns the MediaLog and this class has
+  // non-deterministic destruction paths (either compositor or IO).
+  media::MediaLog media_log_;
 
   size_t serial_;
 

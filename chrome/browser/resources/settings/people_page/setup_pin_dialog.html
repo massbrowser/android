@@ -2,6 +2,7 @@
 <link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
+<link rel="import" href="../i18n_setup.html">
 <link rel="import" href="../icons.html">
 <link rel="import" href="lock_screen_constants.html">
 <link rel="import" href="pin_keyboard.html">
@@ -9,8 +10,7 @@
 
 <dom-module id="settings-setup-pin-dialog">
   <template>
-    <style include="settings-shared"></style>
-    <style>
+    <style include="settings-shared">
       .warning {
         color: var(--paper-grey-700);
       }
@@ -27,12 +27,13 @@
         --iron-icon-fill-color: var(--paper-red-500);
       }
 
-      .align-center {
+      #pinKeyboardDiv {
         justify-content: center;
       }
     </style>
 
-    <dialog is="cr-dialog" id="dialog" on-close="close">
+    <dialog is="cr-dialog" id="dialog" on-close="close"
+        close-text="$i18n{close}">
       <div class="title">[[getTitleMessage_(isConfirmStep_)]]</div>
       <div class="body">
         <!-- Warning/error; only shown if title is hidden. Id is needed for
@@ -44,9 +45,9 @@
         </div>
 
         <!-- Pin keyboard -->
-        <div class="align-center settings-box continuation">
+        <div id="pinKeyboardDiv" class="settings-box continuation">
           <pin-keyboard id="pinKeyboard" on-pin-change="onPinChange_"
-                        on-submit="onPinSubmit_" value="{{pinKeyboardValue_}}">
+              on-submit="onPinSubmit_" value="{{pinKeyboardValue_}}">
           </pin-keyboard>
         </div>
 
@@ -56,7 +57,7 @@
           </paper-button>
 
           <paper-button class="action-button" on-tap="onPinSubmit_"
-                        disabled$="[[!enableSubmit_]]">
+              disabled$="[[!enableSubmit_]]">
             <span>[[getContinueMessage_(isConfirmStep_)]]</span>
           </paper-button>
         </div>

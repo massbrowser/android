@@ -23,11 +23,11 @@ namespace mojo {
 
 namespace {
 
-base::LazyInstance<base::ThreadLocalPointer<internal::MessageDispatchContext>>
-    g_tls_message_dispatch_context = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::ThreadLocalPointer<internal::MessageDispatchContext>>::
+    DestructorAtExit g_tls_message_dispatch_context = LAZY_INSTANCE_INITIALIZER;
 
-base::LazyInstance<base::ThreadLocalPointer<SyncMessageResponseContext>>
-    g_tls_sync_response_context = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::ThreadLocalPointer<SyncMessageResponseContext>>::
+    DestructorAtExit g_tls_sync_response_context = LAZY_INSTANCE_INITIALIZER;
 
 void DoNotifyBadMessage(Message message, const std::string& error) {
   message.NotifyBadMessage(error);
@@ -80,6 +80,7 @@ const uint8_t* Message::payload() const {
   if (version() < 2)
     return data() + header()->num_bytes;
 
+  DCHECK(!header_v2()->payload.is_null());
   return static_cast<const uint8_t*>(header_v2()->payload.Get());
 }
 
@@ -89,30 +90,27 @@ uint32_t Message::payload_num_bytes() const {
   if (version() < 2) {
     num_bytes = data_num_bytes() - header()->num_bytes;
   } else {
-    auto payload = reinterpret_cast<uintptr_t>(header_v2()->payload.Get());
-    if (!payload) {
-      num_bytes = 0;
-    } else {
-      auto payload_end =
-          reinterpret_cast<uintptr_t>(header_v2()->payload_interface_ids.Get());
-      if (!payload_end)
-        payload_end = reinterpret_cast<uintptr_t>(data() + data_num_bytes());
-      DCHECK_GE(payload_end, payload);
-      num_bytes = payload_end - payload;
-    }
+    auto payload_begin =
+        reinterpret_cast<uintptr_t>(header_v2()->payload.Get());
+    auto payload_end =
+        reinterpret_cast<uintptr_t>(header_v2()->payload_interface_ids.Get());
+    if (!payload_end)
+      payload_end = reinterpret_cast<uintptr_t>(data() + data_num_bytes());
+    DCHECK_GE(payload_end, payload_begin);
+    num_bytes = payload_end - payload_begin;
   }
   DCHECK_LE(num_bytes, std::numeric_limits<uint32_t>::max());
   return static_cast<uint32_t>(num_bytes);
 }
 
 uint32_t Message::payload_num_interface_ids() const {
-  auto array_pointer =
+  auto* array_pointer =
       version() < 2 ? nullptr : header_v2()->payload_interface_ids.Get();
   return array_pointer ? static_cast<uint32_t>(array_pointer->size()) : 0;
 }
 
 const uint32_t* Message::payload_interface_ids() const {
-  auto array_pointer =
+  auto* array_pointer =
       version() < 2 ? nullptr : header_v2()->payload_interface_ids.Get();
   return array_pointer ? array_pointer->storage() : nullptr;
 }
@@ -174,16 +172,15 @@ void Message::SerializeAssociatedEndpointHandles(
   DCHECK(header_v2()->payload_interface_ids.is_null());
 
   size_t size = associated_endpoint_handles_.size();
-  auto data = internal::Array_Data<uint32_t>::New(size, buffer());
+  auto* data = internal::Array_Data<uint32_t>::New(size, buffer());
   header_v2()->payload_interface_ids.Set(data);
 
   for (size_t i = 0; i < size; ++i) {
     ScopedInterfaceEndpointHandle& handle = associated_endpoint_handles_[i];
 
-    DCHECK(handle.is_valid());
-    DCHECK(!handle.is_local());
-    DCHECK_EQ(group_controller, handle.group_controller());
-    data->storage()[i] = handle.release();
+    DCHECK(handle.pending_association());
+    data->storage()[i] =
+        group_controller->AssociateInterface(std::move(handle));
   }
   associated_endpoint_handles_.clear();
 }

@@ -27,6 +27,8 @@ class ContentFaviconDriver
       public content::WebContentsUserData<ContentFaviconDriver>,
       public FaviconDriverImpl {
  public:
+  ~ContentFaviconDriver() override;
+
   static void CreateForWebContents(content::WebContents* web_contents,
                                    FaviconService* favicon_service,
                                    history::HistoryService* history_service,
@@ -45,8 +47,6 @@ class ContentFaviconDriver
   // FaviconDriver implementation.
   gfx::Image GetFavicon() const override;
   bool FaviconIsValid() const override;
-  int StartDownload(const GURL& url, int max_bitmap_size) override;
-  bool IsOffTheRecord() override;
   GURL GetActiveURL() override;
 
  protected:
@@ -54,18 +54,20 @@ class ContentFaviconDriver
                        FaviconService* favicon_service,
                        history::HistoryService* history_service,
                        bookmarks::BookmarkModel* bookmark_model);
-  ~ContentFaviconDriver() override;
 
  private:
   friend class content::WebContentsUserData<ContentFaviconDriver>;
 
-  // FaviconDriver implementation.
-  void OnFaviconUpdated(
-      const GURL& page_url,
-      FaviconDriverObserver::NotificationIconType icon_type,
-      const GURL& icon_url,
-      bool icon_url_changed,
-      const gfx::Image& image) override;
+  // FaviconHandler::Delegate implementation.
+  int DownloadImage(const GURL& url,
+                    int max_image_size,
+                    ImageDownloadCallback callback) override;
+  bool IsOffTheRecord() override;
+  void OnFaviconUpdated(const GURL& page_url,
+                        FaviconDriverObserver::NotificationIconType icon_type,
+                        const GURL& icon_url,
+                        bool icon_url_changed,
+                        const gfx::Image& image) override;
 
   // content::WebContentsObserver implementation.
   void DidUpdateFaviconURL(

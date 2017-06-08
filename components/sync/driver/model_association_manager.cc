@@ -41,15 +41,14 @@ static const ModelType kStartOrder[] = {
                        //  so we want to do it early.
     PREFERENCES, PRIORITY_PREFERENCES, EXTENSIONS, APPS, APP_LIST, ARC_PACKAGE,
     READING_LIST, THEMES, SEARCH_ENGINES, SESSIONS, APP_NOTIFICATIONS,
-    DICTIONARY, FAVICON_IMAGES, FAVICON_TRACKING, PRINTERS,
+    DICTIONARY, FAVICON_IMAGES, FAVICON_TRACKING, PRINTERS, USER_EVENTS,
     SUPERVISED_USER_SETTINGS, SUPERVISED_USER_SHARED_SETTINGS,
     SUPERVISED_USER_WHITELISTS, ARTICLES, WIFI_CREDENTIALS,
 };
 
 static_assert(arraysize(kStartOrder) ==
                   MODEL_TYPE_COUNT - FIRST_REAL_MODEL_TYPE,
-              "kStartOrder must have MODEL_TYPE_COUNT - "
-              "FIRST_REAL_MODEL_TYPE elements");
+              "When adding a new type, update kStartOrder.");
 
 // The amount of time we wait for association to finish. If some types haven't
 // finished association by the time, DataTypeManager is notified of the

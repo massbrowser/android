@@ -160,9 +160,8 @@ class ExtensionServiceInterface
       const extensions::Extension* extension) = 0;
 
   // Unload the specified extension.
-  virtual void UnloadExtension(
-      const std::string& extension_id,
-      extensions::UnloadedExtensionInfo::Reason reason) = 0;
+  virtual void UnloadExtension(const std::string& extension_id,
+                               extensions::UnloadedExtensionReason reason) = 0;
 
   // Remove the specified component extension.
   virtual void RemoveComponentExtension(const std::string& extension_id) = 0;
@@ -215,9 +214,8 @@ class ExtensionService
                        bool file_ownership_passed,
                        extensions::CrxInstaller** out_crx_installer) override;
   bool IsExtensionEnabled(const std::string& extension_id) const override;
-  void UnloadExtension(
-      const std::string& extension_id,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void UnloadExtension(const std::string& extension_id,
+                       extensions::UnloadedExtensionReason reason) override;
   void RemoveComponentExtension(const std::string& extension_id) override;
   void AddExtension(const extensions::Extension* extension) override;
   void AddComponentExtension(const extensions::Extension* extension) override;
@@ -383,7 +381,6 @@ class ExtensionService
   content::BrowserContext* GetBrowserContext() const;
 
   bool extensions_enabled() const { return extensions_enabled_; }
-  void set_extensions_enabled(bool enabled) { extensions_enabled_ = enabled; }
 
   const base::FilePath& install_directory() const { return install_directory_; }
 
@@ -448,6 +445,10 @@ class ExtensionService
   void set_external_updates_finished_callback_for_test(
       const base::Closure& callback) {
     external_updates_finished_callback_ = callback;
+  }
+
+  void set_external_updates_disabled_for_test(bool value) {
+    external_updates_disabled_for_test_ = value;
   }
 
  private:
@@ -524,9 +525,8 @@ class ExtensionService
       scoped_refptr<const extensions::Extension> extension);
 
   // Handles sending notification that |extension| was unloaded.
-  void NotifyExtensionUnloaded(
-      const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason);
+  void NotifyExtensionUnloaded(const extensions::Extension* extension,
+                               extensions::UnloadedExtensionReason reason);
 
   // Common helper to finish installing the given extension.
   void FinishInstallation(const extensions::Extension* extension);
@@ -677,6 +677,9 @@ class ExtensionService
   // updating additional extensions and allows in-progress installations to
   // decide to abort.
   bool browser_terminating_ = false;
+
+  // If set, call to CheckForExternalUpdates() will bail out.
+  bool external_updates_disabled_for_test_ = false;
 
   // Set to true if this is the first time this ExtensionService has run.
   // Used for specially handling external extensions that are installed the

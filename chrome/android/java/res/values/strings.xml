@@ -18,14 +18,24 @@
     <string name="coins_stub"></string>
     <string name="your_balance">Your balance</string>
     <string name="you_can_see_your_balance">
-        You can see your balance in Mass Coins, Bitcoin or US Dollars. To make more money share more details about
-        yourself in My Personal Valuation section. The more you share, the more money you make!
+        You can see your balance in Mass Coins, Bitcoin or US Dollars.\n\nWant to earn more?\nGet an additional dollar every time you refer a friend to try Mass.
     </string>
+    <string name="how_invites_work">How Invites Work</string>
     <string name="withdrawals">Withdrawals</string>
     <string name="withdraw">WITHDRAW</string>
-    <string name="_100">0</string>
-    <string name="_1">0</string>
-    <string name="_1_dollar">0</string>
-    <string name="feature_in_march_2017">This feature is under development and will be available in March 2017</string>
+    <string name="zero">0</string>
+    <string name="feature_in_march_2017">This feature is under development and will be available soon</string>
     <string name="use_time_text">You are actively using browser for %d minutes</string>
+
+    <string name="how_invites_work_description">
+
+    Every time a new user follows a link sent by you and installs Mass Browser you get an equivalent of $1 in Mass Coins.\n\n
+
+    To prove the installation is not made by robots/fraudulent software we need some time (usually couple of weeks) to make sure that your friend is a real human who uses Mass.\n\n
+
+    You can either withdraw Mass Coins in available currencies or pay with it at our partners\' locations/websites.
+    </string>
+    <string name="where_spend_coins">Where I can spend Mass Coins?</string>
+    <string name="refer_friend">Invite friend</string>
+
 </resources>

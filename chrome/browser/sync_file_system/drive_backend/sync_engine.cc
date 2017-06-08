@@ -56,6 +56,7 @@
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/extension.h"
 #include "google_apis/drive/drive_api_url_generator.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "storage/browser/blob/scoped_file.h"
 #include "storage/common/fileapi/file_system_util.h"
@@ -65,6 +66,29 @@ namespace sync_file_system {
 class RemoteChangeProcessor;
 
 namespace drive_backend {
+
+constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
+    net::DefineNetworkTrafficAnnotation("sync_file_system", R"(
+        semantics {
+          sender: "Sync FileSystem Chrome API"
+          description:
+            "Sync FileSystem API provides an isolated FileSystem to Chrome "
+            "Apps. The contents of the FileSystem are automatically synced "
+            "among application instances through a hidden folder on Google "
+            "Drive. This service uploades or downloads these files for "
+            "synchronization."
+          trigger:
+            "When a Chrome App uses Sync FileSystem API, or when a file on "
+            "Google Drive is modified."
+          data:
+            "Files created by Chrome Apps via Sync FileSystem API."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting: "This feature cannot be disabled in settings."
+          policy_exception_justification: "Not implemented."
+        })");
 
 std::unique_ptr<drive::DriveServiceInterface>
 SyncEngine::DriveServiceFactory::CreateDriveService(
@@ -76,7 +100,8 @@ SyncEngine::DriveServiceFactory::CreateDriveService(
       oauth2_token_service, url_request_context_getter, blocking_task_runner,
       GURL(google_apis::DriveApiUrlGenerator::kBaseUrlForProduction),
       GURL(google_apis::DriveApiUrlGenerator::kBaseThumbnailUrlForProduction),
-      std::string() /* custom_user_agent */));
+      std::string(), /* custom_user_agent */
+      kTrafficAnnotation));
 }
 
 class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
@@ -101,10 +126,8 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
 
     DCHECK(sequence_checker_.CalledOnValidSequence());
     ui_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&SyncEngine::OnPendingFileListUpdated,
-                   sync_engine_,
-                   item_count));
+        FROM_HERE, base::BindOnce(&SyncEngine::OnPendingFileListUpdated,
+                                  sync_engine_, item_count));
   }
 
   void OnFileStatusChanged(const storage::FileSystemURL& url,
@@ -122,9 +145,8 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
     DCHECK(sequence_checker_.CalledOnValidSequence());
     ui_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&SyncEngine::OnFileStatusChanged,
-                   sync_engine_,
-                   url, file_type, file_status, sync_action, direction));
+        base::BindOnce(&SyncEngine::OnFileStatusChanged, sync_engine_, url,
+                       file_type, file_status, sync_action, direction));
   }
 
   void UpdateServiceState(RemoteServiceState state,
@@ -137,9 +159,8 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
 
     DCHECK(sequence_checker_.CalledOnValidSequence());
     ui_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&SyncEngine::UpdateServiceState,
-                   sync_engine_, state, description));
+        FROM_HERE, base::BindOnce(&SyncEngine::UpdateServiceState, sync_engine_,
+                                  state, description));
   }
 
   void DetachFromSequence() {
@@ -320,10 +341,9 @@ void SyncEngine::InitializeInternal(
   sync_worker_->AddObserver(worker_observer_.get());
 
   worker_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncWorkerInterface::Initialize,
-                 base::Unretained(sync_worker_.get()),
-                 base::Passed(&sync_engine_context)));
+      FROM_HERE, base::BindOnce(&SyncWorkerInterface::Initialize,
+                                base::Unretained(sync_worker_.get()),
+                                base::Passed(&sync_engine_context)));
   if (remote_change_processor_)
     SetRemoteChangeProcessor(remote_change_processor_);
 
@@ -362,10 +382,9 @@ void SyncEngine::RegisterOrigin(const GURL& origin,
                             TrackCallback(callback)));
 
   worker_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncWorkerInterface::RegisterOrigin,
-                 base::Unretained(sync_worker_.get()),
-                 origin, relayed_callback));
+      FROM_HERE, base::BindOnce(&SyncWorkerInterface::RegisterOrigin,
+                                base::Unretained(sync_worker_.get()), origin,
+                                relayed_callback));
 }
 
 void SyncEngine::EnableOrigin(
@@ -381,10 +400,9 @@ void SyncEngine::EnableOrigin(
       FROM_HERE, TrackCallback(callback));
 
   worker_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncWorkerInterface::EnableOrigin,
-                 base::Unretained(sync_worker_.get()),
-                 origin, relayed_callback));
+      FROM_HERE, base::BindOnce(&SyncWorkerInterface::EnableOrigin,
+                                base::Unretained(sync_worker_.get()), origin,
+                                relayed_callback));
 }
 
 void SyncEngine::DisableOrigin(
@@ -400,11 +418,9 @@ void SyncEngine::DisableOrigin(
       FROM_HERE, TrackCallback(callback));
 
   worker_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncWorkerInterface::DisableOrigin,
-                 base::Unretained(sync_worker_.get()),
-                 origin,
-                 relayed_callback));
+      FROM_HERE, base::BindOnce(&SyncWorkerInterface::DisableOrigin,
+                                base::Unretained(sync_worker_.get()), origin,
+                                relayed_callback));
 }
 
 void SyncEngine::UninstallOrigin(
@@ -421,10 +437,9 @@ void SyncEngine::UninstallOrigin(
   SyncStatusCallback relayed_callback = RelayCallbackToCurrentThread(
       FROM_HERE, TrackCallback(callback));
   worker_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncWorkerInterface::UninstallOrigin,
-                 base::Unretained(sync_worker_.get()),
-                 origin, flag, relayed_callback));
+      FROM_HERE, base::BindOnce(&SyncWorkerInterface::UninstallOrigin,
+                                base::Unretained(sync_worker_.get()), origin,
+                                flag, relayed_callback));
 }
 
 void SyncEngine::ProcessRemoteChange(const SyncFileCallback& callback) {
@@ -447,9 +462,8 @@ void SyncEngine::ProcessRemoteChange(const SyncFileCallback& callback) {
       FROM_HERE, tracked_callback);
   worker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&SyncWorkerInterface::ProcessRemoteChange,
-                 base::Unretained(sync_worker_.get()),
-                 relayed_callback));
+      base::BindOnce(&SyncWorkerInterface::ProcessRemoteChange,
+                     base::Unretained(sync_worker_.get()), relayed_callback));
 }
 
 void SyncEngine::SetRemoteChangeProcessor(RemoteChangeProcessor* processor) {
@@ -467,10 +481,9 @@ void SyncEngine::SetRemoteChangeProcessor(RemoteChangeProcessor* processor) {
       worker_task_runner_.get()));
 
   worker_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncWorkerInterface::SetRemoteChangeProcessor,
-                 base::Unretained(sync_worker_.get()),
-                 remote_change_processor_on_worker_.get()));
+      FROM_HERE, base::BindOnce(&SyncWorkerInterface::SetRemoteChangeProcessor,
+                                base::Unretained(sync_worker_.get()),
+                                remote_change_processor_on_worker_.get()));
 }
 
 LocalChangeProcessor* SyncEngine::GetLocalChangeProcessor() {
@@ -501,9 +514,8 @@ void SyncEngine::GetOriginStatusMap(const StatusMapCallback& callback) {
 
   worker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&SyncWorkerInterface::GetOriginStatusMap,
-                 base::Unretained(sync_worker_.get()),
-                 relayed_callback));
+      base::BindOnce(&SyncWorkerInterface::GetOriginStatusMap,
+                     base::Unretained(sync_worker_.get()), relayed_callback));
 }
 
 void SyncEngine::DumpFiles(const GURL& origin,
@@ -561,9 +573,8 @@ void SyncEngine::SetSyncEnabled(bool sync_enabled) {
 
     worker_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&SyncWorkerInterface::SetSyncEnabled,
-                   base::Unretained(sync_worker_.get()),
-                   sync_enabled_));
+        base::BindOnce(&SyncWorkerInterface::SetSyncEnabled,
+                       base::Unretained(sync_worker_.get()), sync_enabled_));
     return;
   }
 
@@ -574,9 +585,8 @@ void SyncEngine::SetSyncEnabled(bool sync_enabled) {
   // let SyncEngine handle the flag.
   worker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&SyncWorkerInterface::SetSyncEnabled,
-                 base::Unretained(sync_worker_.get()),
-                 sync_enabled_));
+      base::BindOnce(&SyncWorkerInterface::SetSyncEnabled,
+                     base::Unretained(sync_worker_.get()), sync_enabled_));
   Reset();
 }
 
@@ -591,9 +601,8 @@ void SyncEngine::PromoteDemotedChanges(const base::Closure& callback) {
 
   worker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&SyncWorkerInterface::PromoteDemotedChanges,
-                 base::Unretained(sync_worker_.get()),
-                 relayed_callback));
+      base::BindOnce(&SyncWorkerInterface::PromoteDemotedChanges,
+                     base::Unretained(sync_worker_.get()), relayed_callback));
 }
 
 void SyncEngine::ApplyLocalChange(const FileChange& local_change,
@@ -615,13 +624,9 @@ void SyncEngine::ApplyLocalChange(const FileChange& local_change,
       FROM_HERE, TrackCallback(callback));
   worker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&SyncWorkerInterface::ApplyLocalChange,
-                 base::Unretained(sync_worker_.get()),
-                 local_change,
-                 local_path,
-                 local_metadata,
-                 url,
-                 relayed_callback));
+      base::BindOnce(&SyncWorkerInterface::ApplyLocalChange,
+                     base::Unretained(sync_worker_.get()), local_change,
+                     local_path, local_metadata, url, relayed_callback));
 }
 
 void SyncEngine::OnNotificationReceived() {
@@ -630,10 +635,9 @@ void SyncEngine::OnNotificationReceived() {
 
   worker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&SyncWorkerInterface::ActivateService,
-                 base::Unretained(sync_worker_.get()),
-                 REMOTE_SERVICE_OK,
-                 "Got push notification for Drive"));
+      base::BindOnce(&SyncWorkerInterface::ActivateService,
+                     base::Unretained(sync_worker_.get()), REMOTE_SERVICE_OK,
+                     "Got push notification for Drive"));
 }
 
 void SyncEngine::OnPushNotificationEnabled(bool /* enabled */) {}
@@ -644,11 +648,9 @@ void SyncEngine::OnReadyToSendRequests() {
     return;
 
   worker_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncWorkerInterface::ActivateService,
-                 base::Unretained(sync_worker_.get()),
-                 REMOTE_SERVICE_OK,
-                 "Authenticated"));
+      FROM_HERE, base::BindOnce(&SyncWorkerInterface::ActivateService,
+                                base::Unretained(sync_worker_.get()),
+                                REMOTE_SERVICE_OK, "Authenticated"));
 }
 
 void SyncEngine::OnRefreshTokenInvalid() {
@@ -657,10 +659,9 @@ void SyncEngine::OnRefreshTokenInvalid() {
     return;
 
   worker_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&SyncWorkerInterface::DeactivateService,
-                 base::Unretained(sync_worker_.get()),
-                 "Found invalid refresh token."));
+      FROM_HERE, base::BindOnce(&SyncWorkerInterface::DeactivateService,
+                                base::Unretained(sync_worker_.get()),
+                                "Found invalid refresh token."));
 }
 
 void SyncEngine::OnNetworkChanged(
@@ -673,17 +674,14 @@ void SyncEngine::OnNetworkChanged(
 
   if (!network_available_old && network_available_) {
     worker_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&SyncWorkerInterface::ActivateService,
-                   base::Unretained(sync_worker_.get()),
-                   REMOTE_SERVICE_OK,
-                   "Connected"));
+        FROM_HERE, base::BindOnce(&SyncWorkerInterface::ActivateService,
+                                  base::Unretained(sync_worker_.get()),
+                                  REMOTE_SERVICE_OK, "Connected"));
   } else if (network_available_old && !network_available_) {
     worker_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&SyncWorkerInterface::DeactivateService,
-                   base::Unretained(sync_worker_.get()),
-                   "Disconnected"));
+        base::BindOnce(&SyncWorkerInterface::DeactivateService,
+                       base::Unretained(sync_worker_.get()), "Disconnected"));
   }
 }
 

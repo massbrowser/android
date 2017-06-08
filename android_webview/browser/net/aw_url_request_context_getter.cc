@@ -22,6 +22,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
@@ -57,6 +58,13 @@ namespace android_webview {
 
 
 namespace {
+
+#if DCHECK_IS_ON()
+bool g_created_url_request_context_builder = false;
+#endif
+// On apps targeting API level O or later, check cleartext is enforced.
+bool g_check_cleartext_permitted = false;
+
 
 const base::FilePath::CharType kChannelIDFilename[] = "Origin Bound Certs";
 const char kProxyServerSwitch[] = "proxy-server";
@@ -104,9 +112,9 @@ std::unique_ptr<net::URLRequestJobFactory> CreateJobFactory(
   bool set_protocol = aw_job_factory->SetProtocolHandler(
       url::kFileScheme,
       base::MakeUnique<net::FileProtocolHandler>(
-          content::BrowserThread::GetBlockingPool()
-              ->GetTaskRunnerWithShutdownBehavior(
-                  base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
+          base::CreateTaskRunnerWithTraits(
+              {base::MayBlock(), base::TaskPriority::BACKGROUND,
+               base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       url::kDataScheme, base::MakeUnique<net::DataProtocolHandler>());
@@ -214,8 +222,8 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
     scoped_refptr<net::SQLiteChannelIDStore> channel_id_db;
     channel_id_db = new net::SQLiteChannelIDStore(
         channel_id_path,
-        BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-            BrowserThread::GetBlockingPool()->GetSequenceToken()));
+        base::CreateSequencedTaskRunnerWithTraits(
+            {base::MayBlock(), base::TaskPriority::BACKGROUND}));
 
     channel_id_service.reset(new net::ChannelIDService(
         new net::DefaultChannelIDStore(channel_id_db.get())));
@@ -262,6 +270,11 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   builder.set_host_resolver(std::move(host_resolver));
 
   url_request_context_ = builder.Build();
+#if DCHECK_IS_ON()
+  g_created_url_request_context_builder = true;
+#endif
+  url_request_context_->set_check_cleartext_permitted(
+    g_check_cleartext_permitted);
 
   job_factory_ =
       CreateJobFactory(&protocol_handlers_, std::move(request_interceptors_));
@@ -292,6 +305,14 @@ void AwURLRequestContextGetter::SetHandlersAndInterceptors(
 
 net::NetLog* AwURLRequestContextGetter::GetNetLog() {
   return net_log_.get();
+}
+
+// static
+void AwURLRequestContextGetter::set_check_cleartext_permitted(bool permitted) {
+#if DCHECK_IS_ON()
+    DCHECK(!g_created_url_request_context_builder);
+#endif
+    g_check_cleartext_permitted = permitted;
 }
 
 std::unique_ptr<net::HttpAuthHandlerFactory>

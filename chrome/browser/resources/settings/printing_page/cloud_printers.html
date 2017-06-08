@@ -20,15 +20,14 @@
           label="$i18n{printingNotificationsLabel}">
       </settings-toggle-button>
     </div>
-    <div class="settings-box two-line" on-tap="onManageTap_" actionable>
+    <a class="settings-box inherit-color no-outline" tabindex="-1"
+        target="_blank" href="$i18n{devicesUrl}">
       <div class="start">
         $i18n{printingManageCloudPrintDevices}
-        <div class="secondary">
-          $i18n{printingManageCloudPrintDevicesDescription}
-        </div>
       </div>
-      <button class="icon-external" is="paper-icon-button-light"></button>
-    </div>
+      <button class="icon-external" is="paper-icon-button-light" actionable
+          aria-label="$i18n{printingManageCloudPrintDevices}"></button>
+    </a>
   </template>
   <script src="cloud_printers.js"></script>
 </dom-module>

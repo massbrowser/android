@@ -7,24 +7,21 @@
 /* global PaymentRequest:false */
 /* global print:false */
 
+var request;
+
 /**
  * Do not query CanMakePayment before showing the Payment Request.
  */
 function noQueryShow() {  // eslint-disable-line no-unused-vars
   try {
-    var request = new PaymentRequest(
+    request = new PaymentRequest(
         [{supportedMethods: ['https://bobpay.com', 'visa']}],
         {total: {label: 'Total', amount: {currency: 'USD', value: '5.00'}}});
     request.show()
         .then(function(resp) {
           resp.complete('success')
               .then(function() {
-                print(
-                    resp.shippingOption + '<br>' +
-                    JSON.stringify(
-                        toDictionary(resp.shippingAddress), undefined, 2) +
-                    '<br>' + resp.methodName + '<br>' +
-                    JSON.stringify(resp.details, undefined, 2));
+                print(JSON.stringify(resp, undefined, 2));
               })
               .catch(function(error) { print(error); });
         })
@@ -39,7 +36,7 @@ function noQueryShow() {  // eslint-disable-line no-unused-vars
  */
 function queryShow() {  // eslint-disable-line no-unused-vars
   try {
-    var request = new PaymentRequest(
+    request = new PaymentRequest(
         [{supportedMethods: ['https://bobpay.com', 'visa']}],
         {total: {label: 'Total', amount: {currency: 'USD', value: '5.00'}}});
     request.canMakePayment()
@@ -49,12 +46,7 @@ function queryShow() {  // eslint-disable-line no-unused-vars
         .then(function(resp) {
           resp.complete('success')
               .then(function() {
-                print(
-                    resp.shippingOption + '<br>' +
-                    JSON.stringify(
-                        toDictionary(resp.shippingAddress), undefined, 2) +
-                    '<br>' + resp.methodName + '<br>' +
-                    JSON.stringify(resp.details, undefined, 2));
+                print(JSON.stringify(resp, undefined, 2));
               })
               .catch(function(error) { print(error); });
         })
@@ -69,12 +61,27 @@ function queryShow() {  // eslint-disable-line no-unused-vars
  */
 function queryNoShow() {  // eslint-disable-line no-unused-vars
   try {
-    var request = new PaymentRequest(
+    request = new PaymentRequest(
         [{supportedMethods: ['https://bobpay.com', 'visa']}],
         {total: {label: 'Total', amount: {currency: 'USD', value: '5.00'}}});
     request.canMakePayment()
         .then(function(result) { print(result); })
         .catch(function(error) { print(error); });
+  } catch (error) {
+    print(error.message);
+  }
+}
+
+/**
+ * Aborts the PaymentRequest UI.
+ */
+function abort() {  // eslint-disable-line no-unused-vars
+  try {
+    request.abort().then(() => {
+      print('Aborted');
+    }).catch(() => {
+      print('Cannot abort');
+    });
   } catch (error) {
     print(error.message);
   }

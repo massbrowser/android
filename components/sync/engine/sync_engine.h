@@ -42,10 +42,10 @@ class UnrecoverableErrorHandler;
 // interface will handle crossing threads if necessary.
 class SyncEngine : public ModelTypeConfigurer {
  public:
-  typedef SyncStatus Status;
-  typedef base::Callback<std::unique_ptr<HttpPostProviderFactory>(
-      CancelationSignal*)>
-      HttpPostProviderFactoryGetter;
+  using Status = SyncStatus;
+  using HttpPostProviderFactoryGetter =
+      base::Callback<std::unique_ptr<HttpPostProviderFactory>(
+          CancelationSignal*)>;
 
   // Utility struct for holding initialization options.
   struct InitParams {
@@ -181,12 +181,13 @@ class SyncEngine : public ModelTypeConfigurer {
   virtual void RefreshTypesForTest(ModelTypeSet types) = 0;
 
   // See SyncManager::ClearServerData.
-  virtual void ClearServerData(
-      const SyncManager::ClearServerDataCallback& callback) = 0;
+  virtual void ClearServerData(const base::Closure& callback) = 0;
 
   // Notify the syncer that the cookie jar has changed.
   // See SyncManager::OnCookieJarChanged.
-  virtual void OnCookieJarChanged(bool account_mismatch, bool empty_jar) = 0;
+  virtual void OnCookieJarChanged(bool account_mismatch,
+                                  bool empty_jar,
+                                  const base::Closure& callback) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SyncEngine);

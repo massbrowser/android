@@ -23,6 +23,8 @@
 #endif
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/api/identity/identity_constants.h"
+#include "chrome/browser/extensions/api/identity/identity_get_accounts_function.h"
+#include "chrome/browser/extensions/api/identity/identity_get_auth_token_function.h"
 #include "chrome/browser/extensions/api/identity/identity_get_profile_user_info_function.h"
 #include "chrome/browser/extensions/api/identity/identity_launch_web_auth_flow_function.h"
 #include "chrome/browser/extensions/api/identity/identity_remove_cached_auth_token_function.h"
@@ -420,7 +422,7 @@ class IdentityGetAccountsFunctionTest : public ExtensionBrowserTest {
          it != results->end();
          ++it) {
       std::unique_ptr<api::identity::AccountInfo> info =
-          api::identity::AccountInfo::FromValue(**it);
+          api::identity::AccountInfo::FromValue(*it);
       if (info.get())
         result_ids.insert(info->id);
       else
@@ -452,11 +454,11 @@ class IdentityGetAccountsFunctionTest : public ExtensionBrowserTest {
     } else {
       for (const auto& result : *results) {
         std::unique_ptr<api::identity::AccountInfo> info =
-            api::identity::AccountInfo::FromValue(*result);
+            api::identity::AccountInfo::FromValue(result);
         if (info.get())
           msg << info->id << " ";
         else
-          msg << *result << "<-" << result->GetType() << " ";
+          msg << result << "<-" << result.GetType() << " ";
       }
     }
 
@@ -1600,7 +1602,7 @@ class GetAuthTokenFunctionPublicSessionTest : public GetAuthTokenFunctionTest {
     // enterprise-managed.
      std::unique_ptr<chromeos::StubInstallAttributes> attributes
          = base::MakeUnique<chromeos::StubInstallAttributes>();
-     attributes->SetEnterprise("example.com", "fake-id");
+     attributes->SetCloudManaged("example.com", "fake-id");
      policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
          attributes.release());
   }

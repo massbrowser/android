@@ -32,7 +32,8 @@ class WindowAndroid::WindowBeginFrameSource : public cc::BeginFrameSource {
         observers_(
             base::ObserverList<cc::BeginFrameObserver>::NOTIFY_EXISTING_ONLY),
         observer_count_(0),
-        next_sequence_number_(cc::BeginFrameArgs::kStartingFrameNumber) {}
+        next_sequence_number_(cc::BeginFrameArgs::kStartingFrameNumber),
+        paused_(false) {}
   ~WindowBeginFrameSource() override {}
 
   // cc::BeginFrameSource implementation.
@@ -43,6 +44,7 @@ class WindowAndroid::WindowBeginFrameSource : public cc::BeginFrameSource {
   bool IsThrottled() const override { return true; }
 
   void OnVSync(base::TimeTicks frame_time, base::TimeDelta vsync_period);
+  void OnPauseChanged(bool paused);
 
  private:
   WindowAndroid* const window_;
@@ -50,6 +52,7 @@ class WindowAndroid::WindowBeginFrameSource : public cc::BeginFrameSource {
   int observer_count_;
   cc::BeginFrameArgs last_begin_frame_args_;
   uint64_t next_sequence_number_;
+  bool paused_;
 };
 
 void WindowAndroid::WindowBeginFrameSource::AddObserver(
@@ -59,7 +62,7 @@ void WindowAndroid::WindowBeginFrameSource::AddObserver(
 
   observers_.AddObserver(obs);
   observer_count_++;
-  obs->OnBeginFrameSourcePausedChanged(false);
+  obs->OnBeginFrameSourcePausedChanged(paused_);
   window_->SetNeedsBeginFrames(true);
 
   // Send a MISSED BeginFrame if possible and necessary.
@@ -106,6 +109,12 @@ void WindowAndroid::WindowBeginFrameSource::OnVSync(
 
   for (auto& obs : observers_)
     obs.OnBeginFrame(last_begin_frame_args_);
+}
+
+void WindowAndroid::WindowBeginFrameSource::OnPauseChanged(bool paused) {
+  paused_ = paused;
+  for (auto& obs : observers_)
+    obs.OnBeginFrameSourcePausedChanged(paused_);
 }
 
 WindowAndroid::WindowAndroid(JNIEnv* env, jobject obj, int display_id)
@@ -244,6 +253,12 @@ void WindowAndroid::OnActivityStarted(JNIEnv* env,
     observer.OnActivityStarted();
 }
 
+void WindowAndroid::SetVSyncPaused(JNIEnv* env,
+                                   const JavaParamRef<jobject>& obj,
+                                   bool paused) {
+  begin_frame_source_->OnPauseChanged(paused);
+}
+
 bool WindowAndroid::HasPermission(const std::string& permission) {
   JNIEnv* env = AttachCurrentThread();
   return Java_WindowAndroid_hasPermission(
@@ -261,6 +276,11 @@ bool WindowAndroid::CanRequestPermission(const std::string& permission) {
 WindowAndroid* WindowAndroid::GetWindowAndroid() const {
   DCHECK(parent_ == nullptr);
   return const_cast<WindowAndroid*>(this);
+}
+
+ScopedJavaLocalRef<jobject> WindowAndroid::GetWindowToken() {
+  JNIEnv* env = AttachCurrentThread();
+  return Java_WindowAndroid_getWindowToken(env, GetJavaObject());
 }
 
 // ----------------------------------------------------------------------------

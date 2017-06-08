@@ -52,9 +52,13 @@ class TestConfiguration : public Configuration {
 
 class MiniInstallerConfigurationTest : public ::testing::Test {
  protected:
-  MiniInstallerConfigurationTest() {
-    registry_overrides_.OverrideRegistry(HKEY_CURRENT_USER);
-    registry_overrides_.OverrideRegistry(HKEY_LOCAL_MACHINE);
+  MiniInstallerConfigurationTest() = default;
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(
+        registry_overrides_.OverrideRegistry(HKEY_CURRENT_USER));
+    ASSERT_NO_FATAL_FAILURE(
+        registry_overrides_.OverrideRegistry(HKEY_LOCAL_MACHINE));
   }
 
   // Adds sufficient state in the registry for Configuration to think that
@@ -174,6 +178,10 @@ TEST_F(MiniInstallerConfigurationTest, IsUpdatingSystemMulti) {
 TEST_F(MiniInstallerConfigurationTest, ChromeAppGuid) {
   EXPECT_STREQ(google_update::kAppGuid,
                TestConfiguration(L"spam.exe").chrome_app_guid());
+  EXPECT_STREQ(google_update::kBetaAppGuid,
+               TestConfiguration(L"spam.exe --chrome-beta").chrome_app_guid());
+  EXPECT_STREQ(google_update::kDevAppGuid,
+               TestConfiguration(L"spam.exe --chrome-dev").chrome_app_guid());
   EXPECT_STREQ(google_update::kSxSAppGuid,
                TestConfiguration(L"spam.exe --chrome-sxs").chrome_app_guid());
 }

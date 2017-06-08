@@ -10,7 +10,9 @@ import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.view.ViewGroup;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.signin.SigninAccessPoint;
 import org.chromium.chrome.browser.signin.SigninAndSyncView;
@@ -43,8 +45,10 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
     // TODO(kkimlabs): Figure out the optimal number based on UMA data.
     private static final int MAX_SIGNIN_PROMO_SHOW_COUNT = 5;
 
+    private static boolean sShouldShowForTests;
+
     private Context mContext;
-    private SigninManager mSignInManager;
+//    private SigninManager mSignInManager;
     private boolean mShouldShow;
     private PromoHeaderShowingChangeListener mShowingChangeListener;
 
@@ -59,8 +63,8 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
 
         AndroidSyncSettings.registerObserver(mContext, this);
 
-        mSignInManager = SigninManager.get(mContext);
-        mSignInManager.addSignInStateObserver(this);
+//        mSignInManager = SigninManager.get(mContext);
+//        mSignInManager.addSignInStateObserver(this);
 
         updateShouldShow(false);
         if (shouldShow()) {
@@ -78,15 +82,15 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
     void destroy() {
         AndroidSyncSettings.unregisterObserver(mContext, this);
 
-        mSignInManager.removeSignInStateObserver(this);
-        mSignInManager = null;
+//        mSignInManager.removeSignInStateObserver(this);
+//        mSignInManager = null;
     }
 
     /**
      * @return Whether it should be showing.
      */
     boolean shouldShow() {
-        return mShouldShow;
+        return mShouldShow || sShouldShowForTests;
     }
 
     /**
@@ -102,8 +106,13 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
             }
         };
 
-        return new ViewHolder(
-                SigninAndSyncView.create(parent, listener, SigninAccessPoint.BOOKMARK_MANAGER)) {};
+        SigninAndSyncView view =
+                SigninAndSyncView.create(parent, listener, SigninAccessPoint.BOOKMARK_MANAGER);
+        // A MarginResizer is used to apply margins in regular and wide display modes. Remove the
+        // view's lateral padding so that margins can be used instead.
+        ApiCompatibilityUtils.setPaddingRelative(
+                view, 0, view.getPaddingTop(), 0, view.getPaddingBottom());
+        return new ViewHolder(view) {};
     }
 
     /**
@@ -127,7 +136,7 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
     private void updateShouldShow(boolean notifyUI) {
         boolean oldIsShowing = mShouldShow;
         mShouldShow = AndroidSyncSettings.isMasterSyncEnabled(mContext)
-                && mSignInManager.isSignInAllowed()
+                /*&& mSignInManager.isSignInAllowed()*/
                 && !wasSigninPromoDeclined()
                 && ContextUtils.getAppSharedPreferences().getInt(
                         PREF_SIGNIN_PROMO_SHOW_COUNT, 0) < MAX_SIGNIN_PROMO_SHOW_COUNT;
@@ -153,5 +162,13 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
     @Override
     public void onSignedOut() {
         updateShouldShow(true);
+    }
+
+    /**
+     * Forces the promo to show for testing purposes.
+     */
+    @VisibleForTesting
+    public static void setShouldShowForTests() {
+        sShouldShowForTests = true;
     }
 }

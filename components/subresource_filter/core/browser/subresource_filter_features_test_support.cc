@@ -4,71 +4,47 @@
 
 #include "components/subresource_filter/core/browser/subresource_filter_features_test_support.h"
 
-#include <map>
-#include <memory>
+#include <utility>
 
-#include "base/metrics/field_trial.h"
-#include "components/subresource_filter/core/browser/subresource_filter_features.h"
-#include "components/variations/variations_associated_data.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "base/memory/ptr_util.h"
+#include "base/memory/ref_counted.h"
+#include "base/strings/string_util.h"
 
 namespace subresource_filter {
 namespace testing {
 
-namespace {
-constexpr const char kTestFieldTrialName[] = "FieldTrialNameShouldNotMatter";
-constexpr const char kTestExperimentGroupName[] = "GroupNameShouldNotMatter";
-}  // namespace
+// ScopedSubresourceFilterConfigurator ----------------------------------------
 
-ScopedSubresourceFilterFeatureToggle::ScopedSubresourceFilterFeatureToggle(
-    base::FeatureList::OverrideState feature_state,
-    const std::string& maximum_activation_level,
-    const std::string& activation_scope,
-    const std::string& activation_lists,
-    const std::string& performance_measurement_rate,
-    const std::string& suppress_notifications)
-    : ScopedSubresourceFilterFeatureToggle(
-          feature_state,
-          {{kActivationLevelParameterName, maximum_activation_level},
-           {kActivationScopeParameterName, activation_scope},
-           {kActivationListsParameterName, activation_lists},
-           {kPerformanceMeasurementRateParameterName,
-            performance_measurement_rate},
-           {kSuppressNotificationsParameterName, suppress_notifications}}) {}
+ScopedSubresourceFilterConfigurator::ScopedSubresourceFilterConfigurator(
+    scoped_refptr<ConfigurationList> configs)
+    : original_config_(GetAndSetActivateConfigurations(configs)) {}
 
-ScopedSubresourceFilterFeatureToggle::ScopedSubresourceFilterFeatureToggle(
-    base::FeatureList::OverrideState feature_state,
-    std::map<std::string, std::string> variation_params) {
-  variations::testing::ClearAllVariationParams();
+ScopedSubresourceFilterConfigurator::ScopedSubresourceFilterConfigurator(
+    Configuration config)
+    : ScopedSubresourceFilterConfigurator(
+          base::MakeShared<ConfigurationList>(std::move(config))) {}
 
-  EXPECT_TRUE(variations::AssociateVariationParams(
-      kTestFieldTrialName, kTestExperimentGroupName, variation_params));
-
-  base::FieldTrial* field_trial = base::FieldTrialList::CreateFieldTrial(
-      kTestFieldTrialName, kTestExperimentGroupName);
-
-  std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-  feature_list->RegisterFieldTrialOverride(kSafeBrowsingSubresourceFilter.name,
-                                           feature_state, field_trial);
-
-  // Since we are adding a scoped feature list after browser start, copy over
-  // the existing feature list to prevent inconsistency.
-  base::FeatureList* existing_feature_list = base::FeatureList::GetInstance();
-  if (existing_feature_list) {
-    std::string enabled_features;
-    std::string disabled_features;
-    base::FeatureList::GetInstance()->GetFeatureOverrides(&enabled_features,
-                                                          &disabled_features);
-    feature_list->InitializeFromCommandLine(enabled_features,
-                                            disabled_features);
-  }
-
-  scoped_feature_list_.InitWithFeatureList(std::move(feature_list));
+ScopedSubresourceFilterConfigurator::~ScopedSubresourceFilterConfigurator() {
+  GetAndSetActivateConfigurations(std::move(original_config_));
 }
 
-ScopedSubresourceFilterFeatureToggle::~ScopedSubresourceFilterFeatureToggle() {
-  variations::testing::ClearAllVariationParams();
+void ScopedSubresourceFilterConfigurator::ResetConfiguration(
+    Configuration config) {
+  GetAndSetActivateConfigurations(
+      base::MakeShared<ConfigurationList>(std::move(config)));
 }
+
+// ScopedSubresourceFilterFeatureToggle ---------------------------------------
+
+ScopedSubresourceFilterFeatureToggle::ScopedSubresourceFilterFeatureToggle(
+    base::FeatureList::OverrideState feature_state) {
+  if (feature_state == base::FeatureList::OVERRIDE_ENABLE_FEATURE)
+    scoped_feature_list_.InitAndEnableFeature(kSafeBrowsingSubresourceFilter);
+  else if (feature_state == base::FeatureList::OVERRIDE_DISABLE_FEATURE)
+    scoped_feature_list_.InitAndDisableFeature(kSafeBrowsingSubresourceFilter);
+}
+
+ScopedSubresourceFilterFeatureToggle::~ScopedSubresourceFilterFeatureToggle() {}
 
 }  // namespace testing
 }  // namespace subresource_filter

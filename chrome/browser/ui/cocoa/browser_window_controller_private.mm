@@ -32,12 +32,13 @@
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/floating_bar_backing_view.h"
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
-#include "chrome/browser/ui/cocoa/fullscreen_low_power_coordinator.h"
 #import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_controller.h"
+#include "chrome/browser/ui/cocoa/fullscreen_low_power_coordinator.h"
 #import "chrome/browser/ui/cocoa/fullscreen_window.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #include "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
+#import "chrome/browser/ui/cocoa/permission_bubble/permission_bubble_cocoa.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_icon_controller.h"
 #import "chrome/browser/ui/cocoa/status_bubble_mac.h"
@@ -45,7 +46,6 @@
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#import "chrome/browser/ui/cocoa/website_settings/permission_bubble_cocoa.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
@@ -610,6 +610,7 @@ willPositionSheet:(NSWindow*)sheet
 
   [self setSheetHiddenForFullscreenTransition:YES];
   [self adjustUIForEnteringFullscreen];
+  browser_->WindowFullscreenStateWillChange();
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification*)notification {
@@ -668,6 +669,8 @@ willPositionSheet:(NSWindow*)sheet
   [[tabStripController_ activeTabContentsController]
       updateFullscreenWidgetFrame];
 
+  [self invalidateTouchBar];
+
   [self showFullscreenExitBubbleIfNecessary];
   browser_->WindowFullscreenStateChanged();
 
@@ -700,6 +703,7 @@ willPositionSheet:(NSWindow*)sheet
   } else {
     [self adjustUIForExitingFullscreen];
   }
+  browser_->WindowFullscreenStateWillChange();
 }
 
 - (void)windowDidExitFullScreen:(NSNotification*)notification {
@@ -724,6 +728,8 @@ willPositionSheet:(NSWindow*)sheet
   [self.chromeContentView setAutoresizesSubviews:YES];
 
   [self resetCustomAppKitFullscreenVariables];
+
+  [self invalidateTouchBar];
 
   // Ensures that the permission bubble shows up properly at the front.
   PermissionRequestManager* manager = [self permissionRequestManager];
@@ -968,18 +974,10 @@ willPositionSheet:(NSWindow*)sheet
 - (void)updateSubviewZOrderFullscreen {
   base::scoped_nsobject<NSMutableArray> subviews([[NSMutableArray alloc] init]);
 
-  // The infobar should overlay the toolbar if the toolbar is fully shown.
-  FullscreenToolbarLayout layout = [fullscreenToolbarController_ computeLayout];
-  BOOL shouldInfoBarOverlayToolbar =
-      ui::IsCGFloatEqual(layout.toolbarFraction, 1.0);
-
   if ([downloadShelfController_ view])
     [subviews addObject:[downloadShelfController_ view]];
   if ([self tabContentArea])
     [subviews addObject:[self tabContentArea]];
-
-  if (!shouldInfoBarOverlayToolbar && [infoBarContainerController_ view])
-    [subviews addObject:[infoBarContainerController_ view]];
 
   if ([self placeBookmarkBarBelowInfoBar]) {
     if ([bookmarkBarController_ view])
@@ -996,7 +994,7 @@ willPositionSheet:(NSWindow*)sheet
   if ([toolbarController_ view])
     [subviews addObject:[toolbarController_ view]];
 
-  if (shouldInfoBarOverlayToolbar && [infoBarContainerController_ view])
+  if ([infoBarContainerController_ view])
     [subviews addObject:[infoBarContainerController_ view]];
 
   if ([findBarCocoaController_ view])
@@ -1015,6 +1013,21 @@ willPositionSheet:(NSWindow*)sheet
   if (![[self.chromeContentView subviews] containsObject:tabContentArea]) {
     [self.chromeContentView setSubviews:subviews];
     return;
+  }
+
+  // Removing the location bar from the window causes it to resign first
+  // responder. Remember the location bar's focus state in order to restore
+  // it before returning.
+  BOOL locationBarHadFocus = [toolbarController_ locationBarHasFocus];
+  FullscreenToolbarVisibilityLockController* visibilityLockController = nil;
+  if (locationBarHadFocus) {
+    // The location bar, by being focused, has a visibility lock on the toolbar,
+    // and the location bar's removal from the view hierarchy will allow the
+    // toolbar to hide. Create a temporary visibility lock on the toolbar for
+    // the duration of the view hierarchy change.
+    visibilityLockController = [self fullscreenToolbarVisibilityLockController];
+    [visibilityLockController lockToolbarVisibilityForOwner:self
+                                              withAnimation:NO];
   }
 
   // Remove all subviews that aren't the tabContentArea.
@@ -1038,6 +1051,14 @@ willPositionSheet:(NSWindow*)sheet
     [self.chromeContentView addSubview:view
                             positioned:NSWindowAbove
                             relativeTo:nil];
+  }
+
+  // Restore the location bar's focus state and remove the temporary visibility
+  // lock.
+  if (locationBarHadFocus) {
+    [self focusLocationBar:YES];
+    [visibilityLockController releaseToolbarVisibilityForOwner:self
+                                                 withAnimation:NO];
   }
 }
 

@@ -13,6 +13,7 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -41,6 +42,7 @@
 namespace {
 
 Profile* CreateTestingProfile(const std::string& profile_name) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   size_t starting_number_of_profiles = profile_manager->GetNumberOfProfiles();
 
@@ -59,6 +61,7 @@ Profile* CreateTestingProfile(const std::string& profile_name) {
 }
 
 Profile* CreateProfileOutsideUserDataDir() {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::FilePath path;
   if (!base::CreateNewTempDirectory(base::FilePath::StringType(), &path))
     NOTREACHED() << "Could not create directory at " << path.MaybeAsASCII();
@@ -73,6 +76,7 @@ Profile* CreateProfileOutsideUserDataDir() {
 // Set up the profiles to enable Lock. Takes as parameter a profile that will be
 // signed in, and also creates a supervised user (necessary for lock).
 void SetupProfilesForLock(Profile* signed_in) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   const char signed_in_email[] = "me@google.com";
 
   // Set up the |signed_in| profile.
@@ -121,12 +125,10 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
  protected:
   void SetUp() override {
     ExtensionBrowserTest::SetUp();
-    DCHECK(switches::IsNewProfileManagement());
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
-    switches::EnableNewProfileManagementForTesting(command_line);
   }
 
   void OpenProfileChooserView(Browser* browser) {
@@ -212,7 +214,7 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
   browser->window()->ShowAvatarBubbleFromAvatarButton(
       BrowserWindow::AVATAR_BUBBLE_MODE_CONFIRM_SIGNIN,
       signin::ManageAccountsParams(),
-      signin_metrics::AccessPoint::ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN);
+      signin_metrics::AccessPoint::ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN, false);
   ASSERT_FALSE(ProfileChooserView::IsShowing());
   CloseBrowserSynchronously(browser);
 }
@@ -250,13 +252,6 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, ViewProfileUMA) {
   profile->GetPrefs()->SetInteger(prefs::kProfileAvatarTutorialShown, 0);
 
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser()));
-
-  // The MD user menu doesn't display any upgrade toast so it doesn't log this
-  // in UMA.
-  if (!switches::IsMaterialDesignUserMenu()) {
-    histograms.ExpectUniqueSample("Profile.NewAvatarMenu.Upgrade",
-        ProfileMetrics::PROFILE_AVATAR_MENU_UPGRADE_VIEW, 1);
-  }
 }
 
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, LockProfile) {

@@ -4,6 +4,8 @@
 
 #include "components/arc/arc_util.h"
 
+#include <string>
+
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "chromeos/chromeos_switches.h"
@@ -19,25 +21,88 @@ namespace {
 const base::Feature kEnableArcFeature{"EnableARC",
                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Possible values for --arc-availability flag.
+constexpr char kAvailabilityNone[] = "none";
+constexpr char kAvailabilityInstalled[] = "installed";
+constexpr char kAvailabilityOfficiallySupported[] = "officially-supported";
+constexpr char kAvailabilityOfficiallySupportedWithActiveDirectory[] =
+    "officially-supported-with-active-directory";
+
 }  // namespace
 
 bool IsArcAvailable() {
   const auto* command_line = base::CommandLine::ForCurrentProcess();
-  // TODO(hidehiko): Unify --enable-arc and --arc-available flags.
-  // If switches::kEnableArc is set, the device is officially supported to run
-  // ARC. If it is not, but switches::kArcAvailable is set, ARC is installed
-  // but is not allowed to run unless |kEnableArcFeature| is true.
+
+  if (command_line->HasSwitch(chromeos::switches::kArcAvailability)) {
+    std::string value = command_line->GetSwitchValueASCII(
+        chromeos::switches::kArcAvailability);
+    DCHECK(value == kAvailabilityNone ||
+           value == kAvailabilityInstalled ||
+           value == kAvailabilityOfficiallySupported ||
+           value == kAvailabilityOfficiallySupportedWithActiveDirectory)
+        << "Unknown flag value: " << value;
+    return value == kAvailabilityOfficiallySupported ||
+           value == kAvailabilityOfficiallySupportedWithActiveDirectory ||
+           (value == kAvailabilityInstalled &&
+            base::FeatureList::IsEnabled(kEnableArcFeature));
+  }
+
+  // For transition, fallback to old flags.
+  // TODO(hidehiko): Remove this and clean up whole this function, when
+  // session_manager supports a new flag.
   return command_line->HasSwitch(chromeos::switches::kEnableArc) ||
-         (command_line->HasSwitch(chromeos::switches::kArcAvailable) &&
-          base::FeatureList::IsEnabled(kEnableArcFeature));
+      (command_line->HasSwitch(chromeos::switches::kArcAvailable) &&
+       base::FeatureList::IsEnabled(kEnableArcFeature));
+}
+
+bool ShouldArcAlwaysStart() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      chromeos::switches::kArcAlwaysStart);
+}
+
+void SetArcAlwaysStartForTesting() {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      chromeos::switches::kArcAlwaysStart);
+}
+
+bool IsArcKioskAvailable() {
+  const auto* command_line = base::CommandLine::ForCurrentProcess();
+
+  if (command_line->HasSwitch(chromeos::switches::kArcAvailability)) {
+    std::string value =
+        command_line->GetSwitchValueASCII(chromeos::switches::kArcAvailability);
+    if (value == kAvailabilityInstalled)
+      return true;
+    return IsArcAvailable();
+  }
+
+  // TODO(hidehiko): Remove this when session_manager supports the new flag.
+  if (command_line->HasSwitch(chromeos::switches::kArcAvailable))
+    return true;
+
+  // If not special kiosk device case, use general ARC check.
+  return IsArcAvailable();
 }
 
 void SetArcAvailableCommandLineForTesting(base::CommandLine* command_line) {
-  command_line->AppendSwitch(chromeos::switches::kEnableArc);
+  command_line->AppendSwitchASCII(chromeos::switches::kArcAvailability,
+                                  kAvailabilityOfficiallySupported);
 }
 
 bool IsArcKioskMode() {
-  return user_manager::UserManager::Get()->IsLoggedInAsArcKioskApp();
+  return user_manager::UserManager::IsInitialized() &&
+         user_manager::UserManager::Get()->IsLoggedInAsArcKioskApp();
+}
+
+bool IsArcAllowedForActiveDirectoryUsers() {
+  const auto* command_line = base::CommandLine::ForCurrentProcess();
+
+  if (!command_line->HasSwitch(chromeos::switches::kArcAvailability))
+    return false;
+
+  return command_line->GetSwitchValueASCII(
+             chromeos::switches::kArcAvailability) ==
+         kAvailabilityOfficiallySupportedWithActiveDirectory;
 }
 
 bool IsArcOptInVerificationDisabled() {

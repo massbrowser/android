@@ -57,9 +57,6 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   // Sets whether subpixel rendering is used on the label.
   void SetTextSubpixelRenderingEnabled(bool enabled);
 
-  // TODO(estade): remove. See crbug.com/633986
-  void SetFontListDeprecated(const gfx::FontList& font_list);
-
   // Adjusts the font size up or down by the given amount.
   virtual void AdjustFontSize(int font_size_delta);
 
@@ -79,8 +76,10 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   void SetIsDefault(bool is_default);
 
   // Gets or sets the button's overall style; the default is |STYLE_TEXTBUTTON|.
+  // DEPRECATED: ButtonStyle is deprecated. Use MdTextButton in place of
+  // |STYLE_BUTTON|.
   ButtonStyle style() const { return style_; }
-  void SetStyle(ButtonStyle style);
+  void SetStyleDeprecated(ButtonStyle style);
 
   // Sets the spacing between the image and the text. Shrinking the spacing
   // will not shrink the overall button size, as it is monotonically increasing.
@@ -110,6 +109,9 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
  protected:
   ImageView* image() const { return image_; }
   Label* label() const { return label_; }
+  InkDropContainerView* ink_drop_container() const {
+    return ink_drop_container_;
+  }
 
   bool explicitly_set_normal_color() const {
     return explicitly_set_colors_[STATE_NORMAL];
@@ -129,7 +131,7 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
 
   // CustomButton:
-  void StateChanged() override;
+  void StateChanged(ButtonState old_state) override;
 
   // Fills |params| with information about the button.
   virtual void GetExtraParams(ui::NativeTheme::ExtraParams* params) const;
@@ -159,13 +161,6 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   }
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, Init);
-  FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, Label);
-  FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, Image);
-  FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, LabelAndImage);
-  FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, FontList);
-  FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, ResetColorsFromNativeTheme);
-
   void SetTextInternal(const base::string16& text);
 
   // View:

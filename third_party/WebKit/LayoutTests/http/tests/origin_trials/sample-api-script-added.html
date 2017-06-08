@@ -4,7 +4,7 @@
 <script src="../resources/testharness.js"></script>
 <script src="../resources/testharnessreport.js"></script>
 <script src="../resources/origin-trials-helper.js"></script>
-<script src="resources/origin_trials.js"></script>
+<script src="resources/origintrials.js"></script>
 <script>
 
 // TODO(iclelland): Generate this sample token during the build. The token
@@ -19,11 +19,13 @@ var token = "AlCoOPbezqtrGMzSzbLQC4c+oPqO6yuioemcBPjgcXajF8jtmZr4B8tJRPAARPbsX6h
 //    token is added below.
 var skip_worker = true;
 expect_failure(skip_worker);
+expect_failure_bindings(' [disabled]');
 
 // Add the token to enable the trial
 OriginTrialsHelper.add_token(token);
 
 // The trial is now enabled, by the token added via script.
 expect_success();
+expect_success_bindings();
 
 </script>

@@ -62,7 +62,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     private List<RecentlyClosedTab> mRecentlyClosedTabs;
     private RecentTabsPagePrefs mPrefs;
     private RecentlyClosedTabManager mRecentlyClosedTabManager;
-    private SigninManager mSignInManager;
+//    private SigninManager mSignInManager;
     private UpdatedCallback mUpdatedCallback;
     private boolean mIsDestroyed;
 
@@ -82,7 +82,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         mRecentlyClosedTabManager = sRecentlyClosedTabManagerForTests != null
                 ? sRecentlyClosedTabManagerForTests
                 : new RecentlyClosedBridge(profile);
-        mSignInManager = SigninManager.get(context);
+//        mSignInManager = SigninManager.get(context);
         mContext = context;
 
         mRecentlyClosedTabManager.setTabsUpdatedRunnable(new Runnable() {
@@ -109,8 +109,8 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         mIsDestroyed = true;
         AndroidSyncSettings.unregisterObserver(mContext, this);
 
-        mSignInManager.removeSignInStateObserver(this);
-        mSignInManager = null;
+//        mSignInManager.removeSignInStateObserver(this);
+//        mSignInManager = null;
 
         mFaviconHelper.destroy();
         mFaviconHelper = null;
@@ -141,7 +141,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
 
     private void registerForSignInAndSyncNotifications() {
         AndroidSyncSettings.registerObserver(mContext, this);
-        mSignInManager.addSignInStateObserver(this);
+//        mSignInManager.addSignInStateObserver(this);
     }
 
     private void updateRecentlyClosedTabs() {
@@ -307,17 +307,18 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      * @return Whether sync promo should be displayed.
      */
     public boolean shouldDisplaySyncPromo() {
-        SigninManager signinManager = SigninManager.get(mContext);
-        if (signinManager.isSigninDisabledByPolicy() || !signinManager.isSigninSupported()) {
-            return false;
-        }
-
-        if (ContextUtils.getAppSharedPreferences().getBoolean(
-                PREF_SIGNIN_PROMO_DECLINED, false)) {
-            return false;
-        }
-
-        return !AndroidSyncSettings.isSyncEnabled(mContext) || mForeignSessions.isEmpty();
+        return false;
+//        SigninManager signinManager = SigninManager.get(mContext);
+//        if (signinManager.isSigninDisabledByPolicy() || !signinManager.isSigninSupported()) {
+//
+//        }
+//
+//        if (ContextUtils.getAppSharedPreferences().getBoolean(
+//                PREF_SIGNIN_PROMO_DECLINED, false)) {
+//            return false;
+//        }
+//
+//        return !AndroidSyncSettings.isSyncEnabled(mContext) || mForeignSessions.isEmpty();
     }
 
     /**
@@ -380,7 +381,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     }
 
     public boolean isSignedIn() {
-        return ChromeSigninController.get(mContext).isSignedIn();
+        return ChromeSigninController.get().isSignedIn();
     }
 
     @VisibleForTesting

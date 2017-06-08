@@ -4,7 +4,9 @@
 
 #include "components/omnibox/browser/autocomplete_match.h"
 
-#include "base/i18n/time_formatting.h"
+#include <algorithm>
+#include <utility>
+
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
@@ -12,7 +14,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
@@ -24,6 +26,7 @@
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
 #include "components/omnibox/browser/vector_icons.h"  // nogncheck
+#include "ui/vector_icons/vector_icons.h"             // nogncheck
 #endif
 
 namespace {
@@ -82,8 +85,8 @@ AutocompleteMatch::AutocompleteMatch()
       swap_contents_and_description(false),
       transition(ui::PAGE_TRANSITION_GENERATED),
       type(AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED),
-      from_previous(false) {
-}
+      subtype_identifier(0),
+      from_previous(false) {}
 
 AutocompleteMatch::AutocompleteMatch(AutocompleteProvider* provider,
                                      int relevance,
@@ -97,8 +100,8 @@ AutocompleteMatch::AutocompleteMatch(AutocompleteProvider* provider,
       swap_contents_and_description(false),
       transition(ui::PAGE_TRANSITION_TYPED),
       type(type),
-      from_previous(false) {
-}
+      subtype_identifier(0),
+      from_previous(false) {}
 
 AutocompleteMatch::AutocompleteMatch(const AutocompleteMatch& match)
     : provider(match.provider),
@@ -120,16 +123,18 @@ AutocompleteMatch::AutocompleteMatch(const AutocompleteMatch& match)
       answer(SuggestionAnswer::copy(match.answer.get())),
       transition(match.transition),
       type(match.type),
-      associated_keyword(match.associated_keyword.get() ?
-          new AutocompleteMatch(*match.associated_keyword) : NULL),
+      subtype_identifier(match.subtype_identifier),
+      associated_keyword(match.associated_keyword.get()
+                             ? new AutocompleteMatch(*match.associated_keyword)
+                             : NULL),
       keyword(match.keyword),
       from_previous(match.from_previous),
-      search_terms_args(match.search_terms_args.get() ?
-          new TemplateURLRef::SearchTermsArgs(*match.search_terms_args) :
-          NULL),
+      search_terms_args(
+          match.search_terms_args.get()
+              ? new TemplateURLRef::SearchTermsArgs(*match.search_terms_args)
+              : NULL),
       additional_info(match.additional_info),
-      duplicate_matches(match.duplicate_matches) {
-}
+      duplicate_matches(match.duplicate_matches) {}
 
 AutocompleteMatch::~AutocompleteMatch() {
 }
@@ -158,6 +163,7 @@ AutocompleteMatch& AutocompleteMatch::operator=(
   answer = SuggestionAnswer::copy(match.answer.get());
   transition = match.transition;
   type = match.type;
+  subtype_identifier = match.subtype_identifier;
   associated_keyword.reset(match.associated_keyword.get() ?
       new AutocompleteMatch(*match.associated_keyword) : NULL);
   keyword = match.keyword;
@@ -196,7 +202,7 @@ const gfx::VectorIcon& AutocompleteMatch::TypeToVectorIcon(Type type) {
     case Type::SEARCH_OTHER_ENGINE:
     case Type::CONTACT_DEPRECATED:
     case Type::VOICE_SUGGEST:
-      return omnibox::kSearchIcon;
+      return ui::kSearchIcon;
 
     case Type::EXTENSION_APP:
       return omnibox::kExtensionAppIcon;
@@ -429,7 +435,7 @@ GURL AutocompleteMatch::GURLToStrippedGURL(
   // to eliminate cases like past search URLs from history that differ only
   // by some obscure query param from each other or from the search/keyword
   // provider matches.
-  TemplateURL* template_url = GetTemplateURLWithKeyword(
+  const TemplateURL* template_url = GetTemplateURLWithKeyword(
       template_url_service, keyword, stripped_destination_url.host());
   if (template_url != NULL &&
       template_url->SupportsReplacement(
@@ -545,10 +551,10 @@ void AutocompleteMatch::RecordAdditionalInfo(const std::string& property,
 }
 
 void AutocompleteMatch::RecordAdditionalInfo(const std::string& property,
-                                             const base::Time& value) {
-  RecordAdditionalInfo(property,
-                       base::UTF16ToUTF8(
-                           base::TimeFormatShortDateAndTime(value)));
+                                             base::Time value) {
+  RecordAdditionalInfo(
+      property, base::StringPrintf("%d hours ago",
+                                   (base::Time::Now() - value).InHours()));
 }
 
 std::string AutocompleteMatch::GetAdditionalInfo(

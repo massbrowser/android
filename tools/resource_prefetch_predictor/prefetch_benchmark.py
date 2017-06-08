@@ -19,6 +19,7 @@ _SRC_PATH = os.path.abspath(os.path.join(
 sys.path.append(os.path.join(
     _SRC_PATH, 'tools', 'android', 'customtabs_benchmark', 'scripts'))
 import customtabs_benchmark
+import chrome_setup
 import device_setup
 
 sys.path.append(os.path.join(_SRC_PATH, 'tools', 'android', 'loading'))
@@ -29,6 +30,7 @@ sys.path.append(os.path.join(_SRC_PATH, 'build', 'android'))
 import devil_chromium
 
 sys.path.append(os.path.join(_SRC_PATH, 'third_party', 'catapult', 'devil'))
+from devil.android import flag_changer
 from devil.android.sdk import intent
 
 import prefetch_predictor_common
@@ -59,7 +61,7 @@ def _CreateArgumentParser():
 
 def _Setup(device, database_filename):
   """Sets up a device and returns an instance of RemoteChromeController."""
-  chrome_controller = prefetch_predictor_common.Setup(device, [''])
+  chrome_controller = prefetch_predictor_common.Setup(device)
   chrome_package = OPTIONS.ChromePackage()
   device.ForceStop(chrome_package.package)
   chrome_controller.ResetBrowserState()
@@ -68,9 +70,8 @@ def _Setup(device, database_filename):
 
   # Make sure that the speculative prefetch predictor is enabled to ensure
   # that the disk database is re-created.
-  command_line_path = '/data/local/tmp/chrome-command-line'
-  with device_setup.FlagReplacer(
-      device, command_line_path, ['--disable-fre']):
+  with flag_changer.CustomCommandLineFlags(
+      device, chrome_package.cmdline_file, ['--disable-fre']):
     # Launch Chrome for the first time to recreate the local state.
     launch_intent = intent.Intent(
         action='android.intent.action.MAIN',
@@ -88,8 +89,9 @@ def _Setup(device, database_filename):
   # database, since adb push sets it to root.
   database_content = open(database_filename, 'r').read()
   device.WriteFile(device_database_filename, database_content, force_push=True)
-  command = 'chown %s:%s \'%s\'' % (owner, group, device_database_filename)
-  device.RunShellCommand(command, as_root=True)
+  device.RunShellCommand(
+      ['chown', '%s:%s' % (owner, group), device_database_filename],
+      as_root=True, check_return=True)
 
 
 def _RunOnce(device, database_filename, url, prefetch_delay_ms,
@@ -98,10 +100,13 @@ def _RunOnce(device, database_filename, url, prefetch_delay_ms,
 
   disable_prefetch = prefetch_delay_ms == -1
   # Startup tracing to ease debugging.
-  chrome_args = (customtabs_benchmark.CHROME_ARGS
+  chrome_args = (chrome_setup.CHROME_ARGS
                  + ['--trace-startup', '--trace-startup-duration=20'])
-  if not disable_prefetch:
-    chrome_args.append(_EXTERNAL_PREFETCH_FLAG)
+  # Speculative Prefetch is enabled through an experiment.
+  chrome_args.extend([
+      '--force-fieldtrials=trial/group',
+      '--force-fieldtrial-params=trial.group:mode/external-prefetching',
+      '--enable-features=SpeculativeResourcePrefetching<trial'])
 
   chrome_controller = controller.RemoteChromeController(device)
   device.ForceStop(OPTIONS.ChromePackage().package)

@@ -16,7 +16,7 @@
 #include "content/common/content_export.h"
 #include "content/common/frame_message_enums.h"
 #include "content/public/browser/site_instance.h"
-#include "content/public/common/javascript_message_type.h"
+#include "content/public/common/javascript_dialog_type.h"
 #include "content/public/common/media_stream_request.h"
 #include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
 #include "net/http/http_response_headers.h"
@@ -24,6 +24,10 @@
 
 #if defined(OS_WIN)
 #include "ui/gfx/native_widget_types.h"
+#endif
+
+#if defined(OS_ANDROID)
+#include "base/android/scoped_java_ref.h"
 #endif
 
 class GURL;
@@ -34,11 +38,18 @@ class Message;
 
 namespace device {
 class GeolocationServiceContext;
-class WakeLockServiceContext;
+
+namespace mojom {
+class WakeLockContext;
+}
 }
 
 namespace gfx {
 class Rect;
+}
+
+namespace url {
+class Origin;
 }
 
 namespace content {
@@ -47,7 +58,6 @@ class InterstitialPage;
 class PageState;
 class RenderFrameHost;
 class RenderFrameHostImpl;
-class ScreenOrientationProvider;
 class SessionStorageNamespace;
 class WebContents;
 struct AXEventNotificationDetails;
@@ -94,13 +104,13 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   virtual void ShowContextMenu(RenderFrameHost* render_frame_host,
                                const ContextMenuParams& params) {}
 
-  // A JavaScript message, confirmation or prompt should be shown.
-  virtual void RunJavaScriptMessage(RenderFrameHost* render_frame_host,
-                                    const base::string16& message,
-                                    const base::string16& default_prompt,
-                                    const GURL& frame_url,
-                                    JavaScriptMessageType type,
-                                    IPC::Message* reply_msg) {}
+  // A JavaScript alert, confirmation or prompt dialog should be shown.
+  virtual void RunJavaScriptDialog(RenderFrameHost* render_frame_host,
+                                   const base::string16& message,
+                                   const base::string16& default_prompt,
+                                   const GURL& frame_url,
+                                   JavaScriptDialogType type,
+                                   IPC::Message* reply_msg) {}
 
   virtual void RunBeforeUnloadConfirm(RenderFrameHost* render_frame_host,
                                       bool is_reload,
@@ -169,7 +179,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // Called when accessibility events or location changes are received
   // from a render frame, when the accessibility mode has the
-  // ACCESSIBILITY_MODE_FLAG_WEB_CONTENTS flag set.
+  // AccessibilityMode::kWebContents flag set.
   virtual void AccessibilityEventReceived(
       const std::vector<AXEventNotificationDetails>& details) {}
   virtual void AccessibilityLocationChangesReceived(
@@ -185,10 +195,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   virtual device::GeolocationServiceContext* GetGeolocationServiceContext();
 
   // Gets the WakeLockServiceContext associated with this delegate.
-  virtual device::WakeLockServiceContext* GetWakeLockServiceContext();
-
-  // Gets the ScreenOrientationProvider associated with this delegate.
-  virtual ScreenOrientationProvider* GetScreenOrientationProvider();
+  virtual device::mojom::WakeLockContext* GetWakeLockServiceContext();
 
   // Notification that the frame wants to go into fullscreen mode.
   // |origin| represents the origin of the frame that requests fullscreen.
@@ -239,11 +246,14 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // The page is trying to open a new page (e.g. a popup window). The window
   // should be created associated with the given |main_frame_widget_route_id| in
-  // the process of |source_site_instance|, but it should not be shown yet. That
-  // should happen in response to ShowCreatedWindow.
-  // |params.window_container_type| describes the type of RenderViewHost
-  // container that is requested -- in particular, the window.open call may have
-  // specified 'background' and 'persistent' in the feature string.
+  // the process of |opener|, but it should not be shown yet. That should happen
+  // in response to ShowCreatedWindow. |params.window_container_type| describes
+  // the type of RenderViewHost container that is requested -- in particular,
+  // the window.open call may have specified 'background' and 'persistent' in
+  // the feature string.
+  //
+  // The passed |opener| is the RenderFrameHost initiating the window creation.
+  // It will never be null, even if the opener is suppressed via |params|.
   //
   // The passed |params.frame_name| parameter is the name parameter that was
   // passed to window.open(), and will be empty if none was passed.
@@ -253,10 +263,9 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   //
   // The caller is expected to handle cleanup if this operation fails or is
   // suppressed, by looking for the existence of a RenderFrameHost in
-  // source_site_instance's process with |main_frame_route_id| after this method
-  // returns.
+  // |opener|'s process with |main_frame_route_id| after this method returns.
   virtual void CreateNewWindow(
-      SiteInstance* source_site_instance,
+      RenderFrameHost* opener,
       int32_t render_view_route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
@@ -274,6 +283,26 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_rect,
                                  bool user_gesture) {}
+
+  // Notifies that mixed content was displayed or ran.
+  virtual void DidDisplayInsecureContent() {}
+  virtual void DidRunInsecureContent(const GURL& security_origin,
+                                     const GURL& target_url) {}
+
+  // Reports that passive mixed content was found at the specified url.
+  virtual void PassiveInsecureContentFound(const GURL& resource_url) {}
+
+  // Checks if running of active mixed content is allowed for the specified
+  // WebContents/tab.
+  virtual bool ShouldAllowRunningInsecureContent(WebContents* web_contents,
+                                                 bool allowed_per_prefs,
+                                                 const url::Origin& origin,
+                                                 const GURL& resource_url);
+
+#if defined(OS_ANDROID)
+  virtual base::android::ScopedJavaLocalRef<jobject>
+  GetJavaRenderFrameHostDelegate();
+#endif
 
  protected:
   virtual ~RenderFrameHostDelegate() {}

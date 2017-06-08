@@ -69,6 +69,9 @@ struct DISPLAY_EXPORT DisplayPlacement {
 
   DisplayPlacement(const DisplayPlacement& placement);
 
+  bool operator==(const DisplayPlacement& other) const;
+  bool operator!=(const DisplayPlacement& other) const;
+
   DisplayPlacement& Swap();
 
   std::string ToString() const;
@@ -107,6 +110,10 @@ class DISPLAY_EXPORT DisplayLayout final {
   int64_t primary_id;
 
   std::unique_ptr<DisplayLayout> Copy() const;
+
+  // Swaps the primary display so it is |new_primary_id|. This modifies the
+  // display placements such so they are anchored on |new_primary_id|.
+  void SwapPrimaryDisplay(int64_t new_primary_id);
 
   // Test if the |layout| has the same placement list. Other fields such
   // as mirrored, primary_id are ignored.

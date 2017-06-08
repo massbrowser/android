@@ -183,10 +183,15 @@ bool ThemeSource::AllowCaching() const {
   return false;
 }
 
-bool ThemeSource::ShouldServiceRequest(const net::URLRequest* request) const {
-  return request->url().SchemeIs(chrome::kChromeSearchScheme) ?
-      InstantIOContext::ShouldServiceRequest(request) :
-      URLDataSource::ShouldServiceRequest(request);
+bool ThemeSource::ShouldServiceRequest(
+    const GURL& url,
+    content::ResourceContext* resource_context,
+    int render_process_id) const {
+  return url.SchemeIs(chrome::kChromeSearchScheme)
+             ? InstantIOContext::ShouldServiceRequest(url, resource_context,
+                                                      render_process_id)
+             : URLDataSource::ShouldServiceRequest(url, resource_context,
+                                                   render_process_id);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -227,7 +232,7 @@ void ThemeSource::SendThemeImage(
     // crbug.com/449277
     content::BrowserThread::PostTaskAndReply(
         content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&ProcessResourceOnUiThread, resource_id, scale, data),
-        base::Bind(callback, data));
+        base::BindOnce(&ProcessResourceOnUiThread, resource_id, scale, data),
+        base::BindOnce(callback, data));
   }
 }

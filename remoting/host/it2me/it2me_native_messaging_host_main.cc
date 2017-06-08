@@ -21,6 +21,7 @@
 #include "remoting/host/logging.h"
 #include "remoting/host/native_messaging/native_messaging_pipe.h"
 #include "remoting/host/native_messaging/pipe_messaging_channel.h"
+#include "remoting/host/policy_watcher.h"
 #include "remoting/host/resources.h"
 #include "remoting/host/usage_stats_consent.h"
 
@@ -62,10 +63,9 @@ int It2MeNativeMessagingHostMain(int argc, char** argv) {
   // Initialize Breakpad as early as possible. On Mac the command-line needs to
   // be initialized first, so that the preference for crash-reporting can be
   // looked up in the config file.
-  // TODO(nicholss): Commenting out Breakpad. See crbug.com/637884
-  // if (IsUsageStatsAllowed()) {
-  //   InitializeCrashReporting();
-  // }
+  if (IsUsageStatsAllowed()) {
+    InitializeCrashReporting();
+  }
 #endif  // defined(REMOTING_ENABLE_BREAKPAD)
 
 #if defined(OS_WIN)
@@ -79,9 +79,7 @@ int It2MeNativeMessagingHostMain(int argc, char** argv) {
   // Required to find the ICU data file, used by some file_util routines.
   base::i18n::InitializeICU();
 
-  // TODO(sergeyu): Consider adding separate pools for different task classes.
-  const int kMaxBackgroundThreads = 5;
-  base::TaskScheduler::CreateAndSetSimpleTaskScheduler(kMaxBackgroundThreads);
+  base::TaskScheduler::CreateAndStartWithDefaultParams("It2Me");
 
   remoting::LoadResources("");
 
@@ -189,8 +187,10 @@ int It2MeNativeMessagingHostMain(int argc, char** argv) {
   std::unique_ptr<ChromotingHostContext> context =
       ChromotingHostContext::Create(new remoting::AutoThreadTaskRunner(
           message_loop.task_runner(), run_loop.QuitClosure()));
+  std::unique_ptr<PolicyWatcher> policy_watcher =
+      PolicyWatcher::Create(nullptr, context->file_task_runner());
   std::unique_ptr<extensions::NativeMessageHost> host(
-      new It2MeNativeMessagingHost(needs_elevation, /*policy_service=*/nullptr,
+      new It2MeNativeMessagingHost(needs_elevation, std::move(policy_watcher),
                                    std::move(context), std::move(factory)));
 
   host->Start(native_messaging_pipe.get());
@@ -199,6 +199,9 @@ int It2MeNativeMessagingHostMain(int argc, char** argv) {
 
   // Run the loop until channel is alive.
   run_loop.Run();
+
+  // Block until tasks blocking shutdown have completed their execution.
+  base::TaskScheduler::GetInstance()->Shutdown();
 
   return kSuccessExitCode;
 }

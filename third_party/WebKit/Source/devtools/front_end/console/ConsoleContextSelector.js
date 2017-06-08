@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 /**
- * @implements {SDK.TargetManager.Observer}
+ * @implements {SDK.SDKModelObserver<!SDK.RuntimeModel>}
  * @unrestricted
  */
 Console.ConsoleContextSelector = class {
@@ -16,7 +16,6 @@ Console.ConsoleContextSelector = class {
      */
     this._optionByExecutionContext = new Map();
 
-    SDK.targetManager.observeTargets(this);
     SDK.targetManager.addModelListener(
         SDK.RuntimeModel, SDK.RuntimeModel.Events.ExecutionContextCreated, this._onExecutionContextCreated, this);
     SDK.targetManager.addModelListener(
@@ -26,6 +25,10 @@ Console.ConsoleContextSelector = class {
 
     this._selectElement.addEventListener('change', this._executionContextChanged.bind(this), false);
     UI.context.addFlavorChangeListener(SDK.ExecutionContext, this._executionContextChangedExternally, this);
+    UI.context.addFlavorChangeListener(SDK.DebuggerModel.CallFrame, this._callFrameSelectedInUI, this);
+    SDK.targetManager.observeModels(SDK.RuntimeModel, this);
+    SDK.targetManager.addModelListener(
+        SDK.DebuggerModel, SDK.DebuggerModel.Events.CallFrameSelected, this._callFrameSelectedInModel, this);
   }
 
   /**
@@ -39,7 +42,7 @@ Console.ConsoleContextSelector = class {
     if (!executionContext.isDefault)
       depth++;
     if (executionContext.frameId) {
-      var resourceTreeModel = SDK.ResourceTreeModel.fromTarget(target);
+      var resourceTreeModel = target.model(SDK.ResourceTreeModel);
       var frame = resourceTreeModel && resourceTreeModel.frameForId(executionContext.frameId);
       if (frame) {
         label = label || frame.displayName();
@@ -88,6 +91,7 @@ Console.ConsoleContextSelector = class {
 
     if (executionContext === UI.context.flavor(SDK.ExecutionContext))
       this._select(newOption);
+    this._updateOptionDisabledState(newOption);
 
     /**
      * @param {!Element} option
@@ -170,7 +174,7 @@ Console.ConsoleContextSelector = class {
   _isTopContext(executionContext) {
     if (!executionContext || !executionContext.isDefault)
       return false;
-    var resourceTreeModel = SDK.ResourceTreeModel.fromTarget(executionContext.target());
+    var resourceTreeModel = executionContext.target().model(SDK.ResourceTreeModel);
     var frame = executionContext.frameId && resourceTreeModel && resourceTreeModel.frameForId(executionContext.frameId);
     if (!frame)
       return false;
@@ -191,20 +195,20 @@ Console.ConsoleContextSelector = class {
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.RuntimeModel} runtimeModel
    */
-  targetAdded(target) {
-    target.runtimeModel.executionContexts().forEach(this._executionContextCreated, this);
+  modelAdded(runtimeModel) {
+    runtimeModel.executionContexts().forEach(this._executionContextCreated, this);
   }
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.RuntimeModel} runtimeModel
    */
-  targetRemoved(target) {
+  modelRemoved(runtimeModel) {
     var executionContexts = this._optionByExecutionContext.keysArray();
     for (var i = 0; i < executionContexts.length; ++i) {
-      if (executionContexts[i].target() === target)
+      if (executionContexts[i].runtimeModel === runtimeModel)
         this._executionContextDestroyed(executionContexts[i]);
     }
   }
@@ -224,5 +228,34 @@ Console.ConsoleContextSelector = class {
     if (this._selectElement.selectedIndex >= 0)
       return this._selectElement[this._selectElement.selectedIndex];
     return null;
+  }
+
+  /**
+   * @param {!Common.Event} event
+   */
+  _callFrameSelectedInModel(event) {
+    var debuggerModel = /** @type {!SDK.DebuggerModel} */ (event.data);
+    var options = this._selectElement.options;
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].__executionContext.debuggerModel === debuggerModel)
+        this._updateOptionDisabledState(options[i]);
+    }
+  }
+
+  /**
+   * @param {!Element} option
+   */
+  _updateOptionDisabledState(option) {
+    var executionContext = option.__executionContext;
+    var callFrame = executionContext.debuggerModel.selectedCallFrame();
+    var callFrameContext = callFrame && callFrame.script.executionContext();
+    option.disabled = callFrameContext && executionContext !== callFrameContext;
+  }
+
+  _callFrameSelectedInUI() {
+    var callFrame = UI.context.flavor(SDK.DebuggerModel.CallFrame);
+    var callFrameContext = callFrame && callFrame.script.executionContext();
+    if (callFrameContext)
+      UI.context.setFlavor(SDK.ExecutionContext, callFrameContext);
   }
 };

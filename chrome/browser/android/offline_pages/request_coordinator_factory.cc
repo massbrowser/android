@@ -9,6 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/sequenced_task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/android/offline_pages/background_loader_offliner.h"
 #include "chrome/browser/android/offline_pages/background_scheduler_bridge.h"
 #include "chrome/browser/android/offline_pages/downloads/offline_page_notification_bridge.h"
@@ -28,7 +29,6 @@
 #include "components/offline_pages/core/background/scheduler.h"
 #include "components/offline_pages/core/downloads/download_notifying_observer.h"
 #include "components/offline_pages/core/offline_page_feature.h"
-#include "content/public/browser/browser_thread.h"
 #include "net/nqe/network_quality_estimator.h"
 
 namespace offline_pages {
@@ -67,8 +67,8 @@ KeyedService* RequestCoordinatorFactory::BuildServiceInstanceFor(
   }
 
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-      content::BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-          content::BrowserThread::GetBlockingPool()->GetSequenceToken());
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND});
   Profile* profile = Profile::FromBrowserContext(context);
   base::FilePath queue_store_path =
       profile->GetPath().Append(chrome::kOfflinePageRequestQueueDirname);
@@ -81,8 +81,6 @@ KeyedService* RequestCoordinatorFactory::BuildServiceInstanceFor(
   net::NetworkQualityEstimator::NetworkQualityProvider*
       network_quality_estimator =
           UINetworkQualityEstimatorServiceFactory::GetForProfile(profile);
-  // TODO(fgorski): Something needs to keep the handle to the Notification
-  // dispatcher.
   RequestCoordinator* request_coordinator = new RequestCoordinator(
       std::move(policy), std::move(offliner), std::move(queue),
       std::move(scheduler), network_quality_estimator);

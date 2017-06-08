@@ -46,6 +46,15 @@ class InterfaceRequest {
     Bind(std::move(pipe.handle1));
   }
 
+  // Similar to the constructor above, but binds one end of the message pipe to
+  // an InterfacePtrInfo instance.
+  explicit InterfaceRequest(InterfacePtrInfo<Interface>* ptr_info) {
+    MessagePipe pipe;
+    ptr_info->set_handle(std::move(pipe.handle0));
+    ptr_info->set_version(0u);
+    Bind(std::move(pipe.handle1));
+  }
+
   // Takes the message pipe from another InterfaceRequest.
   InterfaceRequest(InterfaceRequest&& other) {
     handle_ = std::move(other.handle_);
@@ -86,12 +95,9 @@ class InterfaceRequest {
     if (!handle_.is_valid())
       return;
 
-    base::Optional<DisconnectReason> reason;
-    reason.emplace(custom_reason, description);
-
     Message message =
         PipeControlMessageProxy::ConstructPeerEndpointClosedMessage(
-            kMasterInterfaceId, reason);
+            kMasterInterfaceId, DisconnectReason(custom_reason, description));
     MojoResult result = WriteMessageNew(
         handle_.get(), message.TakeMojoMessage(), MOJO_WRITE_MESSAGE_FLAG_NONE);
     DCHECK_EQ(MOJO_RESULT_OK, result);
@@ -164,6 +170,13 @@ InterfaceRequest<Interface> MakeRequest(
     scoped_refptr<base::SingleThreadTaskRunner> runner =
         base::ThreadTaskRunnerHandle::Get()) {
   return InterfaceRequest<Interface>(ptr, runner);
+}
+
+// Similar to the constructor above, but binds one end of the message pipe to
+// an InterfacePtrInfo instance.
+template <typename Interface>
+InterfaceRequest<Interface> MakeRequest(InterfacePtrInfo<Interface>* ptr_info) {
+  return InterfaceRequest<Interface>(ptr_info);
 }
 
 // Fuses an InterfaceRequest<T> endpoint with an InterfacePtrInfo<T> endpoint.

@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/features.gni")
+import("features/features.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 
 if (is_android) {
@@ -18,9 +18,10 @@ component("vr") {
   defines = [ "DEVICE_VR_IMPLEMENTATION" ]
   deps = [
     ":mojo_bindings",
+    "features",
   ]
 
-  if (!enable_webvr) {
+  if (!enable_vr) {
     sources += [
       # We need to include an empty .cc file so that mac and windows don't fall over when trying to
       # compile this when webvr is disabled.
@@ -35,13 +36,16 @@ component("vr") {
       "vr_device_provider.h",
       "vr_display_impl.cc",
       "vr_display_impl.h",
-      "vr_export.h",
+      "vr_math.cc",
+      "vr_math.h",
       "vr_service_impl.cc",
       "vr_service_impl.h",
+      "vr_types.h",
     ]
 
     deps += [
       "//base",
+      "//gpu/ipc/common:interfaces",
       "//mojo/public/cpp/bindings",
       "//ui/gfx",
     ]
@@ -50,26 +54,45 @@ component("vr") {
       sources += [
         "android/gvr/gvr_delegate.cc",
         "android/gvr/gvr_delegate.h",
+        "android/gvr/gvr_delegate_provider.cc",
+        "android/gvr/gvr_delegate_provider.h",
         "android/gvr/gvr_device.cc",
         "android/gvr/gvr_device.h",
         "android/gvr/gvr_device_provider.cc",
         "android/gvr/gvr_device_provider.h",
         "android/gvr/gvr_gamepad_data_fetcher.cc",
         "android/gvr/gvr_gamepad_data_fetcher.h",
+        "android/gvr/gvr_gamepad_data_provider.h",
       ]
 
       deps += [
         "//device/gamepad",
+        "//device/gamepad/public/cpp:shared_with_blink",
         "//third_party/WebKit/public:blink_headers",
       ]
       ldflags = [ "-landroid" ]
       libs = [ "//third_party/gvr-android-sdk/libgvr_shim_static_${current_cpu}.a" ]
       configs += [ "//third_party/gvr-android-sdk:libgvr_config" ]
     }
+
+    if (enable_openvr) {
+      deps += [
+        "//device/gamepad",
+        "//third_party/openvr:openvr",
+      ]
+      sources += [
+        "openvr/openvr_device.cc",
+        "openvr/openvr_device.h",
+        "openvr/openvr_device_provider.cc",
+        "openvr/openvr_device_provider.h",
+        "openvr/openvr_gamepad_data_fetcher.cc",
+        "openvr/openvr_gamepad_data_fetcher.h",
+      ]
+    }
   }
 }
 
-if (enable_webvr) {
+if (enable_vr) {
   static_library("fakes") {
     testonly = true
 
@@ -99,6 +122,7 @@ mojom("mojo_bindings") {
   ]
 
   public_deps = [
+    "//gpu/ipc/common:interfaces",
     "//mojo/common:common_custom_types",
   ]
 

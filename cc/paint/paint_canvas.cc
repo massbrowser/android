@@ -4,21 +4,33 @@
 
 #include "cc/paint/paint_canvas.h"
 
+#include "base/memory/ptr_util.h"
+#include "cc/paint/paint_record.h"
+#include "cc/paint/paint_recorder.h"
+#include "third_party/skia/include/core/SkAnnotation.h"
+#include "third_party/skia/include/core/SkMetaData.h"
+
+#if defined(OS_MACOSX)
+namespace {
+const char kIsPreviewMetafileKey[] = "CrIsPreviewMetafile";
+}
+#endif
+
 namespace cc {
 
-PaintCanvasPassThrough::PaintCanvasPassThrough(SkCanvas* canvas)
-    : SkNWayCanvas(canvas->getBaseLayerSize().width(),
-                   canvas->getBaseLayerSize().height()) {
-  SkIRect raster_bounds;
-  canvas->getDeviceClipBounds(&raster_bounds);
-  clipRect(SkRect::MakeFromIRect(raster_bounds));
-  setMatrix(canvas->getTotalMatrix());
-  addCanvas(canvas);
+#if defined(OS_MACOSX)
+void SetIsPreviewMetafile(PaintCanvas* canvas, bool is_preview) {
+  SkMetaData& meta = canvas->getMetaData();
+  meta.setBool(kIsPreviewMetafileKey, is_preview);
 }
 
-PaintCanvasPassThrough::PaintCanvasPassThrough(int width, int height)
-    : SkNWayCanvas(width, height) {}
-
-PaintCanvasPassThrough::~PaintCanvasPassThrough() = default;
+bool IsPreviewMetafile(PaintCanvas* canvas) {
+  bool value;
+  SkMetaData& meta = canvas->getMetaData();
+  if (!meta.findBool(kIsPreviewMetafileKey, &value))
+    value = false;
+  return value;
+}
+#endif
 
 }  // namespace cc

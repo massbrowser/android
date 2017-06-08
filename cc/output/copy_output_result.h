@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/resources/single_release_callback.h"
 #include "cc/resources/texture_mailbox.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
@@ -42,13 +42,7 @@ class CC_EXPORT CopyOutputResult {
                                                  std::move(release_callback)));
   }
 
-  CopyOutputResult();
-
-  CopyOutputResult(CopyOutputResult&& other);
-
   ~CopyOutputResult();
-
-  CopyOutputResult& operator=(CopyOutputResult&& other);
 
   bool IsEmpty() const { return !HasBitmap() && !HasTexture(); }
   bool HasBitmap() const { return !!bitmap_ && !bitmap_->isNull(); }
@@ -61,8 +55,9 @@ class CC_EXPORT CopyOutputResult {
 
  private:
   friend struct mojo::StructTraits<mojom::CopyOutputResultDataView,
-                                   CopyOutputResult>;
+                                   std::unique_ptr<CopyOutputResult>>;
 
+  CopyOutputResult();
   explicit CopyOutputResult(std::unique_ptr<SkBitmap> bitmap);
   explicit CopyOutputResult(
       const gfx::Size& size,
@@ -73,6 +68,8 @@ class CC_EXPORT CopyOutputResult {
   std::unique_ptr<SkBitmap> bitmap_;
   TextureMailbox texture_mailbox_;
   std::unique_ptr<SingleReleaseCallback> release_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(CopyOutputResult);
 };
 
 }  // namespace cc

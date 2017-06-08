@@ -10,8 +10,6 @@
 #include <memory>
 #include <string>
 
-#include "ash/common/shell_observer.h"
-#include "ash/common/wm/lock_state_observer.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -23,7 +21,6 @@
 #include "chromeos/dbus/power_manager_client.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/display/display_observer.h"
-#include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 
@@ -47,14 +44,19 @@ class WebUIScreenLockerTester;
 // Displays a WebUI lock screen based on the Oobe account picker screen.
 class WebUIScreenLocker : public WebUILoginView,
                           public LoginDisplay::Delegate,
-                          public ash::LockStateObserver,
                           public views::WidgetObserver,
                           public PowerManagerClient::Observer,
-                          public ash::ShellObserver,
-                          public keyboard::KeyboardControllerObserver,
                           public display::DisplayObserver,
                           public content::WebContentsObserver {
  public:
+  enum class FingerprintState {
+    kHidden,
+    kDefault,
+    kSignin,
+    kFailed,
+    kRemoved,
+  };
+
   // Request lock screen preload when the user is idle. Does nothing if
   // preloading is disabled or if the preload hueristics return false.
   static void RequestPreload();
@@ -92,6 +94,11 @@ class WebUIScreenLocker : public WebUILoginView,
   // Called when the webui header bar becomes visible.
   void OnHeaderBarVisible();
 
+  // Called by ScreenLocker to notify that ash lock animation finishes.
+  void OnAshLockAnimationFinished();
+
+  void SetFingerprintState(const AccountId& account_id, FingerprintState state);
+
  private:
   friend class test::WebUIScreenLockerTester;
 
@@ -118,11 +125,10 @@ class WebUIScreenLocker : public WebUILoginView,
   void ResetAutoLoginTimer() override;
   void ResyncUserData() override;
   void SetDisplayEmail(const std::string& email) override;
+  void SetDisplayAndGivenName(const std::string& display_name,
+                              const std::string& given_name) override;
   void Signout() override;
   bool IsUserWhitelisted(const AccountId& account_id) override;
-
-  // LockStateObserver:
-  void OnLockStateEvent(ash::LockStateObserver::EventType event) override;
 
   // WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
@@ -130,17 +136,11 @@ class WebUIScreenLocker : public WebUILoginView,
   // PowerManagerClient::Observer:
   void SuspendImminent() override;
   void SuspendDone(const base::TimeDelta& sleep_duration) override;
-  void LidEventReceived(bool open, const base::TimeTicks& time) override;
+  void LidEventReceived(PowerManagerClient::LidState state,
+                        const base::TimeTicks& time) override;
 
   // content::WebContentsObserver:
   void RenderProcessGone(base::TerminationStatus status) override;
-
-  // ash::ShellObserver:
-  void OnVirtualKeyboardStateChanged(bool activated) override;
-
-  // keyboard::KeyboardControllerObserver:
-  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
-  void OnKeyboardClosed() override;
 
   // display::DisplayObserver:
   void OnDisplayAdded(const display::Display& new_display) override;
@@ -188,9 +188,6 @@ class WebUIScreenLocker : public WebUILoginView,
   base::TimeTicks lock_time_;
 
   std::unique_ptr<login::NetworkStateHelper> network_state_helper_;
-
-  // True iff this object is observing a keyboard controller.
-  bool is_observing_keyboard_ = false;
 
   base::WeakPtrFactory<WebUIScreenLocker> weak_factory_;
 

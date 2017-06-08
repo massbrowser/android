@@ -31,7 +31,7 @@
       },
       {
         "override_compile_targets": [
-          "breakpad_unittests_deps"
+          "breakpad_unittests"
         ],
         "test": "breakpad_unittests"
       },
@@ -78,6 +78,9 @@
         "test": "ipc_tests"
       },
       {
+        "test": "latency_unittests"
+      },
+      {
         "test": "media_unittests"
       },
       {
@@ -85,7 +88,7 @@
       },
       {
         "override_compile_targets": [
-          "sandbox_linux_unittests_deps"
+          "sandbox_linux_unittests"
         ],
         "test": "sandbox_linux_unittests"
       },
@@ -130,7 +133,7 @@
       },
       {
         "override_compile_targets": [
-          "breakpad_unittests_deps"
+          "breakpad_unittests"
         ],
         "test": "breakpad_unittests"
       },
@@ -177,6 +180,9 @@
         "test": "ipc_tests"
       },
       {
+        "test": "latency_unittests"
+      },
+      {
         "test": "media_unittests"
       },
       {
@@ -184,7 +190,7 @@
       },
       {
         "override_compile_targets": [
-          "sandbox_linux_unittests_deps"
+          "sandbox_linux_unittests"
         ],
         "test": "sandbox_linux_unittests"
       },
@@ -225,114 +231,484 @@
   "Lollipop Low-end Tester": {
     "gtest_tests": [
       {
+        "override_compile_targets": [
+          "android_webview_test_apk"
+        ],
+        "override_isolate_target": "android_webview_test_apk",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400,
+          "shards": 2
+        },
+        "test": "android_webview_test_apk"
+      },
+      {
+        "override_isolate_target": "android_webview_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "android_webview_unittests"
       },
       {
+        "override_isolate_target": "base_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "base_unittests"
       },
       {
-        "override_compile_targets": [
-          "breakpad_unittests_deps"
-        ],
+        "override_isolate_target": "blink_heap_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "blink_heap_unittests"
+      },
+      {
+        "override_isolate_target": "breakpad_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "breakpad_unittests"
       },
       {
+        "override_isolate_target": "capture_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "capture_unittests"
       },
       {
+        "override_isolate_target": "cc_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "cc_unittests"
       },
       {
-        "test": "components_browsertests"
-      },
-      {
-        "test": "components_unittests"
-      },
-      {
-        "args": [
-          "--shard-timeout",
-          "600"
+        "override_compile_targets": [
+          "chrome_public_test_apk"
         ],
-        "test": "content_browsertests"
-      },
-      {
-        "test": "content_unittests"
-      },
-      {
-        "test": "device_unittests"
-      },
-      {
-        "test": "events_unittests"
-      },
-      {
-        "test": "gfx_unittests"
-      },
-      {
-        "test": "gl_tests"
-      },
-      {
-        "test": "gl_unittests"
-      },
-      {
-        "test": "gpu_ipc_service_unittests"
-      },
-      {
-        "test": "gpu_unittests"
-      },
-      {
-        "args": [
-          "--shard-timeout",
-          "600"
-        ],
-        "test": "ipc_tests"
-      },
-      {
-        "test": "media_unittests"
-      },
-      {
-        "test": "net_unittests"
+        "override_isolate_target": "chrome_public_test_apk",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400,
+          "shards": 6
+        },
+        "test": "chrome_public_test_apk"
       },
       {
         "override_compile_targets": [
-          "sandbox_linux_unittests_deps"
+          "chrome_sync_shell_test_apk"
         ],
+        "override_isolate_target": "chrome_sync_shell_test_apk",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "chrome_sync_shell_test_apk"
+      },
+      {
+        "override_isolate_target": "components_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "components_browsertests"
+      },
+      {
+        "override_isolate_target": "components_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "components_unittests"
+      },
+      {
+        "override_isolate_target": "content_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400,
+          "shards": 4
+        },
+        "test": "content_browsertests"
+      },
+      {
+        "override_compile_targets": [
+          "content_shell_test_apk"
+        ],
+        "override_isolate_target": "content_shell_test_apk",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "content_shell_test_apk"
+      },
+      {
+        "override_isolate_target": "content_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "content_unittests"
+      },
+      {
+        "override_isolate_target": "device_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "device_unittests"
+      },
+      {
+        "override_isolate_target": "events_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "events_unittests"
+      },
+      {
+        "override_isolate_target": "gl_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "gl_tests"
+      },
+      {
+        "override_isolate_target": "gl_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "gl_unittests"
+      },
+      {
+        "override_isolate_target": "gpu_ipc_service_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "gpu_ipc_service_unittests"
+      },
+      {
+        "override_isolate_target": "gpu_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "gpu_unittests"
+      },
+      {
+        "override_isolate_target": "ipc_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "ipc_tests"
+      },
+      {
+        "override_isolate_target": "latency_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "latency_unittests"
+      },
+      {
+        "override_isolate_target": "media_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "media_unittests"
+      },
+      {
+        "override_isolate_target": "net_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
+        "test": "net_unittests"
+      },
+      {
+        "override_isolate_target": "sandbox_linux_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "sandbox_linux_unittests"
       },
       {
+        "override_isolate_target": "sql_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "sql_unittests"
       },
       {
+        "override_isolate_target": "storage_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "storage_unittests"
       },
       {
+        "override_isolate_target": "ui_android_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "ui_android_unittests"
       },
       {
+        "override_isolate_target": "ui_base_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "ui_base_unittests"
       },
       {
+        "override_isolate_target": "ui_touch_selection_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "ui_touch_selection_unittests"
       },
       {
+        "override_isolate_target": "unit_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "android_devices": "1",
+              "device_os": "LMY47W",
+              "device_type": "sprout"
+            }
+          ],
+          "expiration": 14400
+        },
         "test": "unit_tests"
-      }
-    ],
-    "instrumentation_tests": [
-      {
-        "test": "android_webview_test_apk",
-        "timeout_scale": 4
-      },
-      {
-        "test": "chrome_public_test_apk",
-        "timeout_scale": 4
-      },
-      {
-        "test": "chrome_sync_shell_test_apk",
-        "timeout_scale": 4
-      },
-      {
-        "test": "content_shell_test_apk",
-        "timeout_scale": 4
       }
     ]
   },
@@ -346,7 +722,7 @@
           "--output-format=chartjson",
           "--browser=android-chromium",
           "--story-filter=load:search:google",
-          "--extra-browser-args=\"--enable-heap-profiler\""
+          "--extra-browser-args=\"--enable-heap-profiling\""
         ],
         "isolate_name": "telemetry_perf_tests",
         "name": "system_health.memory_mobile",
@@ -380,18 +756,18 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
           ],
           "expiration": 10800,
-          "hard_timeout": 960,
+          "hard_timeout": 1500,
           "output_links": [
             {
               "link": [
@@ -401,7 +777,8 @@
               ],
               "name": "shard #${SHARD_INDEX} logcats"
             }
-          ]
+          ],
+          "shards": 6
         },
         "test": "android_webview_test_apk"
       },
@@ -413,12 +790,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -446,12 +823,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -473,7 +850,7 @@
       },
       {
         "override_compile_targets": [
-          "breakpad_unittests_deps"
+          "breakpad_unittests"
         ],
         "override_isolate_target": "breakpad_unittests",
         "swarming": {
@@ -482,12 +859,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -515,12 +892,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -548,12 +925,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -584,18 +961,18 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
           ],
           "expiration": 10800,
-          "hard_timeout": 960,
+          "hard_timeout": 1200,
           "output_links": [
             {
               "link": [
@@ -605,7 +982,8 @@
               ],
               "name": "shard #${SHARD_INDEX} logcats"
             }
-          ]
+          ],
+          "shards": 8
         },
         "test": "chrome_public_test_apk"
       },
@@ -620,12 +998,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -653,12 +1031,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -686,12 +1064,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -719,18 +1097,18 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
           ],
           "expiration": 10800,
-          "hard_timeout": 960,
+          "hard_timeout": 1200,
           "output_links": [
             {
               "link": [
@@ -740,7 +1118,8 @@
               ],
               "name": "shard #${SHARD_INDEX} logcats"
             }
-          ]
+          ],
+          "shards": 6
         },
         "test": "content_browsertests"
       },
@@ -755,18 +1134,18 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
           ],
           "expiration": 10800,
-          "hard_timeout": 960,
+          "hard_timeout": 1200,
           "output_links": [
             {
               "link": [
@@ -776,7 +1155,8 @@
               ],
               "name": "shard #${SHARD_INDEX} logcats"
             }
-          ]
+          ],
+          "shards": 4
         },
         "test": "content_shell_test_apk"
       },
@@ -788,18 +1168,18 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
           ],
           "expiration": 10800,
-          "hard_timeout": 960,
+          "hard_timeout": 1200,
           "output_links": [
             {
               "link": [
@@ -809,7 +1189,8 @@
               ],
               "name": "shard #${SHARD_INDEX} logcats"
             }
-          ]
+          ],
+          "shards": 2
         },
         "test": "content_unittests"
       },
@@ -821,12 +1202,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -854,12 +1235,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -887,12 +1268,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -920,12 +1301,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -953,12 +1334,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -986,12 +1367,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1019,12 +1400,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1052,12 +1433,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1085,12 +1466,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1118,18 +1499,18 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
           ],
           "expiration": 10800,
-          "hard_timeout": 960,
+          "hard_timeout": 1200,
           "output_links": [
             {
               "link": [
@@ -1139,13 +1520,14 @@
               ],
               "name": "shard #${SHARD_INDEX} logcats"
             }
-          ]
+          ],
+          "shards": 2
         },
         "test": "net_unittests"
       },
       {
         "override_compile_targets": [
-          "sandbox_linux_unittests_deps"
+          "sandbox_linux_unittests"
         ],
         "override_isolate_target": "sandbox_linux_unittests",
         "swarming": {
@@ -1154,12 +1536,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1187,12 +1569,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1220,12 +1602,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1253,12 +1635,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1286,12 +1668,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1319,12 +1701,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1352,12 +1734,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1385,12 +1767,12 @@
             {
               "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
               "location": "bin",
-              "revision": "git_revision:dec8cc6fd715753846d0aca1693dc63844ea55d6"
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
             }
           ],
           "dimension_sets": [
             {
-              "android_devices": "4",
+              "android_devices": "1",
               "device_os": "NRD91N",
               "device_type": "bullhead"
             }
@@ -1428,7 +1810,7 @@
       },
       {
         "override_compile_targets": [
-          "breakpad_unittests_deps"
+          "breakpad_unittests"
         ],
         "swarming": {
           "can_use_on_swarming_builders": false
@@ -1541,7 +1923,7 @@
       },
       {
         "override_compile_targets": [
-          "sandbox_linux_unittests_deps"
+          "sandbox_linux_unittests"
         ],
         "swarming": {
           "can_use_on_swarming_builders": false
@@ -1622,7 +2004,7 @@
       },
       {
         "override_compile_targets": [
-          "breakpad_unittests_deps"
+          "breakpad_unittests"
         ],
         "swarming": {
           "can_use_on_swarming_builders": false
@@ -1735,7 +2117,7 @@
       },
       {
         "override_compile_targets": [
-          "sandbox_linux_unittests_deps"
+          "sandbox_linux_unittests"
         ],
         "swarming": {
           "can_use_on_swarming_builders": false
@@ -2229,19 +2611,6 @@
           ]
         },
         "test": "mojo_common_unittests"
-      },
-      {
-        "override_isolate_target": "mojo_public_application_unittests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "android_devices": "1",
-              "device_type": "coho"
-            }
-          ]
-        },
-        "test": "mojo_public_application_unittests"
       },
       {
         "override_isolate_target": "mojo_public_bindings_unittests",
@@ -2773,20 +3142,6 @@
           "hard_timeout": 60
         },
         "test": "mojo_common_unittests"
-      },
-      {
-        "override_isolate_target": "mojo_public_application_unittests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "android_devices": "4",
-              "device_type": "gce_x86"
-            }
-          ],
-          "hard_timeout": 60
-        },
-        "test": "mojo_public_application_unittests"
       },
       {
         "override_isolate_target": "mojo_public_bindings_unittests",

@@ -6,10 +6,10 @@
 
 #include <stddef.h>
 
+#include "cc/paint/drawing_display_item.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_flags.h"
 #include "cc/paint/paint_recorder.h"
-#include "cc/playback/drawing_display_item.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/skia_util.h"
@@ -30,22 +30,22 @@ SolidColorContentLayerClient::PaintContentsToDisplayList(
   canvas->clear(SK_ColorTRANSPARENT);
 
   if (border_size_ != 0) {
-    PaintFlags paint;
-    paint.setStyle(PaintFlags::kFill_Style);
-    paint.setColor(border_color_);
+    PaintFlags flags;
+    flags.setStyle(PaintFlags::kFill_Style);
+    flags.setColor(border_color_);
     canvas->drawRect(
         SkRect::MakeXYWH(clip.x(), clip.y(), clip.width(), clip.height()),
-        paint);
+        flags);
   }
 
-  PaintFlags paint;
-  paint.setStyle(PaintFlags::kFill_Style);
-  paint.setColor(color_);
+  PaintFlags flags;
+  flags.setStyle(PaintFlags::kFill_Style);
+  flags.setColor(color_);
   canvas->drawRect(
       SkRect::MakeXYWH(clip.x() + border_size_, clip.y() + border_size_,
                        clip.width() - 2 * border_size_,
                        clip.height() - 2 * border_size_),
-      paint);
+      flags);
 
   auto display_list = make_scoped_refptr(new DisplayItemList);
   display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(

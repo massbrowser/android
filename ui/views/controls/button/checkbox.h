@@ -41,7 +41,6 @@ class VIEWS_EXPORT Checkbox : public LabelButton {
   static bool UseMd();
 
   // Overridden from LabelButton:
-  void Layout() override;
   const char* GetClassName() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   void OnPaint(gfx::Canvas* canvas) override;
@@ -60,7 +59,7 @@ class VIEWS_EXPORT Checkbox : public LabelButton {
                       const gfx::ImageSkia& image);
 
   // Paints a focus indicator for the view.
-  virtual void PaintFocusRing(gfx::Canvas* canvas, const cc::PaintFlags& paint);
+  virtual void PaintFocusRing(gfx::Canvas* canvas, const cc::PaintFlags& flags);
 
   // Gets the vector icon to use based on the current state of |checked_|.
   virtual const gfx::VectorIcon& GetVectorIcon() const;

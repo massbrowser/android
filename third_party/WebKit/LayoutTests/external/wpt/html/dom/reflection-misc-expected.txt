@@ -16,39 +16,7 @@ PASS script.accessKey: 32 tests
 PASS script.tabIndex: 24 tests
 PASS script.src: 38 tests
 PASS script.type: 32 tests
-FAIL script.noModule: typeof IDL attribute assert_equals: expected "boolean" but got "undefined"
-FAIL script.noModule: IDL get with DOM attribute unset assert_equals: expected (boolean) false but got (undefined) undefined
-FAIL script.noModule: setAttribute() to "" assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to " foo " assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to undefined assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to null assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to 7 assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to 1.5 assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to true assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to false assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to object "[object Object]" assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to NaN assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to Infinity assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to -Infinity assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to "\0" assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to object "test-toString" assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to object "test-valueOf" assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: setAttribute() to "noModule" assert_equals: IDL get expected (boolean) true but got (undefined) undefined
-FAIL script.noModule: IDL set to "" assert_equals: hasAttribute() expected false but got true
-FAIL script.noModule: IDL set to " foo " assert_equals: IDL get expected (boolean) true but got (string) " foo "
-FAIL script.noModule: IDL set to undefined assert_equals: hasAttribute() expected false but got true
-FAIL script.noModule: IDL set to null assert_equals: hasAttribute() expected false but got true
-FAIL script.noModule: IDL set to 7 assert_equals: IDL get expected (boolean) true but got (number) 7
-FAIL script.noModule: IDL set to 1.5 assert_equals: IDL get expected (boolean) true but got (number) 1.5
-PASS script.noModule: IDL set to true 
-FAIL script.noModule: IDL set to false assert_equals: hasAttribute() expected false but got true
-FAIL script.noModule: IDL set to object "[object Object]" assert_equals: IDL get expected (boolean) true but got (object) object "[object Object]"
-FAIL script.noModule: IDL set to NaN assert_equals: hasAttribute() expected false but got true
-FAIL script.noModule: IDL set to Infinity assert_equals: IDL get expected (boolean) true but got (number) Infinity
-FAIL script.noModule: IDL set to -Infinity assert_equals: IDL get expected (boolean) true but got (number) -Infinity
-FAIL script.noModule: IDL set to "\0" assert_equals: IDL get expected (boolean) true but got (string) "\0"
-FAIL script.noModule: IDL set to object "test-toString" assert_equals: IDL get expected (boolean) true but got (object) object "test-toString"
-FAIL script.noModule: IDL set to object "test-valueOf" assert_equals: IDL get expected (boolean) true but got (object) object "test-valueOf"
+PASS script.noModule: 33 tests
 PASS script.charset: 32 tests
 PASS script.defer: 33 tests
 PASS script.crossOrigin: 52 tests
@@ -156,58 +124,7 @@ PASS menu.className (<menu class>): 32 tests
 PASS menu.hidden: 33 tests
 PASS menu.accessKey: 32 tests
 PASS menu.tabIndex: 24 tests
-PASS menu.type: typeof IDL attribute 
-FAIL menu.type: IDL get with DOM attribute unset assert_equals: expected "toolbar" but got ""
-FAIL menu.type: setAttribute() to "" assert_equals: IDL get expected "toolbar" but got ""
-FAIL menu.type: setAttribute() to " \0\x01\x02\x03\x04\x05\x06\x07 \b\t\n\v\f\r\x0e\x0f \x10\x11\x12\x13\x14\x15\x16\x17 \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f  foo " assert_equals: IDL get expected "toolbar" but got " \0\x01\x02\x03\x04\x05\x06\x07 \b\t\n\v\f\r\x0e\x0f \x10\x11\x12\x13\x14\x15\x16\x17 \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f  foo "
-FAIL menu.type: setAttribute() to undefined assert_equals: IDL get expected "toolbar" but got "undefined"
-FAIL menu.type: setAttribute() to 7 assert_equals: IDL get expected "toolbar" but got "7"
-FAIL menu.type: setAttribute() to 1.5 assert_equals: IDL get expected "toolbar" but got "1.5"
-FAIL menu.type: setAttribute() to true assert_equals: IDL get expected "toolbar" but got "true"
-FAIL menu.type: setAttribute() to false assert_equals: IDL get expected "toolbar" but got "false"
-FAIL menu.type: setAttribute() to object "[object Object]" assert_equals: IDL get expected "toolbar" but got "[object Object]"
-FAIL menu.type: setAttribute() to NaN assert_equals: IDL get expected "toolbar" but got "NaN"
-FAIL menu.type: setAttribute() to Infinity assert_equals: IDL get expected "toolbar" but got "Infinity"
-FAIL menu.type: setAttribute() to -Infinity assert_equals: IDL get expected "toolbar" but got "-Infinity"
-FAIL menu.type: setAttribute() to "\0" assert_equals: IDL get expected "toolbar" but got "\0"
-FAIL menu.type: setAttribute() to null assert_equals: IDL get expected "toolbar" but got "null"
-FAIL menu.type: setAttribute() to object "test-toString" assert_equals: IDL get expected "toolbar" but got "test-toString"
-FAIL menu.type: setAttribute() to object "test-valueOf" assert_equals: IDL get expected "toolbar" but got "test-valueOf"
-PASS menu.type: setAttribute() to "popup" 
-FAIL menu.type: setAttribute() to "xpopup" assert_equals: IDL get expected "toolbar" but got "xpopup"
-FAIL menu.type: setAttribute() to "popup\0" assert_equals: IDL get expected "toolbar" but got "popup\0"
-FAIL menu.type: setAttribute() to "opup" assert_equals: IDL get expected "toolbar" but got "opup"
-FAIL menu.type: setAttribute() to "POPUP" assert_equals: IDL get expected "popup" but got "POPUP"
-PASS menu.type: setAttribute() to "toolbar" 
-FAIL menu.type: setAttribute() to "xtoolbar" assert_equals: IDL get expected "toolbar" but got "xtoolbar"
-FAIL menu.type: setAttribute() to "toolbar\0" assert_equals: IDL get expected "toolbar" but got "toolbar\0"
-FAIL menu.type: setAttribute() to "oolbar" assert_equals: IDL get expected "toolbar" but got "oolbar"
-FAIL menu.type: setAttribute() to "TOOLBAR" assert_equals: IDL get expected "toolbar" but got "TOOLBAR"
-FAIL menu.type: IDL set to "" assert_equals: IDL get expected "toolbar" but got ""
-FAIL menu.type: IDL set to " \0\x01\x02\x03\x04\x05\x06\x07 \b\t\n\v\f\r\x0e\x0f \x10\x11\x12\x13\x14\x15\x16\x17 \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f  foo " assert_equals: IDL get expected "toolbar" but got " \0\x01\x02\x03\x04\x05\x06\x07 \b\t\n\v\f\r\x0e\x0f \x10\x11\x12\x13\x14\x15\x16\x17 \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f  foo "
-FAIL menu.type: IDL set to undefined assert_equals: IDL get expected "toolbar" but got "undefined"
-FAIL menu.type: IDL set to 7 assert_equals: IDL get expected "toolbar" but got "7"
-FAIL menu.type: IDL set to 1.5 assert_equals: IDL get expected "toolbar" but got "1.5"
-FAIL menu.type: IDL set to true assert_equals: IDL get expected "toolbar" but got "true"
-FAIL menu.type: IDL set to false assert_equals: IDL get expected "toolbar" but got "false"
-FAIL menu.type: IDL set to object "[object Object]" assert_equals: IDL get expected "toolbar" but got "[object Object]"
-FAIL menu.type: IDL set to NaN assert_equals: IDL get expected "toolbar" but got "NaN"
-FAIL menu.type: IDL set to Infinity assert_equals: IDL get expected "toolbar" but got "Infinity"
-FAIL menu.type: IDL set to -Infinity assert_equals: IDL get expected "toolbar" but got "-Infinity"
-FAIL menu.type: IDL set to "\0" assert_equals: IDL get expected "toolbar" but got "\0"
-FAIL menu.type: IDL set to null assert_equals: IDL get expected "toolbar" but got "null"
-FAIL menu.type: IDL set to object "test-toString" assert_equals: IDL get expected "toolbar" but got "test-toString"
-FAIL menu.type: IDL set to object "test-valueOf" assert_equals: IDL get expected "toolbar" but got "test-valueOf"
-PASS menu.type: IDL set to "popup" 
-FAIL menu.type: IDL set to "xpopup" assert_equals: IDL get expected "toolbar" but got "xpopup"
-FAIL menu.type: IDL set to "popup\0" assert_equals: IDL get expected "toolbar" but got "popup\0"
-FAIL menu.type: IDL set to "opup" assert_equals: IDL get expected "toolbar" but got "opup"
-FAIL menu.type: IDL set to "POPUP" assert_equals: IDL get expected "popup" but got "POPUP"
-PASS menu.type: IDL set to "toolbar" 
-FAIL menu.type: IDL set to "xtoolbar" assert_equals: IDL get expected "toolbar" but got "xtoolbar"
-FAIL menu.type: IDL set to "toolbar\0" assert_equals: IDL get expected "toolbar" but got "toolbar\0"
-FAIL menu.type: IDL set to "oolbar" assert_equals: IDL get expected "toolbar" but got "oolbar"
-FAIL menu.type: IDL set to "TOOLBAR" assert_equals: IDL get expected "toolbar" but got "TOOLBAR"
+PASS menu.type: 52 tests
 PASS menu.label: 32 tests
 PASS menu.compact: 33 tests
 PASS menuitem.title: 32 tests

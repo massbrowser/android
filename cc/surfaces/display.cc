@@ -7,8 +7,10 @@
 #include <stddef.h>
 
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
-#include "cc/debug/benchmark_instrumentation.h"
+#include "cc/benchmarks/benchmark_instrumentation.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/direct_renderer.h"
 #include "cc/output/gl_renderer.h"
@@ -22,9 +24,10 @@
 #include "cc/surfaces/surface_aggregator.h"
 #include "cc/surfaces/surface_manager.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "gpu/vulkan/features.h"
 #include "ui/gfx/buffer_types.h"
 
-#if defined(ENABLE_VULKAN)
+#if BUILDFLAG(ENABLE_VULKAN)
 #include "cc/output/vulkan_renderer.h"
 #endif
 
@@ -68,7 +71,7 @@ Display::~Display() {
     for (const auto& id_entry : aggregator_->previous_contained_surfaces()) {
       Surface* surface = surface_manager_->GetSurfaceForId(id_entry.first);
       if (surface)
-        surface->RunDrawCallbacks();
+        surface->RunDrawCallback();
     }
   }
 }
@@ -157,8 +160,13 @@ void Display::Resize(const gfx::Size& size) {
     scheduler_->DisplayResized();
 }
 
-void Display::SetColorSpace(const gfx::ColorSpace& color_space) {
-  device_color_space_ = color_space;
+void Display::SetColorSpace(const gfx::ColorSpace& blending_color_space,
+                            const gfx::ColorSpace& device_color_space) {
+  blending_color_space_ = blending_color_space;
+  device_color_space_ = device_color_space;
+  if (aggregator_) {
+    aggregator_->SetOutputColorSpace(blending_color_space, device_color_space_);
+  }
 }
 
 void Display::SetOutputIsSecure(bool secure) {
@@ -215,11 +223,12 @@ void Display::InitializeRenderer() {
   aggregator_.reset(new SurfaceAggregator(
       surface_manager_, resource_provider_.get(), output_partial_list));
   aggregator_->set_output_is_secure(output_is_secure_);
+  aggregator_->SetOutputColorSpace(blending_color_space_, device_color_space_);
 }
 
 void Display::UpdateRootSurfaceResourcesLocked() {
   Surface* surface = surface_manager_->GetSurfaceForId(current_surface_id_);
-  bool root_surface_resources_locked = !surface || !surface->HasFrame();
+  bool root_surface_resources_locked = !surface || !surface->HasActiveFrame();
   if (scheduler_)
     scheduler_->SetRootSurfaceResourcesLocked(root_surface_resources_locked);
 }
@@ -245,7 +254,10 @@ bool Display::DrawAndSwap() {
     return false;
   }
 
+  base::ElapsedTimer aggregate_timer;
   CompositorFrame frame = aggregator_->Aggregate(current_surface_id_);
+  UMA_HISTOGRAM_COUNTS_1M("Compositing.SurfaceAggregator.AggregateUs",
+                          aggregate_timer.Elapsed().InMicroseconds());
 
   if (frame.render_pass_list.empty()) {
     TRACE_EVENT_INSTANT0("cc", "Empty aggregated frame.",
@@ -257,7 +269,7 @@ bool Display::DrawAndSwap() {
   for (const auto& id_entry : aggregator_->previous_contained_surfaces()) {
     Surface* surface = surface_manager_->GetSurfaceForId(id_entry.first);
     if (surface)
-      surface->RunDrawCallbacks();
+      surface->RunDrawCallback();
   }
 
   frame.metadata.latency_info.insert(frame.metadata.latency_info.end(),
@@ -271,19 +283,17 @@ bool Display::DrawAndSwap() {
 
   gfx::Size surface_size;
   bool have_damage = false;
-  if (!frame.render_pass_list.empty()) {
-    RenderPass& last_render_pass = *frame.render_pass_list.back();
-    if (last_render_pass.output_rect.size() != current_surface_size_ &&
-        last_render_pass.damage_rect == last_render_pass.output_rect &&
-        !current_surface_size_.IsEmpty()) {
-      // Resize the output rect to the current surface size so that we won't
-      // skip the draw and so that the GL swap won't stretch the output.
-      last_render_pass.output_rect.set_size(current_surface_size_);
-      last_render_pass.damage_rect = last_render_pass.output_rect;
-    }
-    surface_size = last_render_pass.output_rect.size();
-    have_damage = !last_render_pass.damage_rect.size().IsEmpty();
+  RenderPass& last_render_pass = *frame.render_pass_list.back();
+  if (last_render_pass.output_rect.size() != current_surface_size_ &&
+      last_render_pass.damage_rect == last_render_pass.output_rect &&
+      !current_surface_size_.IsEmpty()) {
+    // Resize the output rect to the current surface size so that we won't
+    // skip the draw and so that the GL swap won't stretch the output.
+    last_render_pass.output_rect.set_size(current_surface_size_);
+    last_render_pass.damage_rect = last_render_pass.output_rect;
   }
+  surface_size = last_render_pass.output_rect.size();
+  have_damage = !last_render_pass.damage_rect.size().IsEmpty();
 
   bool size_matches = surface_size == current_surface_size_;
   if (!size_matches)
@@ -312,9 +322,17 @@ bool Display::DrawAndSwap() {
       DCHECK(!disable_image_filtering);
     }
 
+    base::ElapsedTimer draw_timer;
     renderer_->DecideRenderPassAllocationsForFrame(frame.render_pass_list);
     renderer_->DrawFrame(&frame.render_pass_list, device_scale_factor_,
-                         device_color_space_, current_surface_size_);
+                         current_surface_size_);
+    if (software_renderer_) {
+      UMA_HISTOGRAM_COUNTS_1M("Compositing.DirectRenderer.Software.DrawFrameUs",
+                              draw_timer.Elapsed().InMicroseconds());
+    } else {
+      UMA_HISTOGRAM_COUNTS_1M("Compositing.DirectRenderer.GL.DrawFrameUs",
+                              draw_timer.Elapsed().InMicroseconds());
+    }
   } else {
     TRACE_EVENT_INSTANT0("cc", "Draw skipped.", TRACE_EVENT_SCOPE_THREAD);
   }
@@ -374,8 +392,8 @@ void Display::OnSurfaceDamaged(const SurfaceId& surface_id, bool* changed) {
       aggregator_->previous_contained_surfaces().count(surface_id)) {
     Surface* surface = surface_manager_->GetSurfaceForId(surface_id);
     if (surface) {
-      if (!surface->HasFrame() ||
-          surface->GetEligibleFrame().resource_list.empty()) {
+      if (!surface->HasActiveFrame() ||
+          surface->GetActiveFrame().resource_list.empty()) {
         aggregator_->ReleaseResources(surface_id);
       }
     }

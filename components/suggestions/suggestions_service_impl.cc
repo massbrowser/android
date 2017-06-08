@@ -35,6 +35,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
@@ -44,37 +45,6 @@ using base::TimeTicks;
 namespace suggestions {
 
 namespace {
-
-// Establishes the different sync states that matter to SuggestionsService.
-// There are three different concepts in the sync service: initialized, sync
-// enabled and history sync enabled.
-enum SyncState {
-  // State: Sync service is not initialized, yet not disabled. History sync
-  //     state is unknown (since not initialized).
-  // Behavior: Does not issue a server request, but serves from cache if
-  //     available.
-  NOT_INITIALIZED_ENABLED,
-
-  // State: Sync service is initialized, sync is enabled and history sync is
-  //     enabled.
-  // Behavior: Update suggestions from the server. Serve from cache on timeout.
-  INITIALIZED_ENABLED_HISTORY,
-
-  // State: Sync service is disabled or history sync is disabled.
-  // Behavior: Do not issue a server request. Clear the cache. Serve empty
-  //     suggestions.
-  SYNC_OR_HISTORY_SYNC_DISABLED,
-};
-
-SyncState GetSyncState(syncer::SyncService* sync) {
-  if (!sync || !sync->CanSyncStart() || sync->IsLocalSyncEnabled())
-    return SYNC_OR_HISTORY_SYNC_DISABLED;
-  if (!sync->IsSyncActive() || !sync->ConfigurationDone())
-    return NOT_INITIALIZED_ENABLED;
-  return sync->GetActiveDataTypes().Has(syncer::HISTORY_DELETE_DIRECTIVES)
-             ? INITIALIZED_ENABLED_HISTORY
-             : SYNC_OR_HISTORY_SYNC_DISABLED;
-}
 
 // Used to UMA log the state of the last response from the server.
 enum SuggestionsResponseState {
@@ -149,6 +119,7 @@ SuggestionsServiceImpl::SuggestionsServiceImpl(
       token_service_(token_service),
       sync_service_(sync_service),
       sync_service_observer_(this),
+      sync_state_(INITIALIZED_ENABLED_HISTORY),
       url_request_context_(url_request_context),
       suggestions_store_(std::move(suggestions_store)),
       thumbnail_manager_(std::move(thumbnail_manager)),
@@ -156,8 +127,9 @@ SuggestionsServiceImpl::SuggestionsServiceImpl(
       scheduling_delay_(TimeDelta::FromSeconds(kDefaultSchedulingDelaySec)),
       weak_ptr_factory_(this) {
   // |sync_service_| is null if switches::kDisableSync is set (tests use that).
-  if (sync_service_)
+  if (sync_service_) {
     sync_service_observer_.Add(sync_service_);
+  }
   // Immediately get the current sync state, so we'll flush the cache if
   // necessary.
   OnStateChanged(sync_service_);
@@ -168,8 +140,9 @@ SuggestionsServiceImpl::~SuggestionsServiceImpl() {}
 bool SuggestionsServiceImpl::FetchSuggestionsData() {
   DCHECK(thread_checker_.CalledOnValidThread());
   // If sync state allows, issue a network request to refresh the suggestions.
-  if (GetSyncState(sync_service_) != INITIALIZED_ENABLED_HISTORY)
+  if (sync_state_ != INITIALIZED_ENABLED_HISTORY) {
     return false;
+  }
   IssueRequestIfNoneOngoing(BuildSuggestionsURL());
   return true;
 }
@@ -207,6 +180,8 @@ void SuggestionsServiceImpl::GetPageThumbnailWithURL(
 bool SuggestionsServiceImpl::BlacklistURL(const GURL& candidate_url) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  // TODO(treib): Do we need to check |sync_state_| here?
+
   if (!blacklist_store_->BlacklistUrl(candidate_url))
     return false;
 
@@ -223,6 +198,9 @@ bool SuggestionsServiceImpl::BlacklistURL(const GURL& candidate_url) {
 
 bool SuggestionsServiceImpl::UndoBlacklistURL(const GURL& url) {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  // TODO(treib): Do we need to check |sync_state_| here?
+
   TimeDelta time_delta;
   if (blacklist_store_->GetTimeUntilURLReadyForUpload(url, &time_delta) &&
       time_delta > TimeDelta::FromSeconds(0) &&
@@ -238,6 +216,9 @@ bool SuggestionsServiceImpl::UndoBlacklistURL(const GURL& url) {
 
 void SuggestionsServiceImpl::ClearBlacklist() {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  // TODO(treib): Do we need to check |sync_state_| here?
+
   blacklist_store_->ClearBlacklist();
   callback_list_.Notify(
       GetSuggestionsDataFromCache().value_or(SuggestionsProfile()));
@@ -299,22 +280,64 @@ GURL SuggestionsServiceImpl::BuildSuggestionsBlacklistClearURL() {
                                  kDeviceType));
 }
 
-void SuggestionsServiceImpl::OnStateChanged(syncer::SyncService* sync) {
-  switch (GetSyncState(sync_service_)) {
+SuggestionsServiceImpl::SyncState SuggestionsServiceImpl::ComputeSyncState()
+    const {
+  if (!sync_service_ || !sync_service_->CanSyncStart() ||
+      sync_service_->IsLocalSyncEnabled()) {
+    return SYNC_OR_HISTORY_SYNC_DISABLED;
+  }
+  if (!sync_service_->IsSyncActive() || !sync_service_->ConfigurationDone()) {
+    return NOT_INITIALIZED_ENABLED;
+  }
+  return sync_service_->GetActiveDataTypes().Has(
+             syncer::HISTORY_DELETE_DIRECTIVES)
+             ? INITIALIZED_ENABLED_HISTORY
+             : SYNC_OR_HISTORY_SYNC_DISABLED;
+}
+
+SuggestionsServiceImpl::RefreshAction
+SuggestionsServiceImpl::RefreshSyncState() {
+  SyncState new_sync_state = ComputeSyncState();
+  if (sync_state_ == new_sync_state) {
+    return NO_ACTION;
+  }
+
+  SyncState old_sync_state = sync_state_;
+  sync_state_ = new_sync_state;
+
+  switch (new_sync_state) {
+    case NOT_INITIALIZED_ENABLED:
+      break;
+    case INITIALIZED_ENABLED_HISTORY:
+      // If the user just signed in, we fetch suggestions, so that hopefully the
+      // next NTP will already get them.
+      if (old_sync_state == SYNC_OR_HISTORY_SYNC_DISABLED) {
+        return FETCH_SUGGESTIONS;
+      }
+      break;
     case SYNC_OR_HISTORY_SYNC_DISABLED:
+      // If the user signed out (or disabled history sync), we have to clear
+      // everything.
+      return CLEAR_SUGGESTIONS;
+  }
+  // Otherwise, there's nothing to do.
+  return NO_ACTION;
+}
+
+void SuggestionsServiceImpl::OnStateChanged(syncer::SyncService* sync) {
+  DCHECK(sync_service_ == sync);
+
+  switch (RefreshSyncState()) {
+    case NO_ACTION:
+      break;
+    case CLEAR_SUGGESTIONS:
       // Cancel any ongoing request, to stop interacting with the server.
       pending_request_.reset(nullptr);
       suggestions_store_->ClearSuggestions();
       callback_list_.Notify(SuggestionsProfile());
       break;
-    case NOT_INITIALIZED_ENABLED:
-      // Keep the cache (if any), but don't refresh.
-      break;
-    case INITIALIZED_ENABLED_HISTORY:
-      // If we have any observers, issue a network request to refresh the
-      // suggestions in the cache.
-      if (!callback_list_.empty())
-        IssueRequestIfNoneOngoing(BuildSuggestionsURL());
+    case FETCH_SUGGESTIONS:
+      IssueRequestIfNoneOngoing(BuildSuggestionsURL());
       break;
   }
 }
@@ -334,6 +357,10 @@ void SuggestionsServiceImpl::SetDefaultExpiryTimestamp(
 
 void SuggestionsServiceImpl::IssueRequestIfNoneOngoing(const GURL& url) {
   // If there is an ongoing request, let it complete.
+  // This will silently swallow blacklist and clearblacklist requests if a
+  // request happens to be ongoing.
+  // TODO(treib): Queue such requests and send them after the current one
+  // completes.
   if (pending_request_.get()) {
     return;
   }
@@ -381,8 +408,39 @@ std::unique_ptr<net::URLFetcher>
 SuggestionsServiceImpl::CreateSuggestionsRequest(
     const GURL& url,
     const std::string& access_token) {
-  std::unique_ptr<net::URLFetcher> request =
-      net::URLFetcher::Create(0, url, net::URLFetcher::GET, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("suggestions_service", R"(
+        semantics {
+          sender: "Suggestions Service"
+          description:
+            "For signed-in users with History Sync enabled, the Suggestions "
+            "Service fetches website suggestions, based on the user's browsing "
+            "history, for display on the New Tab page."
+          trigger: "Opening a New Tab page."
+          data: "The user's OAuth2 credentials."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "Users can disable this feature by signing out of Chromium, or "
+            "disabling Sync or History Sync in Chromium settings under "
+            "Advanced sync settings. The feature is enabled by default."
+          chrome_policy {
+            SyncDisabled {
+              policy_options {mode: MANDATORY}
+              SyncDisabled: true
+            }
+          }
+          chrome_policy {
+            SigninAllowed {
+              policy_options {mode: MANDATORY}
+              SigninAllowed: false
+            }
+          }
+        })");
+  std::unique_ptr<net::URLFetcher> request = net::URLFetcher::Create(
+      0, url, net::URLFetcher::GET, this, traffic_annotation);
   data_use_measurement::DataUseUserData::AttachToFetcher(
       request.get(), data_use_measurement::DataUseUserData::SUGGESTIONS);
   int load_flags = net::LOAD_DISABLE_CACHE | net::LOAD_DO_NOT_SEND_COOKIES |

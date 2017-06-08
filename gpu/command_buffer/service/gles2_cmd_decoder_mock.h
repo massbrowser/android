@@ -77,11 +77,12 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(PerformPollingWork, void());
   MOCK_METHOD1(RestoreState, void(const ContextState* prev_state));
   MOCK_CONST_METHOD0(RestoreActiveTexture, void());
-  MOCK_CONST_METHOD1(
-      RestoreAllTextureUnitBindings, void(const ContextState* state));
+  MOCK_CONST_METHOD1(RestoreAllTextureUnitAndSamplerBindings,
+                     void(const ContextState* state));
   MOCK_CONST_METHOD1(
       RestoreActiveTextureUnitBinding, void(unsigned int target));
   MOCK_METHOD0(RestoreAllExternalTextureBindingsIfNeeded, void());
+  MOCK_METHOD1(RestoreBufferBinding, void(unsigned int target));
   MOCK_CONST_METHOD0(RestoreBufferBindings, void());
   MOCK_CONST_METHOD0(RestoreFramebufferBindings, void());
   MOCK_CONST_METHOD0(RestoreGlobalState, void());
@@ -89,6 +90,7 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(RestoreRenderbufferBindings, void());
   MOCK_CONST_METHOD1(RestoreTextureState, void(unsigned service_id));
   MOCK_CONST_METHOD1(RestoreTextureUnitBindings, void(unsigned unit));
+  MOCK_METHOD1(RestoreVertexAttribArray, void(unsigned index));
   MOCK_CONST_METHOD0(ClearAllAttributes, void());
   MOCK_CONST_METHOD0(RestoreAllAttributes, void());
   MOCK_METHOD0(GetQueryManager, gpu::gles2::QueryManager*());
@@ -149,8 +151,8 @@ class MockGLES2Decoder : public GLES2Decoder {
                void(const ShaderCacheCallback& callback));
   MOCK_METHOD1(SetFenceSyncReleaseCallback,
                void(const FenceSyncReleaseCallback& callback));
-  MOCK_METHOD1(SetWaitFenceSyncCallback,
-               void(const WaitFenceSyncCallback& callback));
+  MOCK_METHOD1(SetWaitSyncTokenCallback,
+               void(const WaitSyncTokenCallback& callback));
   MOCK_METHOD1(SetDescheduleUntilFinishedCallback,
                void(const NoParamCallback& callback));
   MOCK_METHOD1(SetRescheduleAfterFinishedCallback,

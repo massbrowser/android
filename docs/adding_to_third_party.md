@@ -65,8 +65,8 @@ Run the following scripts:
 * `src/tools/licenses.py scan` - This will complain about incomplete or missing
   data for third_party checkins. We use 'licenses.py credits' to generate the
   about:credits page in Google Chrome builds.
-* `src/tools/checklicenses/checklicenses.py` - See below for info how to handle
-  possible failures.
+* `src/tools/checklicenses/checklicenses.py` - See below for info on how to
+  handle possible failures.
 * If you are adding code that will be present in the content layer, please make
   sure that the license used is compliant with Android tree requirements because
   this code will also be used in Android WebView. You need to run
@@ -82,7 +82,7 @@ license is not included in about:credits page.
 ### Modify DEPS
 
 If the code is applicable and will be compiled on all supported Chromium
-platforms (Windows, Mac, Linux, ChromeOS, iOS, Android), check it in to
+platforms (Windows, Mac, Linux, Chrome OS, iOS, Android), check it in to
 [src/third_party](http://src.chromium.org/viewvc/chrome/trunk/src/third_party/). 
 
 If the code is only applicable to certain platforms, check it in to

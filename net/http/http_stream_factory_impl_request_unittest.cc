@@ -14,7 +14,7 @@
 #include "net/http/http_stream_factory_test_util.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_service.h"
-#include "net/spdy/spdy_test_util_common.h"
+#include "net/spdy/chromium/spdy_test_util_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
@@ -35,7 +35,9 @@ TEST_F(HttpStreamFactoryImplRequestTest, SetPriority) {
   HttpRequestInfo request_info;
   auto job_controller = base::MakeUnique<HttpStreamFactoryImpl::JobController>(
       factory, &request_delegate, session.get(), &job_factory, request_info,
-      /*is_preconnect=*/false);
+      /* is_preconnect = */ false,
+      /* enable_ip_based_pooling = */ true,
+      /* enable_alternative_services = */ true);
   HttpStreamFactoryImpl::JobController* job_controller_raw_ptr =
       job_controller.get();
   factory->job_controller_set_.insert(std::move(job_controller));

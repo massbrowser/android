@@ -11,11 +11,18 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
 #include "base/process/process.h"
+#include "content/public/child/child_thread.h"
+#include "content/public/common/service_manager_connection.h"
+#include "content/public/common/simple_connection_filter.h"
+#include "content/public/test/test_host_resolver.h"
 #include "content/public/test/test_service.h"
 #include "content/public/test/test_service.mojom.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/public/cpp/system/buffer.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "net/base/net_errors.h"
+#include "net/base/network_interfaces.h"
+#include "net/dns/mock_host_resolver.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 
 namespace content {
 
@@ -23,7 +30,8 @@ namespace {
 
 class TestServiceImpl : public mojom::TestService {
  public:
-  static void Create(mojom::TestServiceRequest request) {
+  static void Create(const service_manager::BindSourceInfo&,
+                     mojom::TestServiceRequest request) {
     mojo::MakeStrongBinding(base::WrapUnique(new TestServiceImpl),
                             std::move(request));
   }
@@ -71,9 +79,47 @@ std::unique_ptr<service_manager::Service> CreateTestService() {
   return std::unique_ptr<service_manager::Service>(new TestService);
 }
 
+class NetworkServiceTestImpl : public mojom::NetworkServiceTest {
+ public:
+  static void Create(mojom::NetworkServiceTestRequest request) {
+    // Leak this.
+    new NetworkServiceTestImpl(std::move(request));
+  }
+  explicit NetworkServiceTestImpl(mojom::NetworkServiceTestRequest request)
+      : binding_(this, std::move(request)) {}
+  ~NetworkServiceTestImpl() override = default;
+
+  // mojom::NetworkServiceTest implementation.
+  void AddRules(std::vector<mojom::RulePtr> rules) override {
+    for (const auto& rule : rules) {
+      test_host_resolver_.host_resolver()->AddRule(rule->host_pattern,
+                                                   rule->replacement);
+    }
+  }
+
+ private:
+  mojo::Binding<mojom::NetworkServiceTest> binding_;
+
+  TestHostResolver test_host_resolver_;
+
+  DISALLOW_COPY_AND_ASSIGN(NetworkServiceTestImpl);
+};
+
 }  // namespace
 
+ShellContentUtilityClient::ShellContentUtilityClient() {}
+
 ShellContentUtilityClient::~ShellContentUtilityClient() {
+}
+
+void ShellContentUtilityClient::UtilityThreadStarted() {
+  auto registry = base::MakeUnique<service_manager::BinderRegistry>();
+  registry->AddInterface(base::Bind(&TestServiceImpl::Create),
+                         base::ThreadTaskRunnerHandle::Get());
+  content::ChildThread::Get()
+      ->GetServiceManagerConnection()
+      ->AddConnectionFilter(
+          base::MakeUnique<SimpleConnectionFilter>(std::move(registry)));
 }
 
 void ShellContentUtilityClient::RegisterServices(StaticServiceMap* services) {
@@ -82,9 +128,19 @@ void ShellContentUtilityClient::RegisterServices(StaticServiceMap* services) {
   services->insert(std::make_pair(kTestServiceUrl, info));
 }
 
-void ShellContentUtilityClient::ExposeInterfacesToBrowser(
-    service_manager::InterfaceRegistry* registry) {
-  registry->AddInterface(base::Bind(&TestServiceImpl::Create));
+void ShellContentUtilityClient::RegisterNetworkBinders(
+    service_manager::BinderRegistry* registry) {
+  registry->AddInterface<mojom::NetworkServiceTest>(
+      base::Bind(&ShellContentUtilityClient::BindNetworkServiceTestRequest,
+                 base::Unretained(this)));
+}
+
+void ShellContentUtilityClient::BindNetworkServiceTestRequest(
+    const service_manager::BindSourceInfo& source_info,
+    mojom::NetworkServiceTestRequest request) {
+  DCHECK(!network_service_test_);
+  network_service_test_ =
+      base::MakeUnique<NetworkServiceTestImpl>(std::move(request));
 }
 
 }  // namespace content

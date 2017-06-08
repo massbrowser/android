@@ -8,7 +8,7 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "components/payments/payment_app.mojom.h"
+#include "components/payments/mojom/payment_app.mojom.h"
 #include "content/browser/payments/payment_app_content_unittest_base.h"
 #include "content/browser/payments/payment_app_provider_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,7 +19,7 @@ using payments::mojom::PaymentAppManifestPtr;
 
 namespace content {
 
-class PaymentAppManager;
+class PaymentManager;
 
 namespace {
 
@@ -37,6 +37,11 @@ void GetAllManifestsCallback(bool* called,
   *out_manifests = std::move(manifests);
 }
 
+void InvokePaymentAppCallback(bool* called,
+                              payments::mojom::PaymentAppResponsePtr response) {
+  *called = true;
+}
+
 }  // namespace
 
 class PaymentAppProviderTest : public PaymentAppContentUnitTestBase {
@@ -51,15 +56,15 @@ class PaymentAppProviderTest : public PaymentAppContentUnitTestBase {
   }
 
   void InvokePaymentApp(int64_t registration_id,
-                        payments::mojom::PaymentAppRequestPtr app_request) {
+                        payments::mojom::PaymentAppRequestPtr app_request,
+                        PaymentAppProvider::InvokePaymentAppCallback callback) {
     PaymentAppProviderImpl::GetInstance()->InvokePaymentApp(
-        browser_context(), registration_id, std::move(app_request));
+        browser_context(), registration_id, std::move(app_request), callback);
     base::RunLoop().RunUntilIdle();
   }
 
   void CreatePaymentApp(const GURL& scope_url, const GURL& sw_script_url) {
-    PaymentAppManager* manager =
-        CreatePaymentAppManager(scope_url, sw_script_url);
+    PaymentManager* manager = CreatePaymentManager(scope_url, sw_script_url);
 
     PaymentAppManifestError error =
         PaymentAppManifestError::MANIFEST_STORAGE_OPERATION_FAILED;
@@ -130,14 +135,15 @@ TEST_F(PaymentAppProviderTest, InvokePaymentAppTest) {
 
   payments::mojom::PaymentAppRequestPtr app_request =
       payments::mojom::PaymentAppRequest::New();
-  app_request->methodData.push_back(payments::mojom::PaymentMethodData::New());
+  app_request->method_data.push_back(payments::mojom::PaymentMethodData::New());
   app_request->total = payments::mojom::PaymentItem::New();
   app_request->total->amount = payments::mojom::PaymentCurrencyAmount::New();
 
-  EXPECT_FALSE(payment_app_invoked());
-  InvokePaymentApp(manifests[1].first, std::move(app_request));
+  called = false;
+  InvokePaymentApp(manifests[1].first, std::move(app_request),
+                   base::Bind(&InvokePaymentAppCallback, &called));
+  ASSERT_TRUE(called);
 
-  ASSERT_TRUE(payment_app_invoked());
   EXPECT_EQ(manifests[1].first, last_sw_registration_id());
   EXPECT_EQ(GURL(kPaymentAppInfo[1].scopeUrl), last_sw_scope_url());
 }

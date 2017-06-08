@@ -6,12 +6,28 @@
  * @fileoverview Behavior common to Site Settings classes.
  */
 
+
+/**
+ * The source information on site exceptions doesn't exactly match the
+ * controlledBy values.
+ * TODO(dschuyler): Can they be unified (and this dictionary removed)?
+ * @type {!Object}
+ */
+var kControlledByLookup = {
+  'extension': chrome.settingsPrivate.ControlledBy.EXTENSION,
+  'HostedApp': chrome.settingsPrivate.ControlledBy.EXTENSION,
+  'platform_app': chrome.settingsPrivate.ControlledBy.EXTENSION,
+  'policy': chrome.settingsPrivate.ControlledBy.USER_POLICY,
+};
+
+
 /** @polymerBehavior */
 var SiteSettingsBehaviorImpl = {
   properties: {
     /**
      * The string ID of the category this element is displaying data for.
      * See site_settings/constants.js for possible values.
+     * @type {!settings.ContentSettingsTypes}
      */
     category: String,
 
@@ -23,11 +39,13 @@ var SiteSettingsBehaviorImpl = {
     browserProxy: Object,
   },
 
+  /** @override */
   created: function() {
     this.browserProxy =
         settings.SiteSettingsPrefsBrowserProxyImpl.getInstance();
   },
 
+  /** @override */
   ready: function() {
     this.PermissionValues = settings.PermissionValues;
   },
@@ -38,7 +56,8 @@ var SiteSettingsBehaviorImpl = {
    * @return {string} The URL with a scheme, or an empty string.
    */
   ensureUrlHasScheme: function(url) {
-    if (url.length == 0) return url;
+    if (url.length == 0)
+      return url;
     return url.includes('://') ? url : 'http://' + url;
   },
 
@@ -58,25 +77,6 @@ var SiteSettingsBehaviorImpl = {
       return url.slice(0, -3);
     }
     return url;
-  },
-
-  /**
-   * Adds the wildcard prefix to a pattern string (if missing).
-   * @param {string} pattern The pattern to add the wildcard to.
-   * @return {string} The resulting pattern.
-   * @private
-   */
-  addPatternWildcard: function(pattern) {
-    if (pattern.indexOf('[*.]') > -1)
-      return pattern;
-    if (pattern.startsWith('http://'))
-      return pattern.replace('http://', 'http://[*.]');
-    else if (pattern.startsWith('https://'))
-      return pattern.replace('https://', 'https://[*.]');
-    else if (pattern.startsWith('chrome-extension://'))
-      return pattern;  // No need for a wildcard for this.
-    else
-      return '[*.]' + pattern;
   },
 
   /**
@@ -109,17 +109,6 @@ var SiteSettingsBehaviorImpl = {
     }
     return loadTimeData.getStringF(
         'embeddedOnHost', this.sanitizePort(embeddingOrigin));
-  },
-
-  /**
-   * Returns true if this exception is controlled by, for example, a policy or
-   * set by an extension.
-   * @param {string} source The source controlling the extension
-   * @return {boolean} Whether it is being controlled.
-   * @protected
-   */
-  isExceptionControlled_: function(source) {
-    return source != undefined && source != 'preference';
   },
 
   /**
@@ -165,8 +154,8 @@ var SiteSettingsBehaviorImpl = {
   /**
    * Convert an exception (received from the C++ handler) to a full
    * SiteException.
-   * @param {!Object} exception The raw site exception from C++.
-   * @return {SiteException} The expanded (full) SiteException.
+   * @param {!RawSiteException} exception The raw site exception from C++.
+   * @return {!SiteException} The expanded (full) SiteException.
    * @private
    */
   expandSiteException: function(exception) {
@@ -178,14 +167,22 @@ var SiteSettingsBehaviorImpl = {
           this.getEmbedderString(embeddingOrigin, this.category);
     }
 
+    var enforcement = '';
+    if (exception.source == 'policy' || exception.source == 'extension')
+      enforcement = chrome.settingsPrivate.Enforcement.ENFORCED;
+
+    var controlledBy = kControlledByLookup[exception.source] || '';
+
     return {
+      category: this.category,
       origin: origin,
       displayName: exception.displayName,
       embeddingOrigin: embeddingOrigin,
       embeddingDisplayName: embeddingDisplayName,
       incognito: exception.incognito,
       setting: exception.setting,
-      source: exception.source,
+      enforcement: enforcement,
+      controlledBy: controlledBy,
     };
   },
 

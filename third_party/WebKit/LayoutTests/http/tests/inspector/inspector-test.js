@@ -23,6 +23,10 @@ console.assert = function(condition, object)
     InspectorTest.addResult(new Error(message).stack);
 }
 
+InspectorTest.markStep = function(title) {
+    InspectorTest.addResult('\nRunning: ' + title);
+}
+
 InspectorTest.startDumpingProtocolMessages = function()
 {
     Protocol.InspectorBackend.Connection.prototype._dumpProtocolMessage = testRunner.logToStderr.bind(testRunner);
@@ -50,6 +54,20 @@ InspectorTest.evaluateInPage = function(code, callback)
             callback(InspectorTest.runtimeModel.createRemoteObject(result), exceptionDetails);
     }
     InspectorTest.RuntimeAgent.evaluate(code, "console", false, mycallback);
+}
+
+InspectorTest.addScriptUISourceCode = function(url, content, isContentScript, worldId) {
+    content += '\n//# sourceURL=' + url;
+    if (isContentScript)
+        content = `testRunner.evaluateScriptInIsolatedWorld(${worldId}, \`${content}\`)`;
+    InspectorTest.evaluateInPagePromise(content);
+    return InspectorTest.waitForUISourceCode(url);
+}
+
+InspectorTest.addScriptForFrame = function(url, content, frame) {
+    content += '\n//# sourceURL=' + url;
+    var executionContext = InspectorTest.runtimeModel.executionContexts().find(context => context.frameId === frame.id);
+    InspectorTest.RuntimeAgent.evaluate(content, "console", false, false, executionContext.id, function() { });
 }
 
 InspectorTest.evaluateInPagePromise = function(code)
@@ -345,7 +363,7 @@ InspectorTest.expandAndDumpEventListeners = function(eventListenersView, callbac
             InspectorTest.addResult("======== " + eventType + " ========");
             var listenerItems = listenerTypes[i].children();
             for (var j = 0; j < listenerItems.length; ++j) {
-                InspectorTest.addResult("== " + listenerItems[j].eventListener().listenerType());
+                InspectorTest.addResult("== " + listenerItems[j].eventListener().origin());
                 InspectorTest.dumpObjectPropertyTreeElement(listenerItems[j]);
             }
         }
@@ -355,7 +373,7 @@ InspectorTest.expandAndDumpEventListeners = function(eventListenersView, callbac
     if (force)
         listenersArrived();
     else
-        InspectorTest.addSniffer(Components.EventListenersView.prototype, "_eventListenersArrivedForTest", listenersArrived);
+        InspectorTest.addSniffer(EventListeners.EventListenersView.prototype, "_eventListenersArrivedForTest", listenersArrived);
 }
 
 InspectorTest.dumpNavigatorView = function(navigatorView, dumpIcons)
@@ -409,7 +427,7 @@ InspectorTest.dumpNavigatorViewInMode = function(view, mode)
     InspectorTest.dumpNavigatorView(view);
 }
 
-InspectorTest.waitForUISourceCode = function(callback, url, projectType)
+InspectorTest.waitForUISourceCode = function(urlSuffix, projectType)
 {
     function matches(uiSourceCode)
     {
@@ -417,25 +435,27 @@ InspectorTest.waitForUISourceCode = function(callback, url, projectType)
             return false;
         if (!projectType && uiSourceCode.project().type() === Workspace.projectTypes.Service)
             return false;
-        if (url && !uiSourceCode.url().endsWith(url))
+        if (urlSuffix && !uiSourceCode.url().endsWith(urlSuffix))
             return false;
         return true;
     }
 
     for (var uiSourceCode of Workspace.workspace.uiSourceCodes()) {
-        if (url && matches(uiSourceCode)) {
-            callback(uiSourceCode);
-            return;
-        }
+        if (urlSuffix && matches(uiSourceCode))
+            return Promise.resolve(uiSourceCode);
     }
 
+    var fulfill;
+    var promise = new Promise(x => fulfill = x);
     Workspace.workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCodeAdded);
+    return promise;
+
     function uiSourceCodeAdded(event)
     {
         if (!matches(event.data))
             return;
         Workspace.workspace.removeEventListener(Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCodeAdded);
-        callback(event.data);
+        fulfill(event.data);
     }
 }
 
@@ -449,9 +469,55 @@ InspectorTest.waitForUISourceCodeRemoved = function(callback)
     }
 }
 
-InspectorTest.createMockTarget = function(name, capabilities, dontAttachToMain)
-{
-    return SDK.targetManager.createTarget(name, capabilities || SDK.Target.Capability.AllForTests, params => new SDK.StubConnection(params), dontAttachToMain ? null : InspectorTest.mainTarget);
+InspectorTest.waitForTarget = function(filter) {
+    filter = filter || (target => true);
+    for (var target of SDK.targetManager.targets()) {
+        if (filter(target))
+            return Promise.resolve(target);
+    }
+    var fulfill;
+    var promise = new Promise(callback => fulfill = callback);
+    var observer = {
+        targetAdded: function(target) {
+            if (filter(target)) {
+                SDK.targetManager.unobserveTargets(observer);
+                fulfill(target);
+            }
+        },
+        targetRemoved: function() {
+        },
+    };
+    SDK.targetManager.observeTargets(observer);
+    return promise;
+}
+
+InspectorTest.waitForExecutionContext = function(runtimeModel) {
+    if (runtimeModel.executionContexts().length)
+        return Promise.resolve(runtimeModel.executionContexts()[0]);
+    var fulfill;
+    var promise = new Promise(callback => fulfill = callback);
+    function onContext(event) {
+      runtimeModel.removeEventListener(SDK.RuntimeModel.Events.ExecutionContextCreated, onContext);
+      fulfill(event.data);
+    }
+    runtimeModel.addEventListener(SDK.RuntimeModel.Events.ExecutionContextCreated, onContext);
+    return promise;
+}
+
+InspectorTest.waitForExecutionContextDestroyed = function(context) {
+    var runtimeModel = context.runtimeModel;
+    if (runtimeModel.executionContexts().indexOf(context) === -1)
+        return Promise.resolve();
+    var fulfill;
+    var promise = new Promise(callback => fulfill = callback);
+    function onContext(event) {
+        if (event.data === context) {
+            runtimeModel.removeEventListener(SDK.RuntimeModel.Events.ExecutionContextDestroyed, onContext);
+            fulfill();
+        }
+    }
+    runtimeModel.addEventListener(SDK.RuntimeModel.Events.ExecutionContextDestroyed, onContext);
+    return promise;
 }
 
 InspectorTest.assertGreaterOrEqual = function(a, b, message)
@@ -464,6 +530,14 @@ InspectorTest.navigate = function(url, callback)
 {
     InspectorTest._pageLoadedCallback = InspectorTest.safeWrap(callback);
     InspectorTest.evaluateInPage("window.location.replace('" + url + "')");
+}
+
+InspectorTest.navigatePromise = function(url)
+{
+    var fulfill;
+    var promise = new Promise(callback => fulfill = callback);
+    InspectorTest.navigate(url, fulfill);
+    return promise;
 }
 
 InspectorTest.hardReloadPage = function(callback, scriptToEvaluateOnLoad, scriptPreprocessor)
@@ -657,7 +731,7 @@ InspectorTest.addSnifferPromise = function(receiver, methodName)
 
 InspectorTest.addConsoleSniffer = function(override, opt_sticky)
 {
-    InspectorTest.addSniffer(SDK.ConsoleModel.prototype, "addMessage", override, opt_sticky);
+    InspectorTest.addSniffer(ConsoleModel.ConsoleModel.prototype, "addMessage", override, opt_sticky);
 }
 
 InspectorTest.override = function(receiver, methodName, override, opt_sticky)
@@ -747,7 +821,7 @@ InspectorTest.hideInspectorView = function()
 
 InspectorTest.mainFrame = function()
 {
-    return SDK.ResourceTreeModel.fromTarget(InspectorTest.mainTarget).mainFrame;
+    return InspectorTest.resourceTreeModel.mainFrame;
 }
 
 InspectorTest.StringOutputStream = function(callback)
@@ -955,28 +1029,27 @@ SDK.targetManager.observeTargets({
         InspectorTest.HeapProfilerAgent = target.heapProfilerAgent();
         InspectorTest.InspectorAgent = target.inspectorAgent();
         InspectorTest.NetworkAgent = target.networkAgent();
+        InspectorTest.OverlayAgent = target.overlayAgent();
         InspectorTest.PageAgent = target.pageAgent();
         InspectorTest.ProfilerAgent = target.profilerAgent();
         InspectorTest.RuntimeAgent = target.runtimeAgent();
         InspectorTest.TargetAgent = target.targetAgent();
 
-        InspectorTest.consoleModel = target.consoleModel;
-        InspectorTest.networkManager = SDK.NetworkManager.fromTarget(target);
-        InspectorTest.securityOriginManager = SDK.SecurityOriginManager.fromTarget(target);
-        InspectorTest.resourceTreeModel = SDK.ResourceTreeModel.fromTarget(target);
-        InspectorTest.networkLog = SDK.NetworkLog.fromTarget(target);
-        InspectorTest.debuggerModel = SDK.DebuggerModel.fromTarget(target);
-        InspectorTest.runtimeModel = target.runtimeModel;
-        InspectorTest.domModel = SDK.DOMModel.fromTarget(target);
-        InspectorTest.cssModel = SDK.CSSModel.fromTarget(target);
-        InspectorTest.powerProfiler = target.powerProfiler;
-        InspectorTest.cpuProfilerModel = target.cpuProfilerModel;
-        InspectorTest.heapProfilerModel = target.heapProfilerModel;
-        InspectorTest.animationModel = target.animationModel;
-        InspectorTest.serviceWorkerCacheModel = target.serviceWorkerCacheModel;
-        InspectorTest.serviceWorkerManager = target.serviceWorkerManager;
-        InspectorTest.tracingManager = target.tracingManager;
+        InspectorTest.networkManager = target.model(SDK.NetworkManager);
+        InspectorTest.securityOriginManager = target.model(SDK.SecurityOriginManager);
+        InspectorTest.resourceTreeModel = target.model(SDK.ResourceTreeModel);
+        InspectorTest.debuggerModel = target.model(SDK.DebuggerModel);
+        InspectorTest.runtimeModel = target.model(SDK.RuntimeModel);
+        InspectorTest.domModel = target.model(SDK.DOMModel);
+        InspectorTest.domDebuggerModel = target.model(SDK.DOMDebuggerModel);
+        InspectorTest.cssModel = target.model(SDK.CSSModel);
+        InspectorTest.cpuProfilerModel = target.model(SDK.CPUProfilerModel);
+        InspectorTest.overlayModel = target.model(SDK.OverlayModel);
+        InspectorTest.serviceWorkerManager = target.model(SDK.ServiceWorkerManager);
+        InspectorTest.tracingManager = target.model(SDK.TracingManager);
         InspectorTest.mainTarget = target;
+        InspectorTest.consoleModel = ConsoleModel.consoleModel;
+        InspectorTest.networkLog = NetworkLog.networkLog;
     },
 
     targetRemoved: function(target) { }

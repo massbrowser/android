@@ -12,13 +12,17 @@ import android.view.ViewGroup;
 
 import org.chromium.base.Callback;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ntp.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder.PartialBindCallback;
 import org.chromium.chrome.browser.ntp.snippets.SectionHeaderViewHolder;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticleViewHolder;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
+import org.chromium.chrome.browser.suggestions.TileGrid;
+import org.chromium.chrome.browser.suggestions.TileGroup;
 import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
 
 import java.util.List;
@@ -37,14 +41,16 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
     @Nullable
     private final View mAboveTheFoldView;
     private final UiConfig mUiConfig;
-    private NewTabPageRecyclerView mRecyclerView;
+    private SuggestionsRecyclerView mRecyclerView;
 
     private final InnerNode mRoot;
 
     @Nullable
     private final AboveTheFoldItem mAboveTheFold;
-    private final SectionList mSections;
-    private final SignInPromo mSigninPromo;
+//    @Nullable
+//    private final TileGrid mTileGrid;
+//    private final SectionList mSections;
+//    private final SignInPromo mSigninPromo;
     private final AllDismissedItem mAllDismissed;
     private final Footer mFooter;
     private final SpacingItem mBottomSpacer;
@@ -58,10 +64,11 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
      * @param uiConfig the NTP UI configuration, to be passed to created views.
      * @param offlinePageBridge used to determine if articles are available.
      * @param contextMenuManager used to build context menus.
+     * @param tileGroupDelegate if not null this is used to build a {@link TileGrid}.
      */
     public NewTabPageAdapter(SuggestionsUiDelegate uiDelegate, @Nullable View aboveTheFoldView,
             UiConfig uiConfig, OfflinePageBridge offlinePageBridge,
-            ContextMenuManager contextMenuManager) {
+            ContextMenuManager contextMenuManager, @Nullable TileGroup.Delegate tileGroupDelegate) {
         mUiDelegate = uiDelegate;
         mContextMenuManager = contextMenuManager;
 
@@ -69,8 +76,8 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         mUiConfig = uiConfig;
         mRoot = new InnerNode();
 
-        mSections = new SectionList(mUiDelegate, offlinePageBridge);
-        mSigninPromo = new SignInPromo(mUiDelegate);
+//        mSections = new SectionList(mUiDelegate, offlinePageBridge);
+//        mSigninPromo = new SignInPromo(mUiDelegate);
         mAllDismissed = new AllDismissedItem();
         mFooter = new Footer();
 
@@ -80,15 +87,23 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
             mAboveTheFold = new AboveTheFoldItem();
             mRoot.addChild(mAboveTheFold);
         }
-        mRoot.addChildren(mSections, mSigninPromo, mAllDismissed, mFooter);
-        if (mAboveTheFoldView == null) {
+//        if (tileGroupDelegate == null) {
+//            mTileGrid = null;
+//        } else {
+//            mTileGrid = new TileGrid(
+//                    uiDelegate, mContextMenuManager, tileGroupDelegate, offlinePageBridge);
+//            mRoot.addChild(mTileGrid);
+//        }
+        mRoot.addChildren(/*mSections,*/ /*mSigninPromo, */mAllDismissed, mFooter);
+        if (mAboveTheFoldView == null
+                || ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_CONDENSED_LAYOUT)) {
             mBottomSpacer = null;
         } else {
             mBottomSpacer = new SpacingItem();
             mRoot.addChild(mBottomSpacer);
         }
 
-        updateAllDismissedVisibility();
+//        updateAllDismissedVisibility();
         mRoot.setParent(this);
     }
 
@@ -105,6 +120,9 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         switch (viewType) {
             case ItemViewType.ABOVE_THE_FOLD:
                 return new NewTabPageViewHolder(mAboveTheFoldView);
+
+//            case ItemViewType.TILE_GRID:
+//                return new TileGrid.ViewHolder(mRecyclerView);
 
             case ItemViewType.HEADER:
                 return new SectionHeaderViewHolder(mRecyclerView, mUiConfig);
@@ -126,14 +144,14 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
                 return new ActionItem.ViewHolder(
                         mRecyclerView, mContextMenuManager, mUiDelegate, mUiConfig);
 
-            case ItemViewType.PROMO:
-                return new SignInPromo.ViewHolder(mRecyclerView, mContextMenuManager, mUiConfig);
+//            case ItemViewType.PROMO:
+//                return new SignInPromo.ViewHolder(mRecyclerView, mContextMenuManager, mUiConfig);
 
             case ItemViewType.FOOTER:
                 return new Footer.ViewHolder(mRecyclerView, mUiDelegate.getNavigationDelegate());
 
-            case ItemViewType.ALL_DISMISSED:
-                return new AllDismissedItem.ViewHolder(mRecyclerView, mSections);
+//            case ItemViewType.ALL_DISMISSED:
+//                return new AllDismissedItem.ViewHolder(mRecyclerView, mSections);
         }
 
         assert false : viewType;
@@ -163,6 +181,17 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         return mRoot.getItemCount();
     }
 
+    /** Resets suggestions, pulling the current state as known by the backend. */
+    public void refreshSuggestions() {
+//        if (ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_HOME)) {
+//            mSections.synchroniseWithSource();
+//        } else {
+//            mSections.refreshSuggestions();
+//        }
+
+//        if (mTileGrid != null) mTileGrid.getTileGroup().onSwitchToForeground();
+    }
+
     public int getAboveTheFoldPosition() {
         if (mAboveTheFoldView == null) return RecyclerView.NO_POSITION;
 
@@ -180,9 +209,9 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         return RecyclerView.NO_POSITION;
     }
 
-    int getLastContentItemPosition() {
-        return getChildPositionOffset(hasAllBeenDismissed() ? mAllDismissed : mFooter);
-    }
+//    int getLastContentItemPosition() {
+//        return getChildPositionOffset(hasAllBeenDismissed() ? mAllDismissed : mFooter);
+//    }
 
     int getBottomSpacerPosition() {
         if (mBottomSpacer == null) return RecyclerView.NO_POSITION;
@@ -190,11 +219,11 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         return getChildPositionOffset(mBottomSpacer);
     }
 
-    private void updateAllDismissedVisibility() {
-        boolean showAllDismissed = hasAllBeenDismissed();
-        mAllDismissed.setVisible(showAllDismissed);
-        mFooter.setVisible(!showAllDismissed);
-    }
+//    private void updateAllDismissedVisibility() {
+//        boolean showAllDismissed = hasAllBeenDismissed();
+//        mAllDismissed.setVisible(showAllDismissed);
+//        mFooter.setVisible(!showAllDismissed);
+//    }
 
     @Override
     public void onItemRangeChanged(TreeNode child, int itemPosition, int itemCount,
@@ -209,7 +238,7 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         notifyItemRangeInserted(itemPosition, itemCount);
         if (mBottomSpacer != null) mBottomSpacer.refresh();
 
-        updateAllDismissedVisibility();
+//        updateAllDismissedVisibility();
     }
 
     @Override
@@ -218,7 +247,7 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         notifyItemRangeRemoved(itemPosition, itemCount);
         if (mBottomSpacer != null) mBottomSpacer.refresh();
 
-        updateAllDismissedVisibility();
+//        updateAllDismissedVisibility();
     }
 
     @Override
@@ -230,9 +259,9 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         assert mRecyclerView == null;
 
         // FindBugs chokes on the cast below when not checked, raising BC_UNCONFIRMED_CAST
-        assert recyclerView instanceof NewTabPageRecyclerView;
+        assert recyclerView instanceof SuggestionsRecyclerView;
 
-        mRecyclerView = (NewTabPageRecyclerView) recyclerView;
+        mRecyclerView = (SuggestionsRecyclerView) recyclerView;
     }
 
     /**
@@ -254,9 +283,9 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         mRoot.dismissItem(position, itemRemovedCallback);
     }
 
-    private boolean hasAllBeenDismissed() {
-        return mSections.isEmpty() && !mSigninPromo.isVisible();
-    }
+//    private boolean hasAllBeenDismissed() {
+//        return mSections.isEmpty() /*&& !mSigninPromo.isVisible()*/;
+//    }
 
     private int getChildPositionOffset(TreeNode child) {
         return mRoot.getStartingOffsetForChild(child);
@@ -276,9 +305,9 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder> implements 
         return RecyclerView.NO_POSITION;
     }
 
-    SectionList getSectionListForTesting() {
-        return mSections;
-    }
+//    SectionList getSectionListForTesting() {
+//        return mSections;
+//    }
 
     InnerNode getRootForTesting() {
         return mRoot;

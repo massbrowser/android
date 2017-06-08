@@ -12,6 +12,7 @@
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -100,7 +101,7 @@ class UpdateSieve {
   int64_t GetMinVersion() const { return min_version_; }
 
  private:
-  typedef std::map<ModelType, int64_t> ModelTypeToVersionMap;
+  using ModelTypeToVersionMap = std::map<ModelType, int64_t>;
 
   // Creates an UpdateSieve.
   UpdateSieve(const ModelTypeToVersionMap request_from_version,
@@ -522,6 +523,7 @@ bool LoopbackServer::SaveStateToFile(const base::FilePath& filename) const {
     return false;
   }
   int result = base::WriteFile(filename, serialized.data(), serialized.size());
+  UMA_HISTOGRAM_MEMORY_KB("Sync.Local.FileSize", result);
   return result == static_cast<int>(serialized.size());
 }
 

@@ -31,7 +31,6 @@ class TrieWriter {
   enum : uint8_t { kTerminalValue = 0, kEndOfTableValue = 127 };
 
   TrieWriter(const HuffmanRepresentationTable& huffman_table,
-             const NameIDMap& domain_ids_map,
              const NameIDMap& expect_ct_report_uri_map,
              const NameIDMap& expect_staple_report_uri_map,
              const NameIDMap& pinsets_map,
@@ -39,8 +38,10 @@ class TrieWriter {
   ~TrieWriter();
 
   // Constructs a trie containing all |entries|. The output is written to
-  // |buffer_|. Returns the position of the trie root.
-  uint32_t WriteEntries(const TransportSecurityStateEntries& entries);
+  // |buffer_| and |*position| is set to the position of the trie root. Returns
+  // true on success and false on failure.
+  bool WriteEntries(const TransportSecurityStateEntries& entries,
+                    uint32_t* position);
 
   // Returns the position |buffer_| is currently at. The returned value
   // represents the number of bits.
@@ -54,11 +55,12 @@ class TrieWriter {
   const std::vector<uint8_t>& bytes() const { return buffer_.bytes(); }
 
  private:
-  uint32_t WriteDispatchTables(ReversedEntries::iterator start,
-                               ReversedEntries::iterator end);
+  bool WriteDispatchTables(ReversedEntries::iterator start,
+                           ReversedEntries::iterator end,
+                           uint32_t* position);
 
   // Serializes |*entry| and writes it to |*writer|.
-  void WriteEntry(const TransportSecurityStateEntry* entry,
+  bool WriteEntry(const TransportSecurityStateEntry* entry,
                   TrieBitBuffer* writer);
 
   // Removes the first |length| characters from all entries between |start| and
@@ -69,8 +71,9 @@ class TrieWriter {
 
   // Searches for the longest common prefix for all entries between |start| and
   // |end|.
-  std::vector<uint8_t> LongestCommonPrefix(ReversedEntries::iterator start,
-                                           ReversedEntries::iterator end) const;
+  std::vector<uint8_t> LongestCommonPrefix(
+      ReversedEntries::const_iterator start,
+      ReversedEntries::const_iterator end) const;
 
   // Returns the reversed |hostname| as a vector of bytes. The reversed hostname
   // will be terminated by |kTerminalValue|.
@@ -78,7 +81,6 @@ class TrieWriter {
 
   BitWriter buffer_;
   const HuffmanRepresentationTable& huffman_table_;
-  const NameIDMap& domain_ids_map_;
   const NameIDMap& expect_ct_report_uri_map_;
   const NameIDMap& expect_staple_report_uri_map_;
   const NameIDMap& pinsets_map_;

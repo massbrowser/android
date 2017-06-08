@@ -15,9 +15,13 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 
 /**
- * {@link CronetEngine} that exposes experimental features. Use {@link Builder} to build an
- * instance of this class. Every instance of {@link CronetEngine} can be casted to an instance
- * of this class.
+ * {@link CronetEngine} that exposes experimental features. To obtain an
+ * instance of this class, cast a {@code CronetEngine} to this type. Every
+ * instance of {@code CronetEngine} can be cast to an instance of this class,
+ * as they are backed by the same implementation and hence perform identically.
+ * Instances of this class are not meant for general use, but instead only
+ * to access experimental features. Experimental features may be deprecated in the
+ * future. Use at your own risk.
  *
  * {@hide since this class exposes experimental features that should be hidden.}
  */
@@ -70,7 +74,10 @@ public abstract class ExperimentalCronetEngine extends CronetEngine {
     public static final int EFFECTIVE_CONNECTION_TYPE_4G = 5;
 
     /**
-     * Builder for building {@link ExperimentalCronetEngine}.
+     * A version of {@link CronetEngine.Builder} that exposes experimental
+     * features. Instances of this class are not meant for general use, but
+     * instead only to access experimental features. Experimental features
+     * may be deprecated in the future. Use at your own risk.
      */
     public static class Builder extends CronetEngine.Builder {
         /**
@@ -128,37 +135,6 @@ public abstract class ExperimentalCronetEngine extends CronetEngine {
          */
         public Builder setCertVerifierData(String certVerifierData) {
             mBuilderDelegate.setCertVerifierData(certVerifierData);
-            return this;
-        }
-
-        /**
-         * Overrides
-         * <a href="https://developer.chrome.com/multidevice/data-compression">
-         * Data Reduction Proxy</a> configuration parameters with a primary
-         * proxy name, fallback proxy name, and a secure proxy check URL. Proxies
-         * are specified as [scheme://]host[:port]. Used for testing.
-         * @param primaryProxy the primary data reduction proxy to use.
-         * @param fallbackProxy a fallback data reduction proxy to use.
-         * @param secureProxyCheckUrl a URL to fetch to determine if using a secure
-         * proxy is allowed.
-         * @return the builder to facilitate chaining.
-         */
-        public Builder setDataReductionProxyOptions(
-                String primaryProxy, String fallbackProxy, String secureProxyCheckUrl) {
-            mBuilderDelegate.setDataReductionProxyOptions(
-                    primaryProxy, fallbackProxy, secureProxyCheckUrl);
-            return this;
-        }
-
-        /**
-         * Enables
-         * <a href="https://developer.chrome.com/multidevice/data-compression">Data
-         * Reduction Proxy</a>. Defaults to disabled.
-         * @param key key to use when authenticating with the proxy.
-         * @return the builder to facilitate chaining.
-         */
-        public Builder enableDataReductionProxy(String key) {
-            mBuilderDelegate.enableDataReductionProxy(key);
             return this;
         }
 

@@ -484,11 +484,7 @@ cr.define('print_preview', function() {
      * @private
      */
     createPlugin_: function(srcUrl) {
-      if (this.plugin_) {
-        console.warn('Pdf preview plugin already created');
-        return;
-      }
-
+      assert(!this.plugin_);
       this.plugin_ = /** @type {print_preview.PDFPlugin} */(
           PDFCreateOutOfProcessPlugin(srcUrl));
       this.plugin_.setKeyEventCallback(this.keyEventCallback_);
@@ -503,15 +499,9 @@ cr.define('print_preview', function() {
       this.getChildElement('.preview-area-plugin-wrapper').
           appendChild(/** @type {Node} */(this.plugin_));
 
-
-      var pageNumbers =
-          this.printTicketStore_.pageRange.getPageNumberSet().asArray();
-      var grayscale = !this.printTicketStore_.color.getValue();
       this.plugin_.setLoadCallback(this.onPluginLoad_.bind(this));
       this.plugin_.setViewportChangedCallback(
           this.onPreviewVisualStateChange_.bind(this));
-      this.plugin_.resetPrintPreviewMode(srcUrl, grayscale, pageNumbers,
-                                         this.documentInfo_.isModifiable);
     },
 
     /**
@@ -569,14 +559,13 @@ cr.define('print_preview', function() {
       this.isPluginReloaded_ = false;
       if (!this.plugin_) {
         this.createPlugin_(event.previewUrl);
-      } else {
-        var grayscale = !this.printTicketStore_.color.getValue();
-        var pageNumbers =
-            this.printTicketStore_.pageRange.getPageNumberSet().asArray();
-        var url = event.previewUrl;
-        this.plugin_.resetPrintPreviewMode(url, grayscale, pageNumbers,
-                                           this.documentInfo_.isModifiable);
       }
+      this.plugin_.resetPrintPreviewMode(
+          event.previewUrl,
+          !this.printTicketStore_.color.getValue(),
+          this.printTicketStore_.pageRange.getPageNumberSet().asArray(),
+          this.documentInfo_.isModifiable);
+
       cr.dispatchSimpleEvent(
           this, PreviewArea.EventType.PREVIEW_GENERATION_IN_PROGRESS);
     },
@@ -602,14 +591,21 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Called when the generation of a preview fails. Shows an error message.
-     * @private
+     * Cancels the timeout so that an error message can be shown.
      */
-    onPreviewGenerationFail_: function() {
+    cancelTimeout: function() {
       if (this.loadingTimeout_) {
         clearTimeout(this.loadingTimeout_);
         this.loadingTimeout_ = null;
       }
+    },
+
+    /**
+     * Called when the generation of a preview fails. Shows an error message.
+     * @private
+     */
+    onPreviewGenerationFail_: function() {
+      this.cancelTimeout();
       this.showMessage_(PreviewArea.MessageId_.PREVIEW_FAILED);
       cr.dispatchSimpleEvent(
           this, PreviewArea.EventType.PREVIEW_GENERATION_FAIL);
@@ -622,11 +618,7 @@ cr.define('print_preview', function() {
      * @private
      */
     onPluginLoad_: function() {
-      if (this.loadingTimeout_) {
-        clearTimeout(this.loadingTimeout_);
-        this.loadingTimeout_ = null;
-      }
-
+      this.cancelTimeout();
       this.setOverlayVisible_(false);
       this.isPluginReloaded_ = true;
       this.dispatchPreviewGenerationDoneIfReady_();

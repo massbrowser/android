@@ -10,6 +10,7 @@
 
 #include "base/files/file_path.h"
 #include "base/json/json_reader.h"
+#include "base/memory/ptr_util.h"
 #include "base/unguessable_token.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message.h"
@@ -97,13 +98,13 @@ TEST(IPCMessageUtilsTest, StackVector) {
 // Tests that PickleSizer and Pickle agree on the size of a complex base::Value.
 TEST(IPCMessageUtilsTest, ValueSize) {
   std::unique_ptr<base::DictionaryValue> value(new base::DictionaryValue);
-  value->SetWithoutPathExpansion("foo", new base::FundamentalValue(42));
-  value->SetWithoutPathExpansion("bar", new base::FundamentalValue(3.14));
-  value->SetWithoutPathExpansion("baz", new base::StringValue("hello"));
-  value->SetWithoutPathExpansion("qux", base::Value::CreateNullValue());
+  value->SetWithoutPathExpansion("foo", new base::Value(42));
+  value->SetWithoutPathExpansion("bar", new base::Value(3.14));
+  value->SetWithoutPathExpansion("baz", new base::Value("hello"));
+  value->SetWithoutPathExpansion("qux", base::MakeUnique<base::Value>());
 
   std::unique_ptr<base::DictionaryValue> nested_dict(new base::DictionaryValue);
-  nested_dict->SetWithoutPathExpansion("foobar", new base::FundamentalValue(5));
+  nested_dict->SetWithoutPathExpansion("foobar", new base::Value(5));
   value->SetWithoutPathExpansion("nested", std::move(nested_dict));
 
   std::unique_ptr<base::ListValue> list_value(new base::ListValue);
@@ -212,6 +213,26 @@ TEST(IPCMessageUtilsTest, UnguessableTokenTest) {
   base::PickleIterator iter(pickle);
   EXPECT_TRUE(IPC::ReadParam(&pickle, &iter, &deserialized_token));
   EXPECT_EQ(token, deserialized_token);
+}
+
+TEST(IPCMessageUtilsTest, FlatMap) {
+  base::flat_map<std::string, int> input;
+  input["foo"] = 42;
+  input["bar"] = 96;
+
+  base::Pickle pickle;
+  IPC::WriteParam(&pickle, input);
+
+  base::PickleSizer sizer;
+  IPC::GetParamSize(&sizer, input);
+
+  EXPECT_EQ(sizer.payload_size(), pickle.payload_size());
+
+  base::PickleIterator iter(pickle);
+  base::flat_map<std::string, int> output;
+  EXPECT_TRUE(IPC::ReadParam(&pickle, &iter, &output));
+
+  EXPECT_EQ(input, output);
 }
 
 }  // namespace

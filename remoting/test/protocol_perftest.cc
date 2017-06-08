@@ -242,7 +242,8 @@ class ProtocolPerfTest
   void StartHostAndClient(bool use_webrtc) {
     fake_network_dispatcher_ =  new FakeNetworkDispatcher();
 
-    client_signaling_.reset(new FakeSignalStrategy(kClientJid));
+    client_signaling_.reset(
+        new FakeSignalStrategy(SignalingAddress(kClientJid)));
 
     jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
 
@@ -261,7 +262,7 @@ class ProtocolPerfTest
 
     jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
 
-    host_signaling_.reset(new FakeSignalStrategy(kHostJid));
+    host_signaling_.reset(new FakeSignalStrategy(SignalingAddress(kHostJid)));
     host_signaling_->set_send_delay(GetParam().signaling_latency);
     host_signaling_->ConnectTo(client_signaling_.get());
 
@@ -310,7 +311,8 @@ class ProtocolPerfTest
         protocol::GetSharedSecretHash(kHostId, kHostPin);
     std::unique_ptr<protocol::AuthenticatorFactory> auth_factory =
         protocol::Me2MeHostAuthenticatorFactory::CreateWithPin(
-            true, kHostOwner, host_cert, key_pair, "", host_pin_hash, nullptr);
+            true, kHostOwner, host_cert, key_pair, std::vector<std::string>(),
+            host_pin_hash, nullptr);
     host_->SetAuthenticatorFactory(std::move(auth_factory));
 
     host_->AddStatusObserver(this);

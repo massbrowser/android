@@ -6,15 +6,14 @@
             android:orientation="vertical"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="24dp">
+            android:padding="16dp">
 
         <TextView android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:text="@string/your_balance"
-                  android:layout_marginBottom="17dp"
+                  android:layout_marginBottom="16dp"
                   android:textColor="@android:color/black"
                   android:textSize="20sp"/>
-
 
         <RadioGroup
                 android:id="@+id/coin_group"
@@ -39,7 +38,7 @@
                     android:drawableStart="@drawable/masscoin_selector"
                     android:textStyle="bold"
                     android:textColor="@color/coins_text_color"
-                    android:text="@string/_100"
+                    android:text="@string/zero"
             />
             <View android:layout_width="1dp"
                   android:layout_height="match_parent"
@@ -59,7 +58,7 @@
                     android:drawableStart="@drawable/bitcoin_selector"
                     android:textStyle="bold"
                     android:textColor="@color/coins_text_color"
-                    android:text=""/>
+                    android:text="@string/zero"/>
             <View android:layout_width="1dp"
                   android:layout_height="match_parent"
                   android:background="#d8d8d8"/>
@@ -78,34 +77,50 @@
                     android:drawableStart="@drawable/dollar_selector"
                     android:textStyle="bold"
                     android:textColor="@color/coins_text_color"
-                    android:text=""/>
+                    android:text="@string/zero"/>
         </RadioGroup>
 
         <TextView
                 android:id="@+id/use_time"
                 android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:layout_marginBottom="12dp"
-                  android:textColor="@android:color/black"
-                  android:textSize="14sp"
-                  android:text="@string/use_time_text"/>
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:textColor="@android:color/black"
+                android:textSize="14sp"
+                android:text="@string/use_time_text"/>
 
         <TextView android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
-                  android:layout_marginBottom="24dp"
+                  android:layout_marginBottom="8dp"
                   android:textColor="@android:color/black"
                   android:textSize="14sp"
                   android:text="@string/you_can_see_your_balance"/>
 
+        <TextView
+                android:id="@+id/how_invite_work"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="#0890fc"
+                android:text="@string/how_invites_work"/>
+
+        <Button
+                android:id="@+id/refer_friend"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAllCaps="false"
+                android:text="@string/refer_friend"/>
+
         <View android:layout_width="match_parent"
               android:layout_height="2dp"
+              android:layout_marginBottom="16dp"
+              android:layout_marginTop="16dp"
               android:background="#ededed"/>
 
         <TextView android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:text="@string/withdrawals"
                   android:layout_marginBottom="16dp"
-                  android:layout_marginTop="24dp"
                   android:textColor="@android:color/black"
                   android:textSize="20sp"/>
         <LinearLayout android:layout_width="match_parent"
@@ -132,7 +147,5 @@
                 android:textColor="@android:color/black"
                 android:textSize="14sp"
                 android:text="@string/feature_in_march_2017"/>
-
-
     </LinearLayout>
 </ScrollView>

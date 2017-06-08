@@ -51,8 +51,8 @@ class SafeBrowsingCallbackWaiter {
      DCHECK_CURRENTLY_ON(BrowserThread::IO);
      BrowserThread::PostTask(
          BrowserThread::UI, FROM_HERE,
-         base::Bind(&SafeBrowsingCallbackWaiter::OnBlockingPageDone,
-                    base::Unretained(this), proceed));
+         base::BindOnce(&SafeBrowsingCallbackWaiter::OnBlockingPageDone,
+                        base::Unretained(this), proceed));
    }
 
    void WaitForCallback() {
@@ -350,9 +350,10 @@ class TestSafeBrowsingBlockingPage : public SafeBrowsingBlockingPage {
                 false,
                 false,
                 false,
-                false)) {
+                false,
+                BaseBlockingPage::IsMainPageLoadBlocked(unsafe_resources))) {
     // Don't delay details at all for the unittest.
-    threat_details_proceed_delay_ms_ = 0;
+    SetThreatDetailsProceedDelayForTesting(0);
     DontCreateViewForTesting();
   }
 };

@@ -19,9 +19,8 @@
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/profiles/profile_util.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/drive/drive_notification_manager_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
@@ -51,6 +50,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/user_agent.h"
 #include "google_apis/drive/auth_service.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -264,7 +264,7 @@ DriveIntegrationService::DriveIntegrationService(
         blocking_task_runner_.get(),
         GURL(google_apis::DriveApiUrlGenerator::kBaseUrlForProduction),
         GURL(google_apis::DriveApiUrlGenerator::kBaseThumbnailUrlForProduction),
-        GetDriveUserAgent()));
+        GetDriveUserAgent(), NO_TRAFFIC_ANNOTATION_YET));
   }
   scheduler_.reset(new JobScheduler(
       profile_->GetPrefs(),
@@ -638,7 +638,7 @@ DriveIntegrationServiceFactory::DriveIntegrationServiceFactory()
         BrowserContextDependencyManager::GetInstance()) {
   DependsOn(ProfileOAuth2TokenServiceFactory::GetInstance());
   DependsOn(DriveNotificationManagerFactory::GetInstance());
-  DependsOn(DownloadServiceFactory::GetInstance());
+  DependsOn(DownloadCoreServiceFactory::GetInstance());
 }
 
 DriveIntegrationServiceFactory::~DriveIntegrationServiceFactory() {

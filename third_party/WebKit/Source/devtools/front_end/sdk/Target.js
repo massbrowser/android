@@ -10,20 +10,34 @@
 SDK.Target = class extends Protocol.TargetBase {
   /**
    * @param {!SDK.TargetManager} targetManager
+   * @param {string} id
    * @param {string} name
    * @param {number} capabilitiesMask
    * @param {!Protocol.InspectorBackend.Connection.Factory} connectionFactory
    * @param {?SDK.Target} parentTarget
    */
-  constructor(targetManager, name, capabilitiesMask, connectionFactory, parentTarget) {
+  constructor(targetManager, id, name, capabilitiesMask, connectionFactory, parentTarget) {
     super(connectionFactory);
     this._targetManager = targetManager;
     this._name = name;
     this._inspectedURL = '';
     this._capabilitiesMask = capabilitiesMask;
     this._parentTarget = parentTarget;
-    this._id = SDK.Target._nextId++;
+    this._id = id;
     this._modelByConstructor = new Map();
+  }
+
+  createModels(required) {
+    this._creatingModels = true;
+    // TODO(dgozman): fix this in bindings layer.
+    this.model(SDK.ResourceTreeModel);
+    var registered = Array.from(SDK.SDKModel._registeredModels.keys());
+    for (var modelClass of registered) {
+      var info = SDK.SDKModel._registeredModels.get(modelClass);
+      if (info.autostart || required.has(modelClass))
+        this.model(modelClass);
+    }
+    this._creatingModels = false;
   }
 
   /**
@@ -39,7 +53,7 @@ SDK.Target = class extends Protocol.TargetBase {
   }
 
   /**
-   * @return {number}
+   * @return {string}
    */
   id() {
     return this._id;
@@ -140,13 +154,14 @@ SDK.Target = class extends Protocol.TargetBase {
    */
   model(modelClass) {
     if (!this._modelByConstructor.get(modelClass)) {
-      var capabilities = SDK.SDKModel._capabilitiesByModelClass.get(modelClass);
-      if (capabilities === undefined)
-        throw 'Model class is not registered';
-      if ((this._capabilitiesMask & capabilities) === capabilities) {
+      var info = SDK.SDKModel._registeredModels.get(modelClass);
+      if (info === undefined)
+        throw 'Model class is not registered @' + new Error().stack;
+      if ((this._capabilitiesMask & info.capabilities) === info.capabilities) {
         var model = new modelClass(this);
         this._modelByConstructor.set(modelClass, model);
-        this._targetManager.modelAdded(this, modelClass, model);
+        if (!this._creatingModels)
+          this._targetManager.modelAdded(this, modelClass, model);
       }
     }
     return this._modelByConstructor.get(modelClass) || null;
@@ -185,24 +200,29 @@ SDK.Target = class extends Protocol.TargetBase {
  * @enum {number}
  */
 SDK.Target.Capability = {
-  Browser: 1,
-  DOM: 2,
-  JS: 4,
-  Log: 8,
-  Network: 16,
-  Target: 32,
+  Browser: 1 << 0,
+  DOM: 1 << 1,
+  JS: 1 << 2,
+  Log: 1 << 3,
+  Network: 1 << 4,
+  Target: 1 << 5,
+  ScreenCapture: 1 << 6,
+  Tracing: 1 << 7,
+  Emulation: 1 << 8,
+  Security: 1 << 9,
+  Input: 1 << 10,
+  Inspector: 1 << 11,
+  DeviceEmulation: 1 << 12,
 
   None: 0,
 
-  AllForTests: 63
+  AllForTests: (1 << 13) - 1
 };
-
-SDK.Target._nextId = 1;
 
 /**
  * @unrestricted
  */
-SDK.SDKObject = class extends Common.Object {
+SDK.SDKModel = class extends Common.Object {
   /**
    * @param {!SDK.Target} target
    */
@@ -216,18 +236,6 @@ SDK.SDKObject = class extends Common.Object {
    */
   target() {
     return this._target;
-  }
-};
-
-/**
- * @unrestricted
- */
-SDK.SDKModel = class extends SDK.SDKObject {
-  /**
-   * @param {!SDK.Target} target
-   */
-  constructor(target) {
-    super(target);
   }
 
   /**
@@ -252,12 +260,13 @@ SDK.SDKModel = class extends SDK.SDKObject {
 /**
  * @param {function(new:SDK.SDKModel, !SDK.Target)} modelClass
  * @param {number} capabilities
+ * @param {boolean} autostart
  */
-SDK.SDKModel.register = function(modelClass, capabilities) {
-  if (!SDK.SDKModel._capabilitiesByModelClass)
-    SDK.SDKModel._capabilitiesByModelClass = new Map();
-  SDK.SDKModel._capabilitiesByModelClass.set(modelClass, capabilities);
+SDK.SDKModel.register = function(modelClass, capabilities, autostart) {
+  if (!SDK.SDKModel._registeredModels)
+    SDK.SDKModel._registeredModels = new Map();
+  SDK.SDKModel._registeredModels.set(modelClass, {capabilities: capabilities, autostart: autostart});
 };
 
-/** @type {!Map<function(new:SDK.SDKModel, !SDK.Target), number>} */
-SDK.SDKModel._capabilitiesByModelClass;
+/** @type {!Map<function(new:SDK.SDKModel, !SDK.Target), !{capabilities: number, autostart: boolean}>} */
+SDK.SDKModel._registeredModels;

@@ -50,10 +50,10 @@ bool D3D11VideoDecodeAccelerator::Initialize(const Config& config,
   device_ = gl::QueryD3D11DeviceObjectFromANGLE();
   device_->GetImmediateContext(device_context_.Receive());
 
-  HRESULT hr = device_context_.QueryInterface(video_context_.Receive());
+  HRESULT hr = device_context_.CopyTo(video_context_.Receive());
   CHECK(SUCCEEDED(hr));
 
-  hr = device_.QueryInterface(video_device_.Receive());
+  hr = device_.CopyTo(video_device_.Receive());
   CHECK(SUCCEEDED(hr));
 
   bool is_h264 =
@@ -105,7 +105,7 @@ bool D3D11VideoDecodeAccelerator::Initialize(const Config& config,
   base::win::ScopedComPtr<ID3D11VideoDecoder> video_decoder;
   hr = video_device_->CreateVideoDecoder(&desc, &dec_config,
                                          video_decoder.Receive());
-  CHECK(video_decoder.get());
+  CHECK(video_decoder.Get());
 
   h264_accelerator_.reset(new D3D11H264Accelerator(
       this, video_decoder, video_device_, video_context_));

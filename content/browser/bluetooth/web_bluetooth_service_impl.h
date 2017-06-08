@@ -12,7 +12,7 @@
 #include "base/macros.h"
 #include "base/optional.h"
 #include "content/browser/bad_message.h"
-#include "content/browser/bluetooth/bluetooth_allowed_devices_map.h"
+#include "content/browser/bluetooth/bluetooth_allowed_devices.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "device/bluetooth/bluetooth_adapter.h"
@@ -32,6 +32,7 @@ namespace content {
 class BluetoothDeviceChooserController;
 struct CacheQueryResult;
 class FrameConnectedBluetoothDevices;
+struct GATTNotifySessionAndCharacteristicClient;
 class RenderFrameHost;
 class RenderProcessHost;
 
@@ -97,12 +98,11 @@ class CONTENT_EXPORT WebBluetoothServiceImpl
       const std::vector<uint8_t>& value);
 
   // WebBluetoothService methods:
-  void SetClient(
-      blink::mojom::WebBluetoothServiceClientAssociatedPtrInfo client) override;
   void RequestDevice(blink::mojom::WebBluetoothRequestDeviceOptionsPtr options,
                      const RequestDeviceCallback& callback) override;
   void RemoteServerConnect(
       const WebBluetoothDeviceId& device_id,
+      blink::mojom::WebBluetoothServerClientAssociatedPtrInfo client,
       const RemoteServerConnectCallback& callback) override;
   void RemoteServerDisconnect(const WebBluetoothDeviceId& device_id) override;
   void RemoteServerGetPrimaryServices(
@@ -124,6 +124,7 @@ class CONTENT_EXPORT WebBluetoothServiceImpl
       const RemoteCharacteristicWriteValueCallback& callback) override;
   void RemoteCharacteristicStartNotifications(
       const std::string& characteristic_instance_id,
+      blink::mojom::WebBluetoothCharacteristicClientAssociatedPtrInfo client,
       const RemoteCharacteristicStartNotificationsCallback& callback) override;
   void RemoteCharacteristicStopNotifications(
       const std::string& characteristic_instance_id,
@@ -167,6 +168,7 @@ class CONTENT_EXPORT WebBluetoothServiceImpl
   void OnCreateGATTConnectionSuccess(
       const WebBluetoothDeviceId& device_id,
       base::TimeTicks start_time,
+      blink::mojom::WebBluetoothServerClientAssociatedPtr client,
       const RemoteServerConnectCallback& callback,
       std::unique_ptr<device::BluetoothGattConnection> connection);
   void OnCreateGATTConnectionFailed(
@@ -191,6 +193,7 @@ class CONTENT_EXPORT WebBluetoothServiceImpl
 
   // Callbacks for BluetoothRemoteGattCharacteristic::StartNotifySession.
   void OnStartNotifySessionSuccess(
+      blink::mojom::WebBluetoothCharacteristicClientAssociatedPtr client,
       const RemoteCharacteristicStartNotificationsCallback& callback,
       std::unique_ptr<device::BluetoothGattNotifySession> notify_session);
   void OnStartNotifySessionFailed(
@@ -248,15 +251,13 @@ class CONTENT_EXPORT WebBluetoothServiceImpl
   RenderProcessHost* GetRenderProcessHost();
   device::BluetoothAdapter* GetAdapter();
   url::Origin GetOrigin();
+  BluetoothAllowedDevices& allowed_devices();
 
   // Clears all state (maps, sets, etc).
   void ClearState();
 
   // Used to open a BluetoothChooser and start a device discovery session.
   std::unique_ptr<BluetoothDeviceChooserController> device_chooser_controller_;
-
-  // Keeps track of which devices the frame's origin is allowed to access.
-  BluetoothAllowedDevicesMap allowed_devices_map_;
 
   // Maps to get the object's parent based on its instanceID.
   std::unordered_map<std::string, std::string> service_id_to_device_address_;
@@ -274,14 +275,11 @@ class CONTENT_EXPORT WebBluetoothServiceImpl
 
   // Map to keep track of the characteristics' notify sessions.
   std::unordered_map<std::string,
-                     std::unique_ptr<device::BluetoothGattNotifySession>>
+                     std::unique_ptr<GATTNotifySessionAndCharacteristicClient>>
       characteristic_id_to_notify_session_;
 
   // The RFH that owns this instance.
   RenderFrameHost* render_frame_host_;
-
-  // Proxy to the WebBluetoothServiceClient to send device events to.
-  blink::mojom::WebBluetoothServiceClientAssociatedPtr client_;
 
   // The lifetime of this instance is exclusively managed by the RFH that
   // owns it so we use a "Binding" as opposed to a "StrongBinding" which deletes

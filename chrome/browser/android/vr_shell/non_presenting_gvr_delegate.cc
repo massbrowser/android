@@ -4,21 +4,22 @@
 
 #include "chrome/browser/android/vr_shell/non_presenting_gvr_delegate.h"
 
+#include <utility>
+
 #include "base/callback_helpers.h"
-#include "chrome/browser/android/vr_shell/vr_shell.h"
 #include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr.h"
 
 namespace vr_shell {
-
-namespace {
-static constexpr long kPredictionTimeWithoutVsyncNanos = 50000000;
-}  // namespace
 
 NonPresentingGvrDelegate::NonPresentingGvrDelegate(gvr_context* context)
     : task_runner_(base::ThreadTaskRunnerHandle::Get()),
       binding_(this),
       weak_ptr_factory_(this) {
-  gvr_api_ = gvr::GvrApi::WrapNonOwned(context);
+  // Context may be null, see VrShellDelegate#createNonPresentingNativeContext
+  // for possible reasons a context could fail to be created. For example,
+  // the user might uninstall apps or clear data after VR support was detected.
+  if (context)
+    gvr_api_ = gvr::GvrApi::WrapNonOwned(context);
 }
 
 NonPresentingGvrDelegate::~NonPresentingGvrDelegate() {
@@ -38,7 +39,8 @@ void NonPresentingGvrDelegate::OnVRVsyncProviderRequest(
 void NonPresentingGvrDelegate::Pause() {
   vsync_task_.Cancel();
   vsync_paused_ = true;
-  gvr_api_->PauseTracking();
+  if (gvr_api_)
+    gvr_api_->PauseTracking();
 }
 
 void NonPresentingGvrDelegate::Resume() {
@@ -58,10 +60,14 @@ NonPresentingGvrDelegate::OnSwitchToPresentingDelegate() {
 
 void NonPresentingGvrDelegate::StopVSyncLoop() {
   vsync_task_.Cancel();
+  binding_.Close();
   if (!callback_.is_null()) {
-    base::ResetAndReturn(&callback_).Run(nullptr, base::TimeDelta(), -1);
+    base::ResetAndReturn(&callback_)
+        .Run(nullptr, base::TimeDelta(), -1,
+             device::mojom::VRVSyncProvider::Status::CLOSING);
   }
-  gvr_api_->PauseTracking();
+  if (gvr_api_)
+    gvr_api_->PauseTracking();
   // If the loop is stopped, it's not considered to be paused.
   vsync_paused_ = false;
 }
@@ -69,8 +75,10 @@ void NonPresentingGvrDelegate::StopVSyncLoop() {
 void NonPresentingGvrDelegate::StartVSyncLoop() {
   vsync_task_.Reset(
       base::Bind(&NonPresentingGvrDelegate::OnVSync, base::Unretained(this)));
-  gvr_api_->RefreshViewerProfile();
-  gvr_api_->ResumeTracking();
+  if (gvr_api_) {
+    gvr_api_->RefreshViewerProfile();
+    gvr_api_->ResumeTracking();
+  }
   OnVSync();
 }
 
@@ -106,8 +114,9 @@ void NonPresentingGvrDelegate::OnVSync() {
 void NonPresentingGvrDelegate::GetVSync(const GetVSyncCallback& callback) {
   if (!pending_vsync_) {
     if (!callback_.is_null()) {
-      mojo::ReportBadMessage("Requested VSync before waiting for response to "
-          "previous request.");
+      mojo::ReportBadMessage(
+          "Requested VSync before waiting for response to previous request.");
+      binding_.Close();
       return;
     }
     callback_ = callback;
@@ -117,7 +126,7 @@ void NonPresentingGvrDelegate::GetVSync(const GetVSyncCallback& callback) {
   SendVSync(pending_time_, callback);
 }
 
-void NonPresentingGvrDelegate::UpdateVSyncInterval(long timebase_nanos,
+void NonPresentingGvrDelegate::UpdateVSyncInterval(int64_t timebase_nanos,
                                                    double interval_seconds) {
   vsync_timebase_ = base::TimeTicks();
   vsync_timebase_ += base::TimeDelta::FromMicroseconds(timebase_nanos / 1000);
@@ -127,30 +136,29 @@ void NonPresentingGvrDelegate::UpdateVSyncInterval(long timebase_nanos,
 
 void NonPresentingGvrDelegate::SendVSync(base::TimeDelta time,
                                          const GetVSyncCallback& callback) {
-  gvr::ClockTimePoint target_time = gvr::GvrApi::GetTimePointNow();
-  target_time.monotonic_system_time_nanos += kPredictionTimeWithoutVsyncNanos;
+  if (!gvr_api_) {
+    callback.Run(device::mojom::VRPosePtr(nullptr), time, -1,
+                 device::mojom::VRVSyncProvider::Status::SUCCESS);
+    return;
+  }
 
-  gvr::Mat4f head_mat = gvr_api_->ApplyNeckModel(
-      gvr_api_->GetHeadSpaceFromStartSpaceRotation(target_time), 1.0f);
-  callback.Run(VrShell::VRPosePtrFromGvrPose(head_mat), time, -1);
-}
-
-bool NonPresentingGvrDelegate::SupportsPresentation() {
-  return false;
-}
-
-void NonPresentingGvrDelegate::ResetPose() {
-  // Should never call RecenterTracking when using with Daydream viewers. On
-  // those devices recentering should only be done via the controller.
-  if (gvr_api_ && gvr_api_->GetViewerType() == GVR_VIEWER_TYPE_CARDBOARD)
-    gvr_api_->RecenterTracking();
+  callback.Run(GvrDelegate::GetVRPosePtrWithNeckModel(gvr_api_.get(), nullptr),
+               time, -1, device::mojom::VRVSyncProvider::Status::SUCCESS);
 }
 
 void NonPresentingGvrDelegate::CreateVRDisplayInfo(
     const base::Callback<void(device::mojom::VRDisplayInfoPtr)>& callback,
     uint32_t device_id) {
-  callback.Run(VrShell::CreateVRDisplayInfo(
-      gvr_api_.get(), device::kInvalidRenderTargetSize, device_id));
+  if (!gvr_api_) {
+    callback.Run(device::mojom::VRDisplayInfoPtr(nullptr));
+    return;
+  }
+
+  gfx::Size webvr_size = GvrDelegate::GetRecommendedWebVrSize(gvr_api_.get());
+  DVLOG(1) << __FUNCTION__ << ": resize recommended to " << webvr_size.width()
+           << "x" << webvr_size.height();
+  callback.Run(
+      GvrDelegate::CreateVRDisplayInfo(gvr_api_.get(), webvr_size, device_id));
 }
 
 }  // namespace vr_shell

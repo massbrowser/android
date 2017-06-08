@@ -12,6 +12,7 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/metrics/user_metrics.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
@@ -33,7 +34,6 @@
 #include "components/grit/components_scaled_resources.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -59,7 +59,6 @@
 using base::UserMetricsAction;
 using content::BrowserThread;
 using extensions::Extension;
-using extensions::UnloadedExtensionInfo;
 using ui::ResourceBundle;
 
 
@@ -195,9 +194,9 @@ class ThemeService::ThemeObserver
   void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) override {
-    if (reason != extensions::UnloadedExtensionInfo::REASON_UPDATE &&
-        reason != extensions::UnloadedExtensionInfo::REASON_LOCK_ALL &&
+      extensions::UnloadedExtensionReason reason) override {
+    if (reason != extensions::UnloadedExtensionReason::UPDATE &&
+        reason != extensions::UnloadedExtensionReason::LOCK_ALL &&
         extension->is_theme() &&
         extension->id() == theme_service_->GetThemeID()) {
       theme_service_->UseDefaultTheme();
@@ -291,7 +290,7 @@ void ThemeService::SetTheme(const Extension* extension) {
   SaveThemeID(extension->id());
 
   NotifyThemeChanged();
-  content::RecordAction(UserMetricsAction("Themes_Installed"));
+  base::RecordAction(UserMetricsAction("Themes_Installed"));
 
   if (previous_theme_id != kDefaultThemeID &&
       previous_theme_id != extension->id() &&
@@ -309,7 +308,7 @@ void ThemeService::SetTheme(const Extension* extension) {
 
 void ThemeService::UseDefaultTheme() {
   if (ready_)
-    content::RecordAction(UserMetricsAction("Themes_Reset"));
+    base::RecordAction(UserMetricsAction("Themes_Reset"));
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   if (IsSupervisedUser()) {
     SetSupervisedUserTheme();
@@ -438,6 +437,8 @@ SkColor ThemeService::GetDefaultColor(int id, bool incognito) const {
       return SkColorSetA(
           GetColor(ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON, incognito),
           0x33);
+    case ThemeProperties::COLOR_LOCATION_BAR_BORDER:
+      return SkColorSetA(SK_ColorBLACK, 0x4D);
     case ThemeProperties::COLOR_TOOLBAR_TOP_SEPARATOR:
     case ThemeProperties::COLOR_TOOLBAR_TOP_SEPARATOR_INACTIVE: {
       const SkColor tab_color =
@@ -545,7 +546,7 @@ void ThemeService::ClearAllThemeData() {
   // There should be no more infobars. This may not be the case because of
   // http://crbug.com/62154
   // RemoveUnusedThemes is called on a task because ClearAllThemeData() may
-  // be called as a result of NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED.
+  // be called as a result of OnExtensionUnloaded().
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&ThemeService::RemoveUnusedThemes,
                             weak_ptr_factory_.GetWeakPtr(), true));
@@ -584,7 +585,7 @@ void ThemeService::LoadThemePrefs() {
   }
 
   if (loaded_pack) {
-    content::RecordAction(UserMetricsAction("Themes.Loaded"));
+    base::RecordAction(UserMetricsAction("Themes.Loaded"));
     set_ready();
   }
   // Else: wait for the extension service to be ready so that the theme pack
@@ -813,11 +814,11 @@ void ThemeService::MigrateTheme() {
   if (extension) {
     DLOG(ERROR) << "Migrating theme";
     BuildFromExtension(extension);
-    content::RecordAction(UserMetricsAction("Themes.Migrated"));
+    base::RecordAction(UserMetricsAction("Themes.Migrated"));
   } else {
     DLOG(ERROR) << "Theme is mysteriously gone.";
     ClearAllThemeData();
-    content::RecordAction(UserMetricsAction("Themes.Gone"));
+    base::RecordAction(UserMetricsAction("Themes.Gone"));
   }
 }
 

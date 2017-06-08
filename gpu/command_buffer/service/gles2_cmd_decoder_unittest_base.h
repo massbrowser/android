@@ -250,6 +250,9 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   void SetupSamplerExternalProgram();
   void SetupTexture();
 
+  // Sets up a sampler on texture unit 0 for certain ES3-specific tests.
+  void SetupSampler();
+
   // Note that the error is returned as GLint instead of GLenum.
   // This is because there is a mismatch in the types of GLenum and
   // the error values GL_NO_ERROR, GL_INVALID_ENUM, etc. GLenum is
@@ -636,6 +639,8 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   std::unique_ptr<MockGLES2Decoder> mock_decoder_;
   std::unique_ptr<GLES2Decoder> decoder_;
   MemoryTracker* memory_tracker_;
+
+  bool surface_supports_draw_rectangle_ = false;
 
   GLuint client_buffer_id_;
   GLuint client_framebuffer_id_;

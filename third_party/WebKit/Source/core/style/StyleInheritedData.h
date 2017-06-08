@@ -29,8 +29,8 @@
 #include "platform/Length.h"
 #include "platform/fonts/Font.h"
 #include "platform/graphics/Color.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
+#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefCounted.h"
 
 namespace blink {
 
@@ -39,28 +39,28 @@ namespace blink {
 // instead. Keep the allocation logic, only allocating a new object if needed.
 class CORE_EXPORT StyleInheritedData : public RefCounted<StyleInheritedData> {
  public:
-  static PassRefPtr<StyleInheritedData> create() {
-    return adoptRef(new StyleInheritedData);
+  static PassRefPtr<StyleInheritedData> Create() {
+    return AdoptRef(new StyleInheritedData);
   }
-  PassRefPtr<StyleInheritedData> copy() const {
-    return adoptRef(new StyleInheritedData(*this));
+  PassRefPtr<StyleInheritedData> Copy() const {
+    return AdoptRef(new StyleInheritedData(*this));
   }
   ~StyleInheritedData();
 
   bool operator==(const StyleInheritedData&) const;
   bool operator!=(const StyleInheritedData& o) const { return !(*this == o); }
 
-  short horizontal_border_spacing;
-  short vertical_border_spacing;
+  short horizontal_border_spacing_;
+  short vertical_border_spacing_;
 
   // could be packed in a short but doesn't
   // make a difference currently because of padding
-  Length line_height;
+  Length line_height_;
 
-  Font font;
-  Color color;
-  Color visitedLinkColor;
-  float textAutosizingMultiplier;
+  Font font_;
+  Color color_;
+  Color visited_link_color_;
+  float text_autosizing_multiplier_;
 
  private:
   StyleInheritedData();

@@ -78,7 +78,7 @@ class DepthCaptureIntegrationTest(gpu_integration_test.GpuIntegrationTest):
     tab = self.tab
     tab.Navigate(url, script_to_evaluate_on_commit=harness_script)
     tab.action_runner.WaitForJavaScriptCondition(
-      'domAutomationController._finished', timeout_in_seconds=60)
+      'domAutomationController._finished', timeout=60)
     if not tab.EvaluateJavaScript('domAutomationController._succeeded'):
       self.fail('page indicated test failure:' +
                 tab.EvaluateJavaScript('domAutomationController._error_msg'))
@@ -88,8 +88,8 @@ class DepthCaptureIntegrationTest(gpu_integration_test.GpuIntegrationTest):
     return depth_capture_expectations.DepthCaptureExpectations()
 
   @classmethod
-  def setUpClass(cls):
-    super(cls, DepthCaptureIntegrationTest).setUpClass()
+  def SetUpProcess(cls):
+    super(cls, DepthCaptureIntegrationTest).SetUpProcess()
     cls.CustomizeOptions()
     cls.SetBrowserOptions(cls._finder_options)
     cls.StartBrowser()

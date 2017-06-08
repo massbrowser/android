@@ -45,38 +45,43 @@ bool StructTraits<common::mojom::DictionaryValueDataView,
   return true;
 }
 
+std::unique_ptr<base::DictionaryValue>
+CloneTraits<std::unique_ptr<base::DictionaryValue>, false>::Clone(
+    const std::unique_ptr<base::DictionaryValue>& input) {
+  return input ? input->CreateDeepCopy() : nullptr;
+}
+
 bool UnionTraits<common::mojom::ValueDataView, std::unique_ptr<base::Value>>::
     Read(common::mojom::ValueDataView data,
          std::unique_ptr<base::Value>* value_out) {
   switch (data.tag()) {
     case common::mojom::ValueDataView::Tag::NULL_VALUE: {
-      *value_out = base::Value::CreateNullValue();
+      *value_out = base::MakeUnique<base::Value>();
       return true;
     }
     case common::mojom::ValueDataView::Tag::BOOL_VALUE: {
-      *value_out = base::MakeUnique<base::FundamentalValue>(data.bool_value());
+      *value_out = base::MakeUnique<base::Value>(data.bool_value());
       return true;
     }
     case common::mojom::ValueDataView::Tag::INT_VALUE: {
-      *value_out = base::MakeUnique<base::FundamentalValue>(data.int_value());
+      *value_out = base::MakeUnique<base::Value>(data.int_value());
       return true;
     }
     case common::mojom::ValueDataView::Tag::DOUBLE_VALUE: {
-      *value_out =
-          base::MakeUnique<base::FundamentalValue>(data.double_value());
+      *value_out = base::MakeUnique<base::Value>(data.double_value());
       return true;
     }
     case common::mojom::ValueDataView::Tag::STRING_VALUE: {
       base::StringPiece string_value;
       if (!data.ReadStringValue(&string_value))
         return false;
-      *value_out = base::MakeUnique<base::StringValue>(string_value);
+      *value_out = base::MakeUnique<base::Value>(string_value);
       return true;
     }
     case common::mojom::ValueDataView::Tag::BINARY_VALUE: {
       mojo::ArrayDataView<uint8_t> binary_data;
       data.GetBinaryValueDataView(&binary_data);
-      *value_out = base::BinaryValue::CreateWithCopiedBuffer(
+      *value_out = base::Value::CreateWithCopiedBuffer(
           reinterpret_cast<const char*>(binary_data.data()),
           binary_data.size());
       return true;
@@ -97,6 +102,12 @@ bool UnionTraits<common::mojom::ValueDataView, std::unique_ptr<base::Value>>::
     }
   }
   return false;
+}
+
+std::unique_ptr<base::Value>
+CloneTraits<std::unique_ptr<base::Value>, false>::Clone(
+    const std::unique_ptr<base::Value>& input) {
+  return input ? input->CreateDeepCopy() : nullptr;
 }
 
 }  // namespace mojo

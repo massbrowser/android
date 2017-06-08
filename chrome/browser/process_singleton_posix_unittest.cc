@@ -32,7 +32,8 @@
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_constants.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/network_interfaces.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -68,14 +69,13 @@ class ProcessSingletonPosixTest : public testing::Test {
 
   ProcessSingletonPosixTest()
       : kill_callbacks_(0),
-        io_thread_(BrowserThread::IO),
+        test_browser_thread_bundle_(
+            content::TestBrowserThreadBundle::REAL_IO_THREAD),
         wait_event_(base::WaitableEvent::ResetPolicy::MANUAL,
                     base::WaitableEvent::InitialState::NOT_SIGNALED),
         signal_event_(base::WaitableEvent::ResetPolicy::MANUAL,
                       base::WaitableEvent::InitialState::NOT_SIGNALED),
-        process_singleton_on_thread_(NULL) {
-    io_thread_.StartIOThread();
-  }
+        process_singleton_on_thread_(NULL) {}
 
   void SetUp() override {
     testing::Test::SetUp();
@@ -105,15 +105,14 @@ class ProcessSingletonPosixTest : public testing::Test {
     if (process_singleton_on_thread_) {
       worker_thread_->task_runner()->PostTask(
           FROM_HERE,
-          base::Bind(&ProcessSingletonPosixTest::DestructProcessSingleton,
-                     base::Unretained(this)));
+          base::BindOnce(&ProcessSingletonPosixTest::DestructProcessSingleton,
+                         base::Unretained(this)));
 
       scoped_refptr<base::ThreadTestHelper> helper(
           new base::ThreadTestHelper(worker_thread_->task_runner().get()));
       ASSERT_TRUE(helper->Run());
     }
 
-    io_thread_.Stop();
     testing::Test::TearDown();
   }
 
@@ -124,8 +123,9 @@ class ProcessSingletonPosixTest : public testing::Test {
 
     worker_thread_->task_runner()->PostTask(
         FROM_HERE,
-        base::Bind(&ProcessSingletonPosixTest::CreateProcessSingletonInternal,
-                   base::Unretained(this)));
+        base::BindOnce(
+            &ProcessSingletonPosixTest::CreateProcessSingletonInternal,
+            base::Unretained(this)));
 
     scoped_refptr<base::ThreadTestHelper> helper(
         new base::ThreadTestHelper(worker_thread_->task_runner().get()));
@@ -214,8 +214,8 @@ class ProcessSingletonPosixTest : public testing::Test {
 
   void BlockWorkerThread() {
     worker_thread_->task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ProcessSingletonPosixTest::BlockThread,
-                              base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&ProcessSingletonPosixTest::BlockThread,
+                                  base::Unretained(this)));
   }
 
   void UnblockWorkerThread() {
@@ -257,8 +257,7 @@ class ProcessSingletonPosixTest : public testing::Test {
     kill_callbacks_++;
   }
 
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread io_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   base::ScopedTempDir temp_dir_;
   base::WaitableEvent wait_event_;
   base::WaitableEvent signal_event_;
@@ -406,6 +405,24 @@ TEST_F(ProcessSingletonPosixTest, NotifyOtherProcessOrCreate_BadCookie) {
 
   std::string url("about:blank");
   EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE, NotifyOtherProcessOrCreate(url));
+}
+
+TEST_F(ProcessSingletonPosixTest, IgnoreSocketSymlinkWithTooLongTarget) {
+  CreateProcessSingletonOnThread();
+  // Change the symlink to one with a too-long target.
+  char buf[PATH_MAX];
+  ssize_t len = readlink(socket_path_.value().c_str(), buf, PATH_MAX);
+  ASSERT_GT(len, 0);
+  base::FilePath socket_target_path = base::FilePath(std::string(buf, len));
+  base::FilePath long_socket_target_path = socket_target_path.DirName().Append(
+      std::string(sizeof(sockaddr_un::sun_path), 'b'));
+  ASSERT_EQ(0, unlink(socket_path_.value().c_str()));
+  ASSERT_EQ(0, symlink(long_socket_target_path.value().c_str(),
+                       socket_path_.value().c_str()));
+
+  // A new ProcessSingleton should ignore the invalid socket path target.
+  std::string url("about:blank");
+  EXPECT_EQ(ProcessSingleton::PROCESS_NONE, NotifyOtherProcessOrCreate(url));
 }
 
 #if defined(OS_MACOSX)

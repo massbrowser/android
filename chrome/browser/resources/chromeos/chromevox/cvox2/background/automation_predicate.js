@@ -313,7 +313,8 @@ AutomationPredicate.structuralContainer = AutomationPredicate.roles([
     Role.WINDOW,
     Role.EMBEDDED_OBJECT,
     Role.IFRAME,
-    Role.IFRAME_PRESENTATIONAL]);
+    Role.IFRAME_PRESENTATIONAL,
+    Role.UNKNOWN]);
 
 /**
  * Returns whether the given node should not be crossed when performing
@@ -485,5 +486,15 @@ AutomationPredicate.makeHeadingPredicate = function(level) {
     return node.role == Role.HEADING && node.hierarchicalLevel == level;
   };
 };
+
+/**
+ * Matches against nodes that we may be able to retrieve image data from.
+ * @param {!AutomationNode} node
+ * @return {boolean}
+ */
+AutomationPredicate.supportsImageData = AutomationPredicate.roles([
+    Role.CANVAS,
+    Role.IMAGE,
+    Role.VIDEO]);
 
 });  // goog.scope

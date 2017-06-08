@@ -17,9 +17,10 @@
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/resources/single_release_callback.h"
+#include "cc/surfaces/local_surface_id_allocator.h"
 #include "cc/surfaces/sequence_surface_reference_factory.h"
 #include "cc/surfaces/surface.h"
-#include "cc/surfaces/surface_id_allocator.h"
+#include "cc/surfaces/surface_manager.h"
 #include "components/exo/buffer.h"
 #include "components/exo/pointer.h"
 #include "components/exo/surface_delegate.h"
@@ -107,7 +108,9 @@ class CustomWindowDelegate : public aura::WindowDelegate {
   bool CanFocus() override { return true; }
   void OnCaptureLost() override {}
   void OnPaint(const ui::PaintContext& context) override {}
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
+  void OnDeviceScaleFactorChanged(float device_scale_factor) override {
+    surface_->SetDeviceScaleFactor(device_scale_factor);
+  }
   void OnWindowDestroying(aura::Window* window) override {}
   void OnWindowDestroyed(aura::Window* window) override { delete this; }
   void OnWindowTargetVisibilityChanged(bool visible) override {}
@@ -154,30 +157,6 @@ class CustomWindowTargeter : public aura::WindowTargeter {
   DISALLOW_COPY_AND_ASSIGN(CustomWindowTargeter);
 };
 
-class CustomSurfaceReferenceFactory
-    : public cc::SequenceSurfaceReferenceFactory {
- public:
-  explicit CustomSurfaceReferenceFactory(CompositorFrameSinkHolder* sink_holder)
-      : sink_holder_(sink_holder) {}
-
- private:
-  ~CustomSurfaceReferenceFactory() override = default;
-
-  // Overridden from cc::SequenceSurfaceReferenceFactory:
-  void SatisfySequence(const cc::SurfaceSequence& sequence) const override {
-    sink_holder_->Satisfy(sequence);
-  }
-
-  void RequireSequence(const cc::SurfaceId& surface_id,
-                       const cc::SurfaceSequence& sequence) const override {
-    sink_holder_->Require(surface_id, sequence);
-  }
-
-  scoped_refptr<CompositorFrameSinkHolder> sink_holder_;
-
-  DISALLOW_COPY_AND_ASSIGN(CustomSurfaceReferenceFactory);
-};
-
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -195,8 +174,12 @@ Surface::Surface()
   compositor_frame_sink_holder_ = new CompositorFrameSinkHolder(
       this, frame_sink_id_,
       aura::Env::GetInstance()->context_factory_private()->GetSurfaceManager());
-  surface_reference_factory_ =
-      new CustomSurfaceReferenceFactory(compositor_frame_sink_holder_.get());
+  // TODO(samans): exo::Surface should not be using
+  // DirectSurfaceReferenceFactory (crbug.com/688573).
+  surface_reference_factory_ = aura::Env::GetInstance()
+                                   ->context_factory_private()
+                                   ->GetSurfaceManager()
+                                   ->reference_factory();
   window_->SetType(ui::wm::WINDOW_TYPE_CONTROL);
   window_->SetName("ExoSurface");
   window_->SetProperty(kSurfaceKey, this);
@@ -424,6 +407,10 @@ void Surface::SetAlpha(float alpha) {
   pending_state_.alpha = alpha;
 }
 
+void Surface::SetDeviceScaleFactor(float device_scale_factor) {
+  device_scale_factor_ = device_scale_factor;
+}
+
 void Surface::Commit() {
   TRACE_EVENT0("exo", "Surface::Commit");
 
@@ -451,6 +438,13 @@ void Surface::Commit() {
     CheckIfSurfaceHierarchyNeedsCommitToNewSurfaces();
     CommitSurfaceHierarchy();
   }
+
+  if (begin_frame_source_ && current_begin_frame_ack_.sequence_number !=
+                                 cc::BeginFrameArgs::kInvalidFrameNumber) {
+    begin_frame_source_->DidFinishFrame(this, current_begin_frame_ack_);
+    current_begin_frame_ack_.sequence_number =
+        cc::BeginFrameArgs::kInvalidFrameNumber;
+  }
 }
 
 void Surface::CommitSurfaceHierarchy() {
@@ -476,6 +470,13 @@ void Surface::CommitSurfaceHierarchy() {
     local_surface_id_ = id_allocator_.GenerateId();
   }
 
+  // Move pending frame callbacks to the end of frame_callbacks_.
+  frame_callbacks_.splice(frame_callbacks_.end(), pending_frame_callbacks_);
+
+  // Move pending presentation callbacks to the end of presentation_callbacks_.
+  presentation_callbacks_.splice(presentation_callbacks_.end(),
+                                 pending_presentation_callbacks_);
+
   UpdateSurface(false);
 
   if (old_local_surface_id != local_surface_id_) {
@@ -486,7 +487,7 @@ void Surface::CommitSurfaceHierarchy() {
     window_->layer()->SetBounds(
         gfx::Rect(window_->layer()->bounds().origin(), content_size_));
     cc::SurfaceId surface_id(frame_sink_id_, local_surface_id_);
-    window_->layer()->SetShowSurface(
+    window_->layer()->SetShowPrimarySurface(
         cc::SurfaceInfo(surface_id, contents_surface_to_layer_scale,
                         content_size_),
         surface_reference_factory_);
@@ -503,13 +504,6 @@ void Surface::CommitSurfaceHierarchy() {
   DCHECK(!current_resource_.id ||
          compositor_frame_sink_holder_->HasReleaseCallbackForResource(
              current_resource_.id));
-
-  // Move pending frame callbacks to the end of frame_callbacks_.
-  frame_callbacks_.splice(frame_callbacks_.end(), pending_frame_callbacks_);
-
-  // Move pending presentation callbacks to the end of presentation_callbacks_.
-  presentation_callbacks_.splice(presentation_callbacks_.end(),
-                                 pending_presentation_callbacks_);
 
   // Synchronize window hierarchy. This will position and update the stacking
   // order of all sub-surfaces after committing all pending state of sub-surface
@@ -581,12 +575,12 @@ void Surface::UnregisterCursorProvider(Pointer* provider) {
 gfx::NativeCursor Surface::GetCursor() {
   // What cursor we display when we have multiple cursor providers is not
   // important. Return the first non-null cursor.
-  for (const auto& cursor_provider : cursor_providers_) {
+  for (auto* cursor_provider : cursor_providers_) {
     gfx::NativeCursor cursor = cursor_provider->GetCursor();
-    if (cursor != ui::kCursorNull)
+    if (cursor != ui::CursorType::kNull)
       return cursor;
   }
-  return ui::kCursorNull;
+  return ui::CursorType::kNull;
 }
 
 void Surface::SetSurfaceDelegate(SurfaceDelegate* delegate) {
@@ -617,22 +611,47 @@ std::unique_ptr<base::trace_event::TracedValue> Surface::AsTracedValue() const {
   return value;
 }
 
-void Surface::WillDraw() {
+void Surface::DidReceiveCompositorFrameAck() {
   active_frame_callbacks_.splice(active_frame_callbacks_.end(),
                                  frame_callbacks_);
   swapping_presentation_callbacks_.splice(
       swapping_presentation_callbacks_.end(), presentation_callbacks_);
+  UpdateNeedsBeginFrame();
 }
 
-bool Surface::NeedsBeginFrame() const {
-  return !active_frame_callbacks_.empty();
+void Surface::SetBeginFrameSource(cc::BeginFrameSource* begin_frame_source) {
+  if (needs_begin_frame_) {
+    DCHECK(begin_frame_source_);
+    begin_frame_source_->RemoveObserver(this);
+    needs_begin_frame_ = false;
+  }
+  begin_frame_source_ = begin_frame_source;
+  UpdateNeedsBeginFrame();
 }
 
-void Surface::BeginFrame(base::TimeTicks frame_time) {
+void Surface::UpdateNeedsBeginFrame() {
+  if (!begin_frame_source_)
+    return;
+
+  bool needs_begin_frame = !active_frame_callbacks_.empty();
+  if (needs_begin_frame == needs_begin_frame_)
+    return;
+
+  needs_begin_frame_ = needs_begin_frame;
+  if (needs_begin_frame_)
+    begin_frame_source_->AddObserver(this);
+  else
+    begin_frame_source_->RemoveObserver(this);
+}
+
+bool Surface::OnBeginFrameDerivedImpl(const cc::BeginFrameArgs& args) {
+  current_begin_frame_ack_ = cc::BeginFrameAck(
+      args.source_id, args.sequence_number, args.sequence_number, false);
   while (!active_frame_callbacks_.empty()) {
-    active_frame_callbacks_.front().Run(frame_time);
+    active_frame_callbacks_.front().Run(args.frame_time);
     active_frame_callbacks_.pop_front();
   }
+  return true;
 }
 
 void Surface::CheckIfSurfaceHierarchyNeedsCommitToNewSurfaces() {
@@ -802,24 +821,40 @@ void Surface::UpdateSurface(bool full_damage) {
                           1.f / scaled_buffer_size.height());
   }
 
-  // pending_damage_ is in Surface coordinates.
-  gfx::Rect damage_rect = full_damage
-                              ? gfx::Rect(contents_surface_size)
-                              : gfx::SkIRectToRect(pending_damage_.getBounds());
+  gfx::Rect damage_rect;
+  gfx::Rect output_rect = gfx::Rect(contents_surface_size);
+  if (full_damage) {
+    damage_rect = output_rect;
+  } else {
+    // pending_damage_ is in Surface coordinates.
+    damage_rect = gfx::SkIRectToRect(pending_damage_.getBounds());
+    damage_rect.Intersect(output_rect);
+  }
 
   const int kRenderPassId = 1;
   std::unique_ptr<cc::RenderPass> render_pass = cc::RenderPass::Create();
-  render_pass->SetNew(kRenderPassId, gfx::Rect(contents_surface_size),
-                      damage_rect, gfx::Transform());
+  render_pass->SetNew(kRenderPassId, output_rect, damage_rect,
+                      gfx::Transform());
 
-  gfx::Rect quad_rect = gfx::Rect(contents_surface_size);
+  gfx::Rect quad_rect = output_rect;
   cc::SharedQuadState* quad_state =
       render_pass->CreateAndAppendSharedQuadState();
-  quad_state->quad_layer_bounds = contents_surface_size;
+  quad_state->quad_layer_rect = gfx::Rect(contents_surface_size);
   quad_state->visible_quad_layer_rect = quad_rect;
   quad_state->opacity = state_.alpha;
 
   cc::CompositorFrame frame;
+  // If we commit while we don't have an active BeginFrame, we acknowledge a
+  // manual one.
+  if (current_begin_frame_ack_.sequence_number ==
+      cc::BeginFrameArgs::kInvalidFrameNumber) {
+    current_begin_frame_ack_ = cc::BeginFrameAck::CreateManualAckWithDamage();
+  } else {
+    current_begin_frame_ack_.has_damage = true;
+  }
+  frame.metadata.begin_frame_ack = current_begin_frame_ack_;
+  frame.metadata.device_scale_factor = device_scale_factor_;
+
   if (current_resource_.id) {
     // Texture quad is only needed if buffer is not fully transparent.
     if (state_.alpha) {

@@ -8,7 +8,7 @@
 #include <stddef.h>
 
 #include "cc/base/region.h"
-#include "cc/playback/recording_source.h"
+#include "cc/layers/recording_source.h"
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "third_party/skia/include/core/SkImage.h"
@@ -64,6 +64,10 @@ class FakeRecordingSource : public RecordingSource {
     clear_canvas_with_debug_color_ = clear;
   }
 
+  void set_fill_with_nonsolid_color(bool nonsolid) {
+    client_.set_fill_with_nonsolid_color(nonsolid);
+  }
+
   void Rerecord() {
     SetNeedsDisplayRect(recorded_viewport_);
     Region invalidation;
@@ -78,40 +82,40 @@ class FakeRecordingSource : public RecordingSource {
   }
 
   void add_draw_rect(const gfx::Rect& rect) {
-    client_.add_draw_rect(rect, default_paint_);
+    client_.add_draw_rect(rect, default_flags_);
   }
 
-  void add_draw_rect_with_paint(const gfx::Rect& rect,
-                                const PaintFlags& paint) {
-    client_.add_draw_rect(rect, paint);
+  void add_draw_rect_with_flags(const gfx::Rect& rect,
+                                const PaintFlags& flags) {
+    client_.add_draw_rect(rect, flags);
   }
 
   void add_draw_rectf(const gfx::RectF& rect) {
-    client_.add_draw_rectf(rect, default_paint_);
+    client_.add_draw_rectf(rect, default_flags_);
   }
 
-  void add_draw_rectf_with_paint(const gfx::RectF& rect,
-                                 const PaintFlags& paint) {
-    client_.add_draw_rectf(rect, paint);
+  void add_draw_rectf_with_flags(const gfx::RectF& rect,
+                                 const PaintFlags& flags) {
+    client_.add_draw_rectf(rect, flags);
   }
 
   void add_draw_image(sk_sp<const SkImage> image, const gfx::Point& point) {
-    client_.add_draw_image(std::move(image), point, default_paint_);
+    client_.add_draw_image(std::move(image), point, default_flags_);
   }
 
   void add_draw_image_with_transform(sk_sp<const SkImage> image,
                                      const gfx::Transform& transform) {
     client_.add_draw_image_with_transform(std::move(image), transform,
-                                          default_paint_);
+                                          default_flags_);
   }
 
-  void add_draw_image_with_paint(sk_sp<const SkImage> image,
+  void add_draw_image_with_flags(sk_sp<const SkImage> image,
                                  const gfx::Point& point,
-                                 const PaintFlags& paint) {
-    client_.add_draw_image(std::move(image), point, paint);
+                                 const PaintFlags& flags) {
+    client_.add_draw_image(std::move(image), point, flags);
   }
 
-  void set_default_paint(const PaintFlags& paint) { default_paint_ = paint; }
+  void set_default_flags(const PaintFlags& flags) { default_flags_ = flags; }
 
   void set_reported_memory_usage(size_t reported_memory_usage) {
     client_.set_reported_memory_usage(reported_memory_usage);
@@ -133,7 +137,7 @@ class FakeRecordingSource : public RecordingSource {
 
  private:
   FakeContentLayerClient client_;
-  PaintFlags default_paint_;
+  PaintFlags default_flags_;
   base::WaitableEvent* playback_allowed_event_;
 };
 

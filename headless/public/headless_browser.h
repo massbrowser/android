@@ -46,6 +46,12 @@ class HEADLESS_EXPORT HeadlessBrowser {
 
   virtual std::vector<HeadlessBrowserContext*> GetAllBrowserContexts() = 0;
 
+  // Return a DevTools target corresponding to this browser. Note that this
+  // method only returns a valid target after browser has been initialized on
+  // the main thread. The target only supports the domains available on the
+  // browser endpoint excluding the Tethering domain.
+  virtual HeadlessDevToolsTarget* GetDevToolsTarget() = 0;
+
   // Returns the HeadlessWebContents associated with the
   // |devtools_agent_host_id| if any.  Otherwise returns null.
   virtual HeadlessWebContents* GetWebContentsForDevToolsAgentHostId(
@@ -102,8 +108,15 @@ struct HeadlessBrowser::Options {
   const char** argv;
 
   // Address at which DevTools should listen for connections. Disabled by
-  // default.
+  // default. Mutually exclusive with devtools_socket_fd.
   net::IPEndPoint devtools_endpoint;
+
+  // The fd of an already-open socket inherited from a parent process. Disabled
+  // by default. Mutually exclusive with devtools_endpoint.
+  size_t devtools_socket_fd;
+
+  // A single way to test whether the devtools server has been requested.
+  bool DevtoolsServerEnabled();
 
   // Optional message pump that overrides the default. Must outlive the browser.
   base::MessagePump* message_pump;
@@ -128,6 +141,7 @@ struct HeadlessBrowser::Options {
 
   // Default per-context options, can be specialized on per-context basis.
 
+  std::string product_name_and_version;
   std::string user_agent;
 
   // Address of the HTTP/HTTPS proxy server to use. The system proxy settings
@@ -157,6 +171,12 @@ struct HeadlessBrowser::Options {
   // exposed WebPreferences API, so use with care.
   base::Callback<void(WebPreferences*)> override_web_preferences_callback;
 
+  // Minidump crash reporter settings. Crash reporting is disabled by default.
+  // By default crash dumps are written to the directory containing the
+  // executable.
+  bool enable_crash_reporter;
+  base::FilePath crash_dumps_dir;
+
   // Reminder: when adding a new field here, do not forget to add it to
   // HeadlessBrowserContextOptions (where appropriate).
  private:
@@ -174,6 +194,7 @@ class HeadlessBrowser::Options::Builder {
   // Browser-wide settings.
 
   Builder& EnableDevToolsServer(const net::IPEndPoint& endpoint);
+  Builder& EnableDevToolsServer(const size_t socket_fd);
   Builder& SetMessagePump(base::MessagePump* message_pump);
   Builder& SetSingleProcessMode(bool single_process_mode);
   Builder& SetDisableSandbox(bool disable_sandbox);
@@ -182,6 +203,8 @@ class HeadlessBrowser::Options::Builder {
 
   // Per-context settings.
 
+  Builder& SetProductNameAndVersion(
+      const std::string& product_name_and_version);
   Builder& SetUserAgent(const std::string& user_agent);
   Builder& SetProxyServer(const net::HostPortPair& proxy_server);
   Builder& SetHostResolverRules(const std::string& host_resolver_rules);
@@ -190,6 +213,8 @@ class HeadlessBrowser::Options::Builder {
   Builder& SetIncognitoMode(bool incognito_mode);
   Builder& SetOverrideWebPreferencesCallback(
       base::Callback<void(WebPreferences*)> callback);
+  Builder& SetCrashReporterEnabled(bool enabled);
+  Builder& SetCrashDumpsDir(const base::FilePath& dir);
 
   Options Build();
 

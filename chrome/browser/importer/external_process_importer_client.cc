@@ -19,7 +19,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
@@ -51,8 +50,8 @@ void ExternalProcessImporterClient::Start() {
   CHECK(BrowserThread::GetCurrentThreadIdentifier(&thread_id));
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&ExternalProcessImporterClient::StartProcessOnIOThread, this,
-                 thread_id, base::Passed(std::move(request))));
+      base::BindOnce(&ExternalProcessImporterClient::StartProcessOnIOThread,
+                     this, thread_id, base::Passed(std::move(request))));
 
   // Dictionary of all localized strings that could be needed by the importer
   // in the external process.
@@ -308,7 +307,7 @@ void ExternalProcessImporterClient::StartProcessOnIOThread(
 
   utility_process_host->Start();
   chrome::mojom::ProfileImportPtr profile_import;
-  utility_process_host->GetRemoteInterfaces()->GetInterface(std::move(request));
+  BindInterface(utility_process_host, std::move(request));
 }
 
 void ExternalProcessImporterClient::CloseMojoHandles() {

@@ -6,34 +6,40 @@
 #define NGPhysicalBoxFragment_h
 
 #include "core/CoreExport.h"
+#include "core/layout/ng/geometry/ng_logical_offset.h"
+#include "core/layout/ng/geometry/ng_margin_strut.h"
+#include "core/layout/ng/ng_floating_object.h"
 #include "core/layout/ng/ng_physical_fragment.h"
-#include "core/layout/ng/ng_units.h"
-#include "platform/heap/Handle.h"
-#include "wtf/Optional.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
-class NGBlockNode;
 struct NGFloatingObject;
 
 class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
  public:
   // This modifies the passed-in children vector.
-  NGPhysicalBoxFragment(
-      LayoutObject* layout_object,
-      NGPhysicalSize size,
-      NGPhysicalSize overflow,
-      HeapVector<Member<NGPhysicalFragment>>& children,
-      HeapLinkedHashSet<WeakMember<NGBlockNode>>& out_of_flow_descendants,
-      Vector<NGStaticPosition>& out_of_flow_positions,
-      HeapVector<Member<NGFloatingObject>>& unpositioned_floats,
-      HeapVector<Member<NGFloatingObject>>& positioned_floats,
-      const WTF::Optional<NGLogicalOffset>& bfc_offset,
-      const NGMarginStrut& end_margin_strut,
-      NGBreakToken* break_token = nullptr);
+  NGPhysicalBoxFragment(LayoutObject* layout_object,
+                        NGPhysicalSize size,
+                        NGPhysicalSize overflow,
+                        Vector<RefPtr<NGPhysicalFragment>>& children,
+                        Vector<RefPtr<NGFloatingObject>>& positioned_floats,
+                        const WTF::Optional<NGLogicalOffset>& bfc_offset,
+                        const NGMarginStrut& end_margin_strut,
+                        RefPtr<NGBreakToken> break_token = nullptr);
 
-  const HeapVector<Member<NGPhysicalFragment>>& Children() const {
+  // Returns the total size, including the contents outside of the border-box.
+  NGPhysicalSize OverflowSize() const { return overflow_; }
+
+  const Vector<RefPtr<NGPhysicalFragment>>& Children() const {
     return children_;
+  }
+
+  // List of positioned floats that need to be copied to the old layout tree.
+  // TODO(layout-ng): remove this once we change painting code to handle floats
+  // differently.
+  const Vector<RefPtr<NGFloatingObject>>& PositionedFloats() const {
+    return positioned_floats_;
   }
 
   const WTF::Optional<NGLogicalOffset>& BfcOffset() const {
@@ -42,15 +48,13 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
 
   const NGMarginStrut& EndMarginStrut() const { return end_margin_strut_; }
 
-  DECLARE_TRACE_AFTER_DISPATCH();
-
  private:
-  HeapVector<Member<NGPhysicalFragment>> children_;
+  NGPhysicalSize overflow_;
+  Vector<RefPtr<NGPhysicalFragment>> children_;
+  Vector<RefPtr<NGFloatingObject>> positioned_floats_;
   const WTF::Optional<NGLogicalOffset> bfc_offset_;
   const NGMarginStrut end_margin_strut_;
 };
-
-WILL_NOT_BE_EAGERLY_TRACED_CLASS(NGPhysicalBoxFragment);
 
 DEFINE_TYPE_CASTS(NGPhysicalBoxFragment,
                   NGPhysicalFragment,

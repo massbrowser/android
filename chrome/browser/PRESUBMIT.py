@@ -12,7 +12,6 @@ http://www.chromium.org/developers/web-development-style-guide for the rules
 checked for here.
 """
 
-
 def CheckChangeOnUpload(input_api, output_api):
   return _CommonChecks(input_api, output_api)
 
@@ -22,16 +21,24 @@ def CheckChangeOnCommit(input_api, output_api):
 
 def _RunHistogramChecks(input_api, output_api, histogram_name):
   try:
-    # Setup sys.path so that we can call histrogram code
+    # Setup sys.path so that we can call histograms code.
     import sys
     original_sys_path = sys.path
     sys.path = sys.path + [input_api.os_path.join(
         input_api.change.RepositoryRoot(),
         'tools', 'metrics', 'histograms')]
 
+    results = []
+
     import presubmit_bad_message_reasons
-    return presubmit_bad_message_reasons.PrecheckBadMessage(input_api,
-      output_api, histogram_name)
+    results.extend(presubmit_bad_message_reasons.PrecheckBadMessage(input_api,
+        output_api, histogram_name))
+
+    import presubmit_scheme_histograms
+    results.extend(presubmit_scheme_histograms.
+                   PrecheckShouldAllowOpenURLEnums(input_api, output_api))
+
+    return results
   except:
     return [output_api.PresubmitError('Could not verify histogram!')]
   finally:

@@ -90,9 +90,11 @@ std::string PrintingContextDelegate::GetAppLocale() {
 
 void NotificationCallback(PrintJobWorkerOwner* print_job,
                           JobEventDetails::Type detail_type,
+                          int job_id,
                           PrintedDocument* document,
                           PrintedPage* page) {
-  JobEventDetails* details = new JobEventDetails(detail_type, document, page);
+  JobEventDetails* details =
+      new JobEventDetails(detail_type, job_id, document, page);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PRINT_JOB_EVENT,
       // We know that is is a PrintJob object in this circumstance.
@@ -157,18 +159,16 @@ void PrintJobWorker::GetSettings(bool ask_user_for_settings,
   if (ask_user_for_settings) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&HoldRefCallback, make_scoped_refptr(owner_),
-                   base::Bind(&PrintJobWorker::GetSettingsWithUI,
-                              base::Unretained(this),
-                              document_page_count,
-                              has_selection,
-                              is_scripted)));
+        base::BindOnce(&HoldRefCallback, make_scoped_refptr(owner_),
+                       base::Bind(&PrintJobWorker::GetSettingsWithUI,
+                                  base::Unretained(this), document_page_count,
+                                  has_selection, is_scripted)));
   } else {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&HoldRefCallback, make_scoped_refptr(owner_),
-                   base::Bind(&PrintJobWorker::UseDefaultSettings,
-                              base::Unretained(this))));
+        base::BindOnce(&HoldRefCallback, make_scoped_refptr(owner_),
+                       base::Bind(&PrintJobWorker::UseDefaultSettings,
+                                  base::Unretained(this))));
   }
 }
 
@@ -177,13 +177,11 @@ void PrintJobWorker::SetSettings(
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
 
   BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&HoldRefCallback,
-                 make_scoped_refptr(owner_),
-                 base::Bind(&PrintJobWorker::UpdatePrintSettings,
-                            base::Unretained(this),
-                            base::Passed(&new_settings))));
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(
+          &HoldRefCallback, make_scoped_refptr(owner_),
+          base::Bind(&PrintJobWorker::UpdatePrintSettings,
+                     base::Unretained(this), base::Passed(&new_settings))));
 }
 
 void PrintJobWorker::UpdatePrintSettings(
@@ -318,7 +316,8 @@ void PrintJobWorker::OnNewPage() {
       // We need to wait for the page to be available.
       base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
           FROM_HERE,
-          base::Bind(&PrintJobWorker::OnNewPage, weak_factory_.GetWeakPtr()),
+          base::BindOnce(&PrintJobWorker::OnNewPage,
+                         weak_factory_.GetWeakPtr()),
           base::TimeDelta::FromMilliseconds(500));
       break;
     }
@@ -370,6 +369,7 @@ void PrintJobWorker::OnDocumentDone() {
   DCHECK_EQ(page_number_, PageNumber::npos());
   DCHECK(document_.get());
 
+  int job_id = printing_context_->job_id();
   if (printing_context_->DocumentDone() != PrintingContext::OK) {
     OnFailure();
     return;
@@ -377,7 +377,7 @@ void PrintJobWorker::OnDocumentDone() {
 
   owner_->PostTask(FROM_HERE,
                    base::Bind(&NotificationCallback, base::RetainedRef(owner_),
-                              JobEventDetails::DOC_DONE,
+                              JobEventDetails::DOC_DONE, job_id,
                               base::RetainedRef(document_), nullptr));
 
   // Makes sure the variables are reinitialized.
@@ -392,8 +392,8 @@ void PrintJobWorker::SpoolPage(PrintedPage* page) {
   owner_->PostTask(
       FROM_HERE,
       base::Bind(&NotificationCallback, base::RetainedRef(owner_),
-                 JobEventDetails::NEW_PAGE, base::RetainedRef(document_),
-                 base::RetainedRef(page)));
+                 JobEventDetails::NEW_PAGE, printing_context_->job_id(),
+                 base::RetainedRef(document_), base::RetainedRef(page)));
 
   // Preprocess.
   if (printing_context_->NewPage() != PrintingContext::OK) {
@@ -418,8 +418,8 @@ void PrintJobWorker::SpoolPage(PrintedPage* page) {
   owner_->PostTask(
       FROM_HERE,
       base::Bind(&NotificationCallback, base::RetainedRef(owner_),
-                 JobEventDetails::PAGE_DONE, base::RetainedRef(document_),
-                 base::RetainedRef(page)));
+                 JobEventDetails::PAGE_DONE, printing_context_->job_id(),
+                 base::RetainedRef(document_), base::RetainedRef(page)));
 }
 
 void PrintJobWorker::OnFailure() {
@@ -430,7 +430,7 @@ void PrintJobWorker::OnFailure() {
 
   owner_->PostTask(FROM_HERE,
                    base::Bind(&NotificationCallback, base::RetainedRef(owner_),
-                              JobEventDetails::FAILED,
+                              JobEventDetails::FAILED, 0,
                               base::RetainedRef(document_), nullptr));
   Cancel();
 

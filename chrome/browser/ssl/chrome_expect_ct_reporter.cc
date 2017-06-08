@@ -39,7 +39,7 @@ std::unique_ptr<base::ListValue> GetPEMEncodedChainAsList(
   std::vector<std::string> pem_encoded_chain;
   cert_chain->GetPEMEncodedChain(&pem_encoded_chain);
   for (const std::string& cert : pem_encoded_chain)
-    result->Append(base::MakeUnique<base::StringValue>(cert));
+    result->Append(base::MakeUnique<base::Value>(cert));
 
   return result;
 }
@@ -106,7 +106,9 @@ void AddValidSCT(const net::SignedCertificateTimestampAndStatus& sct_and_status,
 
 // Records an UMA histogram of the net errors when Expect CT reports
 // fail to send.
-void RecordUMAOnFailure(const GURL& report_uri, int net_error) {
+void RecordUMAOnFailure(const GURL& report_uri,
+                        int net_error,
+                        int http_response_code) {
   UMA_HISTOGRAM_SPARSE_SLOWLY("SSL.ExpectCTReportFailure2", -net_error);
 }
 
@@ -114,16 +116,17 @@ void RecordUMAOnFailure(const GURL& report_uri, int net_error) {
 
 ChromeExpectCTReporter::ChromeExpectCTReporter(
     net::URLRequestContext* request_context)
-    : report_sender_(
-          new net::ReportSender(request_context,
-                                net::ReportSender::DO_NOT_SEND_COOKIES)) {}
+    : report_sender_(new net::ReportSender(request_context)) {}
 
 ChromeExpectCTReporter::~ChromeExpectCTReporter() {}
 
 void ChromeExpectCTReporter::OnExpectCTFailed(
     const net::HostPortPair& host_port_pair,
     const GURL& report_uri,
-    const net::SSLInfo& ssl_info) {
+    const net::X509Certificate* validated_certificate_chain,
+    const net::X509Certificate* served_certificate_chain,
+    const net::SignedCertificateTimestampAndStatusList&
+        signed_certificate_timestamps) {
   if (report_uri.is_empty())
     return;
 
@@ -138,15 +141,15 @@ void ChromeExpectCTReporter::OnExpectCTFailed(
   report.SetInteger("port", host_port_pair.port());
   report.SetString("date-time", TimeToISO8601(base::Time::Now()));
   report.Set("served-certificate-chain",
-             GetPEMEncodedChainAsList(ssl_info.unverified_cert.get()));
+             GetPEMEncodedChainAsList(served_certificate_chain));
   report.Set("validated-certificate-chain",
-             GetPEMEncodedChainAsList(ssl_info.cert.get()));
+             GetPEMEncodedChainAsList(validated_certificate_chain));
 
   std::unique_ptr<base::ListValue> unknown_scts(new base::ListValue());
   std::unique_ptr<base::ListValue> invalid_scts(new base::ListValue());
   std::unique_ptr<base::ListValue> valid_scts(new base::ListValue());
 
-  for (const auto& sct_and_status : ssl_info.signed_certificate_timestamps) {
+  for (const auto& sct_and_status : signed_certificate_timestamps) {
     switch (sct_and_status.status) {
       case net::ct::SCT_STATUS_LOG_UNKNOWN:
         AddUnknownSCT(sct_and_status, unknown_scts.get());
@@ -176,6 +179,6 @@ void ChromeExpectCTReporter::OnExpectCTFailed(
   UMA_HISTOGRAM_BOOLEAN("SSL.ExpectCTReportSendingAttempt", true);
 
   report_sender_->Send(report_uri, "application/json; charset=utf-8",
-                       serialized_report, base::Closure(),
+                       serialized_report, base::Callback<void()>(),
                        base::Bind(RecordUMAOnFailure));
 }

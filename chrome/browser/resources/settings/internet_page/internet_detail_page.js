@@ -113,6 +113,12 @@ Polymer({
     /** @private */
     advancedExpanded_: Boolean,
 
+    /** @private */
+    networkExpanded_: Boolean,
+
+    /** @private */
+    proxyExpanded_: Boolean,
+
     /**
      * Object providing network type values for data binding.
      * @const
@@ -123,6 +129,7 @@ Polymer({
       value: {
         CELLULAR: CrOnc.Type.CELLULAR,
         ETHERNET: CrOnc.Type.ETHERNET,
+        TETHER: CrOnc.Type.TETHER,
         VPN: CrOnc.Type.VPN,
         WIFI: CrOnc.Type.WI_FI,
         WIMAX: CrOnc.Type.WI_MAX,
@@ -138,12 +145,37 @@ Polymer({
    */
   networksChangedListener_: null,
 
+  /** @private {boolean} */
+  didSetFocus_: false,
+
+  /**
+   * Set to true to once the initial properties have been received. This
+   * prevents setProperties from being called when setting default properties.
+   * @private {boolean}
+   */
+  networkPropertiesReceived_: false,
+
+  /**
+   * Set in currentRouteChanged() if the showConfigure URL query
+   * parameter is set to true. The dialog cannot be shown until the
+   * network properties have been fetched in networkPropertiesChanged_().
+   * @private {boolean}
+   */
+  shoudlShowConfigureWhenNetworkLoaded_: false,
+
+  /**
+   * Whether the previous route was also the network detail page.
+   * @private {boolean}
+   */
+  wasPreviousRouteNetworkDetailPage_: false,
+
   /**
    * settings.RouteObserverBehavior
    * @param {!settings.Route} route
+   * @param {!settings.Route} oldRoute
    * @protected
    */
-  currentRouteChanged: function(route) {
+  currentRouteChanged: function(route, oldRoute) {
     if (route != settings.Route.NETWORK_DETAIL) {
       if (this.networksChangedListener_) {
         this.networkingPrivate.onNetworksChanged.removeListener(
@@ -164,9 +196,14 @@ Polymer({
       this.close_();
     }
     // Set basic networkProperties until they are loaded.
+    this.networkPropertiesReceived_ = false;
     var type = /** @type {!chrome.networkingPrivate.NetworkType} */ (
                    queryParams.get('type')) ||
         CrOnc.Type.WI_FI;
+    this.shoudlShowConfigureWhenNetworkLoaded_ =
+        queryParams.get('showConfigure') == 'true';
+    this.wasPreviousRouteNetworkDetailPage_ =
+        oldRoute == settings.Route.NETWORK_DETAIL;
     var name = queryParams.get('name') || type;
     this.networkProperties = {
       GUID: this.guid,
@@ -174,6 +211,7 @@ Polymer({
       ConnectionState: CrOnc.ConnectionState.NOT_CONNECTED,
       Name: {Active: name},
     };
+    this.didSetFocus_ = false;
     this.getNetworkDetails_();
   },
 
@@ -210,6 +248,23 @@ Polymer({
 
     // Update the detail page title.
     this.parentNode.pageTitle = CrOnc.getNetworkName(this.networkProperties);
+
+    Polymer.dom.flush();
+
+    if (this.didSetFocus_) {
+      // Focus a button once the initial state is set.
+      this.didSetFocus_ = true;
+      var button = this.$$('#buttonDiv .primary-button:not([hidden])');
+      if (!button)
+        button = this.$$('#buttonDiv .secondary-button:not([hidden])');
+      assert(button);  // At least one button will always be visible.
+      button.focus();
+    }
+
+    if (this.shoudlShowConfigureWhenNetworkLoaded_
+        && this.networkProperties.Tether) {
+      this.showTetherDialog_();
+    }
   },
 
   /** @private */
@@ -261,12 +316,25 @@ Polymer({
    * @private
    */
   getPropertiesCallback_: function(properties) {
-    this.networkProperties = properties;
-    if (!properties) {
-      // If |properties| is null, the network is no longer visible, close this.
-      console.error('Network no longer exists: ' + this.guid);
+    if (chrome.runtime.lastError) {
+      var message = chrome.runtime.lastError.message;
+      if (message == 'Error.InvalidNetworkGuid') {
+        console.error('Details page: GUID no longer exists: ' + this.guid);
+      } else {
+        console.error(
+            'Unexpected networkingPrivate.getManagedProperties error: ' +
+            message + ' For: ' + this.guid);
+      }
       this.close_();
+      return;
     }
+    if (!properties) {
+      console.error('No properties for: ' + this.guid);
+      this.close_();
+      return;
+    }
+    this.networkProperties = properties;
+    this.networkPropertiesReceived_ = true;
   },
 
   /**
@@ -287,6 +355,7 @@ Polymer({
       Connectable: state.Connectable,
       ConnectionState: state.ConnectionState,
     };
+    this.networkPropertiesReceived_ = true;
   },
 
   /**
@@ -295,6 +364,9 @@ Polymer({
    * @private
    */
   setNetworkProperties_: function(onc) {
+    if (!this.networkPropertiesReceived_)
+      return;
+
     assert(!!this.guid);
     this.networkingPrivate.setProperties(this.guid, onc, function() {
       if (chrome.runtime.lastError) {
@@ -435,9 +507,9 @@ Polymer({
     if (this.connectNotAllowed_(networkProperties, globalPolicy))
       return false;
     var type = networkProperties.Type;
-    if (type == CrOnc.Type.CELLULAR || type == CrOnc.Type.WI_MAX)
+    if (type == CrOnc.Type.CELLULAR)
       return false;
-    if (type == CrOnc.Type.WI_FI &&
+    if ((type == CrOnc.Type.WI_FI || type == CrOnc.Type.WI_MAX) &&
         networkProperties.ConnectionState !=
             CrOnc.ConnectionState.NOT_CONNECTED) {
       return false;
@@ -498,9 +570,36 @@ Polymer({
     return true;
   },
 
+  /**
+   * @return {!TetherConnectionDialogElement}
+   * @private
+   */
+  getTetherDialog_: function() {
+    return /** @type {!TetherConnectionDialogElement} */ (this.$.tetherDialog);
+  },
+
   /** @private */
   onConnectTap_: function() {
-    this.networkingPrivate.startConnect(this.guid);
+    this.fire('network-connect', {networkProperties: this.networkProperties});
+  },
+
+  /** @private */
+  onTetherConnect_: function() {
+    this.getTetherDialog_().close();
+    this.fire('network-connect',
+        {networkProperties: this.networkProperties,
+         bypassConnectionDialog: true});
+  },
+
+  /** @private */
+  onTetherDialogClose_: function() {
+    // The tether dialog is opened by specifying "showConfigure=true"
+    // in the query params. This may lead to the previous route also
+    // being the detail page, in which case we should navigate back to
+    // the previous route here so that when the user navigates back
+    // they will navigate to the previous non-detail page.
+    if (this.wasPreviousRouteNetworkDetailPage_)
+      settings.navigateToPreviousRoute();
   },
 
   /** @private */
@@ -531,14 +630,42 @@ Polymer({
     this.networkingPrivate.startActivate(this.guid);
   },
 
+  /** @const {string} */
+  CR_EXPAND_BUTTON_TAG: 'CR-EXPAND-BUTTON',
+
+  /** @private */
+  showTetherDialog_: function() {
+    this.getTetherDialog_().open();
+  },
+
   /**
    * @param {Event} event
    * @private
    */
   toggleAdvancedExpanded_: function(event) {
-    if (event.target.id == 'expandButton')
+    if (event.target.tagName == this.CR_EXPAND_BUTTON_TAG)
       return;  // Already handled.
     this.advancedExpanded_ = !this.advancedExpanded_;
+  },
+
+  /**
+   * @param {Event} event
+   * @private
+   */
+  toggleNetworkExpanded_: function(event) {
+    if (event.target.tagName == this.CR_EXPAND_BUTTON_TAG)
+      return;  // Already handled.
+    this.networkExpanded_ = !this.networkExpanded_;
+  },
+
+  /**
+   * @param {Event} event
+   * @private
+   */
+  toggleProxyExpanded_: function(event) {
+    if (event.target.tagName == this.CR_EXPAND_BUTTON_TAG)
+      return;  // Already handled.
+    this.proxyExpanded_ = !this.proxyExpanded_;
   },
 
   /**
@@ -658,12 +785,13 @@ Polymer({
   },
 
   /**
+   * @param {!CrOnc.NetworkProperties} networkProperties
    * @return {boolean} True if the shared message should be shown.
    * @private
    */
-  showShared_: function() {
-    return this.networkProperties.Source == 'Device' ||
-        this.networkProperties.Source == 'DevicePolicy';
+  showShared_: function(networkProperties) {
+    return networkProperties.Source == 'Device' ||
+        networkProperties.Source == 'DevicePolicy';
   },
 
   /**
@@ -672,7 +800,7 @@ Polymer({
    * @private
    */
   showAutoConnect_: function(networkProperties) {
-    return this.networkProperties.Type != CrOnc.Type.ETHERNET &&
+    return networkProperties.Type != CrOnc.Type.ETHERNET &&
         this.isRemembered_(networkProperties);
   },
 
@@ -745,6 +873,10 @@ Polymer({
       fields.push(
           'Cellular.ActivationState', 'Cellular.RoamingState',
           'RestrictedConnectivity', 'Cellular.ServingOperator.Name');
+    } else if (type == CrOnc.Type.TETHER && !!this.networkProperties.Tether) {
+      fields.push(
+          'Tether.BatteryPercentage', 'Tether.SignalStrength',
+          'Tether.Carrier');
     } else if (type == CrOnc.Type.VPN && !!this.networkProperties.VPN) {
       var vpnType = CrOnc.getActiveValue(this.networkProperties.VPN.Type);
       if (vpnType == 'ThirdPartyVPN') {
@@ -778,8 +910,9 @@ Polymer({
           'Cellular.ServingOperator.Code');
     } else if (type == CrOnc.Type.WI_FI) {
       fields.push(
-          'WiFi.SSID', 'WiFi.BSSID', 'WiFi.Security', 'WiFi.SignalStrength',
-          'WiFi.Frequency');
+          'WiFi.SSID', 'WiFi.BSSID', 'WiFi.SignalStrength', 'WiFi.Security',
+          'WiFi.EAP.Outer', 'WiFi.EAP.Inner', 'WiFi.EAP.SubjectMatch',
+          'WiFi.EAP.Identity', 'WiFi.EAP.AnonymousIdentity', 'WiFi.Frequency');
     } else if (type == CrOnc.Type.WI_MAX) {
       fields.push('WiFi.SignalStrength');
     }
@@ -840,36 +973,38 @@ Polymer({
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
-   * @return {boolean} True if the network section should be shown.
+   * @return {boolean}
    * @private
    */
   hasNetworkSection_: function(networkProperties) {
-    if (this.networkProperties.Type == CrOnc.Type.VPN)
+    if (networkProperties.Type == CrOnc.Type.VPN)
       return false;
-    if (this.networkProperties.Type == CrOnc.Type.CELLULAR)
+    if (networkProperties.Type == CrOnc.Type.CELLULAR)
       return true;
     return this.isRememberedOrConnected_(networkProperties);
   },
 
   /**
    * @param {string} type The network type.
+   * @param {!CrOnc.NetworkProperties} networkProperties
    * @return {boolean} True if the network type matches 'type'.
    * @private
    */
-  isType_: function(type) {
-    return this.networkProperties.Type == type;
+  isType_: function(type, networkProperties) {
+    return networkProperties.Type == type;
   },
 
   /**
-   * @return {boolean} True if the Cellular SIM section should be shown.
+   * @param {!CrOnc.NetworkProperties} networkProperties
+   * @return {boolean}
    * @private
    */
-  showCellularSim_: function() {
-    if (this.networkProperties.Type != 'Cellular' ||
-        !this.networkProperties.Cellular) {
+  showCellularSim_: function(networkProperties) {
+    if (networkProperties.Type != 'Cellular' ||
+        !networkProperties.Cellular) {
       return false;
     }
-    return this.networkProperties.Cellular.Family == 'GSM';
+    return networkProperties.Cellular.Family == 'GSM';
   },
 
   /**

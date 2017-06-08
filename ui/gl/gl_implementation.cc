@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
@@ -29,14 +30,14 @@ const struct {
   const char* name;
   GLImplementation implementation;
 } kGLImplementationNamePairs[] = {
-  { kGLImplementationDesktopName, kGLImplementationDesktopGL },
-  { kGLImplementationOSMesaName, kGLImplementationOSMesaGL },
+    {kGLImplementationDesktopName, kGLImplementationDesktopGL},
+    {kGLImplementationOSMesaName, kGLImplementationOSMesaGL},
+    {kGLImplementationSwiftShaderName, kGLImplementationSwiftShaderGL},
 #if defined(OS_MACOSX)
-  { kGLImplementationAppleName, kGLImplementationAppleGL },
+    {kGLImplementationAppleName, kGLImplementationAppleGL},
 #endif
-  { kGLImplementationEGLName, kGLImplementationEGLGLES2 },
-  { kGLImplementationMockName, kGLImplementationMockGL }
-};
+    {kGLImplementationEGLName, kGLImplementationEGLGLES2},
+    {kGLImplementationMockName, kGLImplementationMockGL}};
 
 typedef std::vector<base::NativeLibrary> LibraryArray;
 
@@ -78,6 +79,10 @@ GLImplementation GetNamedGLImplementation(const std::string& name) {
   }
 
   return kGLImplementationNone;
+}
+
+GLImplementation GetSoftwareGLImplementation() {
+  return kGLImplementationOSMesaGL;
 }
 
 const char* GetGLImplementationName(GLImplementation implementation) {
@@ -158,10 +163,10 @@ std::string FilterGLExtensionList(
   if (extensions == NULL)
     return "";
 
-  std::vector<std::string> extension_vec = base::SplitString(
+  std::vector<base::StringPiece> extension_vec = base::SplitStringPiece(
       extensions, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
-  auto is_disabled = [&disabled_extensions](const std::string& ext) {
+  auto is_disabled = [&disabled_extensions](const base::StringPiece& ext) {
     return std::find(disabled_extensions.begin(), disabled_extensions.end(),
                      ext) != disabled_extensions.end();
   };
@@ -197,7 +202,7 @@ std::string GetGLExtensionsFromCurrentContext(GLApi* api) {
   GLint num_extensions = 0;
   api->glGetIntegervFn(GL_NUM_EXTENSIONS, &num_extensions);
 
-  std::vector<std::string> exts(num_extensions);
+  std::vector<base::StringPiece> exts(num_extensions);
   for (GLint i = 0; i < num_extensions; ++i) {
     const char* extension =
         reinterpret_cast<const char*>(api->glGetStringiFn(GL_EXTENSIONS, i));

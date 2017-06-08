@@ -13,7 +13,7 @@
 
 #include "base/macros.h"
 #include "services/ui/common/types.h"
-#include "services/ui/public/interfaces/cursor.mojom.h"
+#include "services/ui/public/interfaces/cursor/cursor.mojom.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "services/ui/ws/drag_cursor_updater.h"
 #include "services/ui/ws/modal_window_controller.h"
@@ -24,6 +24,7 @@ namespace ui {
 class Event;
 class KeyEvent;
 class LocatedEvent;
+class PointerEvent;
 
 namespace ws {
 
@@ -65,7 +66,7 @@ class EventDispatcher : public ServerWindowObserver, public DragCursorUpdater {
 
   // Returns the cursor for the current target, or POINTER if the mouse is not
   // over a valid target.
-  ui::mojom::Cursor GetCurrentMouseCursor() const;
+  ui::CursorData GetCurrentMouseCursor() const;
 
   // |capture_window_| will receive all input. See window_tree.mojom for
   // details.
@@ -114,6 +115,11 @@ class EventDispatcher : public ServerWindowObserver, public DragCursorUpdater {
     return mouse_cursor_source_window_;
   }
 
+  // Returns the window the mouse cursor is taken from. This does not take
+  // into account drags. In other words if there is a drag on going the mouse
+  // comes comes from a different window.
+  const ServerWindow* GetWindowForMouseCursor() const;
+
   // If the mouse cursor is still over |mouse_cursor_source_window_|, updates
   // whether we are in the non-client area. Used when
   // |mouse_cursor_source_window_| has changed its properties.
@@ -161,6 +167,8 @@ class EventDispatcher : public ServerWindowObserver, public DragCursorUpdater {
 
     bool is_pointer_down;
   };
+
+  void SetMouseCursorSourceWindow(ServerWindow* window);
 
   void ProcessKeyEvent(const ui::KeyEvent& event,
                        AcceleratorMatchPhase match_phase);

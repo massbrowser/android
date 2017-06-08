@@ -8,6 +8,7 @@
 #include <gtk/gtk.h>
 #include <string>
 
+#include "ui/base/glib/scoped_gobject.h"
 #include "ui/native_theme/native_theme.h"
 
 namespace aura {
@@ -66,7 +67,7 @@ int EventFlagsFromGdkState(guint state);
 void TurnButtonBlue(GtkWidget* button);
 
 // Sets |dialog| as transient for |parent|, which will keep it on top and center
-// it above |parent|. Do nothing if |parent| is NULL.
+// it above |parent|. Do nothing if |parent| is nullptr.
 void SetGtkTransientForAura(GtkWidget* dialog, aura::Window* parent);
 
 // Gets the transient parent aura window for |dialog|.
@@ -83,6 +84,9 @@ void ClearAuraTransientParent(GtkWidget* dialog);
 #define GTK_STATE_FLAG_VISITED static_cast<GtkStateFlags>(1 << 10)
 #define GTK_STATE_FLAG_CHECKED static_cast<GtkStateFlags>(1 << 11)
 
+void* GetGdkSharedLibrary();
+void* GetGtkSharedLibrary();
+
 class CairoSurface {
  public:
   // Attaches a cairo surface to an SkBitmap so that GTK can render
@@ -98,10 +102,10 @@ class CairoSurface {
   // Get the drawing context for GTK to use.
   cairo_t* cairo() { return cairo_; }
 
-  // If |only_frame_pixels| is false, returns the average of all
-  // pixels in the surface, otherwise returns the average of only the
-  // edge pixels.
-  SkColor GetAveragePixelValue(bool only_frame_pixels);
+  // Returns the average of all pixels in the surface.  If |frame| is
+  // true, the resulting alpha will be the average alpha, otherwise it
+  // will be the max alpha across all pixels.
+  SkColor GetAveragePixelValue(bool frame);
 
  private:
   cairo_surface_t* surface_;
@@ -112,51 +116,41 @@ class CairoSurface {
 // |major|.|minor|.|micro|.
 bool GtkVersionCheck(int major, int minor = 0, int micro = 0);
 
-template <typename T>
-class ScopedGObject {
- public:
-  explicit ScopedGObject(T* obj) : obj_(obj) {
-    // Increase the reference count of |obj_|, removing the floating
-    // reference if it has one.
-    g_object_ref_sink(obj_);
+using ScopedStyleContext = ScopedGObject<GtkStyleContext>;
+using ScopedCssProvider = ScopedGObject<GtkCssProvider>;
+
+}  // namespace libgtkui
+
+// Template override cannot be in the libgtkui namespace.
+template <>
+inline void libgtkui::ScopedStyleContext::Unref() {
+  // Versions of GTK earlier than 3.15.4 had a bug where a g_assert
+  // would be triggered when trying to free a GtkStyleContext that had
+  // a parent whose only reference was the child context in question.
+  // This is a hack to work around that case.  See GTK commit
+  // "gtkstylecontext: Don't try to emit a signal when finalizing".
+  GtkStyleContext* context = obj_;
+  while (context) {
+    GtkStyleContext* parent = gtk_style_context_get_parent(context);
+    if (parent && G_OBJECT(context)->ref_count == 1 &&
+        !libgtkui::GtkVersionCheck(3, 15, 4)) {
+      g_object_ref(parent);
+      gtk_style_context_set_parent(context, nullptr);
+      g_object_unref(context);
+    } else {
+      g_object_unref(context);
+      return;
+    }
+    context = parent;
   }
+}
 
-  ScopedGObject(const ScopedGObject<T>& other) : obj_(other.obj_) {
-    g_object_ref(obj_);
-  }
+namespace libgtkui {
 
-  ScopedGObject(ScopedGObject<T>&& other) : obj_(other.obj_) {
-    other.obj_ = nullptr;
-  }
+// Converts ui::NativeTheme::State to GtkStateFlags.
+GtkStateFlags StateToStateFlags(ui::NativeTheme::State state);
 
-  ~ScopedGObject() {
-    if (obj_)
-      g_object_unref(obj_);
-  }
-
-  ScopedGObject<T>& operator=(const ScopedGObject<T>& other) {
-    g_object_ref(other.obj_);
-    g_object_unref(obj_);
-    obj_ = other.obj_;
-    return *this;
-  }
-
-  ScopedGObject<T>& operator=(ScopedGObject<T>&& other) {
-    g_object_unref(obj_);
-    obj_ = other.obj_;
-    other.obj_ = nullptr;
-    return *this;
-  }
-
-  operator T*() { return obj_; }
-
- private:
-  T* obj_;
-};
-
-typedef ScopedGObject<GtkStyleContext> ScopedStyleContext;
-
-// If |context| is NULL, creates a new top-level style context
+// If |context| is nullptr, creates a new top-level style context
 // specified by parsing |css_node|.  Otherwise, creates the child
 // context with |context| as the parent.
 ScopedStyleContext AppendCssNodeToStyleContext(GtkStyleContext* context,
@@ -168,16 +162,21 @@ ScopedStyleContext AppendCssNodeToStyleContext(GtkStyleContext* context,
 // of '.'-prefixed classes and ':'-prefixed pseudoclasses.  An example
 // is "GtkButton.button.suggested-action:hover:active".  The caller
 // must g_object_unref() the returned context.
-ScopedStyleContext GetStyleContextFromCss(const char* css_selector);
+ScopedStyleContext GetStyleContextFromCss(const std::string& css_selector);
 
-SkColor SkColorFromStyleContext(GtkStyleContext* context);
+SkColor GetFgColorFromStyleContext(GtkStyleContext* context);
 
-// Removes all border-type properties on |context| and all of its parents.
-void RemoveBorders(GtkStyleContext* context);
+SkColor GetBgColorFromStyleContext(GtkStyleContext* context);
+
+// Overrides properties on |context| and all its parents with those
+// provided by |css|.
+void ApplyCssToContext(GtkStyleContext* context, const std::string& css);
 
 // Get the 'color' property from the style context created by
 // GetStyleContextFromCss(|css_selector|).
-SkColor GetFgColor(const char* css_selector);
+SkColor GetFgColor(const std::string& css_selector);
+
+ScopedCssProvider GetCssProvider(const std::string& css);
 
 // Renders the backgrounds of all ancestors of |context|, then renders
 // the background for |context| itself.
@@ -186,17 +185,21 @@ void RenderBackground(const gfx::Size& size,
                       GtkStyleContext* context);
 
 // Renders a background from the style context created by
-// GetStyleContextFromCss(|css_selector|) into a single pixel and
-// returns the color.
-SkColor GetBgColor(const char* css_selector);
+// GetStyleContextFromCss(|css_selector|) into a 24x24 bitmap and
+// returns the average color.
+SkColor GetBgColor(const std::string& css_selector);
 
-// If there is a border, renders the border from the style context
-// created by GetStyleContextFromCss(|css_selector|) into a single
-// pixel and returns the color.  Otherwise returns kInvalidColor.
-SkColor GetBorderColor(const char* css_selector);
+// Renders the border from the style context created by
+// GetStyleContextFromCss(|css_selector|) into a 24x24 bitmap and
+// returns the average color.
+SkColor GetBorderColor(const std::string& css_selector);
+
+// On Gtk3.20 or later, behaves like GetBgColor.  Otherwise, returns
+// the background-color property.
+SkColor GetSelectionBgColor(const std::string& css_selector);
 
 // Get the color of the GtkSeparator specified by |css_selector|.
-SkColor GetSeparatorColor(const char* css_selector);
+SkColor GetSeparatorColor(const std::string& css_selector);
 #endif
 
 }  // namespace libgtkui

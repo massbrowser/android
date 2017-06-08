@@ -28,6 +28,7 @@
 #include "ios/net/cookies/cookie_creation_time_manager.h"
 #include "ios/net/cookies/cookie_store_ios_client.h"
 #include "ios/net/cookies/system_cookie_util.h"
+#include "ios/net/ios_net_features.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/cookies/cookie_util.h"
 #include "net/cookies/parsed_cookie.h"
@@ -175,11 +176,11 @@ NSInteger CompareCookies(id a, id b, void* context) {
   DCHECK(manager);
   base::Time created_a = manager->GetCreationTime(cookie_a);
   base::Time created_b = manager->GetCreationTime(cookie_b);
-#if !defined(CRNET)
+#if !BUILDFLAG(CRONET_BUILD)
   // CookieCreationTimeManager is returning creation times that are null.
-  // Since in CrNet, the cookie store is recreated on startup, let's suppress
+  // Since in Cronet, the cookie store is recreated on startup, let's suppress
   // this warning for now.
-  // TODO(huey): Instead of suppressing the warning, assign a creation time
+  // TODO(mef): Instead of suppressing the warning, assign a creation time
   // to cookies if one doesn't already exist.
   DLOG_IF(ERROR, created_a.is_null() || created_b.is_null())
       << "Cookie without creation date";
@@ -279,21 +280,6 @@ CookieStoreIOS::CookieStoreIOS(NSHTTPCookieStorage* cookie_storage)
 
 CookieStoreIOS::~CookieStoreIOS() {
   NotificationTrampoline::GetInstance()->RemoveObserver(this);
-}
-
-// static
-std::unique_ptr<CookieStoreIOS> CookieStoreIOS::CreateCookieStore(
-    NSHTTPCookieStorage* cookie_storage) {
-  DCHECK(cookie_storage);
-  // TODO(huey): Update this when CrNet supports multiple cookie jars.
-  [cookie_storage setCookieAcceptPolicy:NSHTTPCookieAcceptPolicyAlways];
-
-  // Create a cookie store with no persistent store backing. Then, populate
-  // it from the system's cookie jar.
-  std::unique_ptr<CookieStoreIOS> cookie_store(
-      new CookieStoreIOS(cookie_storage));
-  cookie_store->FlushStore(base::Closure());
-  return cookie_store;
 }
 
 // static
@@ -605,8 +591,7 @@ void CookieStoreIOS::ClearSystemStore() {
 
 bool CookieStoreIOS::SystemCookiesAllowed() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return [system_store_ cookieAcceptPolicy] ==
-         NSHTTPCookieAcceptPolicyAlways;
+  return [system_store_ cookieAcceptPolicy] != NSHTTPCookieAcceptPolicyNever;
 }
 
 void CookieStoreIOS::WriteToCookieMonster(NSArray* system_cookies) {

@@ -33,13 +33,12 @@ Checkbox::Checkbox(const base::string16& label)
       checked_(false) {
   SetHorizontalAlignment(gfx::ALIGN_LEFT);
   SetFocusForPlatform();
+  SetFocusPainter(nullptr);
 
   if (UseMd()) {
     set_request_focus_on_press(false);
-    SetInkDropMode(PlatformStyle::kUseRipples ? InkDropMode::ON
-                                              : InkDropMode::OFF);
+    SetInkDropMode(InkDropMode::ON);
     set_has_ink_drop_action_on_click(true);
-    SetFocusPainter(nullptr);
   } else {
     std::unique_ptr<LabelButtonBorder> button_border(new LabelButtonBorder());
     // Inset the trailing side by a couple pixels for the focus border.
@@ -104,18 +103,6 @@ bool Checkbox::UseMd() {
   return ui::MaterialDesignController::IsSecondaryUiMaterial();
 }
 
-void Checkbox::Layout() {
-  LabelButton::Layout();
-
-  if (!UseMd()) {
-    // Construct a focus painter that only surrounds the label area.
-    gfx::Rect rect = label()->GetMirroredBounds();
-    rect.Inset(-2, 3);
-    SetFocusPainter(Painter::CreateDashedFocusPainterWithInsets(gfx::Insets(
-        rect.y(), rect.x(), height() - rect.bottom(), width() - rect.right())));
-  }
-}
-
 const char* Checkbox::GetClassName() const {
   return kViewClassName;
 }
@@ -123,8 +110,9 @@ const char* Checkbox::GetClassName() const {
 void Checkbox::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   LabelButton::GetAccessibleNodeData(node_data);
   node_data->role = ui::AX_ROLE_CHECK_BOX;
-  if (checked())
-    node_data->AddStateFlag(ui::AX_STATE_CHECKED);
+  const ui::AXCheckedState checked_state =
+      checked() ? ui::AX_CHECKED_STATE_TRUE : ui::AX_CHECKED_STATE_FALSE;
+  node_data->AddIntAttribute(ui::AX_ATTR_CHECKED_STATE, checked_state);
   if (enabled()) {
     if (checked()) {
       node_data->AddIntAttribute(ui::AX_ATTR_ACTION,
@@ -142,15 +130,15 @@ void Checkbox::OnPaint(gfx::Canvas* canvas) {
   if (!UseMd() || !HasFocus())
     return;
 
-  cc::PaintFlags focus_paint;
-  focus_paint.setAntiAlias(true);
-  focus_paint.setColor(
+  cc::PaintFlags focus_flags;
+  focus_flags.setAntiAlias(true);
+  focus_flags.setColor(
       SkColorSetA(GetNativeTheme()->GetSystemColor(
                       ui::NativeTheme::kColorId_FocusedBorderColor),
                   0x66));
-  focus_paint.setStyle(cc::PaintFlags::kStroke_Style);
-  focus_paint.setStrokeWidth(2);
-  PaintFocusRing(canvas, focus_paint);
+  focus_flags.setStyle(cc::PaintFlags::kStroke_Style);
+  focus_flags.setStrokeWidth(2);
+  PaintFocusRing(canvas, focus_flags);
 }
 
 void Checkbox::OnFocus() {
@@ -215,9 +203,9 @@ void Checkbox::SetCustomImage(bool checked,
 }
 
 void Checkbox::PaintFocusRing(gfx::Canvas* canvas,
-                              const cc::PaintFlags& paint) {
+                              const cc::PaintFlags& flags) {
   gfx::RectF focus_rect(image()->bounds());
-  canvas->DrawRoundRect(focus_rect, 2.f, paint);
+  canvas->DrawRoundRect(focus_rect, 2.f, flags);
 }
 
 const gfx::VectorIcon& Checkbox::GetVectorIcon() const {

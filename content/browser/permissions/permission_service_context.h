@@ -6,16 +6,13 @@
 #define CONTENT_BROWSER_PERMISSIONS_PERMISSION_SERVICE_CONTEXT_H_
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission.mojom.h"
 
-namespace blink {
-namespace mojom {
-class PermissionObserver;
-class PermissionService;
-}
+namespace service_manager {
+struct BindSourceInfo;
 }
 
 namespace url {
@@ -39,8 +36,8 @@ class PermissionServiceContext : public WebContentsObserver {
   explicit PermissionServiceContext(RenderProcessHost* render_process_host);
   ~PermissionServiceContext() override;
 
-  void CreateService(
-      mojo::InterfaceRequest<blink::mojom::PermissionService> request);
+  void CreateService(const service_manager::BindSourceInfo& source_info,
+                     blink::mojom::PermissionServiceRequest request);
 
   void CreateSubscription(
       PermissionType permission_type,
@@ -66,9 +63,7 @@ class PermissionServiceContext : public WebContentsObserver {
   void RenderFrameHostChanged(RenderFrameHost* old_host,
                               RenderFrameHost* new_host) override;
   void FrameDeleted(RenderFrameHost* render_frame_host) override;
-  void DidNavigateAnyFrame(RenderFrameHost* render_frame_host,
-                           const LoadCommittedDetails& details,
-                           const FrameNavigateParams& params) override;
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
 
   void CancelPendingOperations(RenderFrameHost*);
 

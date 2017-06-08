@@ -56,35 +56,37 @@ AccessibilityTreeFormatterWin::~AccessibilityTreeFormatterWin() {
 }
 
 const char* const ALL_ATTRIBUTES[] = {
-  "name",
-  "value",
-  "states",
-  "attributes",
-  "text_attributes",
-  "role_name",
-  "ia2_hypertext",
-  "currentValue",
-  "minimumValue",
-  "maximumValue",
-  "description",
-  "default_action",
-  "keyboard_shortcut",
-  "location",
-  "size",
-  "index_in_parent",
-  "n_relations",
-  "group_level",
-  "similar_items_in_group",
-  "position_in_group",
-  "table_rows",
-  "table_columns",
-  "row_index",
-  "column_index",
-  "n_characters",
-  "caret_offset",
-  "n_selections",
-  "selection_start",
-  "selection_end"
+    "name",
+    "value",
+    "states",
+    "attributes",
+    "text_attributes",
+    "role_name",
+    "ia2_hypertext",
+    "currentValue",
+    "minimumValue",
+    "maximumValue",
+    "description",
+    "default_action",
+    "keyboard_shortcut",
+    "location",
+    "size",
+    "index_in_parent",
+    "n_relations",
+    "group_level",
+    "similar_items_in_group",
+    "position_in_group",
+    "table_rows",
+    "table_columns",
+    "row_index",
+    "column_index",
+    "n_characters",
+    "caret_offset",
+    "n_selections",
+    "selection_start",
+    "selection_end",
+    "localized_extended_role",
+    "inner_html",
 };
 
 namespace {
@@ -130,7 +132,7 @@ base::string16 GetIA2Hypertext(BrowserAccessibilityWin& ax_object) {
           index_of_embed, embedded_object.Receive());
       DCHECK(SUCCEEDED(hr));
       base::win::ScopedComPtr<IAccessible2> ax_embed;
-      hr = embedded_object.QueryInterface(ax_embed.Receive());
+      hr = embedded_object.CopyTo(ax_embed.Receive());
       DCHECK(SUCCEEDED(hr));
       hr = ax_embed->get_indexInParent(&child_index);
       DCHECK(SUCCEEDED(hr));
@@ -169,7 +171,8 @@ void AccessibilityTreeFormatterWin::AddProperties(
   dict->SetString("role", IAccessible2RoleToString(ax_object->ia2_role()));
 
   base::win::ScopedBstr temp_bstr;
-  if (SUCCEEDED(ax_object->get_accName(variant_self, temp_bstr.Receive()))) {
+  // If S_FALSE it means there is no name
+  if (S_OK == ax_object->get_accName(variant_self, temp_bstr.Receive())) {
     base::string16 name = base::string16(temp_bstr, temp_bstr.Length());
 
     // Ignore a JAWS workaround where the name of a document is " ".
@@ -327,6 +330,18 @@ void AccessibilityTreeFormatterWin::AddProperties(
       }
     }
   }
+
+  if (SUCCEEDED(ax_object->get_localizedExtendedRole(temp_bstr.Receive()))) {
+    dict->SetString("localized_extended_role", base::string16(temp_bstr,
+        temp_bstr.Length()));
+  }
+  temp_bstr.Reset();
+
+  if (SUCCEEDED(ax_object->get_innerHTML(temp_bstr.Receive()))) {
+    dict->SetString("inner_html",
+                    base::string16(temp_bstr, temp_bstr.Length()));
+  }
+  temp_bstr.Reset();
 }
 
 base::string16 AccessibilityTreeFormatterWin::ToString(
@@ -390,7 +405,7 @@ base::string16 AccessibilityTreeFormatterWin::ToString(
              it != list_value->end();
              ++it) {
           base::string16 string_value;
-          if ((*it)->GetAsString(&string_value))
+          if (it->GetAsString(&string_value))
             WriteAttribute(false, string_value, &line);
         }
         break;

@@ -50,6 +50,9 @@ about:version template page
             (<span i18n-content="official"></span>)
             <span i18n-content="version_modifier"></span>
             <span i18n-content="version_bitsize"></span>
+<if expr="is_win">
+            <span i18n-content="update_cohort_name"></span>
+</if>
           </td>
         </tr>
         <tr>
@@ -69,11 +72,25 @@ about:version template page
           </td>
         </tr>
 </if>
+<if expr="is_android">
+        <tr>
+          <td class="label" i18n-content="gms_name"></td>
+          <td class="version" id="gms_version">
+            <span i18n-content="gms_version"></span>
+          </td>
+        </tr>
+</if>
 <if expr="chromeos">
         <tr>
           <td class="label" i18n-content="platform"></td>
           <td class="version" id="os_type">
             <span id="os_version"></span>
+          </td>
+        </tr>
+        <tr>
+          <td class="label" i18n-content="firmware_version"></td>
+          <td class="version">
+            <span id="firmware_version"></span>
           </td>
         </tr>
         <tr id="customization_id_holder" hidden>

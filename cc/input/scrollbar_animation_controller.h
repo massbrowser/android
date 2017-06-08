@@ -8,7 +8,7 @@
 #include "base/cancelable_callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/input/single_scrollbar_animation_controller_thinning.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/scrollbar_layer_impl_base.h"
@@ -23,89 +23,136 @@ class CC_EXPORT ScrollbarAnimationControllerClient {
   virtual void SetNeedsRedrawForScrollbarAnimation() = 0;
   virtual void SetNeedsAnimateForScrollbarAnimation() = 0;
   virtual void DidChangeScrollbarVisibility() = 0;
-  virtual ScrollbarSet ScrollbarsFor(int scroll_layer_id) const = 0;
+  virtual ScrollbarSet ScrollbarsFor(ElementId scroll_element_id) const = 0;
 
  protected:
   virtual ~ScrollbarAnimationControllerClient() {}
 };
 
-// This abstract class represents the compositor-side analogy of
-// ScrollbarAnimator.  Individual platforms should subclass it to provide
-// specialized implementation.
+// This class show scrollbars when scroll and fade out after an idle delay.
+// The fade animations works on both scrollbars and is controlled in this class
 // This class also passes the mouse state to each
 // SingleScrollbarAnimationControllerThinning. The thinning animations are
 // independent between vertical/horizontal and are managed by the
 // SingleScrollbarAnimationControllerThinnings.
 class CC_EXPORT ScrollbarAnimationController {
  public:
-  virtual ~ScrollbarAnimationController();
+  // ScrollbarAnimationController for Android. It only has show & fade out
+  // animation.
+  static std::unique_ptr<ScrollbarAnimationController>
+  CreateScrollbarAnimationControllerAndroid(
+      ElementId scroll_element_id,
+      ScrollbarAnimationControllerClient* client,
+      base::TimeDelta fade_delay,
+      base::TimeDelta fade_duration);
+
+  // ScrollbarAnimationController for Desktop Overlay Scrollbar. It has show &
+  // fade out animation and thinning animation.
+  static std::unique_ptr<ScrollbarAnimationController>
+  CreateScrollbarAnimationControllerAuraOverlay(
+      ElementId scroll_element_id,
+      ScrollbarAnimationControllerClient* client,
+      base::TimeDelta fade_delay,
+      base::TimeDelta fade_duration,
+      base::TimeDelta thinning_duration);
+
+  ~ScrollbarAnimationController();
+
+  bool ScrollbarsHidden() const;
 
   bool Animate(base::TimeTicks now);
 
-  virtual void DidScrollBegin();
-  virtual void DidScrollUpdate(bool on_resize);
-  virtual void DidScrollEnd();
-  virtual bool ScrollbarsHidden() const;
-  virtual bool NeedThinningAnimation() const;
+  // WillUpdateScroll expects to be called even if the scroll position won't
+  // change as a result of the scroll. Only effect Aura Overlay Scrollbar.
+  void WillUpdateScroll();
+
+  // DidScrollUpdate expects to be called only if the scroll position change.
+  // Effect both Android and Aura Overlay Scrollbar.
+  void DidScrollUpdate();
+
+  void DidScrollBegin();
+  void DidScrollEnd();
 
   void DidMouseDown();
   void DidMouseUp();
   void DidMouseLeave();
-  void DidMouseMoveNear(ScrollbarOrientation, float);
+  void DidMouseMove(const gfx::PointF& device_viewport_point);
 
-  bool mouse_is_over_scrollbar(ScrollbarOrientation orientation) const;
-  bool mouse_is_near_scrollbar(ScrollbarOrientation orientation) const;
-  bool mouse_is_near_any_scrollbar() const;
+  // Called when Blink wants to show the scrollbars (via
+  // ScrollableArea::showOverlayScrollbars).
+  void DidRequestShowFromMainThread();
 
-  void set_mouse_move_distance_for_test(float distance);
+  // These methods are public for testing.
+  bool MouseIsOverScrollbarThumb(ScrollbarOrientation orientation) const;
+  bool MouseIsNearScrollbarThumb(ScrollbarOrientation orientation) const;
+  bool MouseIsNearScrollbar(ScrollbarOrientation orientation) const;
+  bool MouseIsNearAnyScrollbar() const;
 
- protected:
-  ScrollbarAnimationController(int scroll_layer_id,
+  static constexpr float kMouseMoveDistanceToTriggerFadeIn = 30.0f;
+
+ private:
+  // Describes whether the current animation should FadeIn or FadeOut.
+  enum AnimationChange { NONE, FADE_IN, FADE_OUT };
+
+  ScrollbarAnimationController(ElementId scroll_element_id,
                                ScrollbarAnimationControllerClient* client,
-                               base::TimeDelta delay_before_starting,
-                               base::TimeDelta resize_delay_before_starting);
+                               base::TimeDelta fade_delay,
+                               base::TimeDelta fade_duration);
 
-  virtual void RunAnimationFrame(float progress) = 0;
-  virtual const base::TimeDelta& Duration() = 0;
-  virtual void ApplyOpacityToScrollbars(float opacity) = 0;
+  ScrollbarAnimationController(ElementId scroll_element_id,
+                               ScrollbarAnimationControllerClient* client,
+                               base::TimeDelta fade_delay,
+                               base::TimeDelta fade_duration,
+                               base::TimeDelta thinning_duration);
+
+  ScrollbarSet Scrollbars() const;
+  SingleScrollbarAnimationControllerThinning& GetScrollbarAnimationController(
+      ScrollbarOrientation) const;
+
+  // Returns how far through the animation we are as a progress value from
+  // 0 to 1.
+  float AnimationProgressAtTime(base::TimeTicks now);
+  void RunAnimationFrame(float progress);
 
   void StartAnimation();
   void StopAnimation();
-  ScrollbarSet Scrollbars() const;
+
+  void Show();
+
+  void PostDelayedAnimation(AnimationChange animation_change);
+
+  bool Captured() const;
+
+  void ApplyOpacityToScrollbars(float opacity);
 
   ScrollbarAnimationControllerClient* client_;
 
-  void PostDelayedAnimationTask(bool on_resize);
+  base::TimeTicks last_awaken_time_;
 
-  int scroll_layer_id() const { return scroll_layer_id_; }
+  base::TimeDelta fade_delay_;
 
-  bool animating_fade() const { return is_animating_; }
+  base::TimeDelta fade_duration_;
 
-  bool Captured() const;
+  bool need_trigger_scrollbar_fade_in_;
+
+  bool is_animating_;
+  AnimationChange animation_change_;
+
+  const ElementId scroll_element_id_;
+  bool currently_scrolling_;
+  bool show_in_fast_scroll_;
+
+  base::CancelableClosure delayed_scrollbar_animation_;
+
+  float opacity_;
+
+  const bool show_scrollbars_on_scroll_gesture_;
+  const bool need_thinning_animation_;
 
   std::unique_ptr<SingleScrollbarAnimationControllerThinning>
       vertical_controller_;
   std::unique_ptr<SingleScrollbarAnimationControllerThinning>
       horizontal_controller_;
-
- private:
-  // Returns how far through the animation we are as a progress value from
-  // 0 to 1.
-  float AnimationProgressAtTime(base::TimeTicks now);
-
-  SingleScrollbarAnimationControllerThinning& GetScrollbarAnimationController(
-      ScrollbarOrientation) const;
-
-  base::TimeTicks last_awaken_time_;
-  base::TimeDelta delay_before_starting_;
-  base::TimeDelta resize_delay_before_starting_;
-
-  bool is_animating_;
-
-  int scroll_layer_id_;
-  bool currently_scrolling_;
-  bool scroll_gesture_has_scrolled_;
-  base::CancelableClosure delayed_scrollbar_fade_;
 
   base::WeakPtrFactory<ScrollbarAnimationController> weak_factory_;
 };

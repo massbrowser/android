@@ -10,8 +10,8 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
+#include "cc/base/filter_operations.h"
 #include "cc/output/compositor_frame.h"
-#include "cc/output/filter_operations.h"
 #include "cc/quads/debug_border_draw_quad.h"
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/largest_draw_quad.h"
@@ -328,6 +328,7 @@ void ParamTraits<cc::RenderPass>::Write(base::Pickle* m, const param_type& p) {
   WriteParam(m, p.transform_to_root_target);
   WriteParam(m, p.filters);
   WriteParam(m, p.background_filters);
+  WriteParam(m, p.color_space);
   WriteParam(m, p.has_transparent_background);
   WriteParam(m, base::checked_cast<uint32_t>(p.quad_list.size()));
 
@@ -382,8 +383,9 @@ void ParamTraits<cc::RenderPass>::Write(base::Pickle* m, const param_type& p) {
     // SharedQuadStates should appear in the order they are used by DrawQuads.
     // Find the SharedQuadState for this DrawQuad.
     while (shared_quad_state_iter != p.shared_quad_state_list.end() &&
-           quad->shared_quad_state != *shared_quad_state_iter)
+           quad->shared_quad_state != *shared_quad_state_iter) {
       ++shared_quad_state_iter;
+    }
 
     DCHECK(shared_quad_state_iter != p.shared_quad_state_list.end());
 
@@ -424,7 +426,7 @@ static cc::DrawQuad* ReadDrawQuad(const base::Pickle* m,
                                   cc::RenderPass* render_pass) {
   QuadType* quad = render_pass->CreateAndAppendDrawQuad<QuadType>();
   if (!ReadParam(m, iter, quad))
-    return NULL;
+    return nullptr;
   return quad;
 }
 
@@ -437,6 +439,7 @@ bool ParamTraits<cc::RenderPass>::Read(const base::Pickle* m,
   gfx::Transform transform_to_root_target;
   cc::FilterOperations filters;
   cc::FilterOperations background_filters;
+  gfx::ColorSpace color_space;
   bool has_transparent_background;
   uint32_t quad_list_size;
 
@@ -445,20 +448,22 @@ bool ParamTraits<cc::RenderPass>::Read(const base::Pickle* m,
       !ReadParam(m, iter, &transform_to_root_target) ||
       !ReadParam(m, iter, &filters) ||
       !ReadParam(m, iter, &background_filters) ||
+      !ReadParam(m, iter, &color_space) ||
       !ReadParam(m, iter, &has_transparent_background) ||
       !ReadParam(m, iter, &quad_list_size))
     return false;
 
   p->SetAll(id, output_rect, damage_rect, transform_to_root_target, filters,
-            background_filters, has_transparent_background);
+            background_filters, color_space, has_transparent_background);
 
+  cc::DrawQuad* last_draw_quad = nullptr;
   for (uint32_t i = 0; i < quad_list_size; ++i) {
     cc::DrawQuad::Material material;
     base::PickleIterator temp_iter = *iter;
     if (!ReadParam(m, &temp_iter, &material))
       return false;
 
-    cc::DrawQuad* draw_quad = NULL;
+    cc::DrawQuad* draw_quad = nullptr;
     switch (material) {
       case cc::DrawQuad::DEBUG_BORDER:
         draw_quad = ReadDrawQuad<cc::DebugBorderDrawQuad>(m, iter, p);
@@ -518,6 +523,29 @@ bool ParamTraits<cc::RenderPass>::Read(const base::Pickle* m,
     }
 
     draw_quad->shared_quad_state = p->shared_quad_state_list.back();
+    // If this quad is a fallback SurfaceDrawQuad then update the previous
+    // primary SurfaceDrawQuad to point to this quad.
+    if (draw_quad->material == cc::DrawQuad::SURFACE_CONTENT) {
+      const cc::SurfaceDrawQuad* surface_draw_quad =
+          cc::SurfaceDrawQuad::MaterialCast(draw_quad);
+      if (surface_draw_quad->surface_draw_quad_type ==
+          cc::SurfaceDrawQuadType::FALLBACK) {
+        // A fallback quad must immediately follow a primary SurfaceDrawQuad.
+        if (!last_draw_quad ||
+            last_draw_quad->material != cc::DrawQuad::SURFACE_CONTENT) {
+          return false;
+        }
+        cc::SurfaceDrawQuad* last_surface_draw_quad =
+            static_cast<cc::SurfaceDrawQuad*>(last_draw_quad);
+        // Only one fallback quad is currently supported.
+        if (last_surface_draw_quad->surface_draw_quad_type !=
+            cc::SurfaceDrawQuadType::PRIMARY) {
+          return false;
+        }
+        last_surface_draw_quad->fallback_quad = surface_draw_quad;
+      }
+    }
+    last_draw_quad = draw_quad;
   }
 
   return true;
@@ -536,6 +564,8 @@ void ParamTraits<cc::RenderPass>::Log(const param_type& p, std::string* l) {
   LogParam(p.filters, l);
   l->append(", ");
   LogParam(p.background_filters, l);
+  l->append(", ");
+  LogParam(p.color_space, l);
   l->append(", ");
   LogParam(p.has_transparent_background, l);
   l->append(", ");
@@ -688,6 +718,48 @@ void ParamTraits<cc::SurfaceId>::Log(const param_type& p, std::string* l) {
   l->append(")");
 }
 
+void ParamTraits<cc::SurfaceInfo>::GetSize(base::PickleSizer* s,
+                                           const param_type& p) {
+  GetParamSize(s, p.id());
+  GetParamSize(s, p.device_scale_factor());
+  GetParamSize(s, p.size_in_pixels());
+}
+
+void ParamTraits<cc::SurfaceInfo>::Write(base::Pickle* m, const param_type& p) {
+  WriteParam(m, p.id());
+  WriteParam(m, p.device_scale_factor());
+  WriteParam(m, p.size_in_pixels());
+}
+
+bool ParamTraits<cc::SurfaceInfo>::Read(const base::Pickle* m,
+                                        base::PickleIterator* iter,
+                                        param_type* p) {
+  cc::SurfaceId surface_id;
+  if (!ReadParam(m, iter, &surface_id))
+    return false;
+
+  float device_scale_factor;
+  if (!ReadParam(m, iter, &device_scale_factor))
+    return false;
+
+  gfx::Size size_in_pixels;
+  if (!ReadParam(m, iter, &size_in_pixels))
+    return false;
+
+  *p = cc::SurfaceInfo(surface_id, device_scale_factor, size_in_pixels);
+  return p->is_valid();
+}
+
+void ParamTraits<cc::SurfaceInfo>::Log(const param_type& p, std::string* l) {
+  l->append("SurfaceInfo(");
+  LogParam(p.id(), l);
+  l->append(", ");
+  LogParam(p.device_scale_factor(), l);
+  l->append(", ");
+  LogParam(p.size_in_pixels(), l);
+  l->append(")");
+}
+
 void ParamTraits<cc::CompositorFrame>::Write(base::Pickle* m,
                                              const param_type& p) {
   WriteParam(m, p.metadata);
@@ -723,7 +795,7 @@ bool ParamTraits<cc::CompositorFrame>::Read(const base::Pickle* m,
 
   uint32_t num_render_passes;
   if (!ReadParam(m, iter, &p->resource_list) ||
-      !ReadParam(m, iter, &num_render_passes) ||
+      !ReadParam(m, iter, &num_render_passes) || num_render_passes == 0 ||
       num_render_passes > kMaxRenderPasses)
     return false;
   for (uint32_t i = 0; i < num_render_passes; ++i) {
@@ -818,84 +890,6 @@ void ParamTraits<cc::DrawQuad::Resources>::Log(const param_type& p,
   l->append("])");
 }
 
-void ParamTraits<cc::StreamVideoDrawQuad::OverlayResources>::GetSize(
-    base::PickleSizer* s,
-    const param_type& p) {
-  for (size_t i = 0; i < cc::DrawQuad::Resources::kMaxResourceIdCount; ++i) {
-    GetParamSize(s, p.size_in_pixels[i]);
-  }
-}
-
-void ParamTraits<cc::StreamVideoDrawQuad::OverlayResources>::Write(
-    base::Pickle* m,
-    const param_type& p) {
-  for (size_t i = 0; i < cc::DrawQuad::Resources::kMaxResourceIdCount; ++i) {
-    WriteParam(m, p.size_in_pixels[i]);
-  }
-}
-
-bool ParamTraits<cc::StreamVideoDrawQuad::OverlayResources>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* p) {
-  for (size_t i = 0; i < cc::DrawQuad::Resources::kMaxResourceIdCount; ++i) {
-    if (!ReadParam(m, iter, &p->size_in_pixels[i]))
-      return false;
-  }
-  return true;
-}
-
-void ParamTraits<cc::StreamVideoDrawQuad::OverlayResources>::Log(
-    const param_type& p,
-    std::string* l) {
-  l->append("StreamVideoDrawQuad::OverlayResources([");
-  for (size_t i = 0; i < cc::DrawQuad::Resources::kMaxResourceIdCount; ++i) {
-    LogParam(p.size_in_pixels[i], l);
-    if (i < (cc::DrawQuad::Resources::kMaxResourceIdCount - 1))
-      l->append(", ");
-  }
-  l->append("])");
-}
-
-void ParamTraits<cc::TextureDrawQuad::OverlayResources>::GetSize(
-    base::PickleSizer* s,
-    const param_type& p) {
-  for (size_t i = 0; i < cc::DrawQuad::Resources::kMaxResourceIdCount; ++i) {
-    GetParamSize(s, p.size_in_pixels[i]);
-  }
-}
-
-void ParamTraits<cc::TextureDrawQuad::OverlayResources>::Write(
-    base::Pickle* m,
-    const param_type& p) {
-  for (size_t i = 0; i < cc::DrawQuad::Resources::kMaxResourceIdCount; ++i) {
-    WriteParam(m, p.size_in_pixels[i]);
-  }
-}
-
-bool ParamTraits<cc::TextureDrawQuad::OverlayResources>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* p) {
-  for (size_t i = 0; i < cc::DrawQuad::Resources::kMaxResourceIdCount; ++i) {
-    if (!ReadParam(m, iter, &p->size_in_pixels[i]))
-      return false;
-  }
-  return true;
-}
-
-void ParamTraits<cc::TextureDrawQuad::OverlayResources>::Log(
-    const param_type& p,
-    std::string* l) {
-  l->append("TextureDrawQuad::OverlayResources([");
-  for (size_t i = 0; i < cc::DrawQuad::Resources::kMaxResourceIdCount; ++i) {
-    LogParam(p.size_in_pixels[i], l);
-    if (i < (cc::DrawQuad::Resources::kMaxResourceIdCount - 1))
-      l->append(", ");
-  }
-  l->append("])");
-}
-
 void ParamTraits<cc::YUVVideoDrawQuad>::GetSize(base::PickleSizer* s,
                                                 const param_type& p) {
   ParamTraits<cc::DrawQuad>::GetSize(s, p);
@@ -964,6 +958,40 @@ void ParamTraits<cc::YUVVideoDrawQuad>::Log(const param_type& p,
   l->append(", ");
   LogParam(p.bits_per_channel, l);
   l->append("])");
+}
+
+void ParamTraits<cc::BeginFrameAck>::GetSize(base::PickleSizer* s,
+                                             const param_type& p) {
+  GetParamSize(s, p.sequence_number);
+  GetParamSize(s, p.latest_confirmed_sequence_number);
+  GetParamSize(s, p.source_id);
+}
+
+void ParamTraits<cc::BeginFrameAck>::Write(base::Pickle* m,
+                                           const param_type& p) {
+  m->WriteUInt64(p.sequence_number);
+  m->WriteUInt64(p.latest_confirmed_sequence_number);
+  m->WriteUInt32(p.source_id);
+  // |has_damage| is implicit through IPC message name, so not transmitted.
+}
+
+bool ParamTraits<cc::BeginFrameAck>::Read(const base::Pickle* m,
+                                          base::PickleIterator* iter,
+                                          param_type* p) {
+  return iter->ReadUInt64(&p->sequence_number) &&
+         p->sequence_number >= cc::BeginFrameArgs::kStartingFrameNumber &&
+         iter->ReadUInt64(&p->latest_confirmed_sequence_number) &&
+         iter->ReadUInt32(&p->source_id);
+}
+
+void ParamTraits<cc::BeginFrameAck>::Log(const param_type& p, std::string* l) {
+  l->append("(");
+  LogParam(p.sequence_number, l);
+  l->append(", ");
+  LogParam(p.latest_confirmed_sequence_number, l);
+  l->append(", ");
+  LogParam(p.source_id, l);
+  l->append(")");
 }
 
 }  // namespace IPC

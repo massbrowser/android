@@ -70,17 +70,17 @@ void SolidRoundRectPainter::Paint(gfx::Canvas* canvas, const gfx::Size& size) {
   gfx::RectF border_rect_f(gfx::ScaleToEnclosingRect(gfx::Rect(size), scale));
   const SkScalar scaled_corner_radius = SkFloatToScalar(radius_ * scale);
 
-  cc::PaintFlags paint;
-  paint.setAntiAlias(true);
-  paint.setStyle(cc::PaintFlags::kFill_Style);
-  paint.setColor(bg_color_);
-  canvas->DrawRoundRect(border_rect_f, scaled_corner_radius, paint);
+  cc::PaintFlags flags;
+  flags.setAntiAlias(true);
+  flags.setStyle(cc::PaintFlags::kFill_Style);
+  flags.setColor(bg_color_);
+  canvas->DrawRoundRect(border_rect_f, scaled_corner_radius, flags);
 
   border_rect_f.Inset(gfx::InsetsF(0.5f));
-  paint.setStyle(cc::PaintFlags::kStroke_Style);
-  paint.setStrokeWidth(1);
-  paint.setColor(stroke_color_);
-  canvas->DrawRoundRect(border_rect_f, scaled_corner_radius, paint);
+  flags.setStyle(cc::PaintFlags::kStroke_Style);
+  flags.setStrokeWidth(1);
+  flags.setColor(stroke_color_);
+  canvas->DrawRoundRect(border_rect_f, scaled_corner_radius, flags);
 }
 
 // DashedFocusPainter ----------------------------------------------------------
@@ -121,9 +121,7 @@ void DashedFocusPainter::Paint(gfx::Canvas* canvas, const gfx::Size& size) {
 
 class SolidFocusPainter : public Painter {
  public:
-  SolidFocusPainter(SkColor color,
-                    SkScalar thickness,
-                    const gfx::InsetsF& insets);
+  SolidFocusPainter(SkColor color, int thickness, const gfx::InsetsF& insets);
   ~SolidFocusPainter() override;
 
   // Painter:
@@ -132,14 +130,14 @@ class SolidFocusPainter : public Painter {
 
  private:
   const SkColor color_;
-  const SkScalar thickness_;
+  const int thickness_;
   const gfx::InsetsF insets_;
 
   DISALLOW_COPY_AND_ASSIGN(SolidFocusPainter);
 };
 
 SolidFocusPainter::SolidFocusPainter(SkColor color,
-                                     SkScalar thickness,
+                                     int thickness,
                                      const gfx::InsetsF& insets)
     : color_(color), thickness_(thickness), insets_(insets) {}
 
@@ -205,7 +203,7 @@ gfx::Size GradientPainter::GetMinimumSize() const {
 }
 
 void GradientPainter::Paint(gfx::Canvas* canvas, const gfx::Size& size) {
-  cc::PaintFlags paint;
+  cc::PaintFlags flags;
   SkPoint p[2];
   p[0].iset(0, 0);
   if (horizontal_)
@@ -213,13 +211,12 @@ void GradientPainter::Paint(gfx::Canvas* canvas, const gfx::Size& size) {
   else
     p[1].iset(0, size.height());
 
-  paint.setShader(cc::WrapSkShader(SkGradientShader::MakeLinear(
+  flags.setShader(cc::WrapSkShader(SkGradientShader::MakeLinear(
       p, colors_.get(), pos_.get(), count_, SkShader::kClamp_TileMode)));
-  paint.setStyle(cc::PaintFlags::kFill_Style);
+  flags.setStyle(cc::PaintFlags::kFill_Style);
 
-  canvas->sk_canvas()->drawRectCoords(SkIntToScalar(0), SkIntToScalar(0),
-                                      SkIntToScalar(size.width()),
-                                      SkIntToScalar(size.height()), paint);
+  canvas->sk_canvas()->drawRect(SkRect::MakeIWH(size.width(), size.height()),
+                                flags);
 }
 
 // ImagePainter ---------------------------------------------------------------
@@ -356,17 +353,15 @@ std::unique_ptr<Painter> Painter::CreateSolidFocusPainter(
   // Subtract that here so it works the same way with the new
   // Canvas::DrawSolidFocusRect.
   const gfx::Insets corrected_insets = insets - gfx::Insets(0, 0, 1, 1);
-  return base::MakeUnique<SolidFocusPainter>(color, SkIntToScalar(1),
-                                             corrected_insets);
+  return base::MakeUnique<SolidFocusPainter>(color, 1, corrected_insets);
 }
 
 // static
 std::unique_ptr<Painter> Painter::CreateSolidFocusPainter(
     SkColor color,
-    float thickness,
+    int thickness,
     const gfx::InsetsF& insets) {
-  return base::MakeUnique<SolidFocusPainter>(color, SkFloatToScalar(thickness),
-                                             insets);
+  return base::MakeUnique<SolidFocusPainter>(color, thickness, insets);
 }
 
 // HorizontalPainter ----------------------------------------------------------

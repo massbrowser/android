@@ -152,11 +152,13 @@ void CertificateReportingService::Reporter::SendInternal(
                  weak_factory_.GetWeakPtr(), report.report_id));
 }
 
-void CertificateReportingService::Reporter::ErrorCallback(int report_id,
-                                                          const GURL& url,
-                                                          int error) {
+void CertificateReportingService::Reporter::ErrorCallback(
+    int report_id,
+    const GURL& url,
+    int net_error,
+    int http_response_code) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  RecordUMAOnFailure(error);
+  RecordUMAOnFailure(net_error);
   if (retries_enabled_) {
     auto it = inflight_reports_.find(report_id);
     DCHECK(it != inflight_reports_.end());
@@ -203,10 +205,10 @@ CertificateReportingService::CertificateReportingService(
 
   content::BrowserThread::PostTaskAndReply(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&CertificateReportingService::InitializeOnIOThread,
-                 base::Unretained(this), true, url_request_context_getter,
-                 max_queued_report_count_, max_report_age_, clock_,
-                 server_public_key_, server_public_key_version_),
+      base::BindOnce(&CertificateReportingService::InitializeOnIOThread,
+                     base::Unretained(this), true, url_request_context_getter,
+                     max_queued_report_count_, max_report_age_, clock_,
+                     server_public_key_, server_public_key_version_),
       reset_callback_);
 }
 
@@ -220,7 +222,7 @@ void CertificateReportingService::Shutdown() {
   url_request_context_ = nullptr;
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&CleanupOnIOThread, base::Passed(std::move(reporter_))));
+      base::BindOnce(&CleanupOnIOThread, base::Passed(std::move(reporter_))));
 }
 
 void CertificateReportingService::Send(const std::string& serialized_report) {
@@ -230,8 +232,8 @@ void CertificateReportingService::Send(const std::string& serialized_report) {
   }
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&CertificateReportingService::Reporter::Send,
-                 base::Unretained(reporter_.get()), serialized_report));
+      base::BindOnce(&CertificateReportingService::Reporter::Send,
+                     base::Unretained(reporter_.get()), serialized_report));
 }
 
 void CertificateReportingService::SendPending() {
@@ -241,8 +243,8 @@ void CertificateReportingService::SendPending() {
   }
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&CertificateReportingService::Reporter::SendPending,
-                 base::Unretained(reporter_.get())));
+      base::BindOnce(&CertificateReportingService::Reporter::SendPending,
+                     base::Unretained(reporter_.get())));
 }
 
 void CertificateReportingService::InitializeOnIOThread(
@@ -269,10 +271,10 @@ void CertificateReportingService::SetEnabled(bool enabled) {
 
   content::BrowserThread::PostTaskAndReply(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&CertificateReportingService::ResetOnIOThread,
-                 base::Unretained(this), enabled, url_request_context_,
-                 max_queued_report_count_, max_report_age_, clock_,
-                 server_public_key_, server_public_key_version_),
+      base::BindOnce(&CertificateReportingService::ResetOnIOThread,
+                     base::Unretained(this), enabled, url_request_context_,
+                     max_queued_report_count_, max_report_age_, clock_,
+                     server_public_key_, server_public_key_version_),
       reset_callback_);
 }
 
@@ -303,15 +305,14 @@ void CertificateReportingService::ResetOnIOThread(
   std::unique_ptr<certificate_reporting::ErrorReporter> error_reporter;
   if (server_public_key) {
     // Only used in tests.
-    std::unique_ptr<net::ReportSender> report_sender(new net::ReportSender(
-        url_request_context, net::ReportSender::DO_NOT_SEND_COOKIES));
+    std::unique_ptr<net::ReportSender> report_sender(
+        new net::ReportSender(url_request_context));
     error_reporter.reset(new certificate_reporting::ErrorReporter(
         GURL(kExtendedReportingUploadUrl), server_public_key,
         server_public_key_version, std::move(report_sender)));
   } else {
     error_reporter.reset(new certificate_reporting::ErrorReporter(
-        url_request_context, GURL(kExtendedReportingUploadUrl),
-        net::ReportSender::DO_NOT_SEND_COOKIES));
+        url_request_context, GURL(kExtendedReportingUploadUrl)));
   }
   reporter_.reset(
       new Reporter(std::move(error_reporter),

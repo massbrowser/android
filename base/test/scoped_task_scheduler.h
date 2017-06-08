@@ -21,6 +21,12 @@ namespace test {
 // thread where the ScopedTaskScheduler lives. The destructor runs remaining
 // BLOCK_SHUTDOWN tasks synchronously.
 //
+// Note: ScopedTaskScheduler intentionally breaks the TaskScheduler contract of
+// always running its tasks on threads it owns, instead opting to run its tasks
+// on the main thread for determinism in tests. Components that depend on
+// TaskScheduler using independent threads should use ScopedAsyncTaskScheduler
+// for testing.
+//
 // Example usage:
 //
 // In this snippet, RunUntilIdle() returns after "A" is run.
@@ -35,8 +41,7 @@ namespace test {
 // base::PostTask(FROM_HERE, base::Bind(&RunLoop::Quit, &run_loop));
 // base::PostTask(FROM_HERE, base::Bind(&C));
 // base::PostTaskWithTraits(
-//     base::TaskTraits().WithShutdownBehavior(
-//         base::TaskShutdownBehavior::BLOCK_SHUTDOWN),
+//     {base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
 //     base::Bind(&D));
 // run_loop.Run();  // Returns after running B and RunLoop::Quit.
 //
@@ -51,8 +56,9 @@ class ScopedTaskScheduler {
   ScopedTaskScheduler();
 
   // Registers a synchronous TaskScheduler on a thread that already has a
-  // |message_loop|. Calling RunLoop::Run/RunUntilIdle() on the thread where
-  // this lives runs the MessageLoop and TaskScheduler tasks in posting order.
+  // |message_loop| assumed to be associated with the caller's thread. Calling
+  // RunLoop::Run/RunUntilIdle() on the thread where this lives runs the
+  // MessageLoop and TaskScheduler tasks in posting order.
   //
   // In general, you don't need a ScopedTaskScheduler and a MessageLoop because
   // ScopedTaskScheduler provides most MessageLoop features.

@@ -6,11 +6,11 @@
 
 #include <stddef.h>
 
+#include "cc/paint/clip_display_item.h"
+#include "cc/paint/drawing_display_item.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_recorder.h"
-#include "cc/playback/clip_display_item.h"
-#include "cc/playback/drawing_display_item.h"
-#include "cc/playback/transform_display_item.h"
+#include "cc/paint/transform_display_item.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
 
@@ -18,13 +18,13 @@ namespace cc {
 
 FakeContentLayerClient::ImageData::ImageData(sk_sp<const SkImage> img,
                                              const gfx::Point& point,
-                                             const PaintFlags& paint)
-    : image(std::move(img)), point(point), paint(paint) {}
+                                             const PaintFlags& flags)
+    : image(std::move(img)), point(point), flags(flags) {}
 
 FakeContentLayerClient::ImageData::ImageData(sk_sp<const SkImage> img,
                                              const gfx::Transform& transform,
-                                             const PaintFlags& paint)
-    : image(std::move(img)), transform(transform), paint(paint) {}
+                                             const PaintFlags& flags)
+    : image(std::move(img)), transform(transform), flags(flags) {}
 
 FakeContentLayerClient::ImageData::ImageData(const ImageData& other) = default;
 
@@ -48,8 +48,6 @@ gfx::Rect FakeContentLayerClient::PaintableRegion() {
 scoped_refptr<DisplayItemList>
 FakeContentLayerClient::PaintContentsToDisplayList(
     PaintingControlSetting painting_control) {
-  // Cached picture is used because unit tests expect to be able to
-  // use GatherPixelRefs.
   auto display_list = make_scoped_refptr(new DisplayItemList);
   display_list->SetRetainVisualRectsForTesting(true);
   PaintRecorder recorder;
@@ -57,10 +55,10 @@ FakeContentLayerClient::PaintContentsToDisplayList(
   for (RectPaintVector::const_iterator it = draw_rects_.begin();
        it != draw_rects_.end(); ++it) {
     const gfx::RectF& draw_rect = it->first;
-    const PaintFlags& paint = it->second;
+    const PaintFlags& flags = it->second;
     PaintCanvas* canvas =
         recorder.beginRecording(gfx::RectFToSkRect(draw_rect));
-    canvas->drawRect(gfx::RectFToSkRect(draw_rect), paint);
+    canvas->drawRect(gfx::RectFToSkRect(draw_rect), flags);
     display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
         ToEnclosingRect(draw_rect), recorder.finishRecordingAsPicture());
   }
@@ -73,8 +71,8 @@ FakeContentLayerClient::PaintContentsToDisplayList(
     }
     PaintCanvas* canvas =
         recorder.beginRecording(it->image->width(), it->image->height());
-    canvas->drawImage(it->image.get(), it->point.x(), it->point.y(),
-                      &it->paint);
+    canvas->drawImage(PaintImage(it->image), it->point.x(), it->point.y(),
+                      &it->flags);
     display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
         PaintableRegion(), recorder.finishRecordingAsPicture());
     if (!it->transform.IsIdentity()) {
@@ -86,11 +84,11 @@ FakeContentLayerClient::PaintContentsToDisplayList(
     gfx::Rect draw_rect = PaintableRegion();
     bool red = true;
     while (!draw_rect.IsEmpty()) {
-      PaintFlags paint;
-      paint.setColor(red ? SK_ColorRED : SK_ColorBLUE);
+      PaintFlags flags;
+      flags.setColor(red ? SK_ColorRED : SK_ColorBLUE);
       PaintCanvas* canvas =
           recorder.beginRecording(gfx::RectToSkRect(draw_rect));
-      canvas->drawIRect(gfx::RectToSkIRect(draw_rect), paint);
+      canvas->drawIRect(gfx::RectToSkIRect(draw_rect), flags);
       display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
           draw_rect, recorder.finishRecordingAsPicture());
       draw_rect.Inset(1, 1);

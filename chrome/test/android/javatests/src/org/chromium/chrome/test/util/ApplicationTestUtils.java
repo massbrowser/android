@@ -39,8 +39,7 @@ public class ApplicationTestUtils {
 
     // TODO(jbudorick): fix deprecation warning crbug.com/537347
     @SuppressWarnings("deprecation")
-    public static void setUp(Context context, boolean clearAppData)
-            throws Exception {
+    public static void setUp(Context context, boolean clearAppData) {
         if (clearAppData) {
             // Clear data and remove any tasks listed in Android's Overview menu between test runs.
             clearAppData(context);
@@ -124,6 +123,23 @@ public class ApplicationTestUtils {
 
     /** Finishes the given activity and waits for its onDestroy() to be called. */
     public static void finishActivity(final Activity activity) throws Exception {
+        closeActivity(activity, new ActivityCloser<Activity>() {
+            @Override
+            public void close(Activity activity) {
+                activity.finish();
+            }
+        });
+    }
+
+    /**
+     * Encapsulates activity closing logic. Invoked on UI thread.
+     * @param <A> Activity type.
+     */
+    public interface ActivityCloser<A extends Activity> { void close(A activity); }
+
+    /** Closes the given activity and waits for its onDestroy() to be called. */
+    public static <A extends Activity> void closeActivity(
+            final A activity, final ActivityCloser<A> closer) throws Exception {
         final CallbackHelper callbackHelper = new CallbackHelper();
         final ApplicationStatus.ActivityStateListener activityStateListener =
                 new ApplicationStatus.ActivityStateListener() {
@@ -144,7 +160,7 @@ public class ApplicationTestUtils {
                     }
                     ApplicationStatus.registerStateListenerForActivity(
                             activityStateListener, activity);
-                    activity.finish();
+                    closer.close(activity);
                     return false;
                 }
             });
@@ -158,7 +174,7 @@ public class ApplicationTestUtils {
 
     /** Finishes all tasks Chrome has listed in Android's Overview. */
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-    public static void finishAllChromeTasks(final Context context) throws Exception {
+    public static void finishAllChromeTasks(final Context context) {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {

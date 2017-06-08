@@ -6,10 +6,20 @@
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
 #include "base/threading/thread.h"
+#include "base/values.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/scoped_ipc_support.h"
 #include "services/catalog/catalog.h"
 #include "services/service_manager/public/cpp/test/service_test_catalog.h"
+
+#if defined(OS_ANDROID)
+#include "base/android/jni_android.h"
+#include "mojo/android/system/mojo_jni_registrar.h"
+#endif
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+#include "services/service_manager/public/cpp/standalone_service/mach_broker.h"
+#endif
 
 int main(int argc, char** argv) {
   base::TestSuite test_suite(argc, argv);
@@ -18,6 +28,15 @@ int main(int argc, char** argv) {
       service_manager::test::CreateTestCatalog());
 
   mojo::edk::Init();
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  mojo::edk::SetMachPortProvider(
+      service_manager::MachBroker::GetInstance()->port_provider());
+#endif
+
+#if defined(OS_ANDROID)
+  mojo::android::RegisterSystemJni(base::android::AttachCurrentThread());
+#endif
 
   base::Thread ipc_thread("IPC thread");
   ipc_thread.StartWithOptions(

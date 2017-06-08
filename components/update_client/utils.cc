@@ -26,11 +26,13 @@
 #include "build/build_config.h"
 #include "components/crx_file/id_util.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
+#include "components/update_client/component.h"
 #include "components/update_client/configurator.h"
 #include "components/update_client/crx_update_item.h"
 #include "components/update_client/update_client.h"
 #include "components/update_client/update_client_errors.h"
 #include "components/update_client/update_query_params.h"
+#include "components/update_client/update_response.h"
 #include "components/update_client/updater_state.h"
 #include "crypto/secure_hash.h"
 #include "crypto/sha2.h"
@@ -94,6 +96,7 @@ std::string GetServicePack() {
 
 }  // namespace
 
+// Builds a protocol message.
 std::string BuildProtocolRequest(
     const std::string& prod_id,
     const std::string& browser_version,
@@ -104,9 +107,10 @@ std::string BuildProtocolRequest(
     const std::string& request_body,
     const std::string& additional_attributes,
     const std::unique_ptr<UpdaterState::Attributes>& updater_state_attributes) {
-  std::string request(
+  std::string request = base::StringPrintf(
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-      "<request protocol=\"3.0\" ");
+      "<request protocol=\"%s\" ",
+      kProtocolVersion);
 
   if (!additional_attributes.empty())
     base::StringAppendF(&request, "%s ", additional_attributes.c_str());
@@ -137,11 +141,12 @@ std::string BuildProtocolRequest(
     base::StringAppendF(&request, " dlpref=\"%s\"",
                         download_preference.c_str());
   if (updater_state_attributes &&
-      updater_state_attributes->count(UpdaterState::kDomainJoined)) {
+      updater_state_attributes->count(UpdaterState::kIsEnterpriseManaged)) {
     base::StringAppendF(
         &request, " %s=\"%s\"",  // domainjoined
-        UpdaterState::kDomainJoined,
-        (*updater_state_attributes)[UpdaterState::kDomainJoined].c_str());
+        UpdaterState::kIsEnterpriseManaged,
+        (*updater_state_attributes)[UpdaterState::kIsEnterpriseManaged]
+            .c_str());
   }
   base::StringAppendF(&request, ">");
 
@@ -167,7 +172,7 @@ std::string BuildProtocolRequest(
   if (updater_state_attributes) {
     base::StringAppendF(&request, "<updater");
     for (const auto& attr : *updater_state_attributes) {
-      if (attr.first != UpdaterState::kDomainJoined) {
+      if (attr.first != UpdaterState::kIsEnterpriseManaged) {
         base::StringAppendF(&request, " %s=\"%s\"", attr.first.c_str(),
                           attr.second.c_str());
       }
@@ -237,8 +242,8 @@ int GetFetchError(const net::URLFetcher& fetcher) {
   }
 }
 
-bool HasDiffUpdate(const CrxUpdateItem* update_item) {
-  return !update_item->crx_diffurls.empty();
+bool HasDiffUpdate(const Component& component) {
+  return !component.crx_diffurls().empty();
 }
 
 bool IsHttpServerError(int status_code) {

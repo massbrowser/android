@@ -21,6 +21,7 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -133,6 +134,7 @@ IN_PROC_BROWSER_TEST_F(RedirectTest, ClientEmptyReferer) {
       final_url.spec().c_str());
 
   // Write the contents to a temporary file.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temp_directory;
   ASSERT_TRUE(temp_directory.CreateUniqueTempDir());
   base::FilePath temp_file;
@@ -171,7 +173,7 @@ IN_PROC_BROWSER_TEST_F(RedirectTest, ClientCancelled) {
   // as client redirect and the redirect will be recoreded, which can cause
   // this test failed.
   content::SimulateMouseClick(web_contents, 0,
-      blink::WebMouseEvent::Button::Left);
+                              blink::WebMouseEvent::Button::kLeft);
   navigation_observer.Wait();
 
   std::vector<GURL> redirects = GetRedirects(first_url);

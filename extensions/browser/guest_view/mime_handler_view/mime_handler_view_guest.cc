@@ -31,7 +31,7 @@
 #include "extensions/strings/grit/extensions_strings.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/base/url_util.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/WebKit/public/platform/WebGestureEvent.h"
 
 using content::WebContents;
@@ -195,10 +195,6 @@ void MimeHandlerViewGuest::DidInitialize(
   ExtensionsAPIClient::Get()->AttachWebContentsHelpers(web_contents());
 }
 
-bool MimeHandlerViewGuest::ShouldHandleFindRequestsForEmbedder() const {
-  return is_full_page_plugin();
-}
-
 bool MimeHandlerViewGuest::ZoomPropagatesFromEmbedderToGuest() const {
   return false;
 }
@@ -245,9 +241,9 @@ bool MimeHandlerViewGuest::HandleContextMenu(
 bool MimeHandlerViewGuest::PreHandleGestureEvent(
     WebContents* source,
     const blink::WebGestureEvent& event) {
-  if (event.type() == blink::WebGestureEvent::GesturePinchBegin ||
-      event.type() == blink::WebGestureEvent::GesturePinchUpdate ||
-      event.type() == blink::WebGestureEvent::GesturePinchEnd) {
+  if (event.GetType() == blink::WebGestureEvent::kGesturePinchBegin ||
+      event.GetType() == blink::WebGestureEvent::kGesturePinchUpdate ||
+      event.GetType() == blink::WebGestureEvent::kGesturePinchEnd) {
     // If we're an embedded plugin we drop pinch-gestures to avoid zooming the
     // guest.
     return !is_full_page_plugin();
@@ -285,7 +281,7 @@ void MimeHandlerViewGuest::OnRenderFrameHostDeleted(int process_id,
                                                     int routing_id) {
   if (process_id == embedder_frame_process_id_ &&
       routing_id == embedder_frame_routing_id_)
-    Destroy();
+    Destroy(true);
 }
 
 void MimeHandlerViewGuest::DocumentOnLoadCompletedInMainFrame() {

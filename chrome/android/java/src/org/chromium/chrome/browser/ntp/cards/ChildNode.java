@@ -40,6 +40,7 @@ public abstract class ChildNode implements TreeNode {
 
     protected void notifyItemRangeChanged(
             int index, int count, @Nullable PartialBindCallback callback) {
+        assert isRangeValid(index, count);
         if (mParent != null) mParent.onItemRangeChanged(this, index, count, callback);
     }
 
@@ -50,10 +51,12 @@ public abstract class ChildNode implements TreeNode {
     protected void notifyItemRangeInserted(int index, int count) {
         mNumItems += count;
         assert mNumItems == getItemCountForDebugging();
+        assert isRangeValid(index, count);
         if (mParent != null) mParent.onItemRangeInserted(this, index, count);
     }
 
     protected void notifyItemRangeRemoved(int index, int count) {
+        assert isRangeValid(index, count);
         mNumItems -= count;
         assert mNumItems == getItemCountForDebugging();
         if (mParent != null) mParent.onItemRangeRemoved(this, index, count);
@@ -63,6 +66,12 @@ public abstract class ChildNode implements TreeNode {
         notifyItemRangeChanged(index, 1, callback);
     }
 
+    /**
+     * @deprecated Change notifications without payload recreate the view holder. Is that on
+     * purpose? Use {@link #notifyItemChanged(int, PartialBindCallback)} if the item to be notified
+     * should not be entirely replaced. (see https://crbug.com/704130)
+     */
+    @Deprecated // Can be valid in specific cases, but marked as deprecated to provide the warning.
     protected void notifyItemChanged(int index) {
         notifyItemRangeChanged(index, 1);
     }
@@ -76,9 +85,15 @@ public abstract class ChildNode implements TreeNode {
     }
 
     protected void checkIndex(int position) {
-        if (position < 0 || position >= getItemCount()) {
+        if (!isRangeValid(position, 1)) {
             throw new IndexOutOfBoundsException(position + "/" + getItemCount());
         }
+    }
+
+    private boolean isRangeValid(int index, int count) {
+        // Uses |mNumItems| to be able to call the method when checking deletion range, as we still
+        // have the previous number of items.
+        return index >= 0 && index + count <= mNumItems;
     }
 
     /**

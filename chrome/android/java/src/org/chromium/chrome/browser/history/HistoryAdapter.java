@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.history;
 
 import android.content.res.Resources;
+import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.text.SpannableString;
 import android.text.method.LinkMovementMethod;
@@ -16,15 +17,14 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
-import org.chromium.base.ContextUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.history.HistoryProvider.BrowsingHistoryObserver;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.widget.DateDividedAdapter;
-import org.chromium.chrome.browser.widget.DateDividedAdapter.DateViewHolder;
 import org.chromium.chrome.browser.widget.displaystyle.MarginResizer;
 import org.chromium.chrome.browser.widget.selection.SelectableItemViewHolder;
+import org.chromium.chrome.browser.widget.selection.SelectableListLayout;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionObserver;
 import org.chromium.components.signin.ChromeSigninController;
@@ -49,7 +49,9 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
     private final HistoryProvider mHistoryProvider;
     private final HistoryManager mHistoryManager;
     private final ArrayList<HistoryItemView> mItemViews;
+    private RecyclerView mRecyclerView;
 
+    private ViewGroup mPrivacyDisclaimers;
     private TextView mSignedInNotSyncedTextView;
     private TextView mSignedInSyncedTextView;
     private TextView mOtherFormsOfBrowsingHistoryTextView;
@@ -85,6 +87,7 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
     public void onDestroyed() {
         mHistoryProvider.destroy();
         mIsDestroyed = true;
+        mRecyclerView = null;
     }
 
     /**
@@ -96,6 +99,19 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
         mNextQueryEndTime = 0;
         mClearOnNextQueryComplete = true;
         mHistoryProvider.queryHistory(mQueryText, mNextQueryEndTime);
+    }
+
+    @Override
+    public void onAttachedToRecyclerView(RecyclerView recyclerView) {
+        // This adapter should only ever be attached to one RecyclerView.
+        assert mRecyclerView == null;
+
+        mRecyclerView = recyclerView;
+    }
+
+    @Override
+    public void onDetachedFromRecyclerView(RecyclerView recyclerView) {
+        mRecyclerView = null;
     }
 
     /**
@@ -183,7 +199,9 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
      * See {@link SelectionObserver}.
      */
     public void onSelectionStateChange(boolean selectionEnabled) {
-        mClearBrowsingDataButton.setEnabled(!selectionEnabled);
+        if (mClearBrowsingDataButton != null) {
+            mClearBrowsingDataButton.setEnabled(!selectionEnabled);
+        }
         for (HistoryItemView item : mItemViews) {
             item.setRemoveButtonVisible(!selectionEnabled);
         }
@@ -196,6 +214,7 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
         SelectableItemViewHolder<HistoryItem> viewHolder =
                 new SelectableItemViewHolder<>(v, mSelectionDelegate);
         HistoryItemView itemView = (HistoryItemView) viewHolder.itemView;
+        itemView.configureWideDisplayStyle(mHistoryManager.getSelectableListLayout().getUiConfig());
         itemView.setRemoveButtonVisible(!mSelectionDelegate.isSelectionEnabled());
         mItemViews.add(itemView);
         return viewHolder;
@@ -213,9 +232,10 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
 
     @Override
     protected int getTimedItemViewResId() {
-        return R.layout.history_date_view;
+        return R.layout.date_view;
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public void onQueryHistoryComplete(List<HistoryItem> items, boolean hasMorePotentialMatches) {
         // Return early if the results are returned after the activity/native page is
@@ -227,13 +247,30 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
             mClearOnNextQueryComplete = false;
         }
 
+        boolean wasInitialized = mIsInitialized;
         if (!mIsInitialized) {
             if (items.size() > 0 && !mIsSearching) addHeader();
             mIsInitialized = true;
         }
 
         removeFooter();
+
+        HistoryItemView lastHistoryItemView = null;
+        if (mRecyclerView != null && wasInitialized) {
+            ViewHolder holder = mRecyclerView.findViewHolderForAdapterPosition(getItemCount() - 1);
+            if (holder instanceof SelectableItemViewHolder) {
+                lastHistoryItemView =
+                        (HistoryItemView) ((SelectableItemViewHolder<HistoryItem>) holder).itemView;
+            }
+        }
+
         loadItems(items);
+
+        if (lastHistoryItemView != null) {
+            // When loading more items, the last item's background needs to be reset since it may
+            // now be in the middle of an ItemGroup.
+            lastHistoryItemView.setBackgroundResourceForGroupPosition();
+        }
 
         mIsLoadingItems = false;
         mHasMorePotentialItems = hasMorePotentialMatches;
@@ -274,22 +311,26 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
         mClearBrowsingDataButtonContainer = (FrameLayout) mClearBrowsingDataButton.getParent();
         MarginResizer.createWithViewAdapter(mClearBrowsingDataButtonContainer,
                 mHistoryManager.getSelectableListLayout().getUiConfig(),
-                mHistoryManager.getDefaultLateralListItemMarginPx(), 0);
+                SelectableListLayout.getDefaultListItemLateralMarginPx(resources), 0);
         updateClearBrowsingDataButtonVisibility();
+
+        mPrivacyDisclaimers = (ViewGroup) v.findViewById(R.id.privacy_disclaimers);
 
         mSignedInNotSyncedTextView = (TextView) v.findViewById(R.id.signed_in_not_synced);
         setPrivacyDisclaimerText(mSignedInNotSyncedTextView,
                 R.string.android_history_no_synced_results, LEARN_MORE_LINK);
         MarginResizer.createWithViewAdapter(mSignedInNotSyncedTextView,
                 mHistoryManager.getSelectableListLayout().getUiConfig(),
-                getDefaultTextMargin(resources), mHistoryManager.getListItemLateralShadowSizePx());
+                getDefaultTextMargin(resources),
+                SelectableListLayout.getDefaultListItemLateralShadowSizePx(resources));
 
         mSignedInSyncedTextView = (TextView) v.findViewById(R.id.signed_in_synced);
         setPrivacyDisclaimerText(mSignedInSyncedTextView,
                 R.string.android_history_has_synced_results, LEARN_MORE_LINK);
         MarginResizer.createWithViewAdapter(mSignedInSyncedTextView,
                 mHistoryManager.getSelectableListLayout().getUiConfig(),
-                getDefaultTextMargin(resources), mHistoryManager.getListItemLateralShadowSizePx());
+                getDefaultTextMargin(resources),
+                SelectableListLayout.getDefaultListItemLateralShadowSizePx(resources));
 
         mOtherFormsOfBrowsingHistoryTextView = (TextView) v.findViewById(
                 R.id.other_forms_of_browsing_history);
@@ -297,7 +338,8 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
                 R.string.android_history_other_forms_of_history, GOOGLE_HISTORY_LINK);
         MarginResizer.createWithViewAdapter(mOtherFormsOfBrowsingHistoryTextView,
                 mHistoryManager.getSelectableListLayout().getUiConfig(),
-                getDefaultTextMargin(resources), mHistoryManager.getListItemLateralShadowSizePx());
+                getDefaultTextMargin(resources),
+                SelectableListLayout.getDefaultListItemLateralShadowSizePx(resources));
 
         setPrivacyDisclaimerVisibility();
 
@@ -316,7 +358,7 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
         MarginResizer.createWithViewAdapter(viewHolder.itemView,
                 mHistoryManager.getSelectableListLayout().getUiConfig(),
                 getDefaultTextMargin(parent.getResources()),
-                mHistoryManager.getListItemLateralShadowSizePx());
+                SelectableListLayout.getDefaultListItemLateralShadowSizePx(parent.getResources()));
         return viewHolder;
     }
 
@@ -337,16 +379,23 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
     private void setPrivacyDisclaimerVisibility() {
         if (!mIsHeaderInflated) return;
 
-        boolean isSignedIn =
-                ChromeSigninController.get(ContextUtils.getApplicationContext()).isSignedIn();
+        boolean isSignedIn = ChromeSigninController.get().isSignedIn();
         mSignedInNotSyncedTextView.setVisibility(
                 !mHasSyncedData && isSignedIn ? View.VISIBLE : View.GONE);
         mSignedInSyncedTextView.setVisibility(mHasSyncedData ? View.VISIBLE : View.GONE);
         mOtherFormsOfBrowsingHistoryTextView.setVisibility(
                 mHasOtherFormsOfBrowsingData ? View.VISIBLE : View.GONE);
+
+        boolean arePrivacyDisclaimersVisible =
+                isSignedIn || mHasSyncedData || mHasOtherFormsOfBrowsingData;
+        mPrivacyDisclaimers.setVisibility(arePrivacyDisclaimersVisible ? View.VISIBLE : View.GONE);
     }
 
     private void updateClearBrowsingDataButtonVisibility() {
+        // If the history header is not showing (e.g. when there is no browsing history),
+        // mClearBrowsingDataButton will be null.
+        if (mClearBrowsingDataButton == null) return;
+
         mClearBrowsingDataButtonContainer.setVisibility(
                 !PrefServiceBridge.getInstance().canDeleteBrowsingHistory() ? View.GONE :
                     View.VISIBLE);
@@ -354,8 +403,7 @@ public class HistoryAdapter extends DateDividedAdapter implements BrowsingHistor
 
     private int getDefaultTextMargin(Resources resources) {
         if (mDefaultTextMargin == 0) {
-            mDefaultTextMargin = resources.getDimensionPixelSize(
-                    R.dimen.history_default_text_margin);
+            mDefaultTextMargin = resources.getDimensionPixelSize(R.dimen.list_item_default_margin);
         }
         return mDefaultTextMargin;
     }

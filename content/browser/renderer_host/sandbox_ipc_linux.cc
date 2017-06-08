@@ -24,7 +24,6 @@
 #include "content/browser/renderer_host/font_utils_linux.h"
 #include "content/common/font_config_ipc_linux.h"
 #include "content/common/sandbox_linux/sandbox_linux.h"
-#include "content/common/set_process_title.h"
 #include "content/public/common/content_switches.h"
 #include "skia/ext/skia_utils_base.h"
 #include "third_party/skia/include/ports/SkFontConfigInterface.h"
@@ -342,7 +341,7 @@ void SandboxIPCHandler::HandleMakeSharedMemorySegment(
   int shm_fd = -1;
   base::SharedMemory shm;
   if (shm.Create(options))
-    shm_fd = shm.handle().fd;
+    shm_fd = shm.handle().GetHandle();
   base::Pickle reply;
   SendRendererReply(fds, reply, shm_fd);
 }

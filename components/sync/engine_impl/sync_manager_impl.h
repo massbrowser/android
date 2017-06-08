@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "components/sync/base/cryptographer.h"
@@ -103,7 +104,7 @@ class SyncManagerImpl
   bool HasDirectoryTypeDebugInfoObserver(
       TypeDebugInfoObserver* observer) override;
   void RequestEmitDebugInfo() override;
-  void ClearServerData(const ClearServerDataCallback& callback) override;
+  void ClearServerData(const base::Closure& callback) override;
   void OnCookieJarChanged(bool account_mismatch, bool empty_jar) override;
   void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd) override;
 
@@ -200,7 +201,7 @@ class SyncManagerImpl
 
   base::TimeDelta GetNudgeDelayTimeDelta(const ModelType& model_type);
 
-  typedef std::map<ModelType, NotificationInfo> NotificationInfoMap;
+  using NotificationInfoMap = std::map<ModelType, NotificationInfo>;
 
   // Determine if the parents or predecessors differ between the old and new
   // versions of an entry.  Note that a node's index may change without its
@@ -291,7 +292,7 @@ class SyncManagerImpl
   // forwarded to the observer slightly later, at the TRANSACTION_ENDING step
   // by HandleTransactionEndingChangeEvent. The list is cleared after observer
   // finishes processing.
-  typedef std::map<int, ImmutableChangeRecordList> ChangeRecordMap;
+  using ChangeRecordMap = std::map<int, ImmutableChangeRecordList>;
   ChangeRecordMap change_records_;
 
   SyncManager::ChangeDelegate* change_delegate_;

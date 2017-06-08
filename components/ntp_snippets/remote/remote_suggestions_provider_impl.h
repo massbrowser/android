@@ -19,7 +19,7 @@
 #include "base/macros.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
-#include "components/image_fetcher/image_fetcher_delegate.h"
+#include "components/image_fetcher/core/image_fetcher_delegate.h"
 #include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/category_status.h"
 #include "components/ntp_snippets/content_suggestion.h"
@@ -39,14 +39,15 @@ class Image;
 }  // namespace gfx
 
 namespace image_fetcher {
-class ImageDecoder;
 class ImageFetcher;
+struct RequestMetadata;
 }  // namespace image_fetcher
 
 namespace ntp_snippets {
 
 class CategoryRanker;
 class RemoteSuggestionsDatabase;
+class RemoteSuggestionsScheduler;
 
 // CachedImageFetcher takes care of fetching images from the network and caching
 // them in the database.
@@ -59,7 +60,6 @@ class CachedImageFetcher : public image_fetcher::ImageFetcherDelegate {
   // |pref_service| and |database| need to outlive the created image fetcher
   // instance.
   CachedImageFetcher(std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
-                     std::unique_ptr<image_fetcher::ImageDecoder> image_decoder,
                      PrefService* pref_service,
                      RemoteSuggestionsDatabase* database);
   ~CachedImageFetcher() override;
@@ -77,7 +77,8 @@ class CachedImageFetcher : public image_fetcher::ImageFetcherDelegate {
 
   void OnImageDecodingDone(const ImageFetchedCallback& callback,
                            const std::string& id_within_category,
-                           const gfx::Image& image);
+                           const gfx::Image& image,
+                           const image_fetcher::RequestMetadata& metadata);
   void OnImageFetchedFromDatabase(
       const ImageFetchedCallback& callback,
       const ContentSuggestion::ID& suggestion_id,
@@ -93,7 +94,6 @@ class CachedImageFetcher : public image_fetcher::ImageFetcherDelegate {
                              const ImageFetchedCallback& callback);
 
   std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher_;
-  std::unique_ptr<image_fetcher::ImageDecoder> image_decoder_;
   RemoteSuggestionsDatabase* database_;
   // Request throttler for limiting requests to thumbnail images.
   RequestThrottler thumbnail_requests_throttler_;
@@ -117,9 +117,9 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
       PrefService* pref_service,
       const std::string& application_language_code,
       CategoryRanker* category_ranker,
+      RemoteSuggestionsScheduler* scheduler,
       std::unique_ptr<RemoteSuggestionsFetcher> suggestions_fetcher,
       std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
-      std::unique_ptr<image_fetcher::ImageDecoder> image_decoder,
       std::unique_ptr<RemoteSuggestionsDatabase> database,
       std::unique_ptr<RemoteSuggestionsStatusService> status_service);
 
@@ -137,15 +137,15 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   bool initialized() const { return ready() || state_ == State::DISABLED; }
 
   // RemoteSuggestionsProvider implementation.
-  void SetProviderStatusCallback(
-      std::unique_ptr<ProviderStatusCallback> callback) override;
-  void RefetchInTheBackground(
-      std::unique_ptr<FetchStatusCallback> callback) override;
+  void RefetchInTheBackground(const FetchStatusCallback& callback) override;
 
   // TODO(fhorschig): Remove this getter when there is an interface for the
   // fetcher that allows better mocks.
   const RemoteSuggestionsFetcher* suggestions_fetcher_for_debugging()
       const override;
+
+  GURL GetUrlWithFavicon(
+      const ContentSuggestion::ID& suggestion_id) const override;
 
   // ContentSuggestionsProvider implementation.
   CategoryStatus GetCategoryStatus(Category category) override;
@@ -196,21 +196,19 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
  private:
   friend class RemoteSuggestionsProviderImplTest;
 
+  // TODO(jkrcal): Mock the database to trigger the error naturally (or remove
+  // the error state and get rid of the test).
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           CallsProviderStatusCallbackWhenReady);
+                           CallsSchedulerOnError);
+  // TODO(jkrcal): Mock the status service and remove these friend declarations.
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           CallsProviderStatusCallbackOnError);
-  FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           CallsProviderStatusCallbackWhenDisabled);
-  FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           ShouldNotCrashWhenCallingEmptyCallback);
+                           CallsSchedulerWhenDisabled);
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
                            DontNotifyIfNotAvailable);
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           RemoveExpiredDismissedContent);
-  FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest, StatusChanges);
+                           CallsSchedulerWhenSignedIn);
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           SuggestionsFetchedOnSignInAndSignOut);
+                           CallsSchedulerWhenSignedOut);
 
   // Possible state transitions:
   //       NOT_INITED --------+
@@ -220,6 +218,8 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   //       \       /          |
   //        v     v           |
   //     ERROR_OCCURRED <-----+
+  // TODO(jkrcal): Do we need to keep the distinction between states DISABLED
+  // and ERROR_OCCURED?
   enum class State {
     // The service has just been created. Can change to states:
     // - DISABLED: After the database is done loading,
@@ -295,7 +295,7 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   // the fetch finished, the provided |callback| will be triggered with the
   // status of the fetch.
   void FetchSuggestions(bool interactive_request,
-                        std::unique_ptr<FetchStatusCallback> callback);
+                        const FetchStatusCallback& callback);
 
   // Returns the URL of the image of a suggestion if it is among the current or
   // among the archived suggestions in the matching category. Returns an empty
@@ -314,7 +314,7 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
 
   // Callback for regular fetch requests with the RemoteSuggestionsFetcher.
   void OnFetchFinished(
-      std::unique_ptr<FetchStatusCallback> callback,
+      const FetchStatusCallback& callback,
       bool interactive_request,
       Status status,
       RemoteSuggestionsFetcher::OptionalFetchedCategories fetched_categories);
@@ -351,6 +351,13 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   // often enough to keep it small but not too often as it still iterates over
   // the file system.
   void ClearOrphanedImages();
+
+  // Clears suggestions because any history item has been removed.
+  void ClearHistoryDependentState();
+
+  // Clears suggestions for any non-history related reason (e.g., sign-in status
+  // change, etc.).
+  void ClearSuggestions();
 
   // Clears all stored suggestions and updates the observer.
   void NukeAllSuggestions();
@@ -420,6 +427,9 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   // Ranker that orders the categories. Not owned.
   CategoryRanker* category_ranker_;
 
+  // Scheduler to inform about scheduling-related events. Not owned.
+  RemoteSuggestionsScheduler* remote_suggestions_scheduler_;
+
   // The suggestions fetcher.
   std::unique_ptr<RemoteSuggestionsFetcher> suggestions_fetcher_;
 
@@ -440,14 +450,12 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
 
   // The parameters for the fetch to perform later.
   bool fetch_when_ready_interactive_;
-  std::unique_ptr<FetchStatusCallback> fetch_when_ready_callback_;
+  FetchStatusCallback fetch_when_ready_callback_;
 
-  std::unique_ptr<ProviderStatusCallback> provider_status_callback_;
-
-  // Set to true if NukeAllSuggestions is called while the service isn't ready.
-  // The nuke will be executed once the service finishes initialization or
-  // enters the READY state.
-  bool nuke_when_initialized_;
+  // Set to true if ClearHistoryDependentState is called while the service isn't
+  // ready. The nuke will be executed once the service finishes initialization
+  // or enters the READY state.
+  bool clear_history_dependent_state_when_initialized_;
 
   // A clock for getting the time. This allows to inject a clock in tests.
   std::unique_ptr<base::Clock> clock_;

@@ -482,20 +482,31 @@ class TemplateURL {
   // An AssociatedExtensionInfo represents information about the extension that
   // added the search engine.
   struct AssociatedExtensionInfo {
-    explicit AssociatedExtensionInfo(const std::string& extension_id);
+    AssociatedExtensionInfo(const std::string& extension_id,
+                            base::Time install_time,
+                            bool wants_to_be_default_engine);
     ~AssociatedExtensionInfo();
 
     std::string extension_id;
 
-    // Whether the search engine is supposed to be default.
-    bool wants_to_be_default_engine;
-
     // Used to resolve conflicts when there are multiple extensions specifying
     // the default search engine. The most recently-installed wins.
     base::Time install_time;
+
+    // Whether the search engine is supposed to be default.
+    bool wants_to_be_default_engine;
   };
 
   explicit TemplateURL(const TemplateURLData& data, Type type = NORMAL);
+
+  // Constructor for extension controlled engine. |type| must be
+  // NORMAL_CONTROLLED_BY_EXTENSION or OMNIBOX_API_EXTENSION.
+  TemplateURL(const TemplateURLData& data,
+              Type type,
+              std::string extension_id,
+              base::Time install_time,
+              bool wants_to_be_default_engine);
+
   ~TemplateURL();
 
   // Generates a suitable keyword for the specified url, which must be valid.
@@ -511,6 +522,11 @@ class TemplateURL {
   static bool MatchesData(const TemplateURL* t_url,
                           const TemplateURLData* data,
                           const SearchTermsData& search_terms_data);
+
+  // Special case for search_terms_replacement_key comparison, because of
+  // its special initialization in TemplateURL constructor.
+  static bool SearchTermsReplacementKeysMatch(const std::string& key1,
+                                              const std::string& key2);
 
   const TemplateURLData& data() const { return data_; }
 
@@ -587,11 +603,8 @@ class TemplateURL {
 
   Type type() const { return type_; }
 
-  // This setter shouldn't be used except by TemplateURLService and
-  // TemplateURLServiceClient implementations.
-  void set_extension_info(
-      std::unique_ptr<AssociatedExtensionInfo> extension_info) {
-    extension_info_ = std::move(extension_info);
+  const AssociatedExtensionInfo* GetExtensionInfoForTesting() const {
+    return extension_info_.get();
   }
 
   // Returns true if |url| supports replacement.
@@ -658,7 +671,7 @@ class TemplateURL {
       const GURL& url,
       const TemplateURLRef::SearchTermsArgs& search_terms_args,
       const SearchTermsData& search_terms_data,
-      GURL* result);
+      GURL* result) const;
 
   // Encodes the search terms from |search_terms_args| so that we know the
   // |input_encoding|. Returns the |encoded_terms| and the

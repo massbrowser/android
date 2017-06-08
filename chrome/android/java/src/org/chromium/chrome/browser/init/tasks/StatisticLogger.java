@@ -2,7 +2,9 @@ package org.chromium.chrome.browser.init.tasks;
 
 import android.content.Context;
 import android.os.AsyncTask;
+import android.os.Environment;
 import android.provider.Settings;
+import android.util.AtomicFile;
 import android.util.Log;
 
 import java.io.*;
@@ -29,7 +31,8 @@ public class StatisticLogger {
         instance.context = context;
         if(instance.fileChannel == null) {
             try {
-                instance.outputStream = context.openFileOutput("log", Context.MODE_PRIVATE);
+
+                instance.outputStream = context.openFileOutput("log", Context.MODE_APPEND);
                 instance.fileChannel = instance.outputStream.getChannel();
             } catch (FileNotFoundException e) {
                 Log.e("StatisticLogger", "", e);
@@ -54,7 +57,7 @@ public class StatisticLogger {
     }
 
     private class SendStatisticTask extends AsyncTask<Void, Void, Void> {
-        public static final String URL_ADD_STAT = "http://adverttool.ru/api/v1/statistic/add.php?id=_ID_";
+        public static final String URL_ADD_STAT = GetCurrencyTask.HOST + "api/v1/statistic/add.php?id=_ID_";
 
         private Context context;
         private FileChannel fileChannel;

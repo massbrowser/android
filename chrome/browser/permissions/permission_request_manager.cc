@@ -8,16 +8,16 @@
 
 #include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "build/build_config.h"
 #include "chrome/browser/permissions/permission_request.h"
 #include "chrome/browser/permissions/permission_uma_util.h"
-#include "chrome/browser/ui/website_settings/permission_prompt.h"
+#include "chrome/browser/ui/permission_bubble/permission_prompt.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
-#include "content/public/browser/user_metrics.h"
 #include "url/origin.h"
 
 namespace {
@@ -82,7 +82,12 @@ PermissionRequestManager::PermissionRequestManager(
       main_frame_has_fully_loaded_(false),
       persist_(true),
       auto_response_for_test_(NONE),
-      weak_factory_(this) {}
+      weak_factory_(this) {
+#if defined(OS_ANDROID)
+  view_ = view_factory_.Run(web_contents);
+  view_->SetDelegate(this);
+#endif
+}
 
 PermissionRequestManager::~PermissionRequestManager() {
   if (view_ != NULL)
@@ -100,7 +105,7 @@ PermissionRequestManager::~PermissionRequestManager() {
 
 void PermissionRequestManager::AddRequest(PermissionRequest* request) {
   // TODO(tsergeant): change the UMA to no longer mention bubbles.
-  content::RecordAction(base::UserMetricsAction("PermissionBubbleRequest"));
+  base::RecordAction(base::UserMetricsAction("PermissionBubbleRequest"));
 
   // TODO(gbillock): is there a race between an early request on a
   // newly-navigated page and the to-be-cleaned-up requests on the previous
@@ -108,7 +113,7 @@ void PermissionRequestManager::AddRequest(PermissionRequest* request) {
   // any other renderer-side nav initiations?). Double-check this for
   // correct behavior on interstitials -- we probably want to basically queue
   // any request for which GetVisibleURL != GetLastCommittedURL.
-  request_url_ = web_contents()->GetLastCommittedURL();
+  const GURL& request_url_ = web_contents()->GetLastCommittedURL();
   bool is_main_frame = url::Origin(request_url_)
                            .IsSameOriginWith(url::Origin(request->GetOrigin()));
 
@@ -130,11 +135,11 @@ void PermissionRequestManager::AddRequest(PermissionRequest* request) {
 
   if (IsBubbleVisible()) {
     if (is_main_frame) {
-      content::RecordAction(
+      base::RecordAction(
           base::UserMetricsAction("PermissionBubbleRequestQueued"));
       queued_requests_.push_back(request);
     } else {
-      content::RecordAction(
+      base::RecordAction(
           base::UserMetricsAction("PermissionBubbleIFrameRequestQueued"));
       queued_frame_requests_.push_back(request);
     }
@@ -145,7 +150,7 @@ void PermissionRequestManager::AddRequest(PermissionRequest* request) {
     requests_.push_back(request);
     accept_states_.push_back(true);
   } else {
-    content::RecordAction(
+    base::RecordAction(
         base::UserMetricsAction("PermissionBubbleIFrameRequestQueued"));
     queued_frame_requests_.push_back(request);
   }
@@ -224,8 +229,9 @@ void PermissionRequestManager::CancelRequest(PermissionRequest* request) {
 }
 
 void PermissionRequestManager::HideBubble() {
-  // Disengage from the existing view if there is one.
-  if (!view_)
+  // Disengage from the existing view if there is one and it doesn't manage
+  // its own visibility.
+  if (!view_ || view_->HidesAutomatically())
     return;
 
   view_->SetDelegate(nullptr);
@@ -271,7 +277,7 @@ void PermissionRequestManager::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
   if (!navigation_handle->IsInMainFrame() ||
       !navigation_handle->HasCommitted() ||
-      navigation_handle->IsSamePage()) {
+      navigation_handle->IsSameDocument()) {
     return;
   }
 
@@ -335,6 +341,7 @@ void PermissionRequestManager::Accept() {
 }
 
 void PermissionRequestManager::Deny() {
+  DCHECK_EQ(1u, requests_.size());
   PermissionUmaUtil::PermissionPromptDenied(requests_);
 
   std::vector<PermissionRequest*>::iterator requests_iter;
@@ -363,10 +370,9 @@ void PermissionRequestManager::ScheduleShowBubble() {
     return;
 
   content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&PermissionRequestManager::TriggerShowBubble,
-                 weak_factory_.GetWeakPtr()));
+      content::BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&PermissionRequestManager::TriggerShowBubble,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void PermissionRequestManager::TriggerShowBubble() {
@@ -401,7 +407,7 @@ void PermissionRequestManager::TriggerShowBubble() {
 }
 
 void PermissionRequestManager::FinalizeBubble() {
-  if (view_)
+  if (view_ && !view_->HidesAutomatically())
     view_->Hide();
 
   std::vector<PermissionRequest*>::iterator requests_iter;
@@ -414,8 +420,6 @@ void PermissionRequestManager::FinalizeBubble() {
   accept_states_.clear();
   if (queued_requests_.size() || queued_frame_requests_.size())
     TriggerShowBubble();
-  else
-    request_url_ = GURL();
 }
 
 void PermissionRequestManager::CancelPendingQueues() {
@@ -519,7 +523,14 @@ void PermissionRequestManager::DoAutoResponseForTesting() {
       Accept();
       break;
     case DENY_ALL:
-      Deny();
+      // Deny() assumes there is only 1 request.
+      if (accept_states_.size() == 1) {
+        Deny();
+      } else {
+        for (size_t i = 0; i < accept_states_.size(); ++i)
+          accept_states_[i] = false;
+        Accept();
+      }
       break;
     case DISMISS:
       Closing();

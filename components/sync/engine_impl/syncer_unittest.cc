@@ -238,7 +238,9 @@ class SyncerTest : public testing::Test,
   void OnBackedOffTypesChanged(ModelTypeSet backed_off_types) override {}
   void OnMigrationRequested(ModelTypeSet types) override {}
 
-  void ResetCycle() { cycle_.reset(SyncCycle::Build(context_.get(), this)); }
+  void ResetCycle() {
+    cycle_ = base::MakeUnique<SyncCycle>(context_.get(), this);
+  }
 
   bool SyncShareNudge() {
     ResetCycle();
@@ -251,10 +253,13 @@ class SyncerTest : public testing::Test,
   }
 
   bool SyncShareConfigure() {
+    return SyncShareConfigureTypes(context_->GetEnabledTypes());
+  }
+
+  bool SyncShareConfigureTypes(ModelTypeSet types) {
     ResetCycle();
     return syncer_->ConfigureSyncShare(
-        context_->GetEnabledTypes(),
-        sync_pb::GetUpdatesCallerInfo::RECONFIGURATION, cycle_.get());
+        types, sync_pb::GetUpdatesCallerInfo::RECONFIGURATION, cycle_.get());
   }
 
   void SetUp() override {
@@ -566,10 +571,10 @@ class SyncerTest : public testing::Test,
 
 TEST_F(SyncerTest, TestCallGatherUnsyncedEntries) {
   {
-    Syncer::UnsyncedMetaHandles handles;
+    syncable::Directory::Metahandles handles;
     {
       syncable::ReadTransaction trans(FROM_HERE, directory());
-      GetUnsyncedEntries(&trans, &handles);
+      syncable::GetUnsyncedEntries(&trans, &handles);
     }
     ASSERT_EQ(0u, handles.size());
   }
@@ -5017,6 +5022,17 @@ TEST_F(SyncerTest, ConfigureFailsDontApplyUpdates) {
 
   // One update remains undownloaded.
   mock_server_->ClearUpdatesQueue();
+}
+
+// Tests that if type is not registered with ModelTypeRegistry (e.g. because
+// type's LoadModels failed), Syncer::ConfigureSyncShare runs without triggering
+// DCHECK.
+TEST_F(SyncerTest, ConfigureFailedUnregisteredType) {
+  // Simulate type being unregistered before configuration by including type
+  // that isn't registered with ModelTypeRegistry.
+  SyncShareConfigureTypes(ModelTypeSet(APPS));
+
+  // No explicit verification, DCHECK shouldn't have been triggered.
 }
 
 TEST_F(SyncerTest, GetKeySuccess) {

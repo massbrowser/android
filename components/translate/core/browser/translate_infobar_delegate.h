@@ -29,6 +29,9 @@ class InfoBarManager;
 
 namespace translate {
 
+// Feature flag for "Translate Compact Infobar UI" project.
+extern const base::Feature kTranslateCompactUI;
+
 class TranslateDriver;
 class TranslateManager;
 
@@ -66,6 +69,9 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
                      const std::string& target_language,
                      TranslateErrors::Type error_type,
                      bool triggered_from_menu);
+
+  // Returns true if compact translate UI is enabled.
+  static bool IsCompactUIEnabled();
 
   // Returns the number of languages supported.
   size_t num_languages() const { return ui_delegate_.GetNumberOfLanguages(); }

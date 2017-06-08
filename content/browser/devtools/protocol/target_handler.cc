@@ -106,9 +106,10 @@ TargetHandler::~TargetHandler() {
 }
 
 // static
-TargetHandler* TargetHandler::FromSession(DevToolsSession* session) {
-  return static_cast<TargetHandler*>(
-      session->GetHandlerByName(Target::Metainfo::domainName));
+std::vector<TargetHandler*> TargetHandler::ForAgentHost(
+    DevToolsAgentHostImpl* host) {
+  return DevToolsSession::HandlersForAgentHost<TargetHandler>(
+      host, Target::Metainfo::domainName);
 }
 
 void TargetHandler::Wire(UberDispatcher* dispatcher) {
@@ -179,8 +180,10 @@ void TargetHandler::UpdateServiceWorkers(bool waiting_for_debugger) {
 
   auto matching = GetMatchingServiceWorkers(browser_context, frame_urls_);
   HostsMap new_hosts;
-  for (const auto& pair : matching)
-    new_hosts[pair.first] = pair.second;
+  for (const auto& pair : matching) {
+    if (pair.second->IsReadyForInspection())
+      new_hosts[pair.first] = pair.second;
+  }
   ReattachTargetsOfType(
       new_hosts, DevToolsAgentHost::kTypeServiceWorker, waiting_for_debugger);
 }
@@ -438,6 +441,7 @@ void TargetHandler::WorkerCreated(
 
 void TargetHandler::WorkerReadyForInspection(
     ServiceWorkerDevToolsAgentHost* host) {
+  DCHECK(host->IsReadyForInspection());
   if (ServiceWorkerDevToolsManager::GetInstance()
           ->debug_service_worker_on_start()) {
     // When debug_service_worker_on_start is true, a new DevTools window will

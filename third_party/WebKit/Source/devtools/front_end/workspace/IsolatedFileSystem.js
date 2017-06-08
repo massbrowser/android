@@ -46,13 +46,11 @@ Workspace.IsolatedFileSystem = class {
     this._excludedFoldersSetting = Common.settings.createLocalSetting('workspaceExcludedFolders', {});
     /** @type {!Set<string>} */
     this._excludedFolders = new Set(this._excludedFoldersSetting.get()[path] || []);
-    /** @type {!Set<string>} */
-    this._nonConfigurableExcludedFolders = new Set();
 
     /** @type {!Set<string>} */
-    this._filePaths = new Set();
+    this._initialFilePaths = new Set();
     /** @type {!Set<string>} */
-    this._gitFolders = new Set();
+    this._initialGitFolders = new Set();
   }
 
   /**
@@ -69,27 +67,9 @@ Workspace.IsolatedFileSystem = class {
       return Promise.resolve(/** @type {?Workspace.IsolatedFileSystem} */ (null));
 
     var fileSystem = new Workspace.IsolatedFileSystem(manager, path, embedderPath, domFileSystem);
-    var fileContentPromise = fileSystem.requestFileContentPromise('.devtools');
-    return fileContentPromise.then(onConfigAvailable)
+    return fileSystem._initializeFilePaths()
         .then(() => fileSystem)
         .catchException(/** @type {?Workspace.IsolatedFileSystem} */ (null));
-
-    /**
-     * @param {?string} projectText
-     * @return {!Promise}
-     */
-    function onConfigAvailable(projectText) {
-      if (projectText) {
-        try {
-          var projectObject = JSON.parse(projectText);
-          fileSystem._initializeProject(
-              typeof projectObject === 'object' ? /** @type {!Object} */ (projectObject) : null);
-        } catch (e) {
-          Common.console.error('Invalid project file: ' + projectText);
-        }
-      }
-      return fileSystem._initializeFilePaths();
-    }
   }
 
   /**
@@ -130,15 +110,15 @@ Workspace.IsolatedFileSystem = class {
   /**
    * @return {!Array<string>}
    */
-  filePaths() {
-    return this._filePaths.valuesArray();
+  initialFilePaths() {
+    return this._initialFilePaths.valuesArray();
   }
 
   /**
    * @return {!Array<string>}
    */
-  gitFolders() {
-    return this._gitFolders.valuesArray();
+  initialGitFolders() {
+    return this._initialGitFolders.valuesArray();
   }
 
   /**
@@ -153,29 +133,6 @@ Workspace.IsolatedFileSystem = class {
    */
   embedderPath() {
     return this._embedderPath;
-  }
-
-  /**
-   * @param {?Object} projectObject
-   */
-  _initializeProject(projectObject) {
-    this._projectObject = projectObject;
-
-    var projectExcludes = this.projectProperty('excludes');
-    if (Array.isArray(projectExcludes)) {
-      for (var folder of /** @type {!Array<*>} */ (projectExcludes)) {
-        if (typeof folder === 'string')
-          this._nonConfigurableExcludedFolders.add(folder);
-      }
-    }
-  }
-
-  /**
-   * @param {string} key
-   * @return {*}
-   */
-  projectProperty(key) {
-    return this._projectObject ? this._projectObject[key] : null;
   }
 
   /**
@@ -199,12 +156,12 @@ Workspace.IsolatedFileSystem = class {
         if (!entry.isDirectory) {
           if (this._isFileExcluded(entry.fullPath))
             continue;
-          this._filePaths.add(entry.fullPath.substr(1));
+          this._initialFilePaths.add(entry.fullPath.substr(1));
         } else {
           if (entry.fullPath.endsWith('/.git')) {
             var lastSlash = entry.fullPath.lastIndexOf('/');
             var parentFolder = entry.fullPath.substring(1, lastSlash);
-            this._gitFolders.add(parentFolder);
+            this._initialGitFolders.add(parentFolder);
           }
           if (this._isFileExcluded(entry.fullPath + '/'))
             continue;
@@ -253,7 +210,6 @@ Workspace.IsolatedFileSystem = class {
           dirEntryLoaded.call(this, dirEntry);
           return;
         }
-
         var errorMessage = Workspace.IsolatedFileSystem.errorMessage(error);
         console.error(
             errorMessage + ' when testing if file exists \'' + (this._path + '/' + path + '/' + nameCandidate) + '\'');
@@ -574,7 +530,7 @@ Workspace.IsolatedFileSystem = class {
    * @return {boolean}
    */
   _isFileExcluded(folderPath) {
-    if (this._nonConfigurableExcludedFolders.has(folderPath) || this._excludedFolders.has(folderPath))
+    if (this._excludedFolders.has(folderPath))
       return true;
     var regex = this._manager.workspaceFolderExcludePatternSetting().asRegExp();
     return !!(regex && regex.test(folderPath));
@@ -585,13 +541,6 @@ Workspace.IsolatedFileSystem = class {
    */
   excludedFolders() {
     return this._excludedFolders;
-  }
-
-  /**
-   * @return {!Set<string>}
-   */
-  nonConfigurableExcludedFolders() {
-    return this._nonConfigurableExcludedFolders;
   }
 
   /**

@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/libgtkui/gtk_ui.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/theme_profile_key.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "ui/aura/env.h"
@@ -30,17 +31,18 @@
 namespace {
 
 ui::NativeTheme* GetNativeThemeForWindow(aura::Window* window) {
-  Profile* profile = nullptr;
-  if (window) {
-    profile = reinterpret_cast<Profile*>(
-        window->GetNativeWindowProperty(Profile::kProfileKey));
-  }
+  if (!window)
+    return nullptr;
+
+  Profile* profile = GetThemeProfileForWindow(window);
 
   // If using the system (GTK) theme, don't use an Aura NativeTheme at all.
   // NB: ThemeService::UsingSystemTheme() might lag behind this pref. See
   // http://crbug.com/585522
-  if (!profile || profile->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme))
+  if (!profile || (!profile->IsSupervised() &&
+                   profile->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme))) {
     return nullptr;
+  }
 
   // Use a dark theme for incognito browser windows that aren't
   // custom-themed. Otherwise, normal Aura theme.
@@ -60,7 +62,8 @@ ChromeBrowserMainExtraPartsViewsLinux::ChromeBrowserMainExtraPartsViewsLinux() {
 
 ChromeBrowserMainExtraPartsViewsLinux::
     ~ChromeBrowserMainExtraPartsViewsLinux() {
-  views::X11DesktopHandler::get()->RemoveObserver(this);
+  if (views::X11DesktopHandler::get_dont_create())
+    views::X11DesktopHandler::get_dont_create()->RemoveObserver(this);
 }
 
 void ChromeBrowserMainExtraPartsViewsLinux::PreEarlyInitialization() {

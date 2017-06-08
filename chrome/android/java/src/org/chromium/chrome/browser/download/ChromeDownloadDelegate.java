@@ -8,23 +8,20 @@ import android.Manifest.permission;
 import android.app.Activity;
 import android.app.DownloadManager;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Environment;
-import android.support.v7.app.AlertDialog;
+import android.os.Handler;
 import android.text.TextUtils;
-import android.view.View;
 import android.webkit.MimeTypeMap;
 import android.webkit.URLUtil;
-import android.widget.TextView;
 
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -133,64 +130,6 @@ public class ChromeDownloadDelegate {
         return downloadInfo.getUrl();
     }
 
-    @CalledByNative
-    private void requestFileAccess(final long callbackId) {
-        if (mTab == null || mTab.getWindowAndroid() == null) {
-            // TODO(tedchoc): Show toast (only when activity is alive).
-            DownloadController.getInstance().onRequestFileAccessResult(callbackId, false);
-            return;
-        }
-        final String storagePermission = android.Manifest.permission.WRITE_EXTERNAL_STORAGE;
-        final Activity activity = mTab.getWindowAndroid().getActivity().get();
-
-        if (activity == null) {
-            DownloadController.getInstance().onRequestFileAccessResult(callbackId, false);
-        } else if (mTab.getWindowAndroid().canRequestPermission(storagePermission)) {
-            View view = activity.getLayoutInflater().inflate(
-                    R.layout.update_permissions_dialog, null);
-            TextView dialogText = (TextView) view.findViewById(R.id.text);
-            dialogText.setText(R.string.missing_storage_permission_download_education_text);
-
-            final PermissionCallback permissionCallback = new PermissionCallback() {
-                @Override
-                public void onRequestPermissionsResult(String[] permissions, int[] grantResults) {
-                    DownloadController.getInstance().onRequestFileAccessResult(callbackId,
-                            grantResults.length > 0
-                                    && grantResults[0] == PackageManager.PERMISSION_GRANTED);
-                }
-            };
-
-            AlertDialog.Builder builder =
-                    new AlertDialog.Builder(activity, R.style.AlertDialogTheme)
-                    .setView(view)
-                    .setPositiveButton(R.string.infobar_update_permissions_button_text,
-                            new DialogInterface.OnClickListener() {
-                                @Override
-                                public void onClick(DialogInterface dialog, int id) {
-                                    if (mTab == null) {
-                                        dialog.cancel();
-                                        return;
-                                    }
-                                    mTab.getWindowAndroid().requestPermissions(
-                                            new String[] {storagePermission}, permissionCallback);
-                                }
-                            })
-                     .setOnCancelListener(new DialogInterface.OnCancelListener() {
-                             @Override
-                             public void onCancel(DialogInterface dialog) {
-                                 DownloadController.getInstance().onRequestFileAccessResult(
-                                         callbackId, false);
-                             }
-                     });
-            builder.create().show();
-        } else if (!mTab.getWindowAndroid().isPermissionRevokedByPolicy(storagePermission)) {
-            nativeLaunchPermissionUpdateInfoBar(mTab, storagePermission, callbackId);
-        } else {
-            // TODO(tedchoc): Show toast.
-            DownloadController.getInstance().onRequestFileAccessResult(callbackId, false);
-        }
-    }
-
     /**
      * Return the full path of the download directory.
      *
@@ -263,9 +202,8 @@ public class ChromeDownloadDelegate {
      * @param info Download information about the download.
      */
     private void enqueueDownloadManagerRequest(final DownloadInfo info) {
-        DownloadManagerService.getDownloadManagerService(
-                mContext.getApplicationContext()).enqueueDownloadManagerRequest(
-                        new DownloadItem(true, info), true);
+        DownloadManagerService.getDownloadManagerService().enqueueDownloadManagerRequest(
+                new DownloadItem(true, info), true);
         closeBlankTab();
     }
 
@@ -306,8 +244,31 @@ public class ChromeDownloadDelegate {
      * @param reason Reason of failure defined in {@link DownloadManager}
      */
     private void alertDownloadFailure(String fileName, int reason) {
-        DownloadManagerService.getDownloadManagerService(
-                mContext.getApplicationContext()).onDownloadFailed(fileName, reason);
+        DownloadManagerService.getDownloadManagerService().onDownloadFailed(fileName, reason);
+    }
+
+    /**
+     * Enqueue a request to download a file using Android DownloadManager.
+     * @param url Url to download.
+     * @param userAgent User agent to use.
+     * @param contentDisposition Content disposition of the request.
+     * @param mimeType MIME type.
+     * @param cookie Cookie to use.
+     * @param referrer Referrer to use.
+     */
+    @CalledByNative
+    private void enqueueAndroidDownloadManagerRequest(String url, String userAgent,
+            String fileName, String mimeType, String cookie, String referrer) {
+        DownloadInfo downloadInfo = new DownloadInfo.Builder()
+                .setUrl(url)
+                .setUserAgent(userAgent)
+                .setFileName(fileName)
+                .setMimeType(mimeType)
+                .setCookie(cookie)
+                .setReferrer(referrer)
+                .setIsGETRequest(true)
+                .build();
+        enqueueDownloadManagerRequest(downloadInfo);
     }
 
     /**
@@ -319,7 +280,12 @@ public class ChromeDownloadDelegate {
     @CalledByNative
     private void onDownloadStarted(String filename) {
         DownloadUtils.showDownloadStartToast(mContext);
-        closeBlankTab();
+        new Handler().post(new Runnable() {
+            @Override
+            public void run() {
+                closeBlankTab();
+            }
+        });
     }
 
     /**
@@ -412,6 +378,7 @@ public class ChromeDownloadDelegate {
             if (!(activity instanceof ChromeActivity)) return true;
 
             TabModelSelector selector = ((ChromeActivity) activity).getTabModelSelector();
+            if (mTab.isIncognito() && selector.getModel(true).getCount() == 1) return false;
             return selector == null ? true : selector.closeTab(mTab);
         }
         return false;
@@ -427,7 +394,9 @@ public class ChromeDownloadDelegate {
     public boolean shouldInterceptContextMenuDownload(String url) {
         Uri uri = Uri.parse(url);
         String scheme = uri.normalizeScheme().getScheme();
-        if (!"http".equals(scheme) && !"https".equals(scheme)) return false;
+        if (!UrlConstants.HTTP_SCHEME.equals(scheme) && !UrlConstants.HTTPS_SCHEME.equals(scheme)) {
+            return false;
+        }
         String path = uri.getPath();
         // OMA downloads have extension "dm" or "dd". For the latter, it
         // can be handled when native download completes.
@@ -465,6 +434,4 @@ public class ChromeDownloadDelegate {
     private static native String nativeGetDownloadWarningText(String filename);
     private static native void nativeLaunchDuplicateDownloadInfoBar(ChromeDownloadDelegate delegate,
             Tab tab, DownloadInfo downloadInfo, String filePath, boolean isIncognito);
-    private static native void nativeLaunchPermissionUpdateInfoBar(
-            Tab tab, String permission, long callbackId);
 }

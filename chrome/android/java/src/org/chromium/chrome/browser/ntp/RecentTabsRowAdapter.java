@@ -515,58 +515,58 @@ public class RecentTabsRowAdapter extends BaseExpandableListAdapter {
     /**
      * A group containing the Sync Promo.
      */
-    class SyncPromoGroup extends Group {
-        @Override
-        public GroupType getGroupType() {
-            return GroupType.CONTENT;
-        }
-
-        @Override
-        public ChildType getChildType() {
-            return ChildType.SYNC_PROMO;
-        }
-
-        @Override
-        public int getChildrenCount() {
-            return 1;
-        }
-
-        @Override
-        View getChildView(int childPosition, boolean isLastChild, View convertView,
-                ViewGroup parent) {
-            if (convertView == null) {
-                SigninAndSyncView.Listener listener = new SigninAndSyncView.Listener() {
-                    @Override
-                    public void onViewDismissed() {
-                        mRecentTabsManager.setSigninPromoDeclined();
-                        notifyDataSetChanged();
-                    }
-                };
-
-                convertView =
-                        SigninAndSyncView.create(parent, listener, SigninAccessPoint.RECENT_TABS);
-            }
-            if (!mRecentTabsManager.isSignedIn()) {
-                RecordUserAction.record("Signin_Impression_FromRecentTabs");
-            }
-            return convertView;
-        }
-
-        @Override
-        public void configureGroupView(RecentTabsGroupView groupView, boolean isExpanded) {
-            groupView.configureForSyncPromo(isExpanded);
-        }
-
-        @Override
-        public void setCollapsed(boolean isCollapsed) {
-            mRecentTabsManager.setSyncPromoCollapsed(isCollapsed);
-        }
-
-        @Override
-        public boolean isCollapsed() {
-            return mRecentTabsManager.isSyncPromoCollapsed();
-        }
-    }
+//    class SyncPromoGroup extends Group {
+//        @Override
+//        public GroupType getGroupType() {
+//            return GroupType.CONTENT;
+//        }
+//
+//        @Override
+//        public ChildType getChildType() {
+//            return ChildType.SYNC_PROMO;
+//        }
+//
+//        @Override
+//        public int getChildrenCount() {
+//            return 1;
+//        }
+//
+//        @Override
+//        View getChildView(int childPosition, boolean isLastChild, View convertView,
+//                ViewGroup parent) {
+//            if (convertView == null) {
+//                SigninAndSyncView.Listener listener = new SigninAndSyncView.Listener() {
+//                    @Override
+//                    public void onViewDismissed() {
+//                        mRecentTabsManager.setSigninPromoDeclined();
+//                        notifyDataSetChanged();
+//                    }
+//                };
+//
+//                convertView =
+//                        SigninAndSyncView.create(parent, listener, SigninAccessPoint.RECENT_TABS);
+//            }
+//            if (!mRecentTabsManager.isSignedIn()) {
+//                RecordUserAction.record("Signin_Impression_FromRecentTabs");
+//            }
+//            return convertView;
+//        }
+//
+//        @Override
+//        public void configureGroupView(RecentTabsGroupView groupView, boolean isExpanded) {
+//            groupView.configureForSyncPromo(isExpanded);
+//        }
+//
+//        @Override
+//        public void setCollapsed(boolean isCollapsed) {
+//            mRecentTabsManager.setSyncPromoCollapsed(isCollapsed);
+//        }
+//
+//        @Override
+//        public boolean isCollapsed() {
+//            return mRecentTabsManager.isSyncPromoCollapsed();
+//        }
+//    }
 
     private static class FaviconCache {
         private static final String SYNCED_FAVICON_PREFIX = "Synced";
@@ -761,9 +761,9 @@ public class RecentTabsRowAdapter extends BaseExpandableListAdapter {
             }
             addGroup(new ForeignSessionGroup(session));
         }
-        if (mRecentTabsManager.shouldDisplaySyncPromo()) {
-            addGroup(new SyncPromoGroup());
-        }
+//        if (mRecentTabsManager.shouldDisplaySyncPromo()) {
+//            addGroup(new SyncPromoGroup());
+//        }
 
         // Add separator line after the recently closed tabs group.
         int recentlyClosedIndex = mGroups.indexOf(mRecentlyClosedTabsGroup);

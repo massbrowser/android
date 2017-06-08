@@ -20,19 +20,20 @@ GamepadMonitor::~GamepadMonitor() {
 }
 
 // static
-void GamepadMonitor::Create(mojom::GamepadMonitorRequest request) {
+void GamepadMonitor::Create(const service_manager::BindSourceInfo& source_info,
+                            mojom::GamepadMonitorRequest request) {
   mojo::MakeStrongBinding(base::MakeUnique<GamepadMonitor>(),
                           std::move(request));
 }
 
 void GamepadMonitor::OnGamepadConnected(unsigned index,
-                                        const blink::WebGamepad& gamepad) {
+                                        const Gamepad& gamepad) {
   if (gamepad_observer_)
     gamepad_observer_->GamepadConnected(index, gamepad);
 }
 
 void GamepadMonitor::OnGamepadDisconnected(unsigned index,
-                                           const blink::WebGamepad& gamepad) {
+                                           const Gamepad& gamepad) {
   if (gamepad_observer_)
     gamepad_observer_->GamepadDisconnected(index, gamepad);
 }

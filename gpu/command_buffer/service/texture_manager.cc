@@ -216,6 +216,9 @@ class FormatTypeValidator {
         // Exposed by GL_APPLE_texture_format_BGRA8888 and
         // GL_EXT_texture_format_BGRA8888
         {GL_BGRA_EXT, GL_BGRA_EXT, GL_UNSIGNED_BYTE},
+
+        // Exposed by GL_EXT_texture_norm16
+        {GL_R16_EXT, GL_RED, GL_UNSIGNED_SHORT},
     };
 
     static const FormatType kSupportedFormatTypesES2Only[] = {
@@ -394,6 +397,24 @@ class ScopedResetPixelUnpackBuffer{
 };
 
 }  // namespace anonymous
+
+DecoderTextureState::DecoderTextureState(
+    const GpuDriverBugWorkarounds& workarounds)
+    : tex_image_failed(false),
+      texture_upload_count(0),
+      texsubimage_faster_than_teximage(
+          workarounds.texsubimage_faster_than_teximage),
+      force_cube_map_positive_x_allocation(
+          workarounds.force_cube_map_positive_x_allocation),
+      force_cube_complete(workarounds.force_cube_complete),
+      force_int_or_srgb_cube_texture_complete(
+          workarounds.force_int_or_srgb_cube_texture_complete),
+      unpack_alignment_workaround_with_unpack_buffer(
+          workarounds.unpack_alignment_workaround_with_unpack_buffer),
+      unpack_overlapping_rows_separately_unpack_buffer(
+          workarounds.unpack_overlapping_rows_separately_unpack_buffer),
+      unpack_image_height_workaround_with_unpack_buffer(
+          workarounds.unpack_image_height_workaround_with_unpack_buffer) {}
 
 TextureManager::DestructionObserver::DestructionObserver() {}
 
@@ -1384,10 +1405,13 @@ GLenum Texture::SetParameterf(
     case GL_TEXTURE_BASE_LEVEL:
     case GL_TEXTURE_MAX_LEVEL:
     case GL_TEXTURE_USAGE_ANGLE:
-      {
-        GLint iparam = static_cast<GLint>(std::round(param));
-        return SetParameteri(feature_info, pname, iparam);
-      }
+    case GL_TEXTURE_SWIZZLE_R:
+    case GL_TEXTURE_SWIZZLE_G:
+    case GL_TEXTURE_SWIZZLE_B:
+    case GL_TEXTURE_SWIZZLE_A: {
+      GLint iparam = static_cast<GLint>(std::round(param));
+      return SetParameteri(feature_info, pname, iparam);
+    }
     case GL_TEXTURE_MIN_LOD:
       sampler_state_.min_lod = param;
       break;
@@ -1753,17 +1777,15 @@ void Texture::DumpLevelMemory(base::trace_event::ProcessMemoryDump* pmd,
         continue;
 
       // If a level has a GLImage, ask the GLImage to dump itself.
+      // If a level does not have a GLImage bound to it, then dump the
+      // texture allocation also as the storage is not provided by the
+      // GLImage in that case.
       if (level_infos[level_index].image) {
         level_infos[level_index].image->OnMemoryDump(
             pmd, client_tracing_id,
             base::StringPrintf("%s/face_%d/level_%d", dump_name.c_str(),
                                face_index, level_index));
-      }
-
-      // If a level does not have a GLImage bound to it, then dump the
-      // texture allocation also as the storage is not provided by the
-      // GLImage in that case.
-      if (level_infos[level_index].image_state != BOUND) {
+      } else {
         MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(base::StringPrintf(
             "%s/face_%d/level_%d", dump_name.c_str(), face_index, level_index));
         dump->AddScalar(
@@ -2526,7 +2548,8 @@ void TextureManager::DoCubeMapWorkaround(
 
   std::vector<GLenum> undefined_faces;
   Texture* texture = texture_ref->texture();
-  if (texture_state->force_cube_complete) {
+  if (texture_state->force_cube_complete ||
+      texture_state->force_int_or_srgb_cube_texture_complete) {
     int width = 0;
     int height = 0;
     for (unsigned i = 0; i < 6; i++) {
@@ -2584,6 +2607,15 @@ void TextureManager::ValidateAndDoTexImage(
       (texture_state->force_cube_complete ||
        (texture_state->force_cube_map_positive_x_allocation &&
         args.target != GL_TEXTURE_CUBE_MAP_POSITIVE_X));
+  // Force integer or srgb cube map texture complete, see crbug.com/712117.
+  need_cube_map_workaround =
+      need_cube_map_workaround ||
+      (texture->target() == GL_TEXTURE_CUBE_MAP &&
+       texture_state->force_int_or_srgb_cube_texture_complete &&
+       (GLES2Util::IsIntegerFormat(args.internal_format) ||
+        GLES2Util::GetColorEncodingFromInternalFormat(args.internal_format) ==
+            GL_SRGB));
+
   if (need_cube_map_workaround && !buffer) {
     DoCubeMapWorkaround(texture_state, state, framebuffer_state,
                         texture_ref, function_name, args);

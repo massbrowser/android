@@ -25,6 +25,7 @@
 #include "base/scoped_generic.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
 
 #if defined(OS_MACOSX)
@@ -74,7 +75,7 @@ bool MakeMachSharedMemoryHandleReadOnly(SharedMemoryHandle* new_handle,
   if (kr != KERN_SUCCESS)
     return false;
 
-  *new_handle = SharedMemoryHandle(named_right, size, base::GetCurrentProcId());
+  *new_handle = SharedMemoryHandle(named_right, size, handle.GetGUID());
   return true;
 }
 
@@ -83,16 +84,14 @@ bool MakeMachSharedMemoryHandleReadOnly(SharedMemoryHandle* new_handle,
 
 SharedMemory::SharedMemory()
     : mapped_memory_mechanism_(SharedMemoryHandle::MACH),
-      readonly_mapped_file_(-1),
       mapped_size_(0),
       memory_(NULL),
       read_only_(false),
       requested_size_(0) {}
 
 SharedMemory::SharedMemory(const SharedMemoryHandle& handle, bool read_only)
-    : shm_(handle),
-      mapped_memory_mechanism_(SharedMemoryHandle::POSIX),
-      readonly_mapped_file_(-1),
+    : mapped_memory_mechanism_(SharedMemoryHandle::POSIX),
+      shm_(handle),
       mapped_size_(0),
       memory_(NULL),
       read_only_(read_only),
@@ -106,11 +105,6 @@ SharedMemory::~SharedMemory() {
 // static
 bool SharedMemory::IsHandleValid(const SharedMemoryHandle& handle) {
   return handle.IsValid();
-}
-
-// static
-SharedMemoryHandle SharedMemory::NULLHandle() {
-  return SharedMemoryHandle();
 }
 
 // static
@@ -156,7 +150,7 @@ bool SharedMemory::Create(const SharedMemoryCreateOptions& options) {
     return false;
 
   if (options.type == SharedMemoryHandle::MACH) {
-    shm_ = SharedMemoryHandle(options.size);
+    shm_ = SharedMemoryHandle(options.size, UnguessableToken::Create());
     requested_size_ = options.size;
     return shm_.IsValid();
   }
@@ -191,10 +185,13 @@ bool SharedMemory::Create(const SharedMemoryCreateOptions& options) {
   requested_size_ = options.size;
 
   int mapped_file = -1;
+  int readonly_mapped_file = -1;
   result = PrepareMapFile(std::move(fp), std::move(readonly_fd), &mapped_file,
-                          &readonly_mapped_file_);
-
-  shm_ = SharedMemoryHandle(FileDescriptor(mapped_file, false));
+                          &readonly_mapped_file);
+  shm_ = SharedMemoryHandle(FileDescriptor(mapped_file, false),
+                            UnguessableToken::Create());
+  readonly_shm_ = SharedMemoryHandle(
+      FileDescriptor(readonly_mapped_file, false), shm_.GetGUID());
   return result;
 }
 
@@ -242,8 +239,8 @@ bool SharedMemory::Unmap() {
 SharedMemoryHandle SharedMemory::handle() const {
   switch (shm_.type_) {
     case SharedMemoryHandle::POSIX:
-      return SharedMemoryHandle(
-          FileDescriptor(shm_.file_descriptor_.fd, false));
+      return SharedMemoryHandle(FileDescriptor(shm_.file_descriptor_.fd, false),
+                                shm_.GetGUID());
     case SharedMemoryHandle::MACH:
       return shm_;
   }
@@ -259,70 +256,27 @@ void SharedMemory::Close() {
   shm_.Close();
   shm_ = SharedMemoryHandle();
   if (shm_.type_ == SharedMemoryHandle::POSIX) {
-    if (readonly_mapped_file_ > 0) {
-      if (IGNORE_EINTR(close(readonly_mapped_file_)) < 0)
-        PLOG(ERROR) << "close";
-      readonly_mapped_file_ = -1;
+    if (readonly_shm_.IsValid()) {
+      readonly_shm_.Close();
+      readonly_shm_ = SharedMemoryHandle();
     }
   }
 }
 
-bool SharedMemory::Share(SharedMemoryHandle* new_handle, ShareMode share_mode) {
-  if (shm_.type_ == SharedMemoryHandle::MACH) {
-    DCHECK(shm_.IsValid());
-
-    bool success = false;
-    switch (share_mode) {
-      case SHARE_CURRENT_MODE:
-        *new_handle = shm_.Duplicate();
-        success = true;
-        break;
-      case SHARE_READONLY:
-        success = MakeMachSharedMemoryHandleReadOnly(new_handle, shm_, memory_);
-        break;
-    }
-
-    if (success)
-      new_handle->SetOwnershipPassesToIPC(true);
-
-    return success;
+SharedMemoryHandle SharedMemory::GetReadOnlyHandle() {
+  if (shm_.type_ == SharedMemoryHandle::POSIX) {
+    // We could imagine re-opening the file from /dev/fd, but that can't make it
+    // readonly on Mac: https://codereview.chromium.org/27265002/#msg10.
+    CHECK(readonly_shm_.IsValid());
+    return readonly_shm_.Duplicate();
   }
 
-  int handle_to_dup = -1;
-  switch (share_mode) {
-    case SHARE_CURRENT_MODE:
-      handle_to_dup = shm_.file_descriptor_.fd;
-      break;
-    case SHARE_READONLY:
-      // We could imagine re-opening the file from /dev/fd, but that can't make
-      // it readonly on Mac: https://codereview.chromium.org/27265002/#msg10
-      CHECK_GE(readonly_mapped_file_, 0);
-      handle_to_dup = readonly_mapped_file_;
-      break;
-  }
-
-  const int new_fd = HANDLE_EINTR(dup(handle_to_dup));
-  if (new_fd < 0) {
-    DPLOG(ERROR) << "dup() failed.";
-    return false;
-  }
-
-  new_handle->file_descriptor_.fd = new_fd;
-  new_handle->type_ = SharedMemoryHandle::POSIX;
-
-  return true;
-}
-
-bool SharedMemory::ShareToProcessCommon(ProcessHandle process,
-                                        SharedMemoryHandle* new_handle,
-                                        bool close_self,
-                                        ShareMode share_mode) {
-  bool success = Share(new_handle, share_mode);
-  if (close_self) {
-    Unmap();
-    Close();
-  }
-  return success;
+  DCHECK(shm_.IsValid());
+  base::SharedMemoryHandle new_handle;
+  bool success = MakeMachSharedMemoryHandleReadOnly(&new_handle, shm_, memory_);
+  if (success)
+    new_handle.SetOwnershipPassesToIPC(true);
+  return new_handle;
 }
 
 }  // namespace base

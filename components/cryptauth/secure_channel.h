@@ -19,6 +19,8 @@
 
 namespace cryptauth {
 
+class CryptAuthService;
+
 // An authenticated bi-directional channel for exchanging messages with remote
 // devices. |SecureChannel| manages a |Connection| by initializing it and
 // authenticating it via a security handshake once the connection has occurred.
@@ -59,27 +61,34 @@ class SecureChannel : public ConnectionObserver {
         const std::string& payload) = 0;
   };
 
-  class Delegate {
+  class Factory {
    public:
-    virtual ~Delegate();
+    static std::unique_ptr<SecureChannel> NewInstance(
+        std::unique_ptr<Connection> connection,
+        CryptAuthService* cryptauth_service);
 
-    virtual std::unique_ptr<SecureMessageDelegate>
-    CreateSecureMessageDelegate() = 0;
+    static void SetInstanceForTesting(Factory* factory);
+
+   protected:
+    virtual std::unique_ptr<SecureChannel> BuildInstance(
+        std::unique_ptr<Connection> connection,
+        CryptAuthService* cryptauth_service);
+
+   private:
+    static Factory* factory_instance_;
   };
 
-  SecureChannel(
-      std::unique_ptr<Connection> connection,
-      std::unique_ptr<Delegate> delegate);
   ~SecureChannel() override;
 
-  void Initialize();
+  virtual void Initialize();
 
-  void SendMessage(const std::string& feature, const std::string& payload);
+  virtual void SendMessage(const std::string& feature,
+                           const std::string& payload);
 
-  void Disconnect();
+  virtual void Disconnect();
 
-  void AddObserver(Observer* observer);
-  void RemoveObserver(Observer* observer);
+  virtual void AddObserver(Observer* observer);
+  virtual void RemoveObserver(Observer* observer);
 
   Status status() const {
     return status_;
@@ -94,6 +103,12 @@ class SecureChannel : public ConnectionObserver {
   void OnSendCompleted(const cryptauth::Connection& connection,
                        const cryptauth::WireMessage& wire_message,
                        bool success) override;
+
+ protected:
+  SecureChannel(std::unique_ptr<Connection> connection,
+                CryptAuthService* cryptauth_service);
+
+  Status status_;
 
  private:
   // Message waiting to be sent. Note that this is *not* the message that will
@@ -120,10 +135,9 @@ class SecureChannel : public ConnectionObserver {
       std::unique_ptr<SecureContext> secure_context);
 
   std::unique_ptr<Connection> connection_;
-  std::unique_ptr<Delegate> delegate_;
+  CryptAuthService* cryptauth_service_;  // Outlives this instance.
   std::unique_ptr<Authenticator> authenticator_;
   std::unique_ptr<SecureContext> secure_context_;
-  Status status_;
   std::deque<PendingMessage> queued_messages_;
   std::unique_ptr<PendingMessage> pending_message_;
   base::ObserverList<Observer> observer_list_;

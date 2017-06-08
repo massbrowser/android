@@ -20,22 +20,24 @@
 #include "base/macros.h"
 #include "base/process/kill.h"
 #include "build/build_config.h"
+#include "content/browser/renderer_host/input/input_device_change_observer.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_owner_delegate.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/common/window_container_type.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/public/web/WebAXEnums.h"
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/mojo/window_open_disposition.mojom.h"
 
 namespace content {
 
 struct FrameReplicationState;
+class TimeoutMonitor;
 
 // This implements the RenderViewHost interface that is exposed to
 // embedders of content, and adds things only visible to content.
@@ -252,10 +254,15 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   FRIEND_TEST_ALL_PREFIXES(RenderViewHostTest, RoutingIdSane);
   FRIEND_TEST_ALL_PREFIXES(RenderFrameHostManagerTest,
                            CleanUpSwappedOutRVHOnProcessCrash);
+  FRIEND_TEST_ALL_PREFIXES(RenderFrameHostManagerTest,
+                           CloseWithPendingWhileUnresponsive);
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
                            NavigateMainFrameToChildSite);
 
   void RenderViewReady();
+
+  // Called by |close_timeout_| when the page closing timeout fires.
+  void ClosePageTimeout();
 
   // TODO(creis): Move to a private namespace on RenderFrameHostImpl.
   // Delay to wait on closing the WebContents for a beforeunload/unload handler
@@ -311,6 +318,15 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   // is in turn called when any of the settings change that the WebPreferences
   // values depend on.
   std::unique_ptr<WebPreferences> web_preferences_;
+
+  // The timeout monitor that runs from when the page close is started in
+  // ClosePage() until either the render process ACKs the close with an IPC to
+  // OnClosePageACK(), or until the timeout triggers and the page is forcibly
+  // closed.
+  std::unique_ptr<TimeoutMonitor> close_timeout_;
+
+  // This monitors input changes so they can be reflected to the interaction MQ.
+  std::unique_ptr<InputDeviceChangeObserver> input_device_change_observer_;
 
   bool updating_web_preferences_;
 

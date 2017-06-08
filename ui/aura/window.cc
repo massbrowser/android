@@ -46,13 +46,16 @@
 
 namespace aura {
 
-Window::Window(WindowDelegate* delegate) : Window(delegate, nullptr) {}
+Window::Window(WindowDelegate* delegate, ui::wm::WindowType type)
+    : Window(delegate, nullptr, type) {}
 
-Window::Window(WindowDelegate* delegate, std::unique_ptr<WindowPort> port)
+Window::Window(WindowDelegate* delegate,
+               std::unique_ptr<WindowPort> port,
+               ui::wm::WindowType type)
     : port_owner_(std::move(port)),
       port_(port_owner_.get()),
       host_(nullptr),
-      type_(ui::wm::WINDOW_TYPE_UNKNOWN),
+      type_(type),
       owned_by_parent_(true),
       delegate_(delegate),
       parent_(nullptr),
@@ -306,11 +309,8 @@ void Window::SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen,
   if (root) {
     aura::client::ScreenPositionClient* screen_position_client =
         aura::client::GetScreenPositionClient(root);
-    if (screen_position_client) {
-      screen_position_client->SetBounds(this, new_bounds_in_screen,
-                                        dst_display);
-      return;
-    }
+    screen_position_client->SetBounds(this, new_bounds_in_screen, dst_display);
+    return;
   }
   SetBounds(new_bounds_in_screen);
 }
@@ -497,10 +497,6 @@ Window* Window::GetEventHandlerForPoint(const gfx::Point& local_point) {
   return GetWindowForPoint(local_point, true, true);
 }
 
-Window* Window::GetTopWindowContainingPoint(const gfx::Point& local_point) {
-  return GetWindowForPoint(local_point, false, false);
-}
-
 Window* Window::GetToplevelWindow() {
   // TODO: this may need to call to the WindowPort. For mus this may need to
   // return for any top level.
@@ -656,7 +652,7 @@ void Window::AfterPropertyChange(const void* key,
                                  int64_t old_value,
                                  std::unique_ptr<ui::PropertyData> data) {
   if (port_)
-    port_->OnPropertyChanged(key, std::move(data));
+    port_->OnPropertyChanged(key, old_value, std::move(data));
   for (WindowObserver& observer : observers_)
     observer.OnWindowPropertyChanged(this, key, old_value);
 }
@@ -732,23 +728,11 @@ Window* Window::GetWindowForPoint(const gfx::Point& local_point,
                                   bool return_tightest,
                                   bool for_event_handling) {
   if (!IsVisible())
-    return NULL;
+    return nullptr;
 
   if ((for_event_handling && !HitTest(local_point)) ||
-      (!for_event_handling && !ContainsPoint(local_point)))
-    return NULL;
-
-  // Check if I should claim this event and not pass it to my children because
-  // the location is inside my hit test override area.  For details, see
-  // set_hit_test_bounds_override_inner().
-  if (for_event_handling && !hit_test_bounds_override_inner_.IsEmpty()) {
-    gfx::Rect inset_local_bounds(gfx::Point(), bounds().size());
-    inset_local_bounds.Inset(hit_test_bounds_override_inner_);
-    // We know we're inside the normal local bounds, so if we're outside the
-    // inset bounds we must be in the special hit test override area.
-    DCHECK(HitTest(local_point));
-    if (!inset_local_bounds.Contains(local_point))
-      return delegate_ ? this : NULL;
+      (!for_event_handling && !ContainsPoint(local_point))) {
+    return nullptr;
   }
 
   if (!return_tightest && delegate_)
@@ -762,13 +746,16 @@ Window* Window::GetWindowForPoint(const gfx::Point& local_point,
     if (for_event_handling) {
       if (child->ignore_events_)
         continue;
+
       // The client may not allow events to be processed by certain subtrees.
       client::EventClient* client = client::GetEventClient(GetRootWindow());
       if (client && !client->CanProcessEventsWithinSubtree(child))
         continue;
+
       if (delegate_ && !delegate_->ShouldDescendIntoChildForEventHandling(
-              child, local_point))
+                           child, local_point)) {
         continue;
+      }
     }
 
     gfx::Point point_in_child_coords(local_point);
@@ -780,7 +767,7 @@ Window* Window::GetWindowForPoint(const gfx::Point& local_point,
       return match;
   }
 
-  return delegate_ ? this : NULL;
+  return delegate_ ? this : nullptr;
 }
 
 void Window::RemoveChildImpl(Window* child, Window* new_parent) {

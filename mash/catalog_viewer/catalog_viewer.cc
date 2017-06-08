@@ -15,9 +15,7 @@
 #include "mojo/public/cpp/bindings/binding.h"
 #include "services/catalog/public/interfaces/catalog.mojom.h"
 #include "services/catalog/public/interfaces/constants.mojom.h"
-#include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "ui/base/models/table_model.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -208,7 +206,8 @@ class CatalogViewerContents : public views::WidgetDelegateView,
 }  // namespace
 
 CatalogViewer::CatalogViewer() {
-  registry_.AddInterface<mojom::Launchable>(this);
+  registry_.AddInterface<mojom::Launchable>(
+      base::Bind(&CatalogViewer::Create, base::Unretained(this)));
 }
 CatalogViewer::~CatalogViewer() {}
 
@@ -221,18 +220,16 @@ void CatalogViewer::RemoveWindow(views::Widget* window) {
 }
 
 void CatalogViewer::OnStart() {
-  tracing_.Initialize(context()->connector(), context()->identity().name());
-
   aura_init_ = base::MakeUnique<views::AuraInit>(
       context()->connector(), context()->identity(), "views_mus_resources.pak",
       std::string(), nullptr, views::AuraInit::Mode::AURA_MUS);
 }
 
 void CatalogViewer::OnBindInterface(
-    const service_manager::ServiceInfo& source_info,
+    const service_manager::BindSourceInfo& source_info,
     const std::string& interface_name,
     mojo::ScopedMessagePipeHandle interface_pipe) {
-  registry_.BindInterface(source_info.identity, interface_name,
+  registry_.BindInterface(source_info, interface_name,
                           std::move(interface_pipe));
 }
 
@@ -253,7 +250,7 @@ void CatalogViewer::Launch(uint32_t what, mojom::LaunchMode how) {
   windows_.push_back(window);
 }
 
-void CatalogViewer::Create(const service_manager::Identity& remote_identity,
+void CatalogViewer::Create(const service_manager::BindSourceInfo& source_info,
                            mojom::LaunchableRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }

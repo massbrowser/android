@@ -11,13 +11,21 @@ var startSessionPromise = null;
 var startedConnection = null;
 var reconnectedSession = null;
 var presentationUrl = null;
-if (window.location.href.indexOf('__is_android__=true') >= 0) {
+let params = (new URL(window.location.href)).searchParams;
+
+if (params.get('__is_android__') == 'true') {
   // For android, "google.com/cast" is required in presentation URL.
   // TODO(zqzhang): this requirement may be removed in the future.
   presentationUrl = "https://google.com/cast#__castAppId__=CCCCCCCC/";
+} else if (params.get('__oneUA__') == 'true') {
+  presentationUrl =
+      "presentation_receiver.html#__testprovider__=true&__oneUA__=true";
+} else if (params.get('__oneUANoReceiver__') == 'true') {
+  presentationUrl = "https://www.google.com#__testprovider__=true&__oneUA__=true";
 } else {
   presentationUrl = "http://www.google.com/#__testprovider__=true";
 }
+
 var startSessionRequest = new PresentationRequest([presentationUrl]);
 var defaultRequestSessionId = null;
 var lastExecutionResult = null;
@@ -30,7 +38,7 @@ window.navigator.presentation.defaultRequest.onconnectionavailable = function(e)
 };
 
 /**
- * Waits until one device is available.
+ * Waits until one sink is available.
  */
 function waitUntilDeviceAvailable() {
   startSessionRequest.getAvailability(presentationUrl).then(
@@ -44,8 +52,8 @@ function waitUntilDeviceAvailable() {
           sendResult(true, '');
       }
     }
-  }).catch(function(){
-    sendResult(false, 'got error');
+  }).catch(function(e) {
+    sendResult(false, 'got error: ' + e);
   });
 }
 
@@ -140,6 +148,49 @@ function terminateSessionAndWaitForStateChange() {
   }
 }
 
+/**
+ * Closes |startedConnection| and waits for its onclose event.
+ */
+function closeConnectionAndWaitForStateChange() {
+  if (startedConnection) {
+    if (startedConnection.state == 'closed') {
+      sendResult(false, 'startedConnection is unexpectedly closed.');
+    }
+    startedConnection.onclose = function() {
+      sendResult(true, '');
+    };
+    startedConnection.close();
+  } else {
+    sendResult(false, 'startedConnection does not exist.');
+  }
+}
+
+/**
+ * Sends a message to |startedConnection| and expects InvalidStateError to be
+ * thrown. Requires |startedConnection.state| to not equal |initialState|.
+ */
+function checkSendMessageFailed(initialState) {
+  if (!startedConnection) {
+    sendResult(false, 'startedConnection does not exist.');
+    return;
+  }
+  if (startedConnection.state != initialState) {
+    sendResult(false, 'startedConnection.state is "' + startedConnection.state +
+               '", but we expected "' + initialState + '".');
+    return;
+  }
+
+  try {
+    startedConnection.send('test message');
+  } catch (e) {
+    if (e.name == 'InvalidStateError') {
+      sendResult(true, '');
+    } else {
+      sendResult(false, 'Got an unexpected error: ' + e.name);
+    }
+  }
+  sendResult(false, 'Expected InvalidStateError but it was never thrown.');
+}
 
 /**
  * Sends a message, and expects the connection to close on error.
@@ -180,6 +231,26 @@ function sendMessageAndExpectResponse(message) {
     sendResult(true, '');
   };
   startedConnection.send(message);
+}
+
+/**
+ * Sends 'close' to receiver page, and expects receiver page closing
+ * the connection.
+ */
+function initiateCloseFromReceiverPage() {
+  if (!startedConnection) {
+    sendResult(false, 'startedConnection does not exist.');
+    return;
+  }
+  startedConnection.onclose = (event) => {
+    const reason = event.reason;
+    if (reason != 'closed') {
+      sendResult(false, 'Unexpected close reason: ' + reason);
+      return;
+    }
+    sendResult(true, '');
+  };
+  startedConnection.send('close');
 }
 
 /**

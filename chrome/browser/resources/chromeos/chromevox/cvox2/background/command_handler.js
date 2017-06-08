@@ -9,10 +9,12 @@
 goog.provide('CommandHandler');
 
 goog.require('ChromeVoxState');
+goog.require('CustomAutomationEvent');
 goog.require('Output');
 goog.require('cvox.ChromeVoxBackground');
 
 goog.scope(function() {
+var AutomationEvent = chrome.automation.AutomationEvent;
 var AutomationNode = chrome.automation.AutomationNode;
 var Dir = constants.Dir;
 var EventType = chrome.automation.EventType;
@@ -176,6 +178,27 @@ CommandHandler.onCommand = function(command) {
       cvox.BrailleCaptionsBackground.setActive(
           !cvox.BrailleCaptionsBackground.isEnabled());
       return false;
+    case 'toggleBrailleTable':
+      var brailleTableType = localStorage['brailleTableType'];
+      var output = '';
+      if (brailleTableType == 'brailleTable6') {
+        brailleTableType = 'brailleTable8';
+
+        // This label reads "switch to 8 dot braille".
+        output = '@OPTIONS_BRAILLE_TABLE_TYPE_6';
+      } else {
+        brailleTableType = 'brailleTable6';
+
+        // This label reads "switch to 6 dot braille".
+        output = '@OPTIONS_BRAILLE_TABLE_TYPE_8';
+      }
+
+      localStorage['brailleTable'] = localStorage[brailleTableType];
+      localStorage['brailleTableType'] = brailleTableType;
+      cvox.BrailleBackground.getInstance().getTranslatorManager().refresh(
+          localStorage[brailleTableType]);
+      new Output().format(output).go();
+      return false;
     case 'toggleChromeVoxVersion':
       if (!ChromeVoxState.instance.toggleNext())
         return false;
@@ -190,6 +213,18 @@ CommandHandler.onCommand = function(command) {
     case 'showNextUpdatePage':
       (new PanelCommand(PanelCommandType.UPDATE_NOTES)).send();
       return false;
+    case 'darkenScreen':
+      chrome.accessibilityPrivate.darkenScreen(true);
+      new Output().format('@darken_screen').go();
+      return false;
+    case 'undarkenScreen':
+      chrome.accessibilityPrivate.darkenScreen(false);
+      new Output().format('@undarken_screen').go();
+      return false;
+    case 'toggleSpeechOnOrOff':
+      var state = cvox.ChromeVox.tts.toggleSpeechOnOrOff();
+      new Output().format(state ? '@speech_on' : '@speech_off').go();
+      return false;
     default:
       break;
   }
@@ -199,8 +234,7 @@ CommandHandler.onCommand = function(command) {
     return true;
 
   // Next/classic compat commands hereafter.
-  if (ChromeVoxState.instance.mode == ChromeVoxMode.CLASSIC ||
-      ChromeVoxState.instance.mode == ChromeVoxMode.NEXT_COMPAT)
+  if (ChromeVoxState.instance.mode == ChromeVoxMode.CLASSIC)
     return true;
 
   var current = ChromeVoxState.instance.currentRange_;
@@ -443,11 +477,17 @@ CommandHandler.onCommand = function(command) {
         current = cursors.Range.fromNode(node);
       break;
     case 'forceClickOnCurrentItem':
-      if (ChromeVoxState.instance.currentRange_) {
-        var actionNode = ChromeVoxState.instance.currentRange_.start.node;
-        if (actionNode.role == RoleType.INLINE_TEXT_BOX)
+      if (ChromeVoxState.instance.currentRange) {
+        var actionNode = ChromeVoxState.instance.currentRange.start.node;
+        while (actionNode.role == RoleType.INLINE_TEXT_BOX ||
+            actionNode.role == RoleType.STATIC_TEXT)
           actionNode = actionNode.parent;
-        actionNode.doDefault();
+        if (actionNode.inPageLinkTarget) {
+          ChromeVoxState.instance.navigateToRange(
+              cursors.Range.fromNode(actionNode.inPageLinkTarget));
+        } else {
+          actionNode.doDefault();
+        }
       }
       // Skip all other processing; if focus changes, we should get an event
       // for that.
@@ -578,7 +618,9 @@ CommandHandler.onCommand = function(command) {
           .withRichSpeechAndBraille(current, null, Output.EventType.NAVIGATE)
           .go();
       return false;
-
+    case 'viewGraphicAsBraille':
+      CommandHandler.viewGraphicAsBraille_(current);
+      return false;
     // Table commands.
     case 'previousRow':
       dir = Dir.BACKWARD;
@@ -773,5 +815,102 @@ CommandHandler.increaseOrDecreaseSpeechProperty_ =
         cvox.AbstractTts.PERSONALITY_ANNOTATION);
   }
 };
+
+/**
+ * To support viewGraphicAsBraille_(), the current image node.
+ * @type {AutomationNode?};
+ */
+CommandHandler.imageNode_;
+
+/**
+ * Called when an image frame is received on a node.
+ * @param {!(AutomationEvent|CustomAutomationEvent)} event The event.
+ * @private
+ */
+CommandHandler.onImageFrameUpdated_ = function(event) {
+  var target = event.target;
+  if (target != CommandHandler.imageNode_)
+    return;
+
+  if (!AutomationUtil.isDescendantOf(
+      ChromeVoxState.instance.currentRange.start.node,
+      CommandHandler.imageNode_)) {
+    CommandHandler.imageNode_.removeEventListener(
+        EventType.IMAGE_FRAME_UPDATED,
+        CommandHandler.onImageFrameUpdated_, false);
+    CommandHandler.imageNode_ = null;
+    return;
+  }
+
+  if (target.imageDataUrl) {
+    cvox.ChromeVox.braille.writeRawImage(target.imageDataUrl);
+    cvox.ChromeVox.braille.freeze();
+  }
+};
+
+/**
+ * Handle the command to view the first graphic within the current range
+ * as braille.
+ * @param {!AutomationNode} current The current range.
+ * @private
+ */
+CommandHandler.viewGraphicAsBraille_ = function(current) {
+  if (CommandHandler.imageNode_) {
+    CommandHandler.imageNode_.removeEventListener(
+        EventType.IMAGE_FRAME_UPDATED,
+        CommandHandler.onImageFrameUpdated_, false);
+    CommandHandler.imageNode_ = null;
+  }
+
+  // Find the first node within the current range that supports image data.
+  var imageNode = AutomationUtil.findNodePost(
+      current.start.node, Dir.FORWARD,
+      AutomationPredicate.supportsImageData);
+  if (!imageNode)
+    return;
+
+  imageNode.addEventListener(EventType.IMAGE_FRAME_UPDATED,
+                             this.onImageFrameUpdated_, false);
+  CommandHandler.imageNode_ = imageNode;
+  if (imageNode.imageDataUrl) {
+    var event = new CustomAutomationEvent(
+        EventType.IMAGE_FRAME_UPDATED, imageNode, 'page');
+    CommandHandler.onImageFrameUpdated_(event);
+  } else {
+    imageNode.getImageData(0, 0);
+  }
+};
+
+/**
+ * Performs global initialization.
+ * @private
+ */
+CommandHandler.init_ = function() {
+  var firstRunId = 'jdgcneonijmofocbhmijhacgchbihela';
+  chrome.runtime.onMessageExternal.addListener(
+      function(request, sender, sendResponse) {
+        if (sender.id != firstRunId)
+          return;
+
+        if (request.openTutorial) {
+          var launchTutorial = function(desktop, evt) {
+            desktop.removeEventListener(
+                chrome.automation.EventType.FOCUS, launchTutorial, true);
+            CommandHandler.onCommand('help');
+          };
+
+          // Since we get this command early on ChromeVox launch, the first run
+          // UI is not yet shown. Monitor for when first run gets focused, and
+          // show our tutorial.
+          chrome.automation.getDesktop(function(desktop) {
+            launchTutorial = launchTutorial.bind(this, desktop);
+            desktop.addEventListener(
+                chrome.automation.EventType.FOCUS, launchTutorial, true);
+          });
+        }
+      });
+};
+
+CommandHandler.init_();
 
 }); //  goog.scope

@@ -110,6 +110,13 @@
 // GL_ANGLE_instanced_arrays
 #define GL_VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE             0x88FE
 
+// GL_ANGLE_client_arrays
+#define GL_CLIENT_ARRAYS_ANGLE 0x93AA
+
+// GL_ANGLE_request_extension
+#define GL_REQUESTABLE_EXTENSIONS_ANGLE 0x93A8
+#define GL_NUM_REQUESTABLE_EXTENSIONS_ANGLE 0x93A8
+
 // GL_EXT_occlusion_query_boolean
 #define GL_ANY_SAMPLES_PASSED_EXT                        0x8C2F
 #define GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT           0x8D6A
@@ -134,9 +141,6 @@
 
 // GL_CHROMIUM_sync_query
 #define GL_COMMANDS_COMPLETED_CHROMIUM                   0x84F7
-
-// GL_CHROMIUM_gpu_memory_buffer_image
-#define GL_READ_WRITE_CHROMIUM                           0x78F2
 
 // GL_CHROMIUM_ycrcb_420_image
 #define GL_RGB_YCRCB_420_CHROMIUM                        0x78FA
@@ -330,6 +334,15 @@
 #define GL_NO_RESET_NOTIFICATION_KHR      0x8261
 #define GL_CONTEXT_LOST_KHR               0x0507
 #endif /* GL_KHR_robustness */
+
+#ifndef GL_EXT_texture_norm16
+#define GL_EXT_texture_norm16 1
+#define GL_R16_EXT 0x822A
+#define GL_RG16_EXT 0x822C
+#define GL_RGBA16_EXT 0x805B
+#define GL_RGB16_EXT 0x8054
+#define GL_RGB16_SNORM_EXT 0x8F9A
+#endif /* GL_EXT_texture_norm16 */
 
 #ifndef GL_EXT_texture_rg
 #define GL_EXT_texture_rg 1

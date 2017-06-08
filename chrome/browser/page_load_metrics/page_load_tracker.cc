@@ -12,12 +12,14 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/user_metrics.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_embedder_interface.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
+#include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "ui/base/page_transition_types.h"
 
@@ -55,6 +57,10 @@ const char kClientRedirectWithoutPaint[] =
     "PageLoad.Internal.ClientRedirect.NavigationWithoutPaint";
 const char kPageLoadCompletedAfterAppBackground[] =
     "PageLoad.Internal.PageLoadCompleted.AfterAppBackground";
+const char kPageLoadStartedInForeground[] =
+    "PageLoad.Internal.NavigationStartedInForeground";
+const char kPageLoadPrerender[] = "PageLoad.Internal.Prerender";
+const char kPageLoadTimingStatus[] = "PageLoad.Internal.PageLoadTimingStatus";
 
 }  // namespace internal
 
@@ -64,20 +70,20 @@ void RecordInternalError(InternalErrorLoadEvent event) {
 
 // TODO(csharrison): Add a case for client side redirects, which is what JS
 // initiated window.location / window.history navigations get set to.
-UserAbortType AbortTypeForPageTransition(ui::PageTransition transition) {
+PageEndReason EndReasonForPageTransition(ui::PageTransition transition) {
   if (transition & ui::PAGE_TRANSITION_CLIENT_REDIRECT) {
-    return ABORT_CLIENT_REDIRECT;
+    return END_CLIENT_REDIRECT;
   }
   if (ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_RELOAD))
-    return ABORT_RELOAD;
+    return END_RELOAD;
   if (transition & ui::PAGE_TRANSITION_FORWARD_BACK)
-    return ABORT_FORWARD_BACK;
+    return END_FORWARD_BACK;
   if (ui::PageTransitionIsNewNavigation(transition))
-    return ABORT_NEW_NAVIGATION;
+    return END_NEW_NAVIGATION;
   NOTREACHED()
-      << "AbortTypeForPageTransition received unexpected ui::PageTransition: "
+      << "EndReasonForPageTransition received unexpected ui::PageTransition: "
       << transition;
-  return ABORT_OTHER;
+  return END_OTHER;
 }
 
 void LogAbortChainSameURLHistogram(int aborted_chain_size_same_url) {
@@ -121,127 +127,147 @@ bool EventsInOrder(const base::Optional<base::TimeDelta>& first,
   return first && first <= second;
 }
 
-bool IsValidPageLoadTiming(const PageLoadTiming& timing) {
+internal::PageLoadTimingStatus IsValidPageLoadTiming(
+    const PageLoadTiming& timing) {
   if (timing.IsEmpty())
-    return false;
+    return internal::INVALID_EMPTY_TIMING;
 
   // If we have a non-empty timing, it should always have a navigation start.
   if (timing.navigation_start.is_null()) {
-    NOTREACHED() << "Received null navigation_start.";
-    return false;
+    LOG(ERROR) << "Received null navigation_start.";
+    return internal::INVALID_NULL_NAVIGATION_START;
   }
 
   // Verify proper ordering between the various timings.
 
-  if (!EventsInOrder(timing.response_start, timing.parse_start)) {
+  if (!EventsInOrder(timing.response_start, timing.parse_timing.parse_start)) {
     // We sometimes get a zero response_start with a non-zero parse start. See
     // crbug.com/590212.
-    DLOG(ERROR) << "Invalid response_start " << timing.response_start
-                << " for parse_start " << timing.parse_start;
-    return false;
+    LOG(ERROR) << "Invalid response_start " << timing.response_start
+               << " for parse_start " << timing.parse_timing.parse_start;
+    return internal::INVALID_ORDER_RESPONSE_START_PARSE_START;
   }
 
-  if (!EventsInOrder(timing.parse_start, timing.parse_stop)) {
-    NOTREACHED() << "Invalid parse_start " << timing.parse_start
-                 << " for parse_stop " << timing.parse_stop;
-    return false;
+  if (!EventsInOrder(timing.parse_timing.parse_start,
+                     timing.parse_timing.parse_stop)) {
+    LOG(ERROR) << "Invalid parse_start " << timing.parse_timing.parse_start
+               << " for parse_stop " << timing.parse_timing.parse_stop;
+    return internal::INVALID_ORDER_PARSE_START_PARSE_STOP;
   }
 
-  if (timing.parse_stop) {
+  if (timing.parse_timing.parse_stop) {
     const base::TimeDelta parse_duration =
-        timing.parse_stop.value() - timing.parse_start.value();
-    if (timing.parse_blocked_on_script_load_duration > parse_duration) {
-      NOTREACHED() << "Invalid parse_blocked_on_script_load_duration "
-                   << timing.parse_blocked_on_script_load_duration
-                   << " for parse duration " << parse_duration;
-      return false;
+        timing.parse_timing.parse_stop.value() -
+        timing.parse_timing.parse_start.value();
+    if (timing.parse_timing.parse_blocked_on_script_load_duration >
+        parse_duration) {
+      LOG(ERROR) << "Invalid parse_blocked_on_script_load_duration "
+                 << timing.parse_timing.parse_blocked_on_script_load_duration
+                 << " for parse duration " << parse_duration;
+      return internal::INVALID_SCRIPT_LOAD_LONGER_THAN_PARSE;
     }
-    if (timing.parse_blocked_on_script_execution_duration > parse_duration) {
-      NOTREACHED() << "Invalid parse_blocked_on_script_execution_duration "
-                   << timing.parse_blocked_on_script_execution_duration
-                   << " for parse duration " << parse_duration;
-      return false;
+    if (timing.parse_timing.parse_blocked_on_script_execution_duration >
+        parse_duration) {
+      LOG(ERROR)
+          << "Invalid parse_blocked_on_script_execution_duration "
+          << timing.parse_timing.parse_blocked_on_script_execution_duration
+          << " for parse duration " << parse_duration;
+      return internal::INVALID_SCRIPT_EXEC_LONGER_THAN_PARSE;
     }
   }
 
-  if (timing.parse_blocked_on_script_load_from_document_write_duration >
-      timing.parse_blocked_on_script_load_duration) {
-    NOTREACHED()
+  if (timing.parse_timing
+          .parse_blocked_on_script_load_from_document_write_duration >
+      timing.parse_timing.parse_blocked_on_script_load_duration) {
+    LOG(ERROR)
         << "Invalid parse_blocked_on_script_load_from_document_write_duration "
-        << timing.parse_blocked_on_script_load_from_document_write_duration
+        << timing.parse_timing
+               .parse_blocked_on_script_load_from_document_write_duration
         << " for parse_blocked_on_script_load_duration "
-        << timing.parse_blocked_on_script_load_duration;
-    return false;
+        << timing.parse_timing.parse_blocked_on_script_load_duration;
+    return internal::INVALID_SCRIPT_LOAD_DOC_WRITE_LONGER_THAN_SCRIPT_LOAD;
   }
 
-  if (timing.parse_blocked_on_script_execution_from_document_write_duration >
-      timing.parse_blocked_on_script_execution_duration) {
-    NOTREACHED()
+  if (timing.parse_timing
+          .parse_blocked_on_script_execution_from_document_write_duration >
+      timing.parse_timing.parse_blocked_on_script_execution_duration) {
+    LOG(ERROR)
         << "Invalid "
            "parse_blocked_on_script_execution_from_document_write_duration "
-        << timing.parse_blocked_on_script_execution_from_document_write_duration
+        << timing.parse_timing
+               .parse_blocked_on_script_execution_from_document_write_duration
         << " for parse_blocked_on_script_execution_duration "
-        << timing.parse_blocked_on_script_execution_duration;
-    return false;
+        << timing.parse_timing.parse_blocked_on_script_execution_duration;
+    return internal::INVALID_SCRIPT_EXEC_DOC_WRITE_LONGER_THAN_SCRIPT_EXEC;
   }
 
-  if (!EventsInOrder(timing.parse_stop,
-                     timing.dom_content_loaded_event_start)) {
-    NOTREACHED() << "Invalid parse_stop " << timing.parse_stop
-                 << " for dom_content_loaded_event_start "
-                 << timing.dom_content_loaded_event_start;
-    return false;
+  if (!EventsInOrder(timing.parse_timing.parse_stop,
+                     timing.document_timing.dom_content_loaded_event_start)) {
+    LOG(ERROR) << "Invalid parse_stop " << timing.parse_timing.parse_stop
+               << " for dom_content_loaded_event_start "
+               << timing.document_timing.dom_content_loaded_event_start;
+    return internal::INVALID_ORDER_PARSE_STOP_DOM_CONTENT_LOADED;
   }
 
-  if (!EventsInOrder(timing.dom_content_loaded_event_start,
-                     timing.load_event_start)) {
-    NOTREACHED() << "Invalid dom_content_loaded_event_start "
-                 << timing.dom_content_loaded_event_start
-                 << " for load_event_start " << timing.load_event_start;
-    return false;
+  if (!EventsInOrder(timing.document_timing.dom_content_loaded_event_start,
+                     timing.document_timing.load_event_start)) {
+    LOG(ERROR) << "Invalid dom_content_loaded_event_start "
+               << timing.document_timing.dom_content_loaded_event_start
+               << " for load_event_start "
+               << timing.document_timing.load_event_start;
+    return internal::INVALID_ORDER_DOM_CONTENT_LOADED_LOAD;
   }
 
-  if (!EventsInOrder(timing.parse_start, timing.first_layout)) {
-    NOTREACHED() << "Invalid parse_start " << timing.parse_start
-                 << " for first_layout " << timing.first_layout;
-    return false;
+  if (!EventsInOrder(timing.parse_timing.parse_start,
+                     timing.document_timing.first_layout)) {
+    LOG(ERROR) << "Invalid parse_start " << timing.parse_timing.parse_start
+               << " for first_layout " << timing.document_timing.first_layout;
+    return internal::INVALID_ORDER_PARSE_START_FIRST_LAYOUT;
   }
 
-  if (!EventsInOrder(timing.first_layout, timing.first_paint)) {
+  if (!EventsInOrder(timing.document_timing.first_layout,
+                     timing.paint_timing.first_paint)) {
     // This can happen when we process an XHTML document that doesn't contain
     // well formed XML. See crbug.com/627607.
-    DLOG(ERROR) << "Invalid first_layout " << timing.first_layout
-                << " for first_paint " << timing.first_paint;
-    return false;
+    DLOG(ERROR) << "Invalid first_layout "
+                << timing.document_timing.first_layout << " for first_paint "
+                << timing.paint_timing.first_paint;
+    return internal::INVALID_ORDER_FIRST_LAYOUT_FIRST_PAINT;
   }
 
-  if (!EventsInOrder(timing.first_paint, timing.first_text_paint)) {
-    NOTREACHED() << "Invalid first_paint " << timing.first_paint
-                 << " for first_text_paint " << timing.first_text_paint;
-    return false;
+  if (!EventsInOrder(timing.paint_timing.first_paint,
+                     timing.paint_timing.first_text_paint)) {
+    LOG(ERROR) << "Invalid first_paint " << timing.paint_timing.first_paint
+               << " for first_text_paint "
+               << timing.paint_timing.first_text_paint;
+    return internal::INVALID_ORDER_FIRST_PAINT_FIRST_TEXT_PAINT;
   }
 
-  if (!EventsInOrder(timing.first_paint, timing.first_image_paint)) {
-    NOTREACHED() << "Invalid first_paint " << timing.first_paint
-                 << " for first_image_paint " << timing.first_image_paint;
-    return false;
+  if (!EventsInOrder(timing.paint_timing.first_paint,
+                     timing.paint_timing.first_image_paint)) {
+    LOG(ERROR) << "Invalid first_paint " << timing.paint_timing.first_paint
+               << " for first_image_paint "
+               << timing.paint_timing.first_image_paint;
+    return internal::INVALID_ORDER_FIRST_PAINT_FIRST_IMAGE_PAINT;
   }
 
-  if (!EventsInOrder(timing.first_paint, timing.first_contentful_paint)) {
-    NOTREACHED() << "Invalid first_paint " << timing.first_paint
-                 << " for first_contentful_paint "
-                 << timing.first_contentful_paint;
-    return false;
+  if (!EventsInOrder(timing.paint_timing.first_paint,
+                     timing.paint_timing.first_contentful_paint)) {
+    LOG(ERROR) << "Invalid first_paint " << timing.paint_timing.first_paint
+               << " for first_contentful_paint "
+               << timing.paint_timing.first_contentful_paint;
+    return internal::INVALID_ORDER_FIRST_PAINT_FIRST_CONTENTFUL_PAINT;
   }
 
-  if (!EventsInOrder(timing.first_paint, timing.first_meaningful_paint)) {
-    NOTREACHED() << "Invalid first_paint " << timing.first_paint
-                 << " for first_meaningful_paint "
-                 << timing.first_meaningful_paint;
-    return false;
+  if (!EventsInOrder(timing.paint_timing.first_paint,
+                     timing.paint_timing.first_meaningful_paint)) {
+    LOG(ERROR) << "Invalid first_paint " << timing.paint_timing.first_paint
+               << " for first_meaningful_paint "
+               << timing.paint_timing.first_meaningful_paint;
+    return internal::INVALID_ORDER_FIRST_PAINT_FIRST_MEANINGFUL_PAINT;
   }
 
-  return true;
+  return internal::VALID;
 }
 
 void RecordAppBackgroundPageLoadCompleted(bool completed_after_background) {
@@ -254,31 +280,41 @@ void DispatchObserverTimingCallbacks(PageLoadMetricsObserver* observer,
                                      const PageLoadTiming& new_timing,
                                      const PageLoadMetadata& last_metadata,
                                      const PageLoadExtraInfo& extra_info) {
+  if (extra_info.main_frame_metadata.behavior_flags !=
+      last_metadata.behavior_flags)
+    observer->OnLoadingBehaviorObserved(extra_info);
   if (last_timing != new_timing)
     observer->OnTimingUpdate(new_timing, extra_info);
-  if (new_timing.dom_content_loaded_event_start &&
-      !last_timing.dom_content_loaded_event_start)
+  if (new_timing.document_timing.dom_content_loaded_event_start &&
+      !last_timing.document_timing.dom_content_loaded_event_start)
     observer->OnDomContentLoadedEventStart(new_timing, extra_info);
-  if (new_timing.load_event_start && !last_timing.load_event_start)
+  if (new_timing.document_timing.load_event_start &&
+      !last_timing.document_timing.load_event_start)
     observer->OnLoadEventStart(new_timing, extra_info);
-  if (new_timing.first_layout && !last_timing.first_layout)
+  if (new_timing.document_timing.first_layout &&
+      !last_timing.document_timing.first_layout)
     observer->OnFirstLayout(new_timing, extra_info);
-  if (new_timing.first_paint && !last_timing.first_paint)
+  if (new_timing.paint_timing.first_paint &&
+      !last_timing.paint_timing.first_paint)
     observer->OnFirstPaint(new_timing, extra_info);
-  if (new_timing.first_text_paint && !last_timing.first_text_paint)
+  if (new_timing.paint_timing.first_text_paint &&
+      !last_timing.paint_timing.first_text_paint)
     observer->OnFirstTextPaint(new_timing, extra_info);
-  if (new_timing.first_image_paint && !last_timing.first_image_paint)
+  if (new_timing.paint_timing.first_image_paint &&
+      !last_timing.paint_timing.first_image_paint)
     observer->OnFirstImagePaint(new_timing, extra_info);
-  if (new_timing.first_contentful_paint && !last_timing.first_contentful_paint)
+  if (new_timing.paint_timing.first_contentful_paint &&
+      !last_timing.paint_timing.first_contentful_paint)
     observer->OnFirstContentfulPaint(new_timing, extra_info);
-  if (new_timing.first_meaningful_paint && !last_timing.first_meaningful_paint)
+  if (new_timing.paint_timing.first_meaningful_paint &&
+      !last_timing.paint_timing.first_meaningful_paint)
     observer->OnFirstMeaningfulPaint(new_timing, extra_info);
-  if (new_timing.parse_start && !last_timing.parse_start)
+  if (new_timing.parse_timing.parse_start &&
+      !last_timing.parse_timing.parse_start)
     observer->OnParseStart(new_timing, extra_info);
-  if (new_timing.parse_stop && !last_timing.parse_stop)
+  if (new_timing.parse_timing.parse_stop &&
+      !last_timing.parse_timing.parse_stop)
     observer->OnParseStop(new_timing, extra_info);
-  if (extra_info.metadata.behavior_flags != last_metadata.behavior_flags)
-    observer->OnLoadingBehaviorObserved(extra_info);
 }
 
 }  // namespace
@@ -294,9 +330,11 @@ PageLoadTracker::PageLoadTracker(
     : did_stop_tracking_(false),
       app_entered_background_(false),
       navigation_start_(navigation_handle->NavigationStart()),
+      url_(navigation_handle->GetURL()),
       start_url_(navigation_handle->GetURL()),
-      abort_type_(ABORT_NONE),
-      abort_user_initiated_info_(UserInitiatedInfo::NotUserInitiated()),
+      did_commit_(false),
+      page_end_reason_(END_NONE),
+      page_end_user_initiated_info_(UserInitiatedInfo::NotUserInitiated()),
       started_in_foreground_(in_foreground),
       page_transition_(navigation_handle->GetPageTransition()),
       user_initiated_info_(user_initiated_info),
@@ -307,6 +345,14 @@ PageLoadTracker::PageLoadTracker(
   embedder_interface_->RegisterObservers(this);
   INVOKE_AND_PRUNE_OBSERVERS(observers_, OnStart, navigation_handle,
                              currently_committed_url, started_in_foreground_);
+
+  UMA_HISTOGRAM_BOOLEAN(internal::kPageLoadStartedInForeground,
+                        started_in_foreground_);
+  const bool is_prerender = prerender::PrerenderContents::FromWebContents(
+                                navigation_handle->GetWebContents()) != nullptr;
+  if (is_prerender) {
+    UMA_HISTOGRAM_BOOLEAN(internal::kPageLoadPrerender, true);
+  }
 }
 
 PageLoadTracker::~PageLoadTracker() {
@@ -317,14 +363,24 @@ PageLoadTracker::~PageLoadTracker() {
   if (did_stop_tracking_)
     return;
 
-  if (committed_url_.is_empty()) {
+  if (page_end_time_.is_null()) {
+    // page_end_time_ can be unset in some cases, such as when a navigation is
+    // aborted by a navigation that started before it. In these cases, set the
+    // end time to the current time.
+    RecordInternalError(ERR_NO_PAGE_LOAD_END_TIME);
+    NotifyPageEnd(END_OTHER, UserInitiatedInfo::NotUserInitiated(),
+                  base::TimeTicks::Now(), true);
+  }
+
+  if (!did_commit_) {
     if (!failed_provisional_load_info_)
       RecordInternalError(ERR_NO_COMMIT_OR_FAILED_PROVISIONAL_LOAD);
 
     // Don't include any aborts that resulted in a new navigation, as the chain
     // length will be included in the aborter PageLoadTracker.
-    if (abort_type_ != ABORT_RELOAD && abort_type_ != ABORT_FORWARD_BACK &&
-        abort_type_ != ABORT_NEW_NAVIGATION) {
+    if (page_end_reason_ != END_RELOAD &&
+        page_end_reason_ != END_FORWARD_BACK &&
+        page_end_reason_ != END_NEW_NAVIGATION) {
       LogAbortChainHistograms(nullptr);
     }
   } else if (timing_.IsEmpty()) {
@@ -335,7 +391,7 @@ PageLoadTracker::~PageLoadTracker() {
   for (const auto& observer : observers_) {
     if (failed_provisional_load_info_) {
       observer->OnFailedProvisionalLoad(*failed_provisional_load_info_, info);
-    } else if (!info.committed_url.is_empty()) {
+    } else if (did_commit_) {
       observer->OnComplete(timing_, info);
     }
   }
@@ -357,7 +413,7 @@ void PageLoadTracker::LogAbortChainHistograms(
   }
 
   // The following is only executed for committing trackers.
-  DCHECK(!committed_url_.is_empty());
+  DCHECK(did_commit_);
 
   // Note that histograms could be separated out by this commit's transition
   // type, but for simplicity they will all be bucketed together.
@@ -365,12 +421,12 @@ void PageLoadTracker::LogAbortChainHistograms(
 
   ui::PageTransition committed_transition =
       final_navigation->GetPageTransition();
-  switch (AbortTypeForPageTransition(committed_transition)) {
-    case ABORT_RELOAD:
+  switch (EndReasonForPageTransition(committed_transition)) {
+    case END_RELOAD:
       UMA_HISTOGRAM_COUNTS(internal::kAbortChainSizeReload,
                            aborted_chain_size_);
       return;
-    case ABORT_FORWARD_BACK:
+    case END_FORWARD_BACK:
       UMA_HISTOGRAM_COUNTS(internal::kAbortChainSizeForwardBack,
                            aborted_chain_size_);
       return;
@@ -379,8 +435,8 @@ void PageLoadTracker::LogAbortChainHistograms(
     // chain, log a histogram of the counts of each of these metrics. For now,
     // merge client redirects with new navigations, which was (basically) the
     // previous behavior.
-    case ABORT_CLIENT_REDIRECT:
-    case ABORT_NEW_NAVIGATION:
+    case END_CLIENT_REDIRECT:
+    case END_NEW_NAVIGATION:
       UMA_HISTOGRAM_COUNTS(internal::kAbortChainSizeNewNavigation,
                            aborted_chain_size_);
       return;
@@ -401,12 +457,6 @@ void PageLoadTracker::WebContentsHidden() {
     DCHECK_EQ(started_in_foreground_, foreground_time_.is_null());
     background_time_ = base::TimeTicks::Now();
     ClampBrowserTimestampIfInterProcessTimeTickSkew(&background_time_);
-    // Though most cases where a tab is backgrounded are user initiated, we
-    // can't be certain that we were backgrounded due to a user action. For
-    // example, on Android, the screen times out after a period of inactivity,
-    // resulting in a non-user-initiated backgrounding.
-    NotifyAbort(ABORT_BACKGROUND, UserInitiatedInfo::NotUserInitiated(),
-                background_time_, true);
   }
   const PageLoadExtraInfo info = ComputePageLoadExtraInfo();
   INVOKE_AND_PRUNE_OBSERVERS(observers_, OnHidden, timing_, info);
@@ -431,8 +481,10 @@ void PageLoadTracker::WillProcessNavigationResponse(
   // PlzNavigate: NavigationHandle::GetGlobalRequestID() sometimes returns an
   // uninitialized GlobalRequestID. Bail early in this case. See
   // crbug.com/680841 for details.
-  if (content::IsBrowserSideNavigationEnabled() &&
-      navigation_handle->GetGlobalRequestID() == content::GlobalRequestID())
+  // TODO(jkarlin): NavigationSimulator is the first unittest framework to hit
+  // this function, and it doesn't provide a GlobalRequestID. Add an ID. See
+  // crbug.com/711352 for details.
+  if (navigation_handle->GetGlobalRequestID() == content::GlobalRequestID())
     return;
 
   DCHECK(!navigation_request_id_.has_value());
@@ -441,24 +493,37 @@ void PageLoadTracker::WillProcessNavigationResponse(
 }
 
 void PageLoadTracker::Commit(content::NavigationHandle* navigation_handle) {
-  committed_url_ = navigation_handle->GetURL();
+  did_commit_ = true;
+  url_ = navigation_handle->GetURL();
   // Some transitions (like CLIENT_REDIRECT) are only known at commit time.
   page_transition_ = navigation_handle->GetPageTransition();
   user_initiated_info_.user_gesture = navigation_handle->HasUserGesture();
+
+  INVOKE_AND_PRUNE_OBSERVERS(
+      observers_, ShouldObserveMimeType,
+      navigation_handle->GetWebContents()->GetContentsMimeType());
 
   INVOKE_AND_PRUNE_OBSERVERS(observers_, OnCommit, navigation_handle);
   LogAbortChainHistograms(navigation_handle);
 }
 
-void PageLoadTracker::FailedProvisionalLoad(
+void PageLoadTracker::DidFinishSubFrameNavigation(
     content::NavigationHandle* navigation_handle) {
+  INVOKE_AND_PRUNE_OBSERVERS(observers_, OnDidFinishSubFrameNavigation,
+                             navigation_handle);
+}
+
+void PageLoadTracker::FailedProvisionalLoad(
+    content::NavigationHandle* navigation_handle,
+    base::TimeTicks failed_load_time) {
   DCHECK(!failed_provisional_load_info_);
   failed_provisional_load_info_.reset(new FailedProvisionalLoadInfo(
-      base::TimeTicks::Now() - navigation_handle->NavigationStart(),
+      failed_load_time - navigation_handle->NavigationStart(),
       navigation_handle->GetNetErrorCode()));
 }
 
 void PageLoadTracker::Redirect(content::NavigationHandle* navigation_handle) {
+  url_ = navigation_handle->GetURL();
   INVOKE_AND_PRUNE_OBSERVERS(observers_, OnRedirect, navigation_handle);
 }
 
@@ -482,9 +547,9 @@ void PageLoadTracker::FlushMetricsOnAppEnterBackground() {
 
 void PageLoadTracker::NotifyClientRedirectTo(
     const PageLoadTracker& destination) {
-  if (timing_.first_paint) {
+  if (timing_.paint_timing.first_paint) {
     base::TimeTicks first_paint_time =
-        navigation_start() + timing_.first_paint.value();
+        navigation_start() + timing_.paint_timing.first_paint.value();
     base::TimeDelta first_paint_to_navigation;
     if (destination.navigation_start() > first_paint_time)
       first_paint_to_navigation =
@@ -496,47 +561,83 @@ void PageLoadTracker::NotifyClientRedirectTo(
   }
 }
 
-bool PageLoadTracker::UpdateTiming(const PageLoadTiming& new_timing,
+void PageLoadTracker::UpdateChildFrameMetadata(
+    const PageLoadMetadata& child_metadata) {
+  // Merge the child loading behavior flags with any we've already observed,
+  // possibly from other child frames.
+  const int last_child_loading_behavior_flags =
+      child_frame_metadata_.behavior_flags;
+  child_frame_metadata_.behavior_flags |= child_metadata.behavior_flags;
+  if (last_child_loading_behavior_flags == child_frame_metadata_.behavior_flags)
+    return;
+
+  PageLoadExtraInfo extra_info(ComputePageLoadExtraInfo());
+  for (const auto& observer : observers_) {
+    observer->OnLoadingBehaviorObserved(extra_info);
+  }
+}
+
+void PageLoadTracker::UpdateTiming(const PageLoadTiming& new_timing,
                                    const PageLoadMetadata& new_metadata) {
   // Throw away IPCs that are not relevant to the current navigation.
   // Two timing structures cannot refer to the same navigation if they indicate
   // that a navigation started at different times, so a new timing struct with a
   // different start time from an earlier struct is considered invalid.
-  bool valid_timing_descendent =
+  const bool valid_timing_descendent =
       timing_.navigation_start.is_null() ||
       timing_.navigation_start == new_timing.navigation_start;
-  // Ensure flags sent previously are still present in the new metadata fields.
-  bool valid_behavior_descendent =
-      (metadata_.behavior_flags & new_metadata.behavior_flags) ==
-      metadata_.behavior_flags;
-  if (IsValidPageLoadTiming(new_timing) && valid_timing_descendent &&
-      valid_behavior_descendent) {
-    DCHECK(!committed_url_.is_empty());  // OnCommit() must be called first.
-    // There are some subtle ordering constraints here. GetPageLoadMetricsInfo()
-    // must be called before DispatchObserverTimingCallbacks, but its
-    // implementation depends on the state of metadata_, so we need to update
-    // metadata_ before calling GetPageLoadMetricsInfo. Thus, we make a copy of
-    // timing here, update timing_ and metadata_, and then proceed to dispatch
-    // the observer timing callbacks.
-    const PageLoadTiming last_timing = timing_;
-    timing_ = new_timing;
-
-    const PageLoadMetadata last_metadata = metadata_;
-    metadata_ = new_metadata;
-    const PageLoadExtraInfo info = ComputePageLoadExtraInfo();
-    for (const auto& observer : observers_) {
-      DispatchObserverTimingCallbacks(observer.get(), last_timing, new_timing,
-                                      last_metadata, info);
-    }
-    return true;
+  if (!valid_timing_descendent) {
+    RecordInternalError(ERR_BAD_TIMING_IPC_INVALID_TIMING_DESCENDENT);
+    return;
   }
-  return false;
+
+  // Ensure flags sent previously are still present in the new metadata fields.
+  const bool valid_behavior_descendent =
+      (main_frame_metadata_.behavior_flags & new_metadata.behavior_flags) ==
+      main_frame_metadata_.behavior_flags;
+  if (!valid_behavior_descendent) {
+    RecordInternalError(ERR_BAD_TIMING_IPC_INVALID_BEHAVIOR_DESCENDENT);
+    return;
+  }
+  internal::PageLoadTimingStatus status = IsValidPageLoadTiming(new_timing);
+  UMA_HISTOGRAM_ENUMERATION(internal::kPageLoadTimingStatus, status,
+                            internal::LAST_PAGE_LOAD_TIMING_STATUS);
+  if (status != internal::VALID) {
+    RecordInternalError(ERR_BAD_TIMING_IPC_INVALID_TIMING);
+    return;
+  }
+
+  DCHECK(did_commit_);  // OnCommit() must be called first.
+  // There are some subtle ordering constraints here. GetPageLoadMetricsInfo()
+  // must be called before DispatchObserverTimingCallbacks, but its
+  // implementation depends on the state of main_frame_metadata_, so we need
+  // to update main_frame_metadata_ before calling GetPageLoadMetricsInfo.
+  // Thus, we make a copy of timing here, update timing_ and
+  // main_frame_metadata_, and then proceed to dispatch the observer timing
+  // callbacks.
+  const PageLoadTiming last_timing = timing_;
+  timing_ = new_timing;
+
+  const PageLoadMetadata last_metadata = main_frame_metadata_;
+  main_frame_metadata_ = new_metadata;
+  const PageLoadExtraInfo info = ComputePageLoadExtraInfo();
+  for (const auto& observer : observers_) {
+    DispatchObserverTimingCallbacks(observer.get(), last_timing, new_timing,
+                                    last_metadata, info);
+  }
+}
+
+void PageLoadTracker::OnStartedResource(
+    const ExtraRequestStartInfo& extra_request_start_info) {
+  for (const auto& observer : observers_) {
+    observer->OnStartedResource(extra_request_start_info);
+  }
 }
 
 void PageLoadTracker::OnLoadedResource(
-    const ExtraRequestInfo& extra_request_info) {
+    const ExtraRequestCompleteInfo& extra_request_complete_info) {
   for (const auto& observer : observers_) {
-    observer->OnLoadedResource(extra_request_info);
+    observer->OnLoadedResource(extra_request_complete_info);
   }
 }
 
@@ -580,7 +681,7 @@ void PageLoadTracker::ClampBrowserTimestampIfInterProcessTimeTickSkew(
 PageLoadExtraInfo PageLoadTracker::ComputePageLoadExtraInfo() {
   base::Optional<base::TimeDelta> first_background_time;
   base::Optional<base::TimeDelta> first_foreground_time;
-  base::Optional<base::TimeDelta> time_to_abort;
+  base::Optional<base::TimeDelta> page_end_time;
 
   if (!background_time_.is_null()) {
     DCHECK_GE(background_time_, navigation_start_);
@@ -592,23 +693,24 @@ PageLoadExtraInfo PageLoadTracker::ComputePageLoadExtraInfo() {
     first_foreground_time = foreground_time_ - navigation_start_;
   }
 
-  if (abort_type_ != ABORT_NONE) {
-    DCHECK_GE(abort_time_, navigation_start_);
-    time_to_abort = abort_time_ - navigation_start_;
+  if (page_end_reason_ != END_NONE) {
+    DCHECK_GE(page_end_time_, navigation_start_);
+    page_end_time = page_end_time_ - navigation_start_;
   } else {
-    DCHECK(abort_time_.is_null());
+    DCHECK(page_end_time_.is_null());
   }
 
-  // abort_type_ == ABORT_NONE implies abort_user_initiated_info_ is not user
-  // initiated.
-  DCHECK(abort_type_ != ABORT_NONE ||
-         (!abort_user_initiated_info_.browser_initiated &&
-          !abort_user_initiated_info_.user_gesture &&
-          !abort_user_initiated_info_.user_input_event));
+  // page_end_reason_ == END_NONE implies page_end_user_initiated_info_ is not
+  // user initiated.
+  DCHECK(page_end_reason_ != END_NONE ||
+         (!page_end_user_initiated_info_.browser_initiated &&
+          !page_end_user_initiated_info_.user_gesture &&
+          !page_end_user_initiated_info_.user_input_event));
   return PageLoadExtraInfo(
-      first_background_time, first_foreground_time, started_in_foreground_,
-      user_initiated_info_, committed_url_, start_url_, abort_type_,
-      abort_user_initiated_info_, time_to_abort, metadata_);
+      navigation_start_, first_background_time, first_foreground_time,
+      started_in_foreground_, user_initiated_info_, url(), start_url_,
+      did_commit_, page_end_reason_, page_end_user_initiated_info_,
+      page_end_time, main_frame_metadata_, child_frame_metadata_);
 }
 
 bool PageLoadTracker::HasMatchingNavigationRequestID(
@@ -618,54 +720,58 @@ bool PageLoadTracker::HasMatchingNavigationRequestID(
          navigation_request_id_.value() == request_id;
 }
 
-void PageLoadTracker::NotifyAbort(UserAbortType abort_type,
-                                  UserInitiatedInfo user_initiated_info,
-                                  base::TimeTicks timestamp,
-                                  bool is_certainly_browser_timestamp) {
-  DCHECK_NE(abort_type, ABORT_NONE);
-  // Use UpdateAbort to update an already notified PageLoadTracker.
-  if (abort_type_ != ABORT_NONE)
+void PageLoadTracker::NotifyPageEnd(PageEndReason page_end_reason,
+                                    UserInitiatedInfo user_initiated_info,
+                                    base::TimeTicks timestamp,
+                                    bool is_certainly_browser_timestamp) {
+  DCHECK_NE(page_end_reason, END_NONE);
+  // Use UpdatePageEnd to update an already notified PageLoadTracker.
+  if (page_end_reason_ != END_NONE)
     return;
 
-  UpdateAbortInternal(abort_type, user_initiated_info, timestamp,
-                      is_certainly_browser_timestamp);
+  UpdatePageEndInternal(page_end_reason, user_initiated_info, timestamp,
+                        is_certainly_browser_timestamp);
 }
 
-void PageLoadTracker::UpdateAbort(UserAbortType abort_type,
-                                  UserInitiatedInfo user_initiated_info,
-                                  base::TimeTicks timestamp,
-                                  bool is_certainly_browser_timestamp) {
-  DCHECK_NE(abort_type, ABORT_NONE);
-  DCHECK_NE(abort_type, ABORT_OTHER);
-  DCHECK_EQ(abort_type_, ABORT_OTHER);
+void PageLoadTracker::UpdatePageEnd(PageEndReason page_end_reason,
+                                    UserInitiatedInfo user_initiated_info,
+                                    base::TimeTicks timestamp,
+                                    bool is_certainly_browser_timestamp) {
+  DCHECK_NE(page_end_reason, END_NONE);
+  DCHECK_NE(page_end_reason, END_OTHER);
+  DCHECK_EQ(page_end_reason_, END_OTHER);
+  DCHECK(!page_end_time_.is_null());
+  if (page_end_time_.is_null() || page_end_reason_ != END_OTHER)
+    return;
 
   // For some aborts (e.g. navigations), the initiated timestamp can be earlier
   // than the timestamp that aborted the load. Taking the minimum gives the
   // closest user initiated time known.
-  UpdateAbortInternal(abort_type, user_initiated_info,
-                      std::min(abort_time_, timestamp),
-                      is_certainly_browser_timestamp);
+  UpdatePageEndInternal(page_end_reason, user_initiated_info,
+                        std::min(page_end_time_, timestamp),
+                        is_certainly_browser_timestamp);
 }
 
 bool PageLoadTracker::IsLikelyProvisionalAbort(
     base::TimeTicks abort_cause_time) const {
-  // Note that |abort_cause_time - abort_time| can be negative.
-  return abort_type_ == ABORT_OTHER &&
-         (abort_cause_time - abort_time_).InMilliseconds() < 100;
+  // Note that |abort_cause_time - page_end_time_| can be negative.
+  return page_end_reason_ == END_OTHER &&
+         (abort_cause_time - page_end_time_).InMilliseconds() < 100;
 }
 
 bool PageLoadTracker::MatchesOriginalNavigation(
     content::NavigationHandle* navigation_handle) {
   // Neither navigation should have committed.
   DCHECK(!navigation_handle->HasCommitted());
-  DCHECK(committed_url_.is_empty());
+  DCHECK(!did_commit_);
   return navigation_handle->GetURL() == start_url_;
 }
 
-void PageLoadTracker::UpdateAbortInternal(UserAbortType abort_type,
-                                          UserInitiatedInfo user_initiated_info,
-                                          base::TimeTicks timestamp,
-                                          bool is_certainly_browser_timestamp) {
+void PageLoadTracker::UpdatePageEndInternal(
+    PageEndReason page_end_reason,
+    UserInitiatedInfo user_initiated_info,
+    base::TimeTicks timestamp,
+    bool is_certainly_browser_timestamp) {
   // When a provisional navigation commits, that navigation's start time is
   // interpreted as the abort time for other provisional loads in the tab.
   // However, this only makes sense if the committed load started after the
@@ -676,13 +782,13 @@ void PageLoadTracker::UpdateAbortInternal(UserAbortType abort_type,
   // instead report the actual cause of an aborted navigation. See crbug/571647
   // for details.
   if (timestamp < navigation_start_) {
-    RecordInternalError(ERR_ABORT_BEFORE_NAVIGATION_START);
-    abort_type_ = ABORT_NONE;
-    abort_time_ = base::TimeTicks();
+    RecordInternalError(ERR_END_BEFORE_NAVIGATION_START);
+    page_end_reason_ = END_NONE;
+    page_end_time_ = base::TimeTicks();
     return;
   }
-  abort_type_ = abort_type;
-  abort_time_ = timestamp;
+  page_end_reason_ = page_end_reason;
+  page_end_time_ = timestamp;
   // A client redirect can never be user initiated. Due to the way Blink
   // implements user gesture tracking, where all events that occur within 1
   // second after a user interaction are considered to be triggered by user
@@ -691,12 +797,25 @@ void PageLoadTracker::UpdateAbortInternal(UserAbortType abort_type,
   // these navs may sometimes be reported as user initiated by Blink. Thus, we
   // explicitly filter these types of aborts out when deciding if the abort was
   // user initiated.
-  if (abort_type != ABORT_CLIENT_REDIRECT)
-    abort_user_initiated_info_ = user_initiated_info;
+  if (page_end_reason != END_CLIENT_REDIRECT)
+    page_end_user_initiated_info_ = user_initiated_info;
 
   if (is_certainly_browser_timestamp) {
-    ClampBrowserTimestampIfInterProcessTimeTickSkew(&abort_time_);
+    ClampBrowserTimestampIfInterProcessTimeTickSkew(&page_end_time_);
   }
+}
+
+void PageLoadTracker::MediaStartedPlaying(
+    const content::WebContentsObserver::MediaPlayerInfo& video_type,
+    bool is_in_main_frame) {
+  for (const auto& observer : observers_)
+    observer->MediaStartedPlaying(video_type, is_in_main_frame);
+}
+
+void PageLoadTracker::OnNavigationDelayComplete(base::TimeDelta scheduled_delay,
+                                                base::TimeDelta actual_delay) {
+  for (const auto& observer : observers_)
+    observer->OnNavigationDelayComplete(scheduled_delay, actual_delay);
 }
 
 }  // namespace page_load_metrics

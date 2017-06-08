@@ -46,13 +46,17 @@ bool HistoryCounter::HasTrackedTasks() {
 }
 
 const char* HistoryCounter::GetPrefName() const {
-  return browsing_data::prefs::kDeleteBrowsingHistory;
+  return GetTab() == ClearBrowsingDataTab::BASIC
+             ? browsing_data::prefs::kDeleteBrowsingHistoryBasic
+             : browsing_data::prefs::kDeleteBrowsingHistory;
 }
 
 void HistoryCounter::Count() {
   // Reset the state.
   cancelable_task_tracker_.TryCancelAll();
   web_history_request_.reset();
+  weak_ptr_factory_.InvalidateWeakPtrs();
+
   has_synced_visits_ = false;
 
   // Count the locally stored items.

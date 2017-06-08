@@ -1,24 +1,36 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.suggestions;
 
+import android.annotation.SuppressLint;
 import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.RecyclerView.OnScrollListener;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.NativePageHost;
 import org.chromium.chrome.browser.ntp.ContextMenuManager;
+import org.chromium.chrome.browser.ntp.ContextMenuManager.TouchEnabledDelegate;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageAdapter;
-import org.chromium.chrome.browser.ntp.cards.NewTabPageRecyclerView;
 import org.chromium.chrome.browser.ntp.snippets.SnippetsBridge;
+import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.widget.BottomSheet;
+import org.chromium.chrome.browser.widget.FadingShadow;
+import org.chromium.chrome.browser.widget.FadingShadowView;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContentController;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetObserver;
+import org.chromium.chrome.browser.widget.bottomsheet.EmptyBottomSheetObserver;
 import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
 
 /**
@@ -28,36 +40,101 @@ import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
  * notified of it, at least when it is pulled up on the new tab.
  */
 public class SuggestionsBottomSheetContent implements BottomSheet.BottomSheetContent {
-    private final NewTabPageRecyclerView mRecyclerView;
+    private static SuggestionsSource sSuggestionsSourceForTesting;
+    private static SuggestionsEventReporter sEventReporterForTesting;
+
+    private final View mView;
+    private final FadingShadowView mShadowView;
+    private final SuggestionsRecyclerView mRecyclerView;
     private final ContextMenuManager mContextMenuManager;
-    private final SuggestionsUiDelegateImpl mSuggestionsManager;
-    private final SnippetsBridge mSnippetsBridge;
+    private final SuggestionsUiDelegateImpl mSuggestionsUiDelegate;
+    private final TileGroup.Delegate mTileGroupDelegate;
+    private final BottomSheet mBottomSheet;
+    private final BottomSheetObserver mBottomSheetObserver;
 
-    public SuggestionsBottomSheetContent(
-            ChromeActivity activity, Tab tab, TabModelSelector tabModelSelector) {
-        mRecyclerView = (NewTabPageRecyclerView) LayoutInflater.from(activity).inflate(
-                R.layout.new_tab_page_recycler_view, null, false);
-
+    public SuggestionsBottomSheetContent(final ChromeActivity activity, final BottomSheet sheet,
+            TabModelSelector tabModelSelector, SnackbarManager snackbarManager) {
         Profile profile = Profile.getLastUsedProfile();
+        SuggestionsNavigationDelegate navigationDelegate =
+                new SuggestionsNavigationDelegateImpl(activity, profile, sheet, tabModelSelector);
+        mTileGroupDelegate = new TileGroupDelegateImpl(
+                activity, profile, tabModelSelector, navigationDelegate, snackbarManager);
+        mSuggestionsUiDelegate = createSuggestionsDelegate(profile, navigationDelegate, sheet);
+
+        mView = LayoutInflater.from(activity).inflate(
+                R.layout.suggestions_bottom_sheet_content, null);
+        mRecyclerView = (SuggestionsRecyclerView) mView.findViewById(R.id.recycler_view);
+
+        TouchEnabledDelegate touchEnabledDelegate = new TouchEnabledDelegate() {
+            @Override
+            public void setTouchEnabled(boolean enabled) {
+                activity.getBottomSheet().setTouchEnabled(enabled);
+            }
+        };
+        mContextMenuManager =
+                new ContextMenuManager(activity, navigationDelegate, touchEnabledDelegate);
+        activity.getWindowAndroid().addContextMenuCloseListener(mContextMenuManager);
+        mSuggestionsUiDelegate.addDestructionObserver(new DestructionObserver() {
+            @Override
+            public void onDestroy() {
+                activity.getWindowAndroid().removeContextMenuCloseListener(mContextMenuManager);
+            }
+        });
+
         UiConfig uiConfig = new UiConfig(mRecyclerView);
 
-        mSnippetsBridge = new SnippetsBridge(profile);
-        SuggestionsNavigationDelegate navigationDelegate =
-                new SuggestionsNavigationDelegateImpl(activity, profile, tab, tabModelSelector);
+        final NewTabPageAdapter adapter = new NewTabPageAdapter(mSuggestionsUiDelegate,
+                /* aboveTheFoldView = */ null, uiConfig, OfflinePageBridge.getForProfile(profile),
+                mContextMenuManager, mTileGroupDelegate);
+        mRecyclerView.init(uiConfig, mContextMenuManager, adapter);
 
-        mSuggestionsManager = new SuggestionsUiDelegateImpl(
-                mSnippetsBridge, mSnippetsBridge, navigationDelegate, profile, tab);
-        mContextMenuManager = new ContextMenuManager(activity, navigationDelegate, mRecyclerView);
+        mBottomSheetObserver = new EmptyBottomSheetObserver() {
+            @Override
+            public void onSheetOpened() {
+                mRecyclerView.scrollToPosition(0);
 
-        NewTabPageAdapter adapter = new NewTabPageAdapter(mSuggestionsManager, null, uiConfig,
-                OfflinePageBridge.getForProfile(profile), mContextMenuManager);
-        mRecyclerView.setAdapter(adapter);
-        mRecyclerView.setUpSwipeToDismiss();
+                // TODO(https://crbug.com/689962) Ensure this call does not discard all suggestions
+                // every time the sheet is opened.
+                adapter.refreshSuggestions();
+                mSuggestionsUiDelegate.getEventReporter().onSurfaceOpened();
+            }
+        };
+        mBottomSheet = activity.getBottomSheet();
+        mBottomSheet.addObserver(mBottomSheetObserver);
+        adapter.refreshSuggestions();
+        mSuggestionsUiDelegate.getEventReporter().onSurfaceOpened();
+
+        mShadowView = (FadingShadowView) mView.findViewById(R.id.shadow);
+        mShadowView.init(
+                ApiCompatibilityUtils.getColor(mView.getResources(), R.color.toolbar_shadow_color),
+                FadingShadow.POSITION_TOP);
+
+        mRecyclerView.addOnScrollListener(new OnScrollListener() {
+            @Override
+            public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
+                boolean shadowVisible = mRecyclerView.canScrollVertically(-1);
+                mShadowView.setVisibility(shadowVisible ? View.VISIBLE : View.GONE);
+            }
+        });
+
+        final LocationBar locationBar = (LocationBar) sheet.findViewById(R.id.location_bar);
+        mRecyclerView.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            @SuppressLint("ClickableViewAccessibility")
+            public boolean onTouch(View view, MotionEvent motionEvent) {
+                if (locationBar != null && locationBar.isUrlBarFocused()) {
+                    locationBar.setUrlBarFocus(false);
+                }
+
+                // Never intercept the touch event.
+                return false;
+            }
+        });
     }
 
     @Override
-    public RecyclerView getScrollingContentView() {
-        return mRecyclerView;
+    public View getContentView() {
+        return mView;
     }
 
     @Override
@@ -65,12 +142,59 @@ public class SuggestionsBottomSheetContent implements BottomSheet.BottomSheetCon
         return null;
     }
 
-    public ContextMenuManager getContextMenuManager() {
-        return mContextMenuManager;
+    @Override
+    public boolean isUsingLightToolbarTheme() {
+        return false;
     }
 
+    @Override
+    public int getVerticalScrollOffset() {
+        return mRecyclerView.computeVerticalScrollOffset();
+    }
+
+    @Override
     public void destroy() {
-        mSnippetsBridge.destroy();
-        mSuggestionsManager.onDestroy();
+        mBottomSheet.removeObserver(mBottomSheetObserver);
+        mSuggestionsUiDelegate.onDestroy();
+        mTileGroupDelegate.destroy();
+    }
+
+    @Override
+    public int getType() {
+        return BottomSheetContentController.TYPE_SUGGESTIONS;
+    }
+
+    public static void setSuggestionsSourceForTesting(SuggestionsSource suggestionsSource) {
+        sSuggestionsSourceForTesting = suggestionsSource;
+    }
+
+    public static void setEventReporterForTesting(SuggestionsEventReporter eventReporter) {
+        sEventReporterForTesting = eventReporter;
+    }
+
+    private static SuggestionsUiDelegateImpl createSuggestionsDelegate(Profile profile,
+            SuggestionsNavigationDelegate navigationDelegate, NativePageHost host) {
+        SnippetsBridge snippetsBridge = null;
+        SuggestionsSource suggestionsSource;
+        SuggestionsEventReporter eventReporter;
+
+        if (sSuggestionsSourceForTesting == null) {
+            snippetsBridge = new SnippetsBridge(profile);
+            suggestionsSource = snippetsBridge;
+        } else {
+            suggestionsSource = sSuggestionsSourceForTesting;
+        }
+
+        if (sEventReporterForTesting == null) {
+            eventReporter = new SuggestionsEventReporterBridge();
+        } else {
+            eventReporter = sEventReporterForTesting;
+        }
+
+        SuggestionsUiDelegateImpl delegate = new SuggestionsUiDelegateImpl(
+                suggestionsSource, eventReporter, navigationDelegate, profile, host);
+        if (snippetsBridge != null) delegate.addDestructionObserver(snippetsBridge);
+
+        return delegate;
     }
 }

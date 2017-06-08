@@ -6,21 +6,20 @@
 #define SimCanvas_h
 
 #include "platform/graphics/Color.h"
-#include "platform/graphics/paint/PaintCanvas.h"
-#include "platform/graphics/paint/PaintFlags.h"
-#include "wtf/Vector.h"
+#include "platform/wtf/Vector.h"
+#include "third_party/skia/include/core/SkCanvas.h"
 
 namespace blink {
 
-class SimCanvas : public PaintCanvas {
+class SimCanvas : public SkCanvas {
  public:
   SimCanvas(int width, int height);
 
   enum CommandType {
-    Rect,
-    Text,
-    Image,
-    Shape,
+    kRect,
+    kText,
+    kImage,
+    kShape,
   };
 
   // TODO(esprehn): Ideally we'd put the text in here too, but SkTextBlob
@@ -30,57 +29,53 @@ class SimCanvas : public PaintCanvas {
     RGBA32 color;
   };
 
-  const Vector<Command>& commands() const { return m_commands; }
+  const Vector<Command>& Commands() const { return commands_; }
 
   // Rect
-  void onDrawRect(const SkRect&, const PaintFlags&) override;
+  void onDrawRect(const SkRect&, const SkPaint&) override;
 
   // Shape
-  void onDrawOval(const SkRect&, const PaintFlags&) override;
-  void onDrawRRect(const SkRRect&, const PaintFlags&) override;
-  void onDrawPath(const SkPath&, const PaintFlags&) override;
+  void onDrawOval(const SkRect&, const SkPaint&) override;
+  void onDrawRRect(const SkRRect&, const SkPaint&) override;
+  void onDrawPath(const SkPath&, const SkPaint&) override;
 
   // Image
-  void onDrawImage(const SkImage*,
-                   SkScalar,
-                   SkScalar,
-                   const PaintFlags*) override;
+  void onDrawImage(const SkImage*, SkScalar, SkScalar, const SkPaint*) override;
   void onDrawImageRect(const SkImage*,
                        const SkRect* src,
                        const SkRect& dst,
-                       const PaintFlags*,
-                       SkCanvas::SrcRectConstraint) override;
+                       const SkPaint*,
+                       SrcRectConstraint) override;
 
   // Text
   void onDrawText(const void* text,
-                  size_t byteLength,
+                  size_t byte_length,
                   SkScalar x,
                   SkScalar y,
-                  const PaintFlags&) override;
+                  const SkPaint&) override;
   void onDrawPosText(const void* text,
-                     size_t byteLength,
+                     size_t byte_length,
                      const SkPoint pos[],
-                     const PaintFlags&) override;
+                     const SkPaint&) override;
   void onDrawPosTextH(const void* text,
-                      size_t byteLength,
+                      size_t byte_length,
                       const SkScalar xpos[],
-                      SkScalar constY,
-                      const PaintFlags&) override;
-
+                      SkScalar const_y,
+                      const SkPaint&) override;
   void onDrawTextOnPath(const void* text,
-                        size_t byteLength,
+                        size_t byte_length,
                         const SkPath&,
                         const SkMatrix*,
-                        const PaintFlags&) override;
+                        const SkPaint&) override;
   void onDrawTextBlob(const SkTextBlob*,
                       SkScalar x,
                       SkScalar y,
-                      const PaintFlags&) override;
+                      const SkPaint&) override;
 
  private:
-  void addCommand(CommandType, RGBA32 = 0);
+  void AddCommand(CommandType, RGBA32 = 0);
 
-  Vector<Command> m_commands;
+  Vector<Command> commands_;
 };
 
 }  // namespace blink

@@ -12,6 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
+#include "base/threading/sequenced_worker_pool.h"
 #import "ios/net/cookies/cookie_store_ios_persistent.h"
 #import "ios/web/public/web_client.h"
 #include "ios/web/public/web_thread.h"
@@ -87,14 +88,14 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         new net::CookieStoreIOSPersistent(persistent_store.get()));
     storage_->set_cookie_store(std::move(cookie_store));
 
-    std::string user_agent = web::GetWebClient()->GetUserAgent(false);
+    std::string user_agent =
+        web::GetWebClient()->GetUserAgent(web::UserAgentType::MOBILE);
     storage_->set_http_user_agent_settings(
         base::MakeUnique<net::StaticHttpUserAgentSettings>("en-us,en",
                                                            user_agent));
     storage_->set_proxy_service(
         net::ProxyService::CreateUsingSystemProxyResolver(
-            std::move(proxy_config_service_), 0,
-            url_request_context_->net_log()));
+            std::move(proxy_config_service_), url_request_context_->net_log()));
     storage_->set_ssl_config_service(new net::SSLConfigServiceDefaults);
     storage_->set_cert_verifier(net::CertVerifier::CreateDefault());
 

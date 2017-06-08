@@ -66,7 +66,7 @@ class SharedAudioRenderer : public MediaStreamAudioRenderer {
         started_(false),
         on_play_state_changed_(on_play_state_changed) {
     DCHECK(!on_play_state_changed_.is_null());
-    DCHECK(!media_stream_.isNull());
+    DCHECK(!media_stream_.IsNull());
   }
 
  protected:
@@ -569,7 +569,7 @@ void WebRtcAudioRenderer::OnPlayStateChanged(
     PlayingState* state) {
   DCHECK(thread_checker_.CalledOnValidThread());
   blink::WebVector<blink::WebMediaStreamTrack> web_tracks;
-  media_stream.audioTracks(web_tracks);
+  media_stream.AudioTracks(web_tracks);
 
   for (const blink::WebMediaStreamTrack& web_track : web_tracks) {
     // WebRtcAudioRenderer can only render audio tracks received from a remote

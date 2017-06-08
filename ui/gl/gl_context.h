@@ -43,6 +43,9 @@ struct GLContextAttribs {
   GpuPreference gpu_preference = PreferIntegratedGpu;
   bool bind_generates_resource = true;
   bool webgl_compatibility_context = false;
+  bool global_texture_share_group = false;
+  int client_major_es_version = 3;
+  int client_minor_es_version = 0;
 };
 
 // Encapsulates an OpenGL context, hiding platform specific management.
@@ -147,6 +150,12 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // and API.
   CurrentGL* GetCurrentGL();
 
+  // Reinitialize the dynamic bindings of this context.  Needed when the driver
+  // may be exposing different extensions compared to when it was initialized.
+  // TODO(geofflang): Try to make this call uncessessary by pre-loading all
+  // extension entry points.
+  void ReinitializeDynamicBindings();
+
  protected:
   virtual ~GLContext();
 
@@ -188,8 +197,8 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
 
   std::unique_ptr<GLVersionInfo> GenerateGLVersionInfo();
 
-  bool static_bindings_initialized_;
-  bool dynamic_bindings_initialized_;
+  bool static_bindings_initialized_ = false;
+  bool dynamic_bindings_initialized_ = false;
   std::unique_ptr<DriverGL> driver_gl_;
   std::unique_ptr<GLApi> gl_api_;
   std::unique_ptr<TraceGLApi> trace_gl_api_;
@@ -200,13 +209,14 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   RealGLApi* real_gl_api_ = nullptr;
 
   scoped_refptr<GLShareGroup> share_group_;
-  GLContext* current_virtual_context_;
-  bool state_dirtied_externally_;
+  GLContext* current_virtual_context_ = nullptr;
+  bool state_dirtied_externally_ = false;
   std::unique_ptr<GLStateRestorer> state_restorer_;
   std::unique_ptr<GLVersionInfo> version_info_;
 
-  int swap_interval_;
-  bool force_swap_interval_zero_;
+  // Start with an invalid value so that the first SetSwapInterval isn't a nop.
+  int swap_interval_ = -1;
+  bool force_swap_interval_zero_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(GLContext);
 };

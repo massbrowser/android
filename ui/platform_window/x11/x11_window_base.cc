@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/strings/utf_string_conversions.h"
+#include "ui/base/platform_window_defaults.h"
 #include "ui/base/x/x11_window_event_manager.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event.h"
@@ -29,8 +30,6 @@ namespace {
 const char* kAtomsToCache[] = {"UTF8_STRING",  "WM_DELETE_WINDOW",
                                "_NET_WM_NAME", "_NET_WM_PID",
                                "_NET_WM_PING", NULL};
-
-bool g_override_redirect = false;
 
 XID FindXEventTarget(const XEvent& xev) {
   XID target = xev.xany.window;
@@ -78,7 +77,7 @@ void X11WindowBase::Create() {
   memset(&swa, 0, sizeof(swa));
   swa.background_pixmap = None;
   swa.bit_gravity = NorthWestGravity;
-  swa.override_redirect = g_override_redirect;
+  swa.override_redirect = UseTestConfigForPlatformWindows();
   xwindow_ =
       XCreateWindow(xdisplay_, xroot_window_, bounds_.x(), bounds_.y(),
                     bounds_.width(), bounds_.height(),
@@ -178,17 +177,24 @@ void X11WindowBase::Close() {
 }
 
 void X11WindowBase::SetBounds(const gfx::Rect& bounds) {
-  if (bounds == bounds_)
-    return;
-
   if (window_mapped_) {
     XWindowChanges changes = {0};
-    unsigned value_mask = CWX | CWY | CWWidth | CWHeight;
-    changes.x = bounds.x();
-    changes.y = bounds.y();
-    changes.width = bounds.width();
-    changes.height = bounds.height();
-    XConfigureWindow(xdisplay_, xwindow_, value_mask, &changes);
+    unsigned value_mask = 0;
+
+    if (bounds_.size() != bounds.size()) {
+      changes.width = bounds.width();
+      changes.height = bounds.height();
+      value_mask |= CWHeight | CWWidth;
+    }
+
+    if (bounds_.origin() != bounds.origin()) {
+      changes.x = bounds.x();
+      changes.y = bounds.y();
+      value_mask |= CWX | CWY;
+    }
+
+    if (value_mask)
+      XConfigureWindow(xdisplay_, xwindow_, value_mask, &changes);
   }
 
   // Assume that the resize will go through as requested, which should be the
@@ -197,6 +203,10 @@ void X11WindowBase::SetBounds(const gfx::Rect& bounds) {
   // (possibly synthetic) ConfigureNotify about the actual size and correct
   // |bounds_| later.
   bounds_ = bounds;
+
+  // Even if the pixel bounds didn't change this call to the delegate should
+  // still happen. The device scale factor may have changed which effectively
+  // changes the bounds.
   delegate_->OnBoundsChanged(bounds_);
 }
 
@@ -304,11 +314,4 @@ void X11WindowBase::ProcessXWindowEvent(XEvent* xev) {
   }
 }
 
-namespace test {
-
-void SetUseOverrideRedirectWindowByDefault(bool override_redirect) {
-  g_override_redirect = override_redirect;
-}
-
-}  // namespace test
 }  // namespace ui

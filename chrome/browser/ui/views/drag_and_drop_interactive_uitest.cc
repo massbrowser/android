@@ -695,39 +695,15 @@ class DragAndDropBrowserTest : public InProcessBrowserTest,
     frame = GetFrameByName(frame_name);
     DCHECK(frame);
 
-    // Wait until frame contents (e.g. images) have painted (which should happen
-    // in the animation frame that *starts* after the onload event - therefore
-    // we need to wait for 2 animation frames).
-    script = std::string(
-        "requestAnimationFrame(function() {\n"
-        "  requestAnimationFrame(function() {\n"
-        "    domAutomationController.send(43);\n"
-        "  });\n"
-        "});\n");
-    if (!content::ExecuteScriptAndExtractInt(frame, script, &response))
-      return false;
-    if (response != 43)
-      return false;
+    // Wait until frame contents have painted and are ready for hit testing.
+    WaitForChildFrameSurfaceReady(frame);
 
     return true;
   }
 
   content::RenderFrameHost* GetFrameByName(const std::string& name_to_find) {
-    content::RenderFrameHost* result = nullptr;
-    for (content::RenderFrameHost* rfh : web_contents()->GetAllFrames()) {
-      if (rfh->GetFrameName() == name_to_find) {
-        if (result) {
-          ADD_FAILURE() << "More than one frame named "
-                        << "'" << name_to_find << "'";
-          return nullptr;
-        }
-        result = rfh;
-      }
-    }
-
-    EXPECT_TRUE(result) << "Couldn't find a frame named "
-                        << "'" << name_to_find << "'";
-    return result;
+    return content::FrameMatchingPredicate(
+        web_contents(), base::Bind(&content::FrameMatchesName, name_to_find));
   }
 
   void AssertTestPageIsLoaded() {
@@ -934,12 +910,8 @@ void DragAndDropBrowserTest::DragImageBetweenFrames_Step2(
     {  // Verify dragleave DOM event.
       std::string dragleave_event;
 
-      // TODO(paulmeyer): https://crbug.com/669695: Need to unify coordinates
-      // passed to dragend when OOPIFs are present or not.
-      state->expected_dom_event_data.set_expected_client_position(
-          "<no expectation>");
-      state->expected_dom_event_data.set_expected_page_position(
-          "<no expectation>");
+      state->expected_dom_event_data.set_expected_client_position("(355, 150)");
+      state->expected_dom_event_data.set_expected_page_position("(355, 150)");
 
       EXPECT_TRUE(
           dragleave_event_waiter.WaitForNextMatchingEvent(&dragleave_event));
@@ -1025,8 +997,8 @@ void DragAndDropBrowserTest::DragImageBetweenFrames_Step3(
     state->expected_dom_event_data.set_expected_drop_effect("copy");
     state->expected_dom_event_data.set_expected_mime_types("");
 
-    // TODO(paulmeyer): https://crbug.com/669695: Need to unify coordinates
-    // passed to dragend when OOPIFs are present or not.
+    // TODO: https://crbug.com/686136: dragEnd coordinates for non-OOPIF
+    // scenarios are currently broken.
     state->expected_dom_event_data.set_expected_client_position(
         "<no expectation>");
     state->expected_dom_event_data.set_expected_page_position(

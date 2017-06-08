@@ -5,27 +5,57 @@
 #ifndef REMOTING_CLIENT_IOS_DISPLAY_GL_DISPLAY_HANDLER_H_
 #define REMOTING_CLIENT_IOS_DISPLAY_GL_DISPLAY_HANDLER_H_
 
+#import <Foundation/Foundation.h>
+#import <GLKit/GLKit.h>
+
 #import "remoting/client/display/sys_opengl.h"
-#include "remoting/client/client_context.h"
-#include "remoting/protocol/frame_consumer.h"
-#include "remoting/protocol/video_renderer.h"
+
+#include "base/memory/ptr_util.h"
+#include "remoting/client/view_matrix.h"
 
 namespace remoting {
-namespace ios {
 
-class AppRuntime;
+class ChromotingClientRuntime;
 
-}  // namespace ios
+namespace protocol {
+
+class VideoRenderer;
+class CursorShapeStub;
+
+}  // namespace protocol
 }  // namespace remoting
+
+// This protocol is for receiving notifications from the renderer when its state
+// changes. Implementations can use this to reposition viewport, process
+// animations, etc.
+@protocol GlDisplayHandlerDelegate<NSObject>
+
+// Notifies the delegate that the size of the desktop image has changed.
+- (void)canvasSizeChanged:(CGSize)size;
+
+@end
 
 @interface GlDisplayHandler : NSObject {
 }
 
-- (id)initWithRuntime:(remoting::ios::AppRuntime*)runtime;
+- (void)stop;
 
-- (void)created;
-- (void)glkView:(GLKView*)view drawInRect:(CGRect)rect;
+// Called once the GLKView created.
+- (void)onSurfaceCreated:(GLKView*)view;
+
+// Called every time the GLKView dimension is initialized or changed.
+- (void)onSurfaceChanged:(const CGRect&)frame;
+
+- (void)onPixelTransformationChanged:(const remoting::ViewMatrix&)matrix;
+
 - (std::unique_ptr<remoting::protocol::VideoRenderer>)CreateVideoRenderer;
+- (std::unique_ptr<remoting::protocol::CursorShapeStub>)CreateCursorShapeStub;
+
+- (EAGLContext*)GetEAGLContext;
+
+// This is write-only but @property doesn't support write-only modifier.
+@property id<GlDisplayHandlerDelegate> delegate;
+- (id<GlDisplayHandlerDelegate>)delegate UNAVAILABLE_ATTRIBUTE;
 
 @end
 

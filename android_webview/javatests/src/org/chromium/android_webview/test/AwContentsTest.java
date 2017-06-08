@@ -32,8 +32,9 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.parameter.ParameterizedTest;
 import org.chromium.content.browser.BindingManager;
-import org.chromium.content.browser.ChildProcessConnection;
 import org.chromium.content.browser.ChildProcessLauncher;
+import org.chromium.content.browser.ManagedChildProcessConnection;
+import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.util.TestWebServer;
 
@@ -83,7 +84,8 @@ public class AwContentsTest extends AwTestBase {
             AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
             AwContents awContents = testView.getAwContents();
 
-            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), "about:blank");
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                    ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
             destroyAwContentsOnMainSync(awContents);
         }
     }
@@ -96,7 +98,7 @@ public class AwContentsTest extends AwTestBase {
         for (int i = 0; i < views.length; ++i) {
             views[i] = createAwTestContainerViewOnMainSync(mContentsClient);
             loadUrlSync(views[i].getAwContents(), mContentsClient.getOnPageFinishedHelper(),
-                    "about:blank");
+                    ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
         }
 
         for (int i = 0; i < views.length; ++i) {
@@ -236,9 +238,8 @@ public class AwContentsTest extends AwTestBase {
 
             // Load about:blank so next load is not treated as reload by webkit and force
             // revalidate with the server.
-            loadUrlSync(awContents,
-                        mContentsClient.getOnPageFinishedHelper(),
-                        "about:blank");
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                    ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
 
             // No clearCache call, so should be loaded from cache.
             loadUrlSync(awContents,
@@ -247,9 +248,8 @@ public class AwContentsTest extends AwTestBase {
             assertEquals(1, webServer.getRequestCount(pagePath));
 
             // Same as above.
-            loadUrlSync(awContents,
-                        mContentsClient.getOnPageFinishedHelper(),
-                        "about:blank");
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                    ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
 
             // Clear cache, so should hit server again.
             clearCacheOnUiThread(awContents, true);
@@ -363,7 +363,8 @@ public class AwContentsTest extends AwTestBase {
         String script = "navigator.onLine";
 
         enableJavaScriptOnUiThread(awContents);
-        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), "about:blank");
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
 
         // Default to "online".
         assertEquals("true", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
@@ -546,7 +547,8 @@ public class AwContentsTest extends AwTestBase {
         String script = "window.Notification || window.PushManager";
 
         enableJavaScriptOnUiThread(awContents);
-        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), "about:blank");
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(),
+                ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
         assertEquals("null", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
                 script));
     }
@@ -583,7 +585,7 @@ public class AwContentsTest extends AwTestBase {
         }
 
         @Override
-        public void addNewConnection(int pid, ChildProcessConnection connection) {
+        public void addNewConnection(int pid, ManagedChildProcessConnection connection) {
             mIsChildProcessCreated = true;
         }
 
@@ -596,7 +598,7 @@ public class AwContentsTest extends AwTestBase {
         }
 
         @Override
-        public void determinedVisibility(int pid) {}
+        public void onDeterminedVisibility(int pid) {}
 
         @Override
         public void onSentToBackground() {}
@@ -605,16 +607,10 @@ public class AwContentsTest extends AwTestBase {
         public void onBroughtToForeground() {}
 
         @Override
-        public boolean isOomProtected(int pid) {
-            return false;
-        }
+        public void removeConnection(int pid) {}
 
         @Override
-        public void clearConnection(int pid) {}
-
-        @Override
-        public void startModerateBindingManagement(
-                Context context, int maxSize, boolean moderateBindingTillBackgrounded) {}
+        public void startModerateBindingManagement(Context context, int maxSize) {}
 
         @Override
         public void releaseAllModerateBindings() {}
@@ -654,10 +650,9 @@ public class AwContentsTest extends AwTestBase {
      */
     @Feature({"AndroidWebView"})
     @SmallTest
-    @CommandLineFlags
-            .Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
-            @ParameterizedTest.Set
-            public void testRendererPriorityStartsHigh() throws Throwable {
+    @CommandLineFlags.Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
+    @ParameterizedTest.Set
+    public void testRendererPriorityStartsHigh() throws Throwable {
         MockBindingManager bindingManager = new MockBindingManager();
         ChildProcessLauncher.setBindingManagerForTesting(bindingManager);
         assertFalse(bindingManager.isChildProcessCreated());
@@ -677,10 +672,9 @@ public class AwContentsTest extends AwTestBase {
      */
     @Feature({"AndroidWebView"})
     @SmallTest
-    @CommandLineFlags
-            .Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
-            @ParameterizedTest.Set
-            public void testRendererPriorityLow() throws Throwable {
+    @CommandLineFlags.Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
+    @ParameterizedTest.Set
+    public void testRendererPriorityLow() throws Throwable {
         MockBindingManager bindingManager = new MockBindingManager();
         ChildProcessLauncher.setBindingManagerForTesting(bindingManager);
         assertFalse(bindingManager.isChildProcessCreated());
@@ -708,10 +702,9 @@ public class AwContentsTest extends AwTestBase {
      */
     @Feature({"AndroidWebView"})
     @SmallTest
-    @CommandLineFlags
-            .Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
-            @ParameterizedTest.Set
-            public void testRendererPriorityManaged() throws Throwable {
+    @CommandLineFlags.Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
+    @ParameterizedTest.Set
+    public void testRendererPriorityManaged() throws Throwable {
         MockBindingManager bindingManager = new MockBindingManager();
         ChildProcessLauncher.setBindingManagerForTesting(bindingManager);
         assertFalse(bindingManager.isChildProcessCreated());
@@ -737,5 +730,20 @@ public class AwContentsTest extends AwTestBase {
             }
         });
         bindingManager.assertSetInForegroundCall(false);
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    @UiThreadTest
+    @CommandLineFlags.Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
+    @ParameterizedTest.Set
+    public void testPauseDestroyResume() throws Throwable {
+        AwContents awContents;
+        awContents = createAwTestContainerView(mContentsClient).getAwContents();
+        awContents.pauseTimers();
+        awContents.pauseTimers();
+        awContents.destroy();
+        awContents = createAwTestContainerView(mContentsClient).getAwContents();
+        awContents.resumeTimers();
     }
 }

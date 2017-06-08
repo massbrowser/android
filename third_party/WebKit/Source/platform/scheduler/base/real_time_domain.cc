@@ -12,16 +12,7 @@
 namespace blink {
 namespace scheduler {
 
-RealTimeDomain::RealTimeDomain(const char* tracing_category)
-    : TimeDomain(nullptr),
-      tracing_category_(tracing_category),
-      task_queue_manager_(nullptr) {}
-
-RealTimeDomain::RealTimeDomain(TimeDomain::Observer* observer,
-                               const char* tracing_category)
-    : TimeDomain(observer),
-      tracing_category_(tracing_category),
-      task_queue_manager_(nullptr) {}
+RealTimeDomain::RealTimeDomain() : task_queue_manager_(nullptr) {}
 
 RealTimeDomain::~RealTimeDomain() {}
 
@@ -36,19 +27,18 @@ LazyNow RealTimeDomain::CreateLazyNow() const {
 }
 
 base::TimeTicks RealTimeDomain::Now() const {
-  return task_queue_manager_->delegate()->NowTicks();
+  return task_queue_manager_->Delegate()->NowTicks();
 }
 
-void RealTimeDomain::RequestWakeupAt(LazyNow* lazy_now,
+void RealTimeDomain::RequestWakeUpAt(base::TimeTicks now,
                                      base::TimeTicks run_time) {
   // NOTE this is only called if the scheduled runtime is sooner than any
   // previously scheduled runtime, or there is no (outstanding) previously
   // scheduled runtime.
-  task_queue_manager_->MaybeScheduleDelayedWork(FROM_HERE, this, lazy_now,
-                                                run_time);
+  task_queue_manager_->MaybeScheduleDelayedWork(FROM_HERE, this, now, run_time);
 }
 
-void RealTimeDomain::CancelWakeupAt(base::TimeTicks run_time) {
+void RealTimeDomain::CancelWakeUpAt(base::TimeTicks run_time) {
   task_queue_manager_->CancelDelayedWork(this, run_time);
 }
 
@@ -63,7 +53,7 @@ base::Optional<base::TimeDelta> RealTimeDomain::DelayTillNextTask(
     return base::TimeDelta();  // Makes DoWork post an immediate continuation.
 
   base::TimeDelta delay = next_run_time - now;
-  TRACE_EVENT1(tracing_category_, "RealTimeDomain::DelayTillNextTask",
+  TRACE_EVENT1("renderer.scheduler", "RealTimeDomain::DelayTillNextTask",
                "delay_ms", delay.InMillisecondsF());
 
   // The next task is sometime in the future. DoWork will make sure it gets

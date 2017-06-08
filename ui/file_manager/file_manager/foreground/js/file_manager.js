@@ -8,6 +8,7 @@
  * FileManager objects encapsulate the functionality of the file selector
  * dialogs, as well as the full screen file manager application.
  *
+ * @implements {CommandHandlerDeps}
  * @constructor
  * @struct
  */
@@ -336,6 +337,12 @@ FileManager.prototype = /** @struct */ {
     return this.directoryModel_;
   },
   /**
+   * @return {DirectoryTreeNamingController}
+   */
+  get directoryTreeNamingController() {
+    return this.directoryTreeNamingController_;
+  },
+  /**
    * @return {!FileFilter}
    */
   get fileFilter() {
@@ -370,6 +377,12 @@ FileManager.prototype = /** @struct */ {
    */
   get metadataModel() {
     return this.metadataModel_;
+  },
+  /**
+   * @return {FileSelectionHandler}
+   */
+  get selectionHandler() {
+    return this.selectionHandler_;
   },
   /**
    * @return {DirectoryTree}
@@ -616,17 +629,14 @@ FileManager.prototype = /** @struct */ {
       return;
 
     this.fileTransferController_ = new FileTransferController(
-        assert(this.document_),
-        assert(this.ui_.listContainer),
-        assert(this.ui_.directoryTree),
-        this.ui_.multiProfileShareDialog,
+        assert(this.document_), assert(this.ui_.listContainer),
+        assert(this.ui_.directoryTree), this.ui_.multiProfileShareDialog,
         assert(this.fileBrowserBackground_.progressCenter),
-        assert(this.fileOperationManager_),
-        assert(this.metadataModel_),
-        assert(this.thumbnailModel_),
-        assert(this.directoryModel_),
-        assert(this.volumeManager_),
-        assert(this.selectionHandler_));
+        assert(this.fileOperationManager_), assert(this.metadataModel_),
+        assert(this.thumbnailModel_), assert(this.directoryModel_),
+        assert(this.volumeManager_), assert(this.selectionHandler_),
+        CommandUtil.shouldShowMenuItemForEntry.bind(
+            null, assert(this.volumeManager_)));
   };
 
   /**
@@ -636,7 +646,8 @@ FileManager.prototype = /** @struct */ {
   FileManager.prototype.initCommands_ = function() {
     assert(this.ui_.textContextMenu);
 
-    this.commandHandler_ = new CommandHandler(this);
+    this.commandHandler_ =
+        new CommandHandler(this, assert(this.selectionHandler_));
 
     // TODO(hirono): Move the following block to the UI part.
     var commandButtons = this.dialogDom_.querySelectorAll('button[command]');
@@ -815,6 +826,9 @@ FileManager.prototype = /** @struct */ {
       }
     }
 
+    var writableOnly =
+        this.launchParams_.type === DialogType.SELECT_SAVEAS_FILE;
+
     // VolumeManagerWrapper hides virtual file system related event and data
     // even depends on the value of |supportVirtualPath|. If it is
     // VirtualPathSupport.NO_VIRTUAL_PATH, it hides Drive even if Drive is
@@ -825,7 +839,7 @@ FileManager.prototype = /** @struct */ {
     // Note that the Drive enabling preference change is listened by
     // DriveIntegrationService, so here we don't need to take care about it.
     this.volumeManager_ = new VolumeManagerWrapper(
-        allowedPaths, this.backgroundPage_);
+        allowedPaths, writableOnly, this.backgroundPage_);
   };
 
   /**
@@ -875,9 +889,6 @@ FileManager.prototype = /** @struct */ {
     // Cache nodes we'll be manipulating.
     var dom = this.dialogDom_;
     assert(dom);
-
-    // Initialize the dialog.
-    FileManagerDialogBase.setFileManager(this);
 
     var table = queryRequiredElement('.detail-table', dom);
     FileTable.decorate(
@@ -1004,7 +1015,10 @@ FileManager.prototype = /** @struct */ {
     this.folderShortcutsModel_ = new FolderShortcutsDataModel(
         this.volumeManager_);
 
-    this.selectionHandler_ = new FileSelectionHandler(this);
+    this.selectionHandler_ = new FileSelectionHandler(
+        assert(this.directoryModel_), assert(this.fileOperationManager_),
+        assert(this.ui_.listContainer), assert(this.metadataModel_),
+        assert(this.volumeManager_));
 
     this.directoryModel_.getFileListSelection().addEventListener('change',
         this.selectionHandler_.onFileSelectionChanged.bind(
@@ -1090,13 +1104,6 @@ FileManager.prototype = /** @struct */ {
         this.namingController_,
         this.selectionHandler_,
         this.launchParams_);
-  };
-
-  /**
-   * @return {DirectoryTreeNamingController}
-   */
-  FileManager.prototype.getDirectoryTreeNamingController = function() {
-    return this.directoryTreeNamingController_;
   };
 
   /**
@@ -1366,40 +1373,6 @@ FileManager.prototype = /** @struct */ {
       this.ui_.dialogFooter.filenameInput.value = opt_suggestedName || '';
       this.ui_.dialogFooter.selectTargetNameInFilenameInput();
     }
-  };
-
-  /**
-   * TODO(mtomasz): Move this to a utility function working on the root type.
-   * @return {boolean} True if the current directory content is from Google
-   *     Drive.
-   */
-  FileManager.prototype.isOnDrive = function() {
-    return this.directoryModel_.isOnDrive();
-  };
-
-  /**
-   * @return {boolean} True if the current directory content is from MTP volume.
-   */
-  FileManager.prototype.isOnMTP = function() {
-    return this.directoryModel_.isOnMTP();
-  };
-
-  /**
-   * Check if the drive-related setting items should be shown on currently
-   * displayed gear menu.
-   * @return {boolean} True if those setting items should be shown.
-   */
-  FileManager.prototype.shouldShowDriveSettings = function() {
-    return this.isOnDrive();
-  };
-
-  /**
-   * Tells whether the current directory is read only.
-   * TODO(mtomasz): Remove and use EntryLocation directly.
-   * @return {boolean} True if read only, false otherwise.
-   */
-  FileManager.prototype.isOnReadonlyDirectory = function() {
-    return this.directoryModel_.isReadOnly();
   };
 
   /**

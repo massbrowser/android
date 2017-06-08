@@ -11,7 +11,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/optional.h"
 #include "base/unguessable_token.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/resources/single_release_callback.h"
 #include "cc/resources/texture_mailbox.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
@@ -46,8 +46,6 @@ class CC_EXPORT CopyOutputRequest {
   static std::unique_ptr<CopyOutputRequest> CreateRelayRequest(
       const CopyOutputRequest& original_request,
       const CopyOutputRequestCallback& result_callback);
-
-  CopyOutputRequest();
 
   ~CopyOutputRequest();
 
@@ -87,8 +85,9 @@ class CC_EXPORT CopyOutputRequest {
 
  private:
   friend struct mojo::StructTraits<mojom::CopyOutputRequestDataView,
-                                   CopyOutputRequest>;
+                                   std::unique_ptr<CopyOutputRequest>>;
 
+  CopyOutputRequest();
   CopyOutputRequest(bool force_bitmap_result,
                     const CopyOutputRequestCallback& result_callback);
 
@@ -97,6 +96,8 @@ class CC_EXPORT CopyOutputRequest {
   base::Optional<gfx::Rect> area_;
   base::Optional<TextureMailbox> texture_mailbox_;
   CopyOutputRequestCallback result_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(CopyOutputRequest);
 };
 
 }  // namespace cc

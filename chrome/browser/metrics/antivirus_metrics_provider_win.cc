@@ -5,6 +5,7 @@
 #include "chrome/browser/metrics/antivirus_metrics_provider_win.h"
 
 #include <iwscapi.h>
+#include <objbase.h>
 #include <stddef.h>
 #include <wbemidl.h>
 #include <windows.h>
@@ -239,7 +240,7 @@ AntiVirusMetricsProvider::FillAntiVirusProductsFromWSC(
   base::win::ScopedComPtr<IWSCProductList> product_list;
   HRESULT result =
       CoCreateInstance(__uuidof(WSCProductList), nullptr, CLSCTX_INPROC_SERVER,
-                       __uuidof(IWSCProductList), product_list.ReceiveVoid());
+                       IID_PPV_ARGS(&product_list));
   if (FAILED(result))
     return RESULT_FAILED_TO_CREATE_INSTANCE;
 
@@ -350,7 +351,7 @@ AntiVirusMetricsProvider::FillAntiVirusProductsFromWMI(
   if (FAILED(hr))
     return RESULT_FAILED_TO_CONNECT_TO_WMI;
 
-  hr = ::CoSetProxyBlanket(wmi_services.get(), RPC_C_AUTHN_WINNT,
+  hr = ::CoSetProxyBlanket(wmi_services.Get(), RPC_C_AUTHN_WINNT,
                            RPC_C_AUTHZ_NONE, nullptr, RPC_C_AUTHN_LEVEL_CALL,
                            RPC_C_IMP_LEVEL_IMPERSONATE, nullptr, EOAC_NONE);
   if (FAILED(hr))

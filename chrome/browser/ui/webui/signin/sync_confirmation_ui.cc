@@ -16,13 +16,7 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "ui/base/webui/web_ui_util.h"
 
-SyncConfirmationUI::SyncConfirmationUI(content::WebUI* web_ui)
-    : SyncConfirmationUI(web_ui, base::MakeUnique<SyncConfirmationHandler>()) {}
-
-SyncConfirmationUI::SyncConfirmationUI(
-    content::WebUI* web_ui,
-    std::unique_ptr<SyncConfirmationHandler> handler)
-    : WebDialogUI(web_ui) {
+SyncConfirmationUI::SyncConfirmationUI(content::WebUI* web_ui) : WebDialogUI(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
   bool is_sync_allowed = profile->IsSyncAllowed();
 
@@ -43,8 +37,8 @@ SyncConfirmationUI::SyncConfirmationUI(
       IDS_SYNC_CONFIRMATION_PERSONALIZE_SERVICES_TITLE);
   source->AddLocalizedString("syncConfirmationPersonalizeServicesBody",
       IDS_SYNC_CONFIRMATION_PERSONALIZE_SERVICES_BODY);
-  source->AddLocalizedString("syncConfirmationSyncSettingsLinkBody",
-      IDS_SYNC_CONFIRMATION_SYNC_SETTINGS_LINK_BODY);
+  source->AddLocalizedString("syncConfirmationSyncSettingsLabel",
+                             IDS_SYNC_CONFIRMATION_SYNC_SETTINGS_LABEL);
   source->AddLocalizedString("syncDisabledConfirmationDetails",
                              IDS_SYNC_DISABLED_CONFIRMATION_DETAILS);
 
@@ -52,7 +46,7 @@ SyncConfirmationUI::SyncConfirmationUI(
   int confirm_button_ids = IDS_SYNC_CONFIRMATION_CONFIRM_BUTTON_LABEL;
   int undo_button_ids = IDS_SYNC_CONFIRMATION_UNDO_BUTTON_LABEL;
   if (!is_sync_allowed) {
-    title_ids = IDS_SYNC_DISABLED_CONFIRMATION_CHROME_SYNC_TITLE;
+//    title_ids = IDS_SYNC_DISABLED_CONFIRMATION_CHROME_SYNC_TITLE;
     confirm_button_ids = IDS_SYNC_DISABLED_CONFIRMATION_CONFIRM_BUTTON_LABEL;
     undo_button_ids = IDS_SYNC_DISABLED_CONFIRMATION_UNDO_BUTTON_LABEL;
   }
@@ -67,5 +61,9 @@ SyncConfirmationUI::SyncConfirmationUI(
   source->AddLocalizedStrings(strings);
 
   content::WebUIDataSource::Add(profile, source);
-  web_ui->AddMessageHandler(std::move(handler));
+}
+
+void SyncConfirmationUI::InitializeMessageHandlerWithBrowser(Browser* browser) {
+  web_ui()->AddMessageHandler(
+      base::MakeUnique<SyncConfirmationHandler>(browser));
 }

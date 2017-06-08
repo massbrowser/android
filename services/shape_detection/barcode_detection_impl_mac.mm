@@ -33,6 +33,7 @@ void RunCallbackWithNoBarcodes(
 
 // static
 void BarcodeDetectionImpl::Create(
+    const service_manager::BindSourceInfo& source_info,
     shape_detection::mojom::BarcodeDetectionRequest request) {
   // Barcode detection needs at least MAC OS X 10.10.
   if (!base::mac::IsAtLeastOS10_10())
@@ -42,10 +43,10 @@ void BarcodeDetectionImpl::Create(
 }
 
 BarcodeDetectionImplMac::BarcodeDetectionImplMac() {
-  NSDictionary* const opts = @{CIDetectorAccuracy : CIDetectorAccuracyHigh};
+  NSDictionary* const options = @{CIDetectorAccuracy : CIDetectorAccuracyHigh};
   detector_.reset([[CIDetector detectorOfType:CIDetectorTypeQRCode
                                       context:nil
-                                      options:opts] retain]);
+                                      options:options] retain]);
 }
 
 BarcodeDetectionImplMac::~BarcodeDetectionImplMac() {}

@@ -19,7 +19,7 @@ class BlockersWorker {
 public:
     BlockersWorker();
     ~BlockersWorker();
-
+    bool isInWhiteList(const std::string& base_host, const std::string& host, const std::string& main_url);
     bool shouldTPBlockUrl(const std::string& base_host, const std::string& host);
     bool shouldAdBlockUrl(const std::string& base_host, const std::string& url, unsigned int resource_type);
     std::string getHTTPSURL(const GURL* url);

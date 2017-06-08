@@ -31,7 +31,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "build/build_config.h"
-#include "content/common/child_process_sandbox_support_impl_linux.h"
 #include "content/common/font_config_ipc_linux.h"
 #include "content/common/sandbox_linux/sandbox_debug_handling_linux.h"
 #include "content/common/sandbox_linux/sandbox_linux.h"
@@ -65,7 +64,7 @@
 #endif
 
 #if BUILDFLAG(ENABLE_WEBRTC)
-#include "third_party/webrtc_overrides/init_webrtc.h"
+#include "third_party/webrtc_overrides/init_webrtc.h"  // nogncheck
 #endif
 
 #if defined(SANITIZER_COVERAGE)
@@ -73,7 +72,7 @@
 #include <sanitizer/coverage_interface.h>
 #endif
 
-#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
 #include "content/common/media/cdm_host_files.h"
 #endif
 
@@ -368,7 +367,7 @@ static void ZygotePreSandboxInit() {
   InitializeWebRtcModule();
 #endif
 
-#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
   CdmHostFiles::CreateGlobalInstance();
 #endif
 
@@ -405,7 +404,7 @@ static void ZygotePreSandboxInit() {
     custom.fFontsXml = font_config.c_str();
     custom.fIsolated = true;
 
-    blink::WebFontRendering::setSkiaFontManager(SkFontMgr_New_Android(&custom));
+    blink::WebFontRendering::SetSkiaFontManager(SkFontMgr_New_Android(&custom));
   }
 }
 
@@ -618,10 +617,15 @@ bool ZygoteMain(
 
   if (using_layer1_sandbox) {
     // Let the ZygoteHost know we're booting up.
-    CHECK(base::UnixDomainSocket::SendMsg(kZygoteSocketPairFd,
-                                          kZygoteBootMessage,
-                                          sizeof(kZygoteBootMessage),
-                                          std::vector<int>()));
+    if (!base::UnixDomainSocket::SendMsg(
+            kZygoteSocketPairFd, kZygoteBootMessage, sizeof(kZygoteBootMessage),
+            std::vector<int>())) {
+      // This is not a CHECK failure because the browser process could either
+      // crash or quickly exit while the zygote is starting. In either case a
+      // zygote crash is not useful. http://crbug.com/692227
+      PLOG(ERROR) << "Failed sending zygote boot message";
+      _exit(1);
+    }
   }
 
   VLOG(1) << "ZygoteMain: initializing " << fork_delegates.size()

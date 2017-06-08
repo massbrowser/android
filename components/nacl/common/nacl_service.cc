@@ -14,10 +14,10 @@
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/scoped_ipc_support.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
-#include "services/service_manager/public/cpp/service_info.h"
 
 #if defined(OS_POSIX)
 #include "base/posix/global_descriptors.h"
@@ -54,6 +54,7 @@ service_manager::mojom::ServiceRequest ConnectToServiceManager() {
 }
 
 void ConnectBootstrapChannel(IPC::mojom::ChannelBootstrapPtrInfo ptr,
+                             const service_manager::BindSourceInfo& source_info,
                              IPC::mojom::ChannelBootstrapRequest request) {
   mojo::FuseInterface(std::move(request), std::move(ptr));
 }
@@ -65,35 +66,38 @@ class NaClService : public service_manager::Service {
   ~NaClService() override;
 
   // Service overrides.
-  bool OnConnect(const service_manager::ServiceInfo& remote_info,
-                 service_manager::InterfaceRegistry* registry) override;
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override;
 
  private:
   IPC::mojom::ChannelBootstrapPtrInfo ipc_channel_bootstrap_;
   std::unique_ptr<mojo::edk::ScopedIPCSupport> ipc_support_;
   bool connected_ = false;
+  service_manager::BinderRegistry registry_;
 };
 
 NaClService::NaClService(
     IPC::mojom::ChannelBootstrapPtrInfo bootstrap,
     std::unique_ptr<mojo::edk::ScopedIPCSupport> ipc_support)
     : ipc_channel_bootstrap_(std::move(bootstrap)),
-      ipc_support_(std::move(ipc_support)) {}
+      ipc_support_(std::move(ipc_support)) {
+  registry_.AddInterface(base::Bind(&ConnectBootstrapChannel,
+                                    base::Passed(&ipc_channel_bootstrap_)));
+}
 
 NaClService::~NaClService() = default;
 
-bool NaClService::OnConnect(const service_manager::ServiceInfo& remote_info,
-                            service_manager::InterfaceRegistry* registry) {
-  if (remote_info.identity.name() != content::mojom::kBrowserServiceName)
-    return false;
-
-  if (connected_)
-    return false;
-
-  connected_ = true;
-  registry->AddInterface(base::Bind(&ConnectBootstrapChannel,
-                                    base::Passed(&ipc_channel_bootstrap_)));
-  return true;
+void NaClService::OnBindInterface(
+    const service_manager::BindSourceInfo& source_info,
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  if (source_info.identity.name() == content::mojom::kBrowserServiceName &&
+      !connected_) {
+    connected_ = true;
+    registry_.BindInterface(source_info, interface_name,
+                            std::move(interface_pipe));
+  }
 }
 
 }  // namespace

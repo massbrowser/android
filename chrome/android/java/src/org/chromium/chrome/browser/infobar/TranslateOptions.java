@@ -105,34 +105,37 @@ public class TranslateOptions {
         }
     }
 
-    public TranslateOptions(String sourceLanguageCode, String targetLanguageCode,
-            ArrayList<TranslateLanguagePair> allLanguages, boolean alwaysTranslate,
+    /**
+     * Creates a TranslateOptions by the given data.
+     */
+    public static TranslateOptions create(String sourceLanguageCode, String targetLanguageCode,
+            String[] languages, String[] codes, boolean alwaysTranslate,
             boolean triggeredFromMenu) {
-        this(sourceLanguageCode, targetLanguageCode, allLanguages, false, false, alwaysTranslate,
-                triggeredFromMenu, null);
+        assert languages.length == codes.length;
+
+        ArrayList<TranslateLanguagePair> languageList = new ArrayList<TranslateLanguagePair>();
+        for (int i = 0; i < languages.length; ++i) {
+            languageList.add(new TranslateLanguagePair(codes[i], languages[i]));
+        }
+        return new TranslateOptions(sourceLanguageCode, targetLanguageCode, languageList, false,
+                false, alwaysTranslate, triggeredFromMenu, null);
     }
 
     /**
-     * Copy constructor
+     * Returns a copy of the current instance.
      */
-    public TranslateOptions(TranslateOptions other) {
-        this(other.mSourceLanguageCode, other.mTargetLanguageCode, other.mAllLanguages,
-                other.mOptions[NEVER_LANGUAGE], other.mOptions[NEVER_DOMAIN],
-                other.mOptions[ALWAYS_LANGUAGE], other.mTriggeredFromMenu, other.mOriginalOptions);
+    TranslateOptions copy() {
+        return new TranslateOptions(mSourceLanguageCode, mTargetLanguageCode, mAllLanguages,
+                mOptions[NEVER_LANGUAGE], mOptions[NEVER_DOMAIN], mOptions[ALWAYS_LANGUAGE],
+                mTriggeredFromMenu, mOriginalOptions);
     }
 
     public String sourceLanguageName() {
-        if (isValidLanguageCode(mSourceLanguageCode)) {
-            return mCodeToRepresentation.get(mSourceLanguageCode);
-        }
-        return "";
+        return getRepresentationFromCode(mSourceLanguageCode);
     }
 
     public String targetLanguageName() {
-        if (isValidLanguageCode(mTargetLanguageCode)) {
-            return mCodeToRepresentation.get(mTargetLanguageCode);
-        }
-        return "";
+        return getRepresentationFromCode(mTargetLanguageCode);
     }
 
     public String sourceLanguageCode() {
@@ -221,6 +224,18 @@ public class TranslateOptions {
             return false;
         }
         return toggleState(ALWAYS_LANGUAGE, value);
+    }
+
+    /**
+     * Gets the language's translated representation from a given language code.
+     * @param languageCode ISO code for the language
+     * @return The translated representation of the language, or "" if not found.
+     */
+    public String getRepresentationFromCode(String languageCode) {
+        if (isValidLanguageCode(languageCode)) {
+            return mCodeToRepresentation.get(languageCode);
+        }
+        return "";
     }
 
     private boolean toggleState(int element, boolean newValue) {

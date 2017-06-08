@@ -35,6 +35,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.omnibox.OmniboxResultsAdapter.OmniboxResultItem;
 import org.chromium.chrome.browser.omnibox.OmniboxResultsAdapter.OmniboxSuggestionDelegate;
 import org.chromium.chrome.browser.omnibox.OmniboxSuggestion.MatchClassification;
+import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -820,8 +821,6 @@ class SuggestionView extends ViewGroup {
             }
 
             // Align the text to be pixel perfectly aligned with the text in the url bar.
-            mTextLeft = getSuggestionTextLeftPosition();
-            mTextRight = getSuggestionTextRightPosition();
             boolean isRTL = ApiCompatibilityUtils.isLayoutRtl(this);
             if (DeviceFormFactor.isTablet(getContext())) {
                 int textWidth = isRTL ? mTextRight : (r - l - mTextLeft);
@@ -861,8 +860,9 @@ class SuggestionView extends ViewGroup {
         }
 
         private int getUrlBarLeftOffset() {
-            if (DeviceFormFactor.isTablet(getContext())) {
-                mUrlBar.getLocationInWindow(mViewPositionHolder);
+            if (mLocationBar.mustQueryUrlBarLocationForSuggestions()) {
+                View contentView = getRootView().findViewById(android.R.id.content);
+                ViewUtils.getRelativeLayoutPosition(contentView, mUrlBar, mViewPositionHolder);
                 return mViewPositionHolder[0];
             } else {
                 return ApiCompatibilityUtils.isLayoutRtl(this) ? mPhoneUrlBarLeftOffsetRtlPx
@@ -877,7 +877,8 @@ class SuggestionView extends ViewGroup {
             if (mLocationBar == null) return 0;
 
             int leftOffset = getUrlBarLeftOffset();
-            getLocationInWindow(mViewPositionHolder);
+            View contentView = getRootView().findViewById(android.R.id.content);
+            ViewUtils.getRelativeLayoutPosition(contentView, this, mViewPositionHolder);
             return leftOffset + mUrlBar.getPaddingLeft() - mViewPositionHolder[0];
         }
 
@@ -888,7 +889,8 @@ class SuggestionView extends ViewGroup {
             if (mLocationBar == null) return 0;
 
             int leftOffset = getUrlBarLeftOffset();
-            getLocationInWindow(mViewPositionHolder);
+            View contentView = getRootView().findViewById(android.R.id.content);
+            ViewUtils.getRelativeLayoutPosition(contentView, this, mViewPositionHolder);
             return leftOffset + mUrlBar.getWidth() - mUrlBar.getPaddingRight()
                     - mViewPositionHolder[0];
         }
@@ -914,17 +916,20 @@ class SuggestionView extends ViewGroup {
             int width = MeasureSpec.getSize(widthMeasureSpec);
             int height = MeasureSpec.getSize(heightMeasureSpec);
 
+            boolean isRTL = ApiCompatibilityUtils.isLayoutRtl(this);
+            mTextLeft = getSuggestionTextLeftPosition();
+            mTextRight = getSuggestionTextRightPosition();
+
+            int maxWidth = width - (isRTL ? mTextRight : mTextLeft);
             if (mTextLine1.getMeasuredWidth() != width
                     || mTextLine1.getMeasuredHeight() != height) {
-                mTextLine1.measure(
-                        MeasureSpec.makeMeasureSpec(widthMeasureSpec, MeasureSpec.AT_MOST),
+                mTextLine1.measure(MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.AT_MOST),
                         MeasureSpec.makeMeasureSpec(mSuggestionHeight, MeasureSpec.AT_MOST));
             }
 
             if (mTextLine2.getMeasuredWidth() != width
                     || mTextLine2.getMeasuredHeight() != height) {
-                mTextLine2.measure(
-                        MeasureSpec.makeMeasureSpec(widthMeasureSpec, MeasureSpec.AT_MOST),
+                mTextLine2.measure(MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.AT_MOST),
                         MeasureSpec.makeMeasureSpec(mSuggestionHeight, MeasureSpec.AT_MOST));
             }
             if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.AT_MOST) {

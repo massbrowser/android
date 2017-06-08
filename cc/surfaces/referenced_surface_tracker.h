@@ -26,11 +26,11 @@ class CC_SURFACES_EXPORT ReferencedSurfaceTracker {
 
   const SurfaceId& current_surface_id() const { return current_surface_id_; }
 
-  std::vector<SurfaceReference>& references_to_add() {
+  const std::vector<SurfaceReference>& references_to_add() const {
     return references_to_add_;
   }
 
-  std::vector<SurfaceReference>& references_to_remove() {
+  const std::vector<SurfaceReference>& references_to_remove() const {
     return references_to_remove_;
   }
 
@@ -39,8 +39,9 @@ class CC_SURFACES_EXPORT ReferencedSurfaceTracker {
   // |referenced_surfaces|. Otherwise a diff from the referenced surfaces in the
   // last frame will be computed. This should be called once per
   // CompositorFrame.
-  void UpdateReferences(const LocalSurfaceId& local_surface_id,
-                        const std::vector<SurfaceId>& referenced_surfaces);
+  void UpdateReferences(
+      const LocalSurfaceId& local_surface_id,
+      const std::vector<SurfaceId>* active_referenced_surfaces);
 
  private:
   // Updates |referenced_surfaces_| based on a |new_referenced_surfaces| from a

@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "media/base/media_log.h"
 #include "media/base/media_observer.h"
 #include "media/blink/media_blink_export.h"
 #include "media/filters/context_3d.h"
@@ -28,7 +29,6 @@ class WebContentDecryptionModule;
 namespace media {
 
 class SwitchableAudioRendererSink;
-class MediaLog;
 class SurfaceManager;
 
 // Holds parameters for constructing WebMediaPlayerImpl without having
@@ -48,9 +48,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
   // |defer_load_cb|, |audio_renderer_sink|, |compositor_task_runner|, and
   // |context_3d_cb| may be null.
   WebMediaPlayerParams(
+      std::unique_ptr<MediaLog> media_log,
       const DeferLoadCB& defer_load_cb,
       const scoped_refptr<SwitchableAudioRendererSink>& audio_renderer_sink,
-      const scoped_refptr<MediaLog>& media_log,
       const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
       const scoped_refptr<base::TaskRunner>& worker_task_runner,
       const scoped_refptr<base::SingleThreadTaskRunner>& compositor_task_runner,
@@ -60,8 +60,10 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
       SurfaceManager* surface_manager,
       base::WeakPtr<MediaObserver> media_observer,
       base::TimeDelta max_keyframe_distance_to_disable_background_video,
+      base::TimeDelta max_keyframe_distance_to_disable_background_video_mse,
       bool enable_instant_source_buffer_gc,
-      bool allow_suspend);
+      bool allow_suspend,
+      bool embedded_media_experience_enabled);
 
   ~WebMediaPlayerParams();
 
@@ -72,9 +74,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
     return audio_renderer_sink_;
   }
 
-  const scoped_refptr<MediaLog>& media_log() const {
-    return media_log_;
-  }
+  std::unique_ptr<MediaLog> take_media_log() { return std::move(media_log_); }
 
   const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner() const {
     return media_task_runner_;
@@ -109,16 +109,25 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
     return max_keyframe_distance_to_disable_background_video_;
   }
 
+  base::TimeDelta max_keyframe_distance_to_disable_background_video_mse()
+      const {
+    return max_keyframe_distance_to_disable_background_video_mse_;
+  }
+
   bool enable_instant_source_buffer_gc() const {
     return enable_instant_source_buffer_gc_;
   }
 
   bool allow_suspend() const { return allow_suspend_; }
 
+  bool embedded_media_experience_enabled() const {
+    return embedded_media_experience_enabled_;
+  }
+
  private:
   DeferLoadCB defer_load_cb_;
   scoped_refptr<SwitchableAudioRendererSink> audio_renderer_sink_;
-  scoped_refptr<MediaLog> media_log_;
+  std::unique_ptr<MediaLog> media_log_;
   scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
   scoped_refptr<base::TaskRunner> worker_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner_;
@@ -129,8 +138,10 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
   SurfaceManager* surface_manager_;
   base::WeakPtr<MediaObserver> media_observer_;
   base::TimeDelta max_keyframe_distance_to_disable_background_video_;
+  base::TimeDelta max_keyframe_distance_to_disable_background_video_mse_;
   bool enable_instant_source_buffer_gc_;
   const bool allow_suspend_;
+  const bool embedded_media_experience_enabled_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(WebMediaPlayerParams);
 };

@@ -5,8 +5,8 @@
 #ifndef PushManager_h
 #define PushManager_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/ModulesExport.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -22,7 +22,7 @@ class MODULES_EXPORT PushManager final : public GarbageCollected<PushManager>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static PushManager* create(ServiceWorkerRegistration* registration) {
+  static PushManager* Create(ServiceWorkerRegistration* registration) {
     return new PushManager(registration);
   }
 
@@ -39,7 +39,7 @@ class MODULES_EXPORT PushManager final : public GarbageCollected<PushManager>,
  private:
   explicit PushManager(ServiceWorkerRegistration*);
 
-  Member<ServiceWorkerRegistration> m_registration;
+  Member<ServiceWorkerRegistration> registration_;
 };
 
 }  // namespace blink

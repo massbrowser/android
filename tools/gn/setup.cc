@@ -58,8 +58,12 @@ extern const char kDotfile_Help[] =
 
 Variables
 
+  arg_file_template [optional]
+      Path to a file containing the text that should be used as the default
+      args.gn content when you run `gn args`.
+
   buildconfig [required]
-      Label of the build config file. This file will be used to set up the
+      Path to the build config file. This file will be used to set up the
       build file execution environment for each toolchain.
 
   check_targets [optional]
@@ -694,6 +698,7 @@ bool Setup::RunConfigFile() {
 bool Setup::FillOtherConfig(const base::CommandLine& cmdline) {
   Err err;
   SourceDir current_dir("//");
+  Label root_target_label(current_dir, "");
 
   // Secondary source path, read from the config file if present.
   // Read from the config file if present.
@@ -716,8 +721,7 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline) {
       return false;
     }
 
-    Label root_target_label =
-        Label::Resolve(current_dir, Label(), *root_value, &err);
+    root_target_label = Label::Resolve(current_dir, Label(), *root_value, &err);
     if (err.has_error()) {
       err.PrintToStdout();
       return false;
@@ -725,6 +729,7 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline) {
 
     root_build_file_ = Loader::BuildFileForLabel(root_target_label);
   }
+  build_settings_.SetRootTargetLabel(root_target_label);
 
   // Build config file.
   const Value* build_config_value =
@@ -788,6 +793,17 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline) {
     }
 
     default_args_ = default_args_value->scope_value();
+  }
+
+  const Value* arg_file_template_value =
+      dotfile_scope_.GetValue("arg_file_template", true);
+  if (arg_file_template_value) {
+    if (!arg_file_template_value->VerifyTypeIs(Value::STRING, &err)) {
+      err.PrintToStdout();
+      return false;
+    }
+    SourceFile path(arg_file_template_value->string_value());
+    build_settings_.set_arg_file_template_path(path);
   }
 
   return true;

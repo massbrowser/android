@@ -6,10 +6,13 @@ package org.chromium.chrome.browser.infobar;
 
 import android.support.test.filters.SmallTest;
 
+import org.chromium.base.ThreadUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.SearchGeolocationDisclosureTabHelper;
+import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
 import org.chromium.chrome.test.util.InfoBarUtil;
@@ -20,7 +23,7 @@ import java.util.concurrent.TimeoutException;
 /** Tests for the SearchGeolocationDisclosureInfobar. */
 public class SearchGeolocationDisclosureInfoBarTest
         extends ChromeActivityTestCaseBase<ChromeActivity> {
-    private static final String SEARCH_PAGE = "/chrome/test/data/empty.html";
+    private static final String SEARCH_PAGE = "/chrome/test/data/android/google.html";
     private static final String ENABLE_NEW_DISCLOSURE_FEATURE =
             "enable-features=ConsistentOmniboxGeolocation";
     private static final String DISABLE_NEW_DISCLOSURE_FEATURE =
@@ -41,6 +44,12 @@ public class SearchGeolocationDisclosureInfoBarTest
     protected void setUp() throws Exception {
         super.setUp();
         mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                PrefServiceBridge.getInstance().setEulaAccepted();
+            }
+        });
     }
 
     @Override
@@ -59,7 +68,7 @@ public class SearchGeolocationDisclosureInfoBarTest
         // Infobar should appear when doing the first search.
         InfoBarContainer container = getActivity().getActivityTab().getInfoBarContainer();
         InfoBarTestAnimationListener listener = new InfoBarTestAnimationListener();
-        container.setAnimationListener(listener);
+        container.addAnimationListener(listener);
         loadUrl(mTestServer.getURL(SEARCH_PAGE));
         // Note: the number of infobars is checked immediately after the URL is loaded, unlike in
         // other infobar tests where it is checked after animations have completed. This is because
@@ -80,7 +89,7 @@ public class SearchGeolocationDisclosureInfoBarTest
         // Infobar should appear again the next day.
         SearchGeolocationDisclosureTabHelper.setDayOffsetForTesting(1);
         listener = new InfoBarTestAnimationListener();
-        container.setAnimationListener(listener);
+        container.addAnimationListener(listener);
         loadUrl(mTestServer.getURL(SEARCH_PAGE));
         assertEquals("Wrong infobar count after search", 1, getInfoBars().size());
         listener.addInfoBarAnimationFinished("InfoBar not added.");
@@ -93,7 +102,7 @@ public class SearchGeolocationDisclosureInfoBarTest
         // Infobar should appear again the next day.
         SearchGeolocationDisclosureTabHelper.setDayOffsetForTesting(2);
         listener = new InfoBarTestAnimationListener();
-        container.setAnimationListener(listener);
+        container.addAnimationListener(listener);
         loadUrl(mTestServer.getURL(SEARCH_PAGE));
         assertEquals("Wrong infobar count after search", 1, getInfoBars().size());
         listener.addInfoBarAnimationFinished("InfoBar not added.");
@@ -107,6 +116,14 @@ public class SearchGeolocationDisclosureInfoBarTest
         SearchGeolocationDisclosureTabHelper.setDayOffsetForTesting(3);
         loadUrl(mTestServer.getURL(SEARCH_PAGE));
         assertEquals("Wrong infobar count after search", 0, getInfoBars().size());
+
+        // Check histograms have been recorded.
+        assertEquals("Wrong pre-disclosure metric", 1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "GeolocationDisclosure.PreDisclosureDSESetting", 1));
+        assertEquals("Wrong post-disclosure metric", 1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        "GeolocationDisclosure.PostDisclosureDSESetting", 1));
     }
 
     @SmallTest
@@ -119,7 +136,7 @@ public class SearchGeolocationDisclosureInfoBarTest
         // Infobar should appear when doing the first search.
         InfoBarContainer container = getActivity().getActivityTab().getInfoBarContainer();
         InfoBarTestAnimationListener listener = new InfoBarTestAnimationListener();
-        container.setAnimationListener(listener);
+        container.addAnimationListener(listener);
         loadUrl(mTestServer.getURL(SEARCH_PAGE));
         assertEquals("Wrong infobar count after search", 1, getInfoBars().size());
         listener.addInfoBarAnimationFinished("InfoBar not added.");

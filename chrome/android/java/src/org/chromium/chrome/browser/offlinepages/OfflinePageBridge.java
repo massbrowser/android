@@ -19,13 +19,18 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 /**
  * Access gate to C++ side offline pages functionalities.
  */
 @JNINamespace("offline_pages::android")
 public class OfflinePageBridge {
+    // These constants must be kept in sync with the constants defined in
+    // //components/offline_pages/core/client_namespace_constants.cc
     public static final String ASYNC_NAMESPACE = "async_loading";
     public static final String BOOKMARK_NAMESPACE = "bookmark";
+    public static final String LAST_N_NAMESPACE = "last_n";
     public static final String SHARE_NAMESPACE = "share";
 
     /**
@@ -426,6 +431,7 @@ public class OfflinePageBridge {
      * Returns via callback any urls in <code>urls</code> for which there exist offline pages.
      *
      * TODO(http://crbug.com/598006): Add metrics for preventing UI jank.
+     * TODO(http://crbug.com/693514): Now unused in production code. Can be removed.
      */
     public void checkPagesExistOffline(Set<String> urls, Callback<Set<String>> callback) {
         String[] urlArray = urls.toArray(new String[urls.size()]);
@@ -433,6 +439,54 @@ public class OfflinePageBridge {
         CheckPagesExistOfflineCallbackInternal callbackInternal =
                 new CheckPagesExistOfflineCallbackInternal(callback);
         nativeCheckPagesExistOffline(mNativeOfflinePageBridge, urlArray, callbackInternal);
+    }
+
+    /** Tells the native side that a new tab has been added for this profile. */
+    void registerRecentTab(int tabId) {
+        nativeRegisterRecentTab(mNativeOfflinePageBridge, tabId);
+    }
+
+    /** Tells the native side that the tab of |webContents| will be closed. */
+    void willCloseTab(WebContents webContents) {
+        nativeWillCloseTab(mNativeOfflinePageBridge, webContents);
+    }
+
+    /** Tells the native side that a new tab has been removed for this profile. */
+    void unregisterRecentTab(int tabId) {
+        nativeUnregisterRecentTab(mNativeOfflinePageBridge, tabId);
+    }
+
+    /**
+     * Schedules to download a page from |url| and categorize under |nameSpace|.
+     * The duplicate pages or requests will be checked.
+     *
+     * @param webContents Web contents upon which the infobar is shown.
+     * @param nameSpace Namespace of the page to save.
+     * @param url URL of the page to save.
+     * @param uiAction UI action, like showing infobar or toast on certain case.
+     */
+    public void scheduleDownload(
+            WebContents webContents, String nameSpace, String url, int uiAction) {
+        nativeScheduleDownload(mNativeOfflinePageBridge, webContents, nameSpace, url, uiAction);
+    }
+
+    /**
+     * Checks if an offline page is shown for the webContents.
+     * @param webContents Web contents used to find the offline page.
+     * @return True if the offline page is opened.
+     */
+    public boolean isOfflinePage(WebContents webContents) {
+        return nativeIsOfflinePage(mNativeOfflinePageBridge, webContents);
+    }
+
+    /**
+     * Retrieves the offline page that is shown for the tab.
+     * @param webContents Web contents used to find the offline page.
+     * @return The offline page if tab currently displays it, null otherwise.
+     */
+    @Nullable
+    public OfflinePageItem getOfflinePage(WebContents webContents) {
+        return nativeGetOfflinePage(mNativeOfflinePageBridge, webContents);
     }
 
     @VisibleForTesting
@@ -502,12 +556,14 @@ public class OfflinePageBridge {
     private static native boolean nativeIsPageSharingEnabled();
     private static native boolean nativeCanSavePage(String url);
     private static native OfflinePageBridge nativeGetOfflinePageBridgeForProfile(Profile profile);
-
     @VisibleForTesting
     native void nativeGetAllPages(long nativeOfflinePageBridge, List<OfflinePageItem> offlinePages,
             final Callback<List<OfflinePageItem>> callback);
     private native void nativeCheckPagesExistOffline(long nativeOfflinePageBridge, Object[] urls,
             CheckPagesExistOfflineCallbackInternal callback);
+    private native void nativeRegisterRecentTab(long nativeOfflinePageBridge, int tabId);
+    private native void nativeWillCloseTab(long nativeOfflinePageBridge, WebContents webContents);
+    private native void nativeUnregisterRecentTab(long nativeOfflinePageBridge, int tabId);
     @VisibleForTesting
     native void nativeGetRequestsInQueue(
             long nativeOfflinePageBridge, Callback<SavePageRequest[]> callback);
@@ -535,5 +591,11 @@ public class OfflinePageBridge {
     private native boolean nativeIsShowingOfflinePreview(
             long nativeOfflinePageBridge, WebContents webContents);
     private native boolean nativeIsShowingDownloadButtonInErrorPage(
+            long nativeOfflinePageBridge, WebContents webContents);
+    private native void nativeScheduleDownload(long nativeOfflinePageBridge,
+            WebContents webContents, String nameSpace, String url, int uiAction);
+    private native boolean nativeIsOfflinePage(
+            long nativeOfflinePageBridge, WebContents webContents);
+    private native OfflinePageItem nativeGetOfflinePage(
             long nativeOfflinePageBridge, WebContents webContents);
 }

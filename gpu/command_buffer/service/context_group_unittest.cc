@@ -25,7 +25,7 @@ using ::testing::Not;
 using ::testing::Pointee;
 using ::testing::Return;
 using ::testing::SetArrayArgument;
-using ::testing::SetArgumentPointee;
+using ::testing::SetArgPointee;
 using ::testing::StrEq;
 
 namespace gpu {
@@ -42,9 +42,9 @@ class ContextGroupTest : public GpuServiceTest {
     GpuServiceTest::SetUp();
     decoder_.reset(new MockGLES2Decoder());
     scoped_refptr<FeatureInfo> feature_info = new FeatureInfo;
-    group_ = scoped_refptr<ContextGroup>(
-        new ContextGroup(gpu_preferences_, NULL, NULL, NULL, NULL, feature_info,
-                         kBindGeneratesResource, nullptr, nullptr));
+    group_ = scoped_refptr<ContextGroup>(new ContextGroup(
+        gpu_preferences_, NULL, NULL, NULL, NULL, feature_info,
+        kBindGeneratesResource, nullptr, nullptr, GpuFeatureInfo()));
   }
 
   GpuPreferences gpu_preferences_;

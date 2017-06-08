@@ -59,10 +59,6 @@ import java.util.List;
  * The main implementation of the {@link ExternalNavigationDelegate}.
  */
 public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegate {
-    // Instant Apps system resolver activity on N-MR1+.
-    @VisibleForTesting
-    static final String EPHEMERAL_INSTALLER_CLASS =
-            "com.google.android.gms.instantapps.routing.EphemeralInstallerActivity";
     private static final String PDF_VIEWER = "com.google.android.apps.docs";
     private static final String PDF_MIME = "application/pdf";
     private static final String PDF_SUFFIX = ".pdf";
@@ -287,7 +283,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             }
 
             if (info.activityInfo != null) {
-                if (EPHEMERAL_INSTALLER_CLASS.equals(info.activityInfo.name)) {
+                if (InstantAppsHandler.getInstance().isInstantAppResolveInfo(info)) {
                     // Don't consider the Instant Apps resolver a specialized application.
                     continue;
                 }
@@ -347,7 +343,6 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         boolean activityWasLaunched;
         // Only touches disk on Kitkat. See http://crbug.com/617725 for more context.
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
-        StrictMode.allowThreadDiskReads();
         try {
             forcePdfViewerAsIntentHandlerIfNeeded(intent);
             if (proxy) {
@@ -388,31 +383,34 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
 
         Activity activity = (Activity) context;
         new AlertDialog.Builder(activity, R.style.AlertDialogTheme)
-            .setTitle(R.string.external_app_leave_incognito_warning_title)
-            .setMessage(R.string.external_app_leave_incognito_warning)
-            .setPositiveButton(R.string.ok, new OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        startActivity(intent, proxy);
-                        if (tab != null && !tab.isClosing() && tab.isInitialized()
-                                && needsToCloseTab) {
-                            closeTab(tab);
-                        }
-                    }
-                })
-            .setNegativeButton(R.string.cancel, new OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        loadIntent(intent, referrerUrl, fallbackUrl, tab, needsToCloseTab, true);
-                    }
-                })
-            .setOnCancelListener(new OnCancelListener() {
+                .setTitle(R.string.external_app_leave_incognito_warning_title)
+                .setMessage(R.string.external_app_leave_incognito_warning)
+                .setPositiveButton(R.string.external_app_leave_incognito_leave,
+                        new OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                startActivity(intent, proxy);
+                                if (tab != null && !tab.isClosing() && tab.isInitialized()
+                                        && needsToCloseTab) {
+                                    closeTab(tab);
+                                }
+                            }
+                        })
+                .setNegativeButton(R.string.external_app_leave_incognito_stay,
+                        new OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                loadIntent(intent, referrerUrl, fallbackUrl, tab, needsToCloseTab,
+                                        true);
+                            }
+                        })
+                .setOnCancelListener(new OnCancelListener() {
                     @Override
                     public void onCancel(DialogInterface dialog) {
                         loadIntent(intent, referrerUrl, fallbackUrl, tab, needsToCloseTab, true);
                     }
                 })
-            .show();
+                .show();
     }
 
     @Override
@@ -426,8 +424,8 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             return false;
         }
 
-        return !tab.getWindowAndroid().hasPermission(permission.WRITE_EXTERNAL_STORAGE)
-                && tab.getWindowAndroid().canRequestPermission(permission.WRITE_EXTERNAL_STORAGE);
+        return !tab.getWindowAndroid().hasPermission(permission.READ_EXTERNAL_STORAGE)
+                && tab.getWindowAndroid().canRequestPermission(permission.READ_EXTERNAL_STORAGE);
     }
 
     @Override
@@ -450,7 +448,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             }
         };
         tab.getWindowAndroid().requestPermissions(
-                new String[] {permission.WRITE_EXTERNAL_STORAGE}, permissionCallback);
+                new String[] {permission.READ_EXTERNAL_STORAGE}, permissionCallback);
     }
 
     private void loadIntent(Intent intent, String referrerUrl, String fallbackUrl, Tab tab,
@@ -586,7 +584,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
             Intent resolvedIntent = new Intent(intent);
             resolvedIntent.setData(Uri.parse(url));
             return handler.handleIncomingIntent(getAvailableContext(), resolvedIntent,
-                    ChromeLauncherActivity.isCustomTabIntent(resolvedIntent));
+                    ChromeLauncherActivity.isCustomTabIntent(resolvedIntent), true);
         } else if (!isIncomingRedirect) {
             // Check if the navigation is coming from SERP and skip instant app handling.
             if (isSerpReferrer(tab)) return false;

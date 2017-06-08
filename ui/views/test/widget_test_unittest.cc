@@ -9,6 +9,10 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(USE_AURA)
+#include "ui/aura/window.h"
+#endif
+
 namespace views {
 namespace test {
 namespace {
@@ -42,6 +46,11 @@ using WidgetTestTest = WidgetTest;
 // Ensure that Widgets with various root windows are correctly reported by
 // WidgetTest::GetAllWidgets().
 TEST_F(WidgetTestTest, GetAllWidgets) {
+  // TODO: this test transitively uses GetContext(). That should go away for
+  // aura-mus client. http://crbug.com/663781.
+  if (IsMus())
+    return;
+
   // Note Widget::Widgets is a std::set ordered by pointer value, so the order
   // that |expected| is updated below is not important.
   Widget::Widgets expected;
@@ -68,6 +77,16 @@ TEST_F(WidgetTestTest, GetAllWidgets) {
 
   Widget* desktop_child = CreateChildNativeWidgetWithParent(desktop);
   ExpectAdd(&expected, desktop_child, "desktop_child");
+
+#if defined(USE_AURA)
+  // A DesktopWindowTreeHost has both a root aura::Window and a content window.
+  // DesktopWindowTreeHostX11::GetAllOpenWindows() returns content windows, so
+  // ensure that a Widget parented to the root window is also found.
+  Widget* desktop_cousin =
+      CreateChildPlatformWidget(desktop->GetNativeView()->GetRootWindow());
+  ExpectAdd(&expected, desktop_cousin, "desktop_cousin");
+  ExpectClose(&expected, {desktop_cousin}, "desktop_cousin");
+#endif  // USE_AURA
 
   ExpectClose(&expected, {desktop, desktop_child}, "desktop");
   ExpectClose(&expected, {native, native_child}, "native");

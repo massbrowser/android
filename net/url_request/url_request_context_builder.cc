@@ -188,8 +188,6 @@ URLRequestContextBuilder::HttpNetworkSessionParams::HttpNetworkSessionParams()
       enable_http2(true),
       enable_quic(false),
       quic_max_server_configs_stored_in_properties(0),
-      quic_delay_tcp_race(true),
-      quic_prefer_aes(false),
       quic_idle_connection_timeout_seconds(kIdleConnectionTimeoutSeconds),
       quic_close_sessions_on_ip_change(false),
       quic_migrate_sessions_on_network_change(false),
@@ -201,7 +199,10 @@ URLRequestContextBuilder::HttpNetworkSessionParams::~HttpNetworkSessionParams()
 {}
 
 URLRequestContextBuilder::URLRequestContextBuilder()
-    : data_enabled_(false),
+    : name_(nullptr),
+      enable_brotli_(false),
+      network_quality_estimator_(nullptr),
+      data_enabled_(false),
 #if !BUILDFLAG(DISABLE_FILE_SUPPORT)
       file_enabled_(false),
 #endif
@@ -303,6 +304,10 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
       new ContainerURLRequestContext(file_task_runner_));
   URLRequestContextStorage* storage = context->storage();
 
+  context->set_name(name_);
+  context->set_enable_brotli(enable_brotli_);
+  context->set_network_quality_estimator(network_quality_estimator_);
+
   storage->set_http_user_agent_settings(
       base::MakeUnique<StaticHttpUserAgentSettings>(accept_language_,
                                                     user_agent_));
@@ -336,7 +341,6 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
 #endif  // !defined(OS_LINUX) && !defined(OS_ANDROID)
     proxy_service_ = ProxyService::CreateUsingSystemProxyResolver(
         std::move(proxy_config_service_),
-        0,  // This results in using the default value.
         context->net_log());
   }
   storage->set_proxy_service(std::move(proxy_service_));
@@ -423,22 +427,16 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
   network_session_params.enable_quic = http_network_session_params_.enable_quic;
   network_session_params.quic_max_server_configs_stored_in_properties =
       http_network_session_params_.quic_max_server_configs_stored_in_properties;
-  network_session_params.quic_delay_tcp_race =
-      http_network_session_params_.quic_delay_tcp_race;
   network_session_params.quic_idle_connection_timeout_seconds =
       http_network_session_params_.quic_idle_connection_timeout_seconds;
   network_session_params.quic_connection_options =
       http_network_session_params_.quic_connection_options;
-  network_session_params.quic_host_whitelist =
-      http_network_session_params_.quic_host_whitelist;
   network_session_params.quic_close_sessions_on_ip_change =
       http_network_session_params_.quic_close_sessions_on_ip_change;
   network_session_params.quic_migrate_sessions_on_network_change =
       http_network_session_params_.quic_migrate_sessions_on_network_change;
   network_session_params.quic_user_agent_id =
       http_network_session_params_.quic_user_agent_id;
-  network_session_params.quic_prefer_aes =
-      http_network_session_params_.quic_prefer_aes;
   network_session_params.quic_migrate_sessions_early =
       http_network_session_params_.quic_migrate_sessions_early;
   network_session_params.quic_disable_bidirectional_streams =

@@ -13,13 +13,12 @@
 #include "base/macros.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/quic_stream_sequencer_buffer_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/test/gtest_util.h"
-#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock_mutant.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 using std::string;
 
@@ -81,7 +80,6 @@ class QuicStreamSequencerBufferTest : public testing::Test {
   MockClock clock_;
   std::unique_ptr<QuicStreamSequencerBuffer> buffer_;
   std::unique_ptr<QuicStreamSequencerBufferPeer> helper_;
-  QuicFlagSaver flag_saver_;
   string error_details_;
 };
 
@@ -111,9 +109,7 @@ TEST_F(QuicStreamSequencerBufferTest, OnStreamData0length) {
 }
 
 TEST_F(QuicStreamSequencerBufferTest, OnStreamDataWithinBlock) {
-  if (FLAGS_quic_reloadable_flag_quic_reduce_sequencer_buffer_memory_life_time) {  // NOLINT
-    EXPECT_FALSE(helper_->IsBufferAllocated());
-  }
+  EXPECT_FALSE(helper_->IsBufferAllocated());
   string source(1024, 'a');
   size_t written;
   clock_.AdvanceTime(QuicTime::Delta::FromSeconds(1));
@@ -128,7 +124,7 @@ TEST_F(QuicStreamSequencerBufferTest, OnStreamDataWithinBlock) {
   std::list<Gap> gaps = helper_->GetGaps();
   EXPECT_EQ(800u, gaps.front().end_offset);
   EXPECT_EQ(1824u, gaps.back().begin_offset);
-  auto frame_map = helper_->frame_arrival_time_map();
+  auto* frame_map = helper_->frame_arrival_time_map();
   EXPECT_EQ(1u, frame_map->size());
   EXPECT_EQ(800u, frame_map->begin()->first);
   EXPECT_EQ(t, (*frame_map)[800].timestamp);
@@ -138,8 +134,8 @@ TEST_F(QuicStreamSequencerBufferTest, OnStreamDataWithinBlock) {
 
 TEST_F(QuicStreamSequencerBufferTest, OnStreamDataInvalidSource) {
   // Pass in an invalid source, expects to return error.
-  StringPiece source;
-  source = StringPiece(nullptr, 1024);
+  QuicStringPiece source;
+  source = QuicStringPiece(nullptr, 1024);
   size_t written;
   clock_.AdvanceTime(QuicTime::Delta::FromSeconds(1));
   QuicTime t = clock_.ApproximateNow();
@@ -167,7 +163,7 @@ TEST_F(QuicStreamSequencerBufferTest, OnStreamDataWithOverlap) {
             buffer_->OnStreamData(0, source, t2, &written, &error_details_));
   EXPECT_EQ(QUIC_OVERLAPPING_STREAM_DATA,
             buffer_->OnStreamData(1024, source, t2, &written, &error_details_));
-  auto frame_map = helper_->frame_arrival_time_map();
+  auto* frame_map = helper_->frame_arrival_time_map();
   EXPECT_EQ(1u, frame_map->size());
   EXPECT_EQ(t1, (*frame_map)[800].timestamp);
 }
@@ -198,7 +194,7 @@ TEST_F(QuicStreamSequencerBufferTest,
   EXPECT_EQ(QUIC_NO_ERROR,
             buffer_->OnStreamData(1824, one_byte, clock_.ApproximateNow(),
                                   &written, &error_details_));
-  auto frame_map = helper_->frame_arrival_time_map();
+  auto* frame_map = helper_->frame_arrival_time_map();
   EXPECT_EQ(3u, frame_map->size());
   EXPECT_TRUE(helper_->CheckBufferInvariants());
 }
@@ -472,11 +468,6 @@ TEST_F(QuicStreamSequencerBufferTest, GetReadableRegionsEmpty) {
 
 TEST_F(QuicStreamSequencerBufferTest, ReleaseWholeBuffer) {
   // Tests that buffer is not deallocated unless ReleaseWholeBuffer() is called.
-  if (!FLAGS_quic_reloadable_flag_quic_reduce_sequencer_buffer_memory_life_time) {  // NOLINT
-    // Won't release buffer when flag is off.
-    return;
-  }
-
   string source(100, 'b');
   clock_.AdvanceTime(QuicTime::Delta::FromSeconds(1));
   QuicTime t1 = clock_.ApproximateNow();
@@ -872,7 +863,7 @@ class QuicStreamSequencerBufferRandomIOTest
     for (size_t i = 0; i < num_to_write; ++i) {
       write_buf[i] = (offset + i) % 256;
     }
-    base::StringPiece string_piece_w(write_buf.get(), num_to_write);
+    QuicStringPiece string_piece_w(write_buf.get(), num_to_write);
     size_t written;
     auto result =
         buffer_->OnStreamData(offset, string_piece_w, clock_.ApproximateNow(),

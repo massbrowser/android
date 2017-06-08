@@ -22,6 +22,7 @@ import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.media.RouterTestUtils;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.chrome.test.util.ChromeRestriction;
+import org.chromium.content.browser.test.util.ClickUtils;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.JavaScriptUtils;
@@ -80,8 +81,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                mOldPolicy = StrictMode.allowThreadDiskReads();
-                StrictMode.allowThreadDiskWrites();
+                mOldPolicy = StrictMode.allowThreadDiskWrites();
             }
         });
         mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
@@ -213,7 +213,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
         executeJavaScriptApi(webContents, START_SESSION_SCRIPT);
         View testRouteButton = RouterTestUtils.waitForRouteButton(
                 getActivity(), TEST_SINK_NAME, VIEW_TIMEOUT_MS, VIEW_RETRY_MS);
-        RouterTestUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
+        ClickUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
         executeJavaScriptApi(webContents, CHECK_SESSION_SCRIPT);
         String sessionId = getJavaScriptVariable(webContents, "startedConnection.id");
         assertFalse(sessionId.length() == 0);
@@ -233,7 +233,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
         executeJavaScriptApi(webContents, START_SESSION_SCRIPT);
         View testRouteButton = RouterTestUtils.waitForRouteButton(
                 getActivity(), TEST_SINK_NAME, VIEW_TIMEOUT_MS, VIEW_RETRY_MS);
-        RouterTestUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
+        ClickUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
         executeJavaScriptApi(webContents, CHECK_SESSION_SCRIPT);
         String sessionId = getJavaScriptVariable(webContents, "startedConnection.id");
         assertFalse(sessionId.length() == 0);
@@ -253,7 +253,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
         executeJavaScriptApi(webContents, START_SESSION_SCRIPT);
         View testRouteButton = RouterTestUtils.waitForRouteButton(
                 getActivity(), TEST_SINK_NAME, VIEW_TIMEOUT_MS, VIEW_RETRY_MS);
-        RouterTestUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
+        ClickUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
         executeJavaScriptApi(webContents, CHECK_SESSION_SCRIPT);
         String sessionId = getJavaScriptVariable(webContents, "startedConnection.id");
         assertFalse(sessionId.length() == 0);
@@ -273,7 +273,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
         executeJavaScriptApi(webContents, START_SESSION_SCRIPT);
         View testRouteButton = RouterTestUtils.waitForRouteButton(
                 getActivity(), TEST_SINK_NAME, VIEW_TIMEOUT_MS, VIEW_RETRY_MS);
-        RouterTestUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
+        ClickUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
         checkStartFailed(
                 webContents, "UnknownError", "No provider supports createRoute with source");
     }
@@ -289,7 +289,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
         executeJavaScriptApi(webContents, START_SESSION_SCRIPT);
         View testRouteButton = RouterTestUtils.waitForRouteButton(
                 getActivity(), TEST_SINK_NAME, VIEW_TIMEOUT_MS, VIEW_RETRY_MS);
-        RouterTestUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
+        ClickUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
         checkStartFailed(
                 webContents, "UnknownError", "Unknown sink");
     }
@@ -305,7 +305,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
         executeJavaScriptApi(webContents, START_SESSION_SCRIPT);
         View testRouteButton = RouterTestUtils.waitForRouteButton(
                 getActivity(), TEST_SINK_NAME, VIEW_TIMEOUT_MS, VIEW_RETRY_MS);
-        RouterTestUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
+        ClickUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
         executeJavaScriptApi(webContents, CHECK_SESSION_SCRIPT);
         String sessionId = getJavaScriptVariable(webContents, "startedConnection.id");
 
@@ -330,7 +330,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
         executeJavaScriptApi(webContents, START_SESSION_SCRIPT);
         View testRouteButton = RouterTestUtils.waitForRouteButton(
                 getActivity(), TEST_SINK_NAME, VIEW_TIMEOUT_MS, VIEW_RETRY_MS);
-        RouterTestUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
+        ClickUtils.mouseSingleClickView(getInstrumentation(), testRouteButton);
         executeJavaScriptApi(webContents, CHECK_SESSION_SCRIPT);
         String sessionId = getJavaScriptVariable(webContents, "startedConnection.id");
 

@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 from page_sets.system_health import platforms
+from page_sets.system_health import story_tags
 from page_sets.system_health import system_health_story
 from page_sets.system_health.loading_stories import LoadGmailMobileStory
 
@@ -46,6 +47,7 @@ class BackgroundNytimesMobileStory(_BackgroundStory):
   NAME = 'background:news:nytimes'
   URL = 'http://www.nytimes.com/2016/10/04/us/politics/vice-presidential-debate.html?_r=0'
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
+  TAGS = [story_tags.JAVASCRIPT_HEAVY]
 
   def _DidLoadDocument(self, action_runner):
     # Dismiss the 'You have n free articles' message.
@@ -56,7 +58,7 @@ class BackgroundNytimesMobileStory(_BackgroundStory):
     action_runner.WaitForElement(selector='#additional-content button')
     action_runner.ScrollPageToElement(selector='#additional-content button')
     # TapElement seems flaky here so use JavaScript instead.
-    action_runner.ExecuteJavaScript2(
+    action_runner.ExecuteJavaScript(
         'document.querySelector("#additional-content button").click()')
 
     # Scroll to video, start it and then wait for a few seconds.

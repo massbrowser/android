@@ -72,6 +72,14 @@ public class PersonalDataManager {
          */
         @CalledByNative("NormalizedAddressRequestDelegate")
         void onAddressNormalized(AutofillProfile profile);
+
+        /**
+         * Called when the address could not be normalized.
+         *
+         * @param profile The non normalized profile.
+         */
+        @CalledByNative("NormalizedAddressRequestDelegate")
+        void onCouldNotNormalize(AutofillProfile profile);
     }
 
     /**
@@ -338,7 +346,7 @@ public class PersonalDataManager {
         private String mObfuscatedNumber;
         private String mMonth;
         private String mYear;
-        private String mBasicCardPaymentType;
+        private String mBasicCardIssuerNetwork;
         private int mIssuerIconDrawableId;
         private String mBillingAddressId;
         private String mServerId;
@@ -346,16 +354,16 @@ public class PersonalDataManager {
         @CalledByNative("CreditCard")
         public static CreditCard create(String guid, String origin, boolean isLocal,
                 boolean isCached, String name, String number, String obfuscatedNumber, String month,
-                String year, String basicCardPaymentType, int enumeratedIconId,
+                String year, String basicCardIssuerNetwork, int enumeratedIconId,
                 String billingAddressId, String serverId) {
             return new CreditCard(guid, origin, isLocal, isCached, name, number, obfuscatedNumber,
-                    month, year, basicCardPaymentType, ResourceId.mapToDrawableId(enumeratedIconId),
-                    billingAddressId, serverId);
+                    month, year, basicCardIssuerNetwork,
+                    ResourceId.mapToDrawableId(enumeratedIconId), billingAddressId, serverId);
         }
 
         public CreditCard(String guid, String origin, boolean isLocal, boolean isCached,
                 String name, String number, String obfuscatedNumber, String month, String year,
-                String basicCardPaymentType, int issuerIconDrawableId, String billingAddressId,
+                String basicCardIssuerNetwork, int issuerIconDrawableId, String billingAddressId,
                 String serverId) {
             mGUID = guid;
             mOrigin = origin;
@@ -366,7 +374,7 @@ public class PersonalDataManager {
             mObfuscatedNumber = obfuscatedNumber;
             mMonth = month;
             mYear = year;
-            mBasicCardPaymentType = basicCardPaymentType;
+            mBasicCardIssuerNetwork = basicCardIssuerNetwork;
             mIssuerIconDrawableId = issuerIconDrawableId;
             mBillingAddressId = billingAddressId;
             mServerId = serverId;
@@ -376,7 +384,7 @@ public class PersonalDataManager {
             this("" /* guid */, AutofillAndPaymentsPreferences.SETTINGS_ORIGIN /*origin */,
                     true /* isLocal */, false /* isCached */, "" /* name */, "" /* number */,
                     "" /* obfuscatedNumber */, "" /* month */, "" /* year */,
-                    "" /* basicCardPaymentType */, 0 /* issuerIconDrawableId */,
+                    "" /* basicCardIssuerNetwork */, 0 /* issuerIconDrawableId */,
                     "" /* billingAddressId */, "" /* serverId */);
         }
 
@@ -385,7 +393,7 @@ public class PersonalDataManager {
         public CreditCard(String guid, String origin, String name, String number,
                 String obfuscatedNumber, String month, String year) {
             this(guid, origin, true /* isLocal */, false /* isCached */, name, number,
-                    obfuscatedNumber, month, year, "" /* basicCardPaymentType */,
+                    obfuscatedNumber, month, year, "" /* basicCardIssuerNetwork */,
                     0 /* issuerIconDrawableId */, "" /* billingAddressId */, "" /* serverId */);
         }
 
@@ -440,8 +448,8 @@ public class PersonalDataManager {
         }
 
         @CalledByNative("CreditCard")
-        public String getBasicCardPaymentType() {
-            return mBasicCardPaymentType;
+        public String getBasicCardIssuerNetwork() {
+            return mBasicCardIssuerNetwork;
         }
 
         public int getIssuerIconDrawableId() {
@@ -489,8 +497,8 @@ public class PersonalDataManager {
             mYear = year;
         }
 
-        public void setBasicCardPaymentType(String type) {
-            mBasicCardPaymentType = type;
+        public void setBasicCardIssuerNetwork(String network) {
+            mBasicCardIssuerNetwork = network;
         }
 
         public void setIssuerIconDrawableId(int id) {
@@ -512,7 +520,7 @@ public class PersonalDataManager {
         return sManager;
     }
 
-    private static int sNormalizationTimeoutMs = 5000;
+    private static int sNormalizationTimeoutSeconds = 5;
 
     private final long mPersonalDataManagerAndroid;
     private final List<PersonalDataManagerObserver> mDataObservers =
@@ -684,9 +692,9 @@ public class PersonalDataManager {
         nativeUpdateServerCardBillingAddress(mPersonalDataManagerAndroid, card);
     }
 
-    public String getBasicCardPaymentType(String cardNumber, boolean emptyIfInvalid) {
+    public String getBasicCardIssuerNetwork(String cardNumber, boolean emptyIfInvalid) {
         ThreadUtils.assertOnUiThread();
-        return nativeGetBasicCardPaymentType(
+        return nativeGetBasicCardIssuerNetwork(
                 mPersonalDataManagerAndroid, cardNumber, emptyIfInvalid);
     }
 
@@ -803,28 +811,21 @@ public class PersonalDataManager {
     }
 
     /**
-     * Normalizes the address of the profile associated with the {@code guid} if the rules
-     * associated with the {@code regionCode} are done loading. Otherwise sets up the callback to
-     * start normalizing the address when the rules are loaded. The normalized profile will be sent
-     * to the {@code delegate}.
+     * Normalizes the address of the {@code profile} if the rules associated with the
+     * {@code regionCode} are done loading. Otherwise sets up the callback to start normalizing the
+     * address when the rules are loaded. The normalized profile will be sent to the
+     * {@code delegate}. If the profile is not normalized in the specified
+     * {@code sNormalizationTimeoutSeconds}, the {@code delegate} will be notified.
      *
-     * @param guid The GUID of the profile to normalize.
+     * @param profile The profile to normalize.
      * @param regionCode The region code indicating which rules to use for normalization.
      * @param delegate The object requesting the normalization.
-     *
-     * @return Whether the normalization will happen asynchronously.
      */
-    public boolean normalizeAddress(
-            String guid, String regionCode, NormalizedAddressRequestDelegate delegate) {
+    public void normalizeAddress(
+            AutofillProfile profile, String regionCode, NormalizedAddressRequestDelegate delegate) {
         ThreadUtils.assertOnUiThread();
-        return nativeStartAddressNormalization(
-                mPersonalDataManagerAndroid, guid, regionCode, delegate);
-    }
-
-    /** Cancels the pending address normalizations. */
-    public void cancelPendingAddressNormalizations() {
-        ThreadUtils.assertOnUiThread();
-        nativeCancelPendingAddressNormalizations(mPersonalDataManagerAndroid);
+        nativeStartAddressNormalization(mPersonalDataManagerAndroid, profile, regionCode,
+                sNormalizationTimeoutSeconds, delegate);
     }
 
     /**
@@ -882,16 +883,9 @@ public class PersonalDataManager {
         nativeSetPaymentsIntegrationEnabled(enable);
     }
 
-    /**
-     * @return The timeout value for normalization.
-     */
-    public static int getNormalizationTimeoutMS() {
-        return sNormalizationTimeoutMs;
-    }
-
     @VisibleForTesting
     public static void setNormalizationTimeoutForTesting(int timeout) {
-        sNormalizationTimeoutMs = timeout;
+        sNormalizationTimeoutSeconds = timeout;
     }
 
     private native long nativeInit();
@@ -927,7 +921,7 @@ public class PersonalDataManager {
             CreditCard card);
     private native void nativeUpdateServerCardBillingAddress(long nativePersonalDataManagerAndroid,
             CreditCard card);
-    private native String nativeGetBasicCardPaymentType(
+    private native String nativeGetBasicCardIssuerNetwork(
             long nativePersonalDataManagerAndroid, String cardNumber, boolean emptyIfInvalid);
     private native void nativeAddServerCreditCardForTest(long nativePersonalDataManagerAndroid,
             CreditCard card);
@@ -955,10 +949,9 @@ public class PersonalDataManager {
             WebContents webContents, CreditCard card, FullCardRequestDelegate delegate);
     private native void nativeLoadRulesForRegion(
             long nativePersonalDataManagerAndroid, String regionCode);
-    private native boolean nativeStartAddressNormalization(long nativePersonalDataManagerAndroid,
-            String guid, String regionCode, NormalizedAddressRequestDelegate delegate);
-    private native void nativeCancelPendingAddressNormalizations(
-            long nativePersonalDataManagerAndroid);
+    private native void nativeStartAddressNormalization(long nativePersonalDataManagerAndroid,
+            AutofillProfile profile, String regionCode, int timeoutSeconds,
+            NormalizedAddressRequestDelegate delegate);
     private static native boolean nativeHasProfiles(long nativePersonalDataManagerAndroid);
     private static native boolean nativeHasCreditCards(long nativePersonalDataManagerAndroid);
     private static native boolean nativeIsAutofillEnabled();

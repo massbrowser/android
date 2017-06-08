@@ -214,14 +214,22 @@ void PpapiCommandBufferProxy::SignalSyncToken(const gpu::SyncToken& sync_token,
   NOTIMPLEMENTED();
 }
 
+void PpapiCommandBufferProxy::WaitSyncTokenHint(
+    const gpu::SyncToken& sync_token) {
+  // TODO(sunnyps): Forward sync token dependency hints to the renderer.
+}
+
 bool PpapiCommandBufferProxy::CanWaitUnverifiedSyncToken(
-    const gpu::SyncToken* sync_token) {
+    const gpu::SyncToken& sync_token) {
   return false;
 }
 
 int32_t PpapiCommandBufferProxy::GetExtraCommandBufferData() const {
   return 0;
 }
+
+void PpapiCommandBufferProxy::AddLatencyInfo(
+    const std::vector<ui::LatencyInfo>& latency_info) {}
 
 void PpapiCommandBufferProxy::SignalQuery(uint32_t query,
                                           const base::Closure& callback) {
@@ -247,15 +255,6 @@ int32_t PpapiCommandBufferProxy::CreateImage(ClientBuffer buffer,
 
 void PpapiCommandBufferProxy::DestroyImage(int32_t id) {
   NOTREACHED();
-}
-
-int32_t PpapiCommandBufferProxy::CreateGpuMemoryBufferImage(
-    size_t width,
-    size_t height,
-    unsigned internalformat,
-    unsigned usage) {
-  NOTREACHED();
-  return -1;
 }
 
 bool PpapiCommandBufferProxy::Send(IPC::Message* msg) {

@@ -9,7 +9,7 @@
 
 #include "base/macros.h"
 #include "base/time/time.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/input/scrollbar.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/scrollbar_layer_impl_base.h"
@@ -22,19 +22,27 @@ class ScrollbarAnimationControllerClient;
 // ScrollbarAnimationControllerThinning for one scrollbar
 class CC_EXPORT SingleScrollbarAnimationControllerThinning {
  public:
+  static constexpr float kIdleThicknessScale = 0.4f;
+  static constexpr float kMouseMoveDistanceToTriggerExpand = 25.f;
+
   static std::unique_ptr<SingleScrollbarAnimationControllerThinning> Create(
-      int scroll_layer_id,
+      ElementId scroll_element_id,
       ScrollbarOrientation orientation,
       ScrollbarAnimationControllerClient* client,
       base::TimeDelta thinning_duration);
 
   ~SingleScrollbarAnimationControllerThinning() {}
 
-  void set_mouse_move_distance_for_test(float distance) {
-    mouse_move_distance_to_trigger_animation_ = distance;
+  bool mouse_is_over_scrollbar_thumb() const {
+    return mouse_is_over_scrollbar_thumb_;
   }
-  bool mouse_is_over_scrollbar() const { return mouse_is_over_scrollbar_; }
-  bool mouse_is_near_scrollbar() const { return mouse_is_near_scrollbar_; }
+  bool mouse_is_near_scrollbar_thumb() const {
+    return mouse_is_near_scrollbar_thumb_;
+  }
+  bool mouse_is_near_scrollbar_track() const {
+    return mouse_is_near_scrollbar_track_;
+  }
+
   bool captured() const { return captured_; }
 
   bool Animate(base::TimeTicks now);
@@ -46,15 +54,16 @@ class CC_EXPORT SingleScrollbarAnimationControllerThinning {
   void DidMouseDown();
   void DidMouseUp();
   void DidMouseLeave();
-  void DidMouseMoveNear(float distance);
+  void DidMouseMove(const gfx::PointF& device_viewport_point);
 
  private:
   SingleScrollbarAnimationControllerThinning(
-      int scroll_layer_id,
+      ElementId scroll_element_id,
       ScrollbarOrientation orientation,
       ScrollbarAnimationControllerClient* client,
       base::TimeDelta thinning_duration);
 
+  ScrollbarLayerImplBase* GetScrollbar() const;
   float AnimationProgressAtTime(base::TimeTicks now);
   void RunAnimationFrame(float progress);
   const base::TimeDelta& Duration();
@@ -76,16 +85,15 @@ class CC_EXPORT SingleScrollbarAnimationControllerThinning {
   base::TimeTicks last_awaken_time_;
   bool is_animating_;
 
-  int scroll_layer_id_;
+  ElementId scroll_element_id_;
 
   ScrollbarOrientation orientation_;
   bool captured_;
-  bool mouse_is_over_scrollbar_;
-  bool mouse_is_near_scrollbar_;
+  bool mouse_is_over_scrollbar_thumb_;
+  bool mouse_is_near_scrollbar_thumb_;
+  bool mouse_is_near_scrollbar_track_;
   // Are we narrowing or thickening the bars.
   AnimationChange thickness_change_;
-  // How close should the mouse be to the scrollbar before we thicken it.
-  float mouse_move_distance_to_trigger_animation_;
 
   base::TimeDelta thinning_duration_;
 

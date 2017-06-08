@@ -56,6 +56,7 @@ const struct {
     {"jcbCC", IDR_AUTOFILL_CC_GENERIC},
     {"masterCardCC", IDR_AUTOFILL_CC_MASTERCARD},
     {"mirCC", IDR_AUTOFILL_CC_MIR},
+    {"unionPayCC", IDR_AUTOFILL_CC_UNIONPAY},
     {"visaCC", IDR_AUTOFILL_CC_VISA},
 #if defined(OS_ANDROID)
     {"httpWarning", IDR_AUTOFILL_HTTP_WARNING},
@@ -173,11 +174,12 @@ const gfx::FontList& AutofillPopupLayoutModel::GetValueFontListForRow(
     case POPUP_ITEM_ID_SCAN_CREDIT_CARD:
     case POPUP_ITEM_ID_SEPARATOR:
     case POPUP_ITEM_ID_HTTP_NOT_SECURE_WARNING_MESSAGE:
-      return normal_font_list_;
     case POPUP_ITEM_ID_TITLE:
+    case POPUP_ITEM_ID_PASSWORD_ENTRY:
+      return normal_font_list_;
     case POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY:
     case POPUP_ITEM_ID_DATALIST_ENTRY:
-    case POPUP_ITEM_ID_PASSWORD_ENTRY:
+    case POPUP_ITEM_ID_USERNAME_ENTRY:
       return bold_font_list_;
   }
   NOTREACHED();

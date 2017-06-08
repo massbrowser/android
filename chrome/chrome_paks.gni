@@ -133,11 +133,11 @@ template("chrome_extra_paks") {
     if (!is_android) {
       # New paks should be added here by default.
       sources += [
-        "$root_gen_dir/blink/devtools_resources.pak",
         "$root_gen_dir/chrome/component_extension_resources.pak",
         "$root_gen_dir/chrome/options_resources.pak",
         "$root_gen_dir/chrome/settings_resources.pak",
         "$root_gen_dir/chrome/sync_file_system_internals_resources.pak",
+        "$root_gen_dir/content/browser/devtools/devtools_resources.pak",
       ]
       deps += [
         "//chrome/browser/resources:component_extension_resources",
@@ -157,7 +157,7 @@ template("chrome_extra_paks") {
         "//ui/file_manager:resources",
       ]
     }
-    if (is_linux) {
+    if (is_linux || is_mac) {
       sources += [ "$root_gen_dir/headless/headless_lib_resources.pak" ]
       deps += [ "//headless:resources" ]
     }
@@ -167,6 +167,10 @@ template("chrome_extra_paks") {
         "$root_gen_dir/extensions/extensions_resources.pak",
       ]
       deps += [ "//extensions:extensions_resources" ]
+    }
+    if (is_android) {
+      sources += [ "$root_gen_dir/chrome/webapks_ui_resources.pak" ]
+      deps += [ "//chrome/browser/resources:webapks_ui_resources" ]
     }
   }
 }

@@ -6,10 +6,37 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "components/cryptauth/cryptauth_service.h"
 #include "components/cryptauth/wire_message.h"
 #include "components/proximity_auth/logging/logging.h"
 
 namespace cryptauth {
+
+// static
+SecureChannel::Factory* SecureChannel::Factory::factory_instance_ = nullptr;
+
+// static
+std::unique_ptr<SecureChannel> SecureChannel::Factory::NewInstance(
+    std::unique_ptr<Connection> connection,
+    CryptAuthService* cryptauth_service) {
+  if (!factory_instance_) {
+    factory_instance_ = new Factory();
+  }
+  return factory_instance_->BuildInstance(std::move(connection),
+                                          cryptauth_service);
+}
+
+// static
+void SecureChannel::Factory::SetInstanceForTesting(Factory* factory) {
+  factory_instance_ = factory;
+}
+
+std::unique_ptr<SecureChannel> SecureChannel::Factory::BuildInstance(
+    std::unique_ptr<Connection> connection,
+    CryptAuthService* cryptauth_service) {
+  return base::WrapUnique(
+      new SecureChannel(std::move(connection), cryptauth_service));
+}
 
 // static
 std::string SecureChannel::StatusToString(const Status& status) {
@@ -29,8 +56,6 @@ std::string SecureChannel::StatusToString(const Status& status) {
   }
 }
 
-SecureChannel::Delegate::~Delegate() {}
-
 SecureChannel::PendingMessage::PendingMessage() {}
 
 SecureChannel::PendingMessage::PendingMessage(
@@ -39,17 +64,16 @@ SecureChannel::PendingMessage::PendingMessage(
 
 SecureChannel::PendingMessage::~PendingMessage() {}
 
-SecureChannel::SecureChannel(
-    std::unique_ptr<Connection> connection,
-    std::unique_ptr<Delegate> delegate)
-    : connection_(std::move(connection)),
-      delegate_(std::move(delegate)),
-      status_(Status::DISCONNECTED),
+SecureChannel::SecureChannel(std::unique_ptr<Connection> connection,
+                             CryptAuthService* cryptauth_service)
+    : status_(Status::DISCONNECTED),
+      connection_(std::move(connection)),
+      cryptauth_service_(cryptauth_service),
       weak_ptr_factory_(this) {
   DCHECK(connection_);
   DCHECK(!connection_->IsConnected());
   DCHECK(!connection_->remote_device().user_id.empty());
-  DCHECK(delegate_);
+  DCHECK(cryptauth_service);
 
   connection_->AddObserver(this);
 }
@@ -176,9 +200,8 @@ void SecureChannel::Authenticate() {
   DCHECK(!authenticator_);
 
   authenticator_ = DeviceToDeviceAuthenticator::Factory::NewInstance(
-      connection_.get(),
-      connection_->remote_device().user_id,
-      delegate_->CreateSecureMessageDelegate());
+      connection_.get(), connection_->remote_device().user_id,
+      cryptauth_service_->CreateSecureMessageDelegate());
   authenticator_->Authenticate(
       base::Bind(&SecureChannel::OnAuthenticationResult,
                  weak_ptr_factory_.GetWeakPtr()));

@@ -29,6 +29,8 @@
 #endif
 #elif defined(OS_ANDROID)
 #include "media/gpu/android_video_decode_accelerator.h"
+#include "media/gpu/android_video_surface_chooser_impl.h"
+#include "media/gpu/avda_codec_allocator.h"
 #endif
 
 namespace media {
@@ -66,7 +68,8 @@ GpuVideoDecodeAcceleratorFactory::CreateWithNoGL() {
 // static
 MEDIA_GPU_EXPORT gpu::VideoDecodeAcceleratorCapabilities
 GpuVideoDecodeAcceleratorFactory::GetDecoderCapabilities(
-    const gpu::GpuPreferences& gpu_preferences) {
+    const gpu::GpuPreferences& gpu_preferences,
+    const gpu::GpuDriverBugWorkarounds& workarounds) {
   VideoDecodeAccelerator::Capabilities capabilities;
   if (gpu_preferences.disable_accelerated_video_decode)
     return gpu::VideoDecodeAcceleratorCapabilities();
@@ -80,7 +83,8 @@ GpuVideoDecodeAcceleratorFactory::GetDecoderCapabilities(
 // resolutions and other supported profile parameters.
 #if defined(OS_WIN)
   capabilities.supported_profiles =
-      DXVAVideoDecodeAccelerator::GetSupportedProfiles(gpu_preferences);
+      DXVAVideoDecodeAccelerator::GetSupportedProfiles(gpu_preferences,
+                                                       workarounds);
 #elif defined(OS_CHROMEOS)
   VideoDecodeAccelerator::SupportedProfiles vda_profiles;
 #if defined(USE_V4L2_CODEC)
@@ -247,8 +251,11 @@ GpuVideoDecodeAcceleratorFactory::CreateAndroidVDA(
     const gpu::GpuDriverBugWorkarounds& workarounds,
     const gpu::GpuPreferences& gpu_preferences) const {
   std::unique_ptr<VideoDecodeAccelerator> decoder;
-  decoder.reset(new AndroidVideoDecodeAccelerator(make_context_current_cb_,
-                                                  get_gles2_decoder_cb_));
+  decoder.reset(new AndroidVideoDecodeAccelerator(
+      AVDACodecAllocator::GetInstance(),
+      base::MakeUnique<AndroidVideoSurfaceChooserImpl>(),
+      make_context_current_cb_, get_gles2_decoder_cb_,
+      AndroidVideoDecodeAccelerator::PlatformConfig::CreateDefault()));
   return decoder;
 }
 #endif

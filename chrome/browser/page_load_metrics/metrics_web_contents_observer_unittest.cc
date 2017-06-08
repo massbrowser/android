@@ -17,6 +17,7 @@
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/page_load_tracker.h"
 #include "chrome/common/page_load_metrics/page_load_metrics_messages.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -30,7 +31,7 @@ namespace page_load_metrics {
 namespace {
 
 const char kDefaultTestUrl[] = "https://google.com/";
-const char kDefaultTestUrlAnchor[] = "https://google.com/#samepage";
+const char kDefaultTestUrlAnchor[] = "https://google.com/#samedocument";
 const char kDefaultTestUrl2[] = "https://whatever.com/";
 const char kFilteredStartUrl[] = "https://whatever.com/ignore-on-start";
 const char kFilteredCommitUrl[] = "https://whatever.com/ignore-on-commit";
@@ -99,7 +100,7 @@ class FilteringPageLoadMetricsObserver : public PageLoadMetricsObserver {
 
   void OnComplete(const PageLoadTiming& timing,
                   const PageLoadExtraInfo& extra_info) override {
-    completed_filtered_urls_->push_back(extra_info.committed_url);
+    completed_filtered_urls_->push_back(extra_info.url);
   }
 
  private:
@@ -155,16 +156,18 @@ class MetricsWebContentsObserverTest : public ChromeRenderViewHostTestHarness {
     AttachObserver();
   }
 
+  void NavigateToUntrackedUrl() {
+    content::WebContentsTester::For(web_contents())
+        ->NavigateAndCommit(GURL(url::kAboutBlankURL));
+  }
+
   void SimulateTimingUpdate(const PageLoadTiming& timing) {
     SimulateTimingUpdate(timing, web_contents()->GetMainFrame());
   }
 
   void SimulateTimingUpdate(const PageLoadTiming& timing,
                             content::RenderFrameHost* render_frame_host) {
-    ASSERT_TRUE(observer_->OnMessageReceived(
-        PageLoadMetricsMsg_TimingUpdated(observer_->routing_id(), timing,
-                                         PageLoadMetadata()),
-        render_frame_host));
+    observer_->OnTimingUpdated(render_frame_host, timing, PageLoadMetadata());
   }
 
   void AttachObserver() {
@@ -279,12 +282,12 @@ TEST_F(MetricsWebContentsObserverTest, NotInMainFrame) {
   ASSERT_EQ(0, CountUpdatedTimingReported());
   ASSERT_EQ(1, CountCompleteTimingReported());
   ASSERT_EQ(1, CountEmptyCompleteTimingReported());
-  CheckErrorEvent(ERR_IPC_FROM_WRONG_FRAME, 1);
+  CheckErrorEvent(ERR_TIMING_IPC_FROM_SUBFRAME, 1);
   CheckErrorEvent(ERR_NO_IPCS_RECEIVED, 1);
   CheckTotalErrorEvents();
 }
 
-TEST_F(MetricsWebContentsObserverTest, SamePageNoTrigger) {
+TEST_F(MetricsWebContentsObserverTest, SameDocumentNoTrigger) {
   PageLoadTiming timing;
   timing.navigation_start = base::Time::FromDoubleT(1);
 
@@ -351,6 +354,81 @@ TEST_F(MetricsWebContentsObserverTest, DontLogIrrelevantNavigation) {
   CheckTotalErrorEvents();
 }
 
+TEST_F(MetricsWebContentsObserverTest, EmptyTimingError) {
+  PageLoadTiming timing;
+
+  content::WebContentsTester* web_contents_tester =
+      content::WebContentsTester::For(web_contents());
+
+  web_contents_tester->NavigateAndCommit(GURL(kDefaultTestUrl));
+  SimulateTimingUpdate(timing);
+  ASSERT_EQ(0, CountUpdatedTimingReported());
+  NavigateToUntrackedUrl();
+  ASSERT_EQ(0, CountUpdatedTimingReported());
+  ASSERT_EQ(1, CountCompleteTimingReported());
+
+  CheckErrorEvent(ERR_BAD_TIMING_IPC_INVALID_TIMING, 1);
+  CheckErrorEvent(ERR_NO_IPCS_RECEIVED, 1);
+  CheckTotalErrorEvents();
+
+  histogram_tester_.ExpectTotalCount(
+      page_load_metrics::internal::kPageLoadTimingStatus, 1);
+  histogram_tester_.ExpectBucketCount(
+      page_load_metrics::internal::kPageLoadTimingStatus,
+      page_load_metrics::internal::INVALID_EMPTY_TIMING, 1);
+}
+
+TEST_F(MetricsWebContentsObserverTest, NullNavigationStartError) {
+  PageLoadTiming timing;
+  timing.parse_timing.parse_start = base::TimeDelta::FromMilliseconds(1);
+
+  content::WebContentsTester* web_contents_tester =
+      content::WebContentsTester::For(web_contents());
+
+  web_contents_tester->NavigateAndCommit(GURL(kDefaultTestUrl));
+  SimulateTimingUpdate(timing);
+  ASSERT_EQ(0, CountUpdatedTimingReported());
+  NavigateToUntrackedUrl();
+  ASSERT_EQ(0, CountUpdatedTimingReported());
+  ASSERT_EQ(1, CountCompleteTimingReported());
+
+  CheckErrorEvent(ERR_BAD_TIMING_IPC_INVALID_TIMING, 1);
+  CheckErrorEvent(ERR_NO_IPCS_RECEIVED, 1);
+  CheckTotalErrorEvents();
+
+  histogram_tester_.ExpectTotalCount(
+      page_load_metrics::internal::kPageLoadTimingStatus, 1);
+  histogram_tester_.ExpectBucketCount(
+      page_load_metrics::internal::kPageLoadTimingStatus,
+      page_load_metrics::internal::INVALID_NULL_NAVIGATION_START, 1);
+}
+
+TEST_F(MetricsWebContentsObserverTest, TimingOrderError) {
+  PageLoadTiming timing;
+  timing.navigation_start = base::Time::FromDoubleT(1);
+  timing.parse_timing.parse_stop = base::TimeDelta::FromMilliseconds(1);
+
+  content::WebContentsTester* web_contents_tester =
+      content::WebContentsTester::For(web_contents());
+
+  web_contents_tester->NavigateAndCommit(GURL(kDefaultTestUrl));
+  SimulateTimingUpdate(timing);
+  ASSERT_EQ(0, CountUpdatedTimingReported());
+  NavigateToUntrackedUrl();
+  ASSERT_EQ(0, CountUpdatedTimingReported());
+  ASSERT_EQ(1, CountCompleteTimingReported());
+
+  CheckErrorEvent(ERR_BAD_TIMING_IPC_INVALID_TIMING, 1);
+  CheckErrorEvent(ERR_NO_IPCS_RECEIVED, 1);
+  CheckTotalErrorEvents();
+
+  histogram_tester_.ExpectTotalCount(
+      page_load_metrics::internal::kPageLoadTimingStatus, 1);
+  histogram_tester_.ExpectBucketCount(
+      page_load_metrics::internal::kPageLoadTimingStatus,
+      page_load_metrics::internal::INVALID_ORDER_PARSE_START_PARSE_STOP, 1);
+}
+
 TEST_F(MetricsWebContentsObserverTest, NotInMainError) {
   PageLoadTiming timing;
   timing.navigation_start = base::Time::FromDoubleT(1);
@@ -368,7 +446,7 @@ TEST_F(MetricsWebContentsObserverTest, NotInMainError) {
   subframe_tester->SimulateNavigationStart(GURL(kDefaultTestUrl2));
   subframe_tester->SimulateNavigationCommit(GURL(kDefaultTestUrl2));
   SimulateTimingUpdate(timing, subframe);
-  CheckErrorEvent(ERR_IPC_FROM_WRONG_FRAME, 1);
+  CheckErrorEvent(ERR_TIMING_IPC_FROM_SUBFRAME, 1);
   CheckTotalErrorEvents();
   ASSERT_EQ(0, CountUpdatedTimingReported());
   ASSERT_EQ(0, CountCompleteTimingReported());
@@ -389,7 +467,7 @@ TEST_F(MetricsWebContentsObserverTest, BadIPC) {
   SimulateTimingUpdate(timing2);
   ASSERT_EQ(1, CountUpdatedTimingReported());
 
-  CheckErrorEvent(ERR_BAD_TIMING_IPC, 1);
+  CheckErrorEvent(ERR_BAD_TIMING_IPC_INVALID_TIMING_DESCENDENT, 1);
   CheckTotalErrorEvents();
 }
 

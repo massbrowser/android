@@ -10,8 +10,6 @@ source_set("renderer") {
     "cast_content_renderer_client.h",
     "cast_render_frame_action_deferrer.cc",
     "cast_render_frame_action_deferrer.h",
-    "key_systems_cast.cc",
-    "key_systems_cast.h",
   ]
 
   public_deps = [
@@ -32,7 +30,6 @@ source_set("renderer") {
     "//chromecast/common/media",
     "//chromecast/crash",
     "//chromecast/media",
-    "//components/cdm/renderer",
     "//components/network_hints/renderer",
     "//content/public/common",
     "//content/public/renderer",
@@ -40,6 +37,5 @@ source_set("renderer") {
     "//ipc",
     "//media",
     "//services/service_manager/public/cpp",
-    "//third_party/widevine/cdm:headers",
   ]
 }

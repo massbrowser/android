@@ -11,6 +11,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/supports_user_data.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -80,7 +81,7 @@ AwSettings::AwSettings(JNIEnv* env,
       renderer_prefs_initialized_(false),
       aw_settings_(env, obj) {
   web_contents->SetUserData(kAwSettingsUserDataKey,
-                            new AwSettingsUserData(this));
+                            base::MakeUnique<AwSettingsUserData>(this));
 }
 
 AwSettings::~AwSettings() {
@@ -435,6 +436,9 @@ void AwSettings::PopulateWebPreferencesLocked(JNIEnv* env,
   // possible API breakage because of disabling insecure use of geolocation.
   web_prefs->allow_geolocation_on_insecure_origins =
       Java_AwSettings_getAllowGeolocationOnInsecureOrigins(env, obj);
+
+  web_prefs->do_not_update_selection_on_mutating_selection_range =
+      Java_AwSettings_getDoNotUpdateSelectionOnMutatingSelectionRange(env, obj);
 
   // Keep spellcheck disabled on html elements unless the spellcheck="true"
   // attribute is explicitly specified. This "opt-in" behavior is for backward

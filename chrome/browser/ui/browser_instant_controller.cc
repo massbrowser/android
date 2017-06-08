@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/browser_instant_controller.h"
 
 #include "base/bind.h"
+#include "base/metrics/user_metrics.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
@@ -24,7 +25,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "content/public/common/referrer.h"
@@ -39,6 +39,8 @@ namespace {
 // makes sure to only execute the reload if the WebContents still exists.
 class TabReloader : public content::WebContentsUserData<TabReloader> {
  public:
+  ~TabReloader() override {}
+
   static void Reload(content::WebContents* web_contents) {
     TabReloader::CreateForWebContents(web_contents);
   }
@@ -49,11 +51,10 @@ class TabReloader : public content::WebContentsUserData<TabReloader> {
   explicit TabReloader(content::WebContents* web_contents)
       : web_contents_(web_contents), weak_ptr_factory_(this) {
     content::BrowserThread::PostTask(
-        content::BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&TabReloader::ReloadImpl, weak_ptr_factory_.GetWeakPtr()));
+        content::BrowserThread::UI, FROM_HERE,
+        base::BindOnce(&TabReloader::ReloadImpl,
+                       weak_ptr_factory_.GetWeakPtr()));
   }
-  ~TabReloader() override {}
 
   void ReloadImpl() {
     web_contents_->GetController().Reload(content::ReloadType::NORMAL, false);
@@ -159,13 +160,10 @@ void BrowserInstantController::ModelChanged(
     // the full story, it's necessary to look at other UMA actions as well,
     // such as tab switches.
     if (new_mode.is_ntp())
-      content::RecordAction(base::UserMetricsAction("InstantExtended.ShowNTP"));
+      base::RecordAction(base::UserMetricsAction("InstantExtended.ShowNTP"));
 
     instant_.SearchModeChanged(old_state.mode, new_mode);
   }
-
-  if (old_state.instant_support != new_state.instant_support)
-    instant_.InstantSupportChanged(new_state.instant_support);
 }
 
 void BrowserInstantController::DefaultSearchProviderChanged(

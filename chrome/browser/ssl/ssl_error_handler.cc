@@ -5,12 +5,15 @@
 #include "chrome/browser/ssl/ssl_error_handler.h"
 
 #include <stdint.h>
+#include <unordered_set>
 #include <utility>
 
 #include "base/callback_helpers.h"
 #include "base/feature_list.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/non_thread_safe.h"
@@ -21,22 +24,27 @@
 #include "chrome/browser/ssl/bad_clock_blocking_page.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
 #include "chrome/browser/ssl/ssl_cert_reporter.h"
+#include "chrome/browser/ssl/ssl_error_assistant.pb.h"
 #include "chrome/common/features.h"
+#include "chrome/grit/browser_resources.h"
 #include "components/network_time/network_time_tracker.h"
 #include "components/ssl_errors/error_classification.h"
 #include "components/ssl_errors/error_info.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_errors.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
 #include "chrome/browser/captive_portal/captive_portal_service.h"
 #include "chrome/browser/captive_portal/captive_portal_service_factory.h"
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
 #include "chrome/browser/ssl/captive_portal_blocking_page.h"
+#include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.h"
 #endif
 
 namespace {
@@ -44,12 +52,13 @@ namespace {
 #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
 const base::Feature kCaptivePortalInterstitial{
     "CaptivePortalInterstitial", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kCaptivePortalCertificateList{
+    "CaptivePortalCertificateList", base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
 
 const base::Feature kSSLCommonNameMismatchHandling{
     "SSLCommonNameMismatchHandling", base::FEATURE_ENABLED_BY_DEFAULT};
-
-const char kHistogram[] = "interstitial.ssl_error_handler";
 
 // Default delay in milliseconds before displaying the SSL interstitial.
 // This can be changed in tests.
@@ -60,20 +69,24 @@ const char kHistogram[] = "interstitial.ssl_error_handler";
 // - Otherwise, an SSL interstitial is displayed.
 const int64_t kInterstitialDelayInMilliseconds = 3000;
 
+const char kHistogram[] = "interstitial.ssl_error_handler";
+
 // Adds a message to console after navigation commits and then, deletes itself.
 // Also deletes itself if the navigation is stopped.
 class CommonNameMismatchRedirectObserver
     : public content::WebContentsObserver,
       public content::WebContentsUserData<CommonNameMismatchRedirectObserver> {
  public:
+  ~CommonNameMismatchRedirectObserver() override {}
+
   static void AddToConsoleAfterNavigation(
       content::WebContents* web_contents,
       const std::string& request_url_hostname,
       const std::string& suggested_url_hostname) {
     web_contents->SetUserData(
         UserDataKey(),
-        new CommonNameMismatchRedirectObserver(
-            web_contents, request_url_hostname, suggested_url_hostname));
+        base::WrapUnique(new CommonNameMismatchRedirectObserver(
+            web_contents, request_url_hostname, suggested_url_hostname)));
   }
 
  private:
@@ -84,7 +97,6 @@ class CommonNameMismatchRedirectObserver
         web_contents_(web_contents),
         request_url_hostname_(request_url_hostname),
         suggested_url_hostname_(suggested_url_hostname) {}
-  ~CommonNameMismatchRedirectObserver() override {}
 
   // WebContentsObserver:
   void NavigationStopped() override {
@@ -126,6 +138,29 @@ void RecordUMA(SSLErrorHandler::UMAEvent event) {
 bool IsCaptivePortalInterstitialEnabled() {
   return base::FeatureList::IsEnabled(kCaptivePortalInterstitial);
 }
+
+// Reads the SSL error assistant configuration from the resource bundle.
+std::unique_ptr<chrome_browser_ssl::SSLErrorAssistantConfig>
+ReadErrorAssistantProtoFromResourceBundle() {
+  auto proto = base::MakeUnique<chrome_browser_ssl::SSLErrorAssistantConfig>();
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK(proto);
+  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
+  base::StringPiece data =
+      bundle.GetRawDataResource(IDR_SSL_ERROR_ASSISTANT_PB);
+  google::protobuf::io::ArrayInputStream stream(data.data(), data.size());
+  return proto->ParseFromZeroCopyStream(&stream) ? std::move(proto) : nullptr;
+}
+
+std::unique_ptr<std::unordered_set<std::string>> LoadCaptivePortalCertHashes(
+    const chrome_browser_ssl::SSLErrorAssistantConfig& proto) {
+  auto hashes = base::MakeUnique<std::unordered_set<std::string>>();
+  for (const chrome_browser_ssl::CaptivePortalCert& cert :
+       proto.captive_portal_cert()) {
+    hashes.get()->insert(cert.sha256_hash());
+  }
+  return hashes;
+}
 #endif
 
 bool IsSSLCommonNameMismatchHandlingEnabled() {
@@ -142,12 +177,27 @@ class ConfigSingleton : public base::NonThreadSafe {
   base::Clock* clock() const;
   network_time::NetworkTimeTracker* network_time_tracker() const;
 
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  // Returns true if any of the SHA256 hashes in |ssl_info| is of a captive
+  // portal certificate. The set of captive portal hashes is loaded on first
+  // use.
+  bool IsKnownCaptivePortalCert(const net::SSLInfo& ssl_info);
+#endif
+
+  // Testing methods:
+  void ResetForTesting();
   void SetInterstitialDelayForTesting(const base::TimeDelta& delay);
   void SetTimerStartedCallbackForTesting(
       SSLErrorHandler::TimerStartedCallback* callback);
   void SetClockForTesting(base::Clock* clock);
   void SetNetworkTimeTrackerForTesting(
       network_time::NetworkTimeTracker* tracker);
+
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  void SetErrorAssistantProto(
+      std::unique_ptr<chrome_browser_ssl::SSLErrorAssistantConfig>
+          error_assistant_proto);
+#endif
 
  private:
   base::TimeDelta interstitial_delay_;
@@ -161,6 +211,17 @@ class ConfigSingleton : public base::NonThreadSafe {
   base::Clock* testing_clock_ = nullptr;
 
   network_time::NetworkTimeTracker* network_time_tracker_ = nullptr;
+
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  // Error assistant configuration.
+  std::unique_ptr<chrome_browser_ssl::SSLErrorAssistantConfig>
+      error_assistant_proto_;
+
+  // SPKI hashes belonging to certs treated as captive portals. Null until the
+  // first time IsKnownCaptivePortalCert() or SetErrorAssistantProto()
+  // is called.
+  std::unique_ptr<std::unordered_set<std::string>> captive_portal_spki_hashes_;
+#endif
 };
 
 ConfigSingleton::ConfigSingleton()
@@ -187,6 +248,18 @@ base::Clock* ConfigSingleton::clock() const {
   return testing_clock_;
 }
 
+void ConfigSingleton::ResetForTesting() {
+  interstitial_delay_ =
+      base::TimeDelta::FromMilliseconds(kInterstitialDelayInMilliseconds);
+  timer_started_callback_ = nullptr;
+  network_time_tracker_ = nullptr;
+  testing_clock_ = nullptr;
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  error_assistant_proto_.reset();
+  captive_portal_spki_hashes_.reset();
+#endif
+}
+
 void ConfigSingleton::SetInterstitialDelayForTesting(
     const base::TimeDelta& delay) {
   interstitial_delay_ = delay;
@@ -206,6 +279,43 @@ void ConfigSingleton::SetNetworkTimeTrackerForTesting(
     network_time::NetworkTimeTracker* tracker) {
   network_time_tracker_ = tracker;
 }
+
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+void ConfigSingleton::SetErrorAssistantProto(
+    std::unique_ptr<chrome_browser_ssl::SSLErrorAssistantConfig> proto) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  CHECK(proto);
+  // Ignore versions that are not new.
+  if (error_assistant_proto_ &&
+      proto->version_id() <= error_assistant_proto_->version_id()) {
+    return;
+  }
+  error_assistant_proto_ = std::move(proto);
+  captive_portal_spki_hashes_ =
+      LoadCaptivePortalCertHashes(*error_assistant_proto_);
+}
+
+bool ConfigSingleton::IsKnownCaptivePortalCert(const net::SSLInfo& ssl_info) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (!captive_portal_spki_hashes_) {
+    error_assistant_proto_ = ReadErrorAssistantProtoFromResourceBundle();
+    CHECK(error_assistant_proto_);
+    captive_portal_spki_hashes_ =
+        LoadCaptivePortalCertHashes(*error_assistant_proto_);
+  }
+
+  for (const net::HashValue& hash_value : ssl_info.public_key_hashes) {
+    if (hash_value.tag != net::HASH_VALUE_SHA256) {
+      continue;
+    }
+    if (captive_portal_spki_hashes_->find(hash_value.ToString()) !=
+        captive_portal_spki_hashes_->end()) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif
 
 class SSLErrorHandlerDelegateImpl : public SSLErrorHandler::Delegate {
  public:
@@ -360,8 +470,13 @@ void SSLErrorHandler::HandleSSLError(
               web_contents, ssl_info, profile, cert_error, options_mask,
               request_url, std::move(ssl_cert_reporter), callback)),
       web_contents, profile, cert_error, ssl_info, request_url, callback);
-  web_contents->SetUserData(UserDataKey(), error_handler);
+  web_contents->SetUserData(UserDataKey(), base::WrapUnique(error_handler));
   error_handler->StartHandlingError();
+}
+
+// static
+void SSLErrorHandler::ResetConfigForTesting() {
+  g_config.Pointer()->ResetForTesting();
 }
 
 // static
@@ -396,6 +511,13 @@ bool SSLErrorHandler::IsTimerRunningForTesting() const {
   return timer_.IsRunning();
 }
 
+void SSLErrorHandler::SetErrorAssistantProto(
+    std::unique_ptr<chrome_browser_ssl::SSLErrorAssistantConfig> config_proto) {
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  g_config.Pointer()->SetErrorAssistantProto(std::move(config_proto));
+#endif
+}
+
 SSLErrorHandler::SSLErrorHandler(
     std::unique_ptr<Delegate> delegate,
     content::WebContents* web_contents,
@@ -426,40 +548,60 @@ void SSLErrorHandler::StartHandlingError() {
     return;
   }
 
-  std::vector<std::string> dns_names;
-  ssl_info_.cert->GetDNSNames(&dns_names);
-  DCHECK(!dns_names.empty());
-  GURL suggested_url;
+  const net::CertStatus non_name_mismatch_errors =
+      ssl_info_.cert_status ^ net::CERT_STATUS_COMMON_NAME_INVALID;
+  const bool only_error_is_name_mismatch =
+      cert_error_ == net::ERR_CERT_COMMON_NAME_INVALID &&
+      (!net::IsCertStatusError(non_name_mismatch_errors) ||
+       net::IsCertStatusMinorError(ssl_info_.cert_status));
+
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  // Check known captive portal certificate list if the only error is
+  // name-mismatch. If there are multiple errors, it indicates that the captive
+  // portal landing page itself will have SSL errors, and so it's not a very
+  // helpful place to direct the user to go.
+  if (base::FeatureList::IsEnabled(kCaptivePortalCertificateList) &&
+      only_error_is_name_mismatch &&
+      g_config.Pointer()->IsKnownCaptivePortalCert(ssl_info_)) {
+    RecordUMA(CAPTIVE_PORTAL_CERT_FOUND);
+    ShowCaptivePortalInterstitial(
+        GURL(captive_portal::CaptivePortalDetector::kDefaultURL));
+    return;
+  }
+#endif
+
   if (IsSSLCommonNameMismatchHandlingEnabled() &&
       cert_error_ == net::ERR_CERT_COMMON_NAME_INVALID &&
-      delegate_->IsErrorOverridable() &&
-      delegate_->GetSuggestedUrl(dns_names, &suggested_url)) {
-    RecordUMA(WWW_MISMATCH_FOUND);
-    net::CertStatus extra_cert_errors =
-        ssl_info_.cert_status ^ net::CERT_STATUS_COMMON_NAME_INVALID;
+      delegate_->IsErrorOverridable()) {
+    std::vector<std::string> dns_names;
+    ssl_info_.cert->GetSubjectAltName(&dns_names, nullptr);
+    GURL suggested_url;
+    if (!dns_names.empty() &&
+        delegate_->GetSuggestedUrl(dns_names, &suggested_url)) {
+      RecordUMA(WWW_MISMATCH_FOUND_IN_SAN);
 
-    // Show the SSL intersitial if |CERT_STATUS_COMMON_NAME_INVALID| is not
-    // the only error. Need not check for captive portal in this case.
-    // (See the comment below).
-    if (net::IsCertStatusError(extra_cert_errors) &&
-        !net::IsCertStatusMinorError(ssl_info_.cert_status)) {
-      ShowSSLInterstitial();
+      // Show the SSL interstitial if |CERT_STATUS_COMMON_NAME_INVALID| is not
+      // the only error. Need not check for captive portal in this case.
+      // (See the comment below).
+      if (!only_error_is_name_mismatch) {
+        ShowSSLInterstitial();
+        return;
+      }
+      delegate_->CheckSuggestedUrl(
+          suggested_url,
+          base::Bind(&SSLErrorHandler::CommonNameMismatchHandlerCallback,
+                     weak_ptr_factory_.GetWeakPtr()));
+      timer_.Start(FROM_HERE, g_config.Pointer()->interstitial_delay(), this,
+                   &SSLErrorHandler::ShowSSLInterstitial);
+
+      if (g_config.Pointer()->timer_started_callback())
+        g_config.Pointer()->timer_started_callback()->Run(web_contents_);
+
+      // Do not check for a captive portal in this case, because a captive
+      // portal most likely cannot serve a valid certificate which passes the
+      // similarity check.
       return;
     }
-    delegate_->CheckSuggestedUrl(
-        suggested_url,
-        base::Bind(&SSLErrorHandler::CommonNameMismatchHandlerCallback,
-                   weak_ptr_factory_.GetWeakPtr()));
-    timer_.Start(FROM_HERE, g_config.Pointer()->interstitial_delay(), this,
-                 &SSLErrorHandler::ShowSSLInterstitial);
-
-    if (g_config.Pointer()->timer_started_callback())
-      g_config.Pointer()->timer_started_callback()->Run(web_contents_);
-
-    // Do not check for a captive portal in this case, because a captive
-    // portal most likely cannot serve a valid certificate which passes the
-    // similarity check.
-    return;
   }
 
   // Always listen to captive portal notifications, otherwise build fails
@@ -561,8 +703,10 @@ void SSLErrorHandler::Observe(
 
 void SSLErrorHandler::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->IsInMainFrame() || navigation_handle->IsSamePage())
+  if (!navigation_handle->IsInMainFrame() ||
+      navigation_handle->IsSameDocument()) {
     return;
+  }
 
   // Destroy the error handler on all new navigations. This ensures that the
   // handler is properly recreated when a hanging page is navigated to an SSL

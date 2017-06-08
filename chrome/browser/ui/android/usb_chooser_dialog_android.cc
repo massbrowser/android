@@ -38,11 +38,11 @@ namespace {
 
 void OnDevicePermissionRequestComplete(
     scoped_refptr<UsbDevice> device,
-    const device::usb::ChooserService::GetPermissionCallback& callback,
+    const device::mojom::UsbChooserService::GetPermissionCallback& callback,
     bool granted) {
-  device::usb::DeviceInfoPtr device_info;
+  device::mojom::UsbDeviceInfoPtr device_info;
   if (granted)
-    device_info = device::usb::DeviceInfo::From(*device);
+    device_info = device::mojom::UsbDeviceInfo::From(*device);
   callback.Run(std::move(device_info));
 }
 
@@ -51,7 +51,7 @@ void OnDevicePermissionRequestComplete(
 UsbChooserDialogAndroid::UsbChooserDialogAndroid(
     const std::vector<device::UsbDeviceFilter>& filters,
     content::RenderFrameHost* render_frame_host,
-    const device::usb::ChooserService::GetPermissionCallback& callback)
+    const device::mojom::UsbChooserService::GetPermissionCallback& callback)
     : render_frame_host_(render_frame_host),
       callback_(callback),
       usb_service_observer_(this),
@@ -225,7 +225,7 @@ void UsbChooserDialogAndroid::OpenUrl(const std::string& url) {
 
 bool UsbChooserDialogAndroid::DisplayDevice(
     scoped_refptr<UsbDevice> device) const {
-  if (!device::UsbDeviceFilter::MatchesAny(device, filters_))
+  if (!device::UsbDeviceFilter::MatchesAny(*device, filters_))
     return false;
 
   // On Android it is not possible to read the WebUSB descriptors until Chrome
@@ -236,7 +236,8 @@ bool UsbChooserDialogAndroid::DisplayDevice(
 
   return device::FindInWebUsbAllowedOrigins(
       device->webusb_allowed_origins(),
-      render_frame_host_->GetLastCommittedURL().GetOrigin());
+      render_frame_host_->GetLastCommittedURL().GetOrigin(), base::nullopt,
+      base::nullopt);
 }
 
 // static

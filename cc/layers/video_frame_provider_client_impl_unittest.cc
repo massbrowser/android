@@ -129,6 +129,17 @@ TEST_F(VideoFrameProviderClientImplTest, StopUsingProviderUpdateDamage) {
   ASSERT_FALSE(client_impl_->get_provider_for_testing());
 }
 
+TEST_F(VideoFrameProviderClientImplTest, StopNotUpdateDamage) {
+  CreateActiveVideoLayer();
+  ASSERT_TRUE(client_impl_->get_provider_for_testing());
+  StartRendering();
+  EXPECT_CALL(*this, RemoveVideoFrameController(_));
+  EXPECT_EQ(gfx::Rect(), video_layer_impl_->update_rect());
+  client_impl_->Stop();
+  EXPECT_EQ(gfx::Rect(), video_layer_impl_->update_rect());
+  ASSERT_FALSE(client_impl_->get_provider_for_testing());
+}
+
 TEST_F(VideoFrameProviderClientImplTest, FrameAcquisition) {
   CreateActiveVideoLayer();
   StartRenderingAndRenderFrame();

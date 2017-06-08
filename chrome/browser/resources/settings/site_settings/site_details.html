@@ -3,7 +3,6 @@
 <link rel="import" href="chrome://resources/html/action_link_css.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_dialog/cr_dialog.html">
 <link rel="import" href="chrome://resources/cr_elements/icons.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button.html">
 <link rel="import" href="../route.html">
 <link rel="import" href="../settings_shared_css.html">
@@ -24,7 +23,7 @@
       }
     </style>
     <!-- Confirm Delete dialog -->
-    <dialog is="cr-dialog" id="confirmDeleteDialog">
+    <dialog is="cr-dialog" id="confirmDeleteDialog" close-text="$i18n{close}">
       <div class="title">$i18n{siteSettingsSiteRemoveDialogTitle}</div>
       <div class="body">[[confirmationDeleteMsg_]]</div>
       <div class="button-container">
@@ -50,7 +49,7 @@
         </div>
         <div class="list-frame">
           <div class="list-item" id="storage">
-            <div class="flex">[[storedData_]]</div>
+            <div class="start">[[storedData_]]</div>
             <paper-icon-button icon="cr:delete"
                 on-tap="onConfirmClearStorage_"
                 alt="$i18n{siteSettingsDelete}"></paper-icon-button>
@@ -83,7 +82,7 @@
           label="$i18n{siteSettingsNotifications}" site="[[site]]">
       </site-details-permission>
       <site-details-permission category="{{ContentSettingsTypes.JAVASCRIPT}}"
-          icon="settings:input" id="javascript"
+          icon="settings:code" id="javascript"
           label="$i18n{siteSettingsJavascript}" site="[[site]]">
       </site-details-permission>
       <site-details-permission category="{{ContentSettingsTypes.PLUGINS}}"

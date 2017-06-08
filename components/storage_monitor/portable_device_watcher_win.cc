@@ -20,7 +20,6 @@
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_propvariant.h"
-#include "components/storage_monitor/media_storage_util.h"
 #include "components/storage_monitor/removable_device_constants.h"
 #include "components/storage_monitor/storage_info.h"
 #include "content/public/browser/browser_thread.h"
@@ -158,7 +157,7 @@ bool SetUp(const base::string16& pnp_device_id,
     return false;
   }
 
-  hr = (*device)->Open(pnp_device_id.c_str(), client_info.get());
+  hr = (*device)->Open(pnp_device_id.c_str(), client_info.Get());
   if (SUCCEEDED(hr))
     return true;
 
@@ -231,13 +230,13 @@ bool GetObjectUniqueId(IPortableDevice* device,
 
   base::win::ScopedComPtr<IPortableDeviceValues> properties_values;
   if (FAILED(properties->GetValues(object_id.c_str(),
-                                   properties_to_read.get(),
+                                   properties_to_read.Get(),
                                    properties_values.Receive()))) {
     return false;
   }
 
   REFPROPERTYKEY key = GetUniqueIdPropertyKey(object_id);
-  return GetStringPropertyValue(properties_values.get(), key, unique_id);
+  return GetStringPropertyValue(properties_values.Get(), key, unique_id);
 }
 
 // Constructs the device storage unique identifier using |device_serial_num| and
@@ -336,18 +335,18 @@ bool GetDeviceStorageObjectsOnBlockingThread(
     return false;
 
   base::string16 device_serial_num;
-  if (!GetObjectUniqueId(device.get(), WPD_DEVICE_OBJECT_ID,
+  if (!GetObjectUniqueId(device.Get(), WPD_DEVICE_OBJECT_ID,
                          &device_serial_num)) {
     return false;
   }
 
   PortableDeviceWatcherWin::StorageObjectIDs storage_obj_ids;
-  if (!GetRemovableStorageObjectIds(device.get(), &storage_obj_ids))
+  if (!GetRemovableStorageObjectIds(device.Get(), &storage_obj_ids))
     return false;
   for (PortableDeviceWatcherWin::StorageObjectIDs::const_iterator id_iter =
        storage_obj_ids.begin(); id_iter != storage_obj_ids.end(); ++id_iter) {
     base::string16 storage_persistent_id;
-    if (!GetObjectUniqueId(device.get(), *id_iter, &storage_persistent_id))
+    if (!GetObjectUniqueId(device.Get(), *id_iter, &storage_persistent_id))
       continue;
 
     std::string device_storage_id;
@@ -423,7 +422,7 @@ bool EnumerateAttachedDevicesOnBlockingThread(
 
   for (DWORD index = 0; index < pnp_device_count; ++index) {
     PortableDeviceWatcherWin::DeviceDetails device_details;
-    if (GetDeviceInfoOnBlockingThread(portable_device_mgr.get(),
+    if (GetDeviceInfoOnBlockingThread(portable_device_mgr.Get(),
                                       pnp_device_ids[index], &device_details))
       devices->push_back(device_details);
     CoTaskMemFree(pnp_device_ids[index]);
@@ -446,7 +445,7 @@ bool HandleDeviceAttachedEventOnBlockingThread(
   // Sometimes, portable device manager doesn't have the new device details.
   // Refresh the manager device list to update its details.
   portable_device_mgr->RefreshDeviceList();
-  return GetDeviceInfoOnBlockingThread(portable_device_mgr.get(), pnp_device_id,
+  return GetDeviceInfoOnBlockingThread(portable_device_mgr.Get(), pnp_device_id,
                                        device_details);
 }
 
@@ -632,9 +631,6 @@ void PortableDeviceWatcherWin::OnDidHandleDeviceAttachEvent(
     const std::string& storage_id = storage_iter->object_persistent_id;
     DCHECK(!base::ContainsKey(storage_map_, storage_id));
 
-    // Keep track of storage id and storage name to see how often we receive
-    // empty values.
-    MediaStorageUtil::RecordDeviceInfoHistogram(false, storage_id, name);
     if (storage_id.empty() || name.empty())
       return;
 

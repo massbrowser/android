@@ -14,9 +14,11 @@
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
@@ -129,10 +131,10 @@ class SpellcheckServiceBrowserTest : public InProcessBrowserTest {
   std::string GetMultilingualDictionaries() {
     const base::ListValue* list_value =
         prefs_->GetList(spellcheck::prefs::kSpellCheckDictionaries);
-    std::vector<std::string> dictionaries;
+    std::vector<base::StringPiece> dictionaries;
     for (const auto& item_value : *list_value) {
-      std::string dictionary;
-      EXPECT_TRUE(item_value->GetAsString(&dictionary));
+      base::StringPiece dictionary;
+      EXPECT_TRUE(item_value.GetAsString(&dictionary));
       dictionaries.push_back(dictionary);
     }
     return base::JoinString(dictionaries, ",");
@@ -235,17 +237,12 @@ IN_PROC_BROWSER_TEST_F(SpellcheckServiceBrowserTest,
   EXPECT_FALSE(GetFirstEnableSpellcheckMessageParam());
 }
 
-// Flaky on Windows, see https://crbug.com/611029.
-#if defined(OS_WIN)
-#define MAYBE_StartWithoutLanguages DISABLED_StartWithoutLanguages
-#else
-#define MAYBE_StartWithoutLanguages StartWithoutLanguages
-#endif
 // Starting without spellcheck languages should send the 'disable spellcheck'
 // message to the renderer. Consequently adding spellchecking languages should
 // enable spellcheck.
+// Flaky, see https://crbug.com/600153
 IN_PROC_BROWSER_TEST_F(SpellcheckServiceBrowserTest,
-                       MAYBE_StartWithoutLanguages) {
+                       DISABLED_StartWithoutLanguages) {
   InitSpellcheck(true, "", "");
   EXPECT_FALSE(GetFirstEnableSpellcheckMessageParam());
 
@@ -273,10 +270,13 @@ IN_PROC_BROWSER_TEST_F(SpellcheckServiceBrowserTest, DeleteCorruptedBDICT) {
   base::FilePath bdict_path =
       spellcheck::GetVersionedFileName("en-US", dict_dir);
 
-  size_t actual = base::WriteFile(bdict_path,
-      reinterpret_cast<const char*>(kCorruptedBDICT),
-      arraysize(kCorruptedBDICT));
-  EXPECT_EQ(arraysize(kCorruptedBDICT), actual);
+  {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    size_t actual = base::WriteFile(
+        bdict_path, reinterpret_cast<const char*>(kCorruptedBDICT),
+        arraysize(kCorruptedBDICT));
+    EXPECT_EQ(arraysize(kCorruptedBDICT), actual);
+  }
 
   // Attach an event to the SpellcheckService object so we can receive its
   // status updates.
@@ -308,6 +308,7 @@ IN_PROC_BROWSER_TEST_F(SpellcheckServiceBrowserTest, DeleteCorruptedBDICT) {
   content::RunAllPendingInMessageLoop(content::BrowserThread::UI);
   EXPECT_EQ(SpellcheckService::BDICT_CORRUPTED,
             SpellcheckService::GetStatusEvent());
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   if (base::PathExists(bdict_path)) {
     ADD_FAILURE();
     EXPECT_TRUE(base::DeleteFile(bdict_path, true));

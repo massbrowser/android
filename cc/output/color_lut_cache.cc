@@ -51,16 +51,8 @@ void FloatToLUT(float* f, unsigned char* out, size_t num) {
 }  // namespace
 
 template <typename T>
-unsigned int ColorLUTCache::MakeLUT(const gfx::ColorSpace& from,
-                                    gfx::ColorSpace to,
+unsigned int ColorLUTCache::MakeLUT(const gfx::ColorTransform* transform,
                                     int lut_samples) {
-  if (to == gfx::ColorSpace()) {
-    to = gfx::ColorSpace::CreateSRGB();
-  }
-  std::unique_ptr<gfx::ColorTransform> transform(
-      gfx::ColorTransform::NewColorTransform(
-          from, to, gfx::ColorTransform::Intent::INTENT_PERCEPTUAL));
-
   int lut_entries = lut_samples * lut_samples * lut_samples;
   float inverse = 1.0f / (lut_samples - 1);
   std::vector<T> lut(lut_entries * 4);
@@ -76,7 +68,7 @@ unsigned int ColorLUTCache::MakeLUT(const gfx::ColorSpace& from,
         samples[y].set_y(u * inverse);
         samples[y].set_z(v * inverse);
       }
-      transform->transform(samples.data(), samples.size());
+      transform->Transform(samples.data(), samples.size());
       T* lutp2 = lutp + lut_samples;
       FloatToLUT(reinterpret_cast<float*>(samples.data()), lutp2,
                  lut_samples * 3);
@@ -89,7 +81,10 @@ unsigned int ColorLUTCache::MakeLUT(const gfx::ColorSpace& from,
     }
   }
 
-  unsigned int lut_texture;
+  GLuint previously_bound_texture = 0;
+  GLuint lut_texture = 0;
+  gl_->GetIntegerv(GL_TEXTURE_BINDING_2D,
+                   reinterpret_cast<GLint*>(&previously_bound_texture));
   gl_->GenTextures(1, &lut_texture);
   gl_->BindTexture(GL_TEXTURE_2D, lut_texture);
   gl_->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -100,32 +95,31 @@ unsigned int ColorLUTCache::MakeLUT(const gfx::ColorSpace& from,
                   lut_samples * lut_samples, 0, GL_RGBA,
                   sizeof(T) == 1 ? GL_UNSIGNED_BYTE : GL_HALF_FLOAT_OES,
                   lut.data());
+  gl_->BindTexture(GL_TEXTURE_2D, previously_bound_texture);
   return lut_texture;
 }
 
-ColorLUTCache::LUT ColorLUTCache::GetLUT(const gfx::ColorSpace& from,
-                                         const gfx::ColorSpace& to) {
-  CacheKey key(from, to);
-  auto iter = lut_cache_.Get(key);
+ColorLUTCache::LUT ColorLUTCache::GetLUT(const gfx::ColorTransform* transform) {
+  auto iter = lut_cache_.Get(transform);
   if (iter != lut_cache_.end()) {
     iter->second.last_used_frame = current_frame_;
     return iter->second.lut;
   }
 
   LUT lut;
-  // If input is HDR, and the output is scRGB, we're going to need
+  // If input is HDR, and the output is full range, we're going to need
   // to produce values outside of 0-1, so we'll need to make a half-float
   // LUT. Also, we'll need to build a larger lut to maintain accuracy.
-  // All LUT sizes should be odd a some transforms hav a knee at 0.5.
-  if (to == gfx::ColorSpace::CreateSCRGBLinear() && from.IsHDR() &&
-      texture_half_float_linear_) {
+  // All LUT sizes should be odd as some transforms have a knee at 0.5.
+  if (transform->GetDstColorSpace().FullRangeEncodedValues() &&
+      transform->GetSrcColorSpace().IsHDR() && texture_half_float_linear_) {
     lut.size = 37;
-    lut.texture = MakeLUT<uint16_t>(from, to, lut.size);
+    lut.texture = MakeLUT<uint16_t>(transform, lut.size);
   } else {
     lut.size = 17;
-    lut.texture = MakeLUT<unsigned char>(from, to, lut.size);
+    lut.texture = MakeLUT<unsigned char>(transform, lut.size);
   }
-  lut_cache_.Put(key, CacheVal(lut, current_frame_));
+  lut_cache_.Put(transform, CacheVal(lut, current_frame_));
   return lut;
 }
 

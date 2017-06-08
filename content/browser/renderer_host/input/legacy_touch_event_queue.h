@@ -24,6 +24,7 @@
 namespace content {
 
 class CoalescedWebTouchEvent;
+class TouchTimeoutHandler;
 
 // A queue for throttling and coalescing touch-events.
 class CONTENT_EXPORT LegacyTouchEventQueue : public TouchEventQueue {
@@ -95,10 +96,7 @@ class CONTENT_EXPORT LegacyTouchEventQueue : public TouchEventQueue {
   }
 
  private:
-  class TouchTimeoutHandler;
-  class TouchMoveSlopSuppressor;
-  friend class TouchTimeoutHandler;
-  friend class TouchEventQueueTest;
+  friend class LegacyTouchEventQueueTest;
 
   bool HasPendingAsyncTouchMoveForTesting() const;
   bool IsTimeoutRunningForTesting() const;
@@ -106,7 +104,7 @@ class CONTENT_EXPORT LegacyTouchEventQueue : public TouchEventQueue {
 
   // Empties the queue of touch events. This may result in any number of gesture
   // events being sent to the renderer.
-  void FlushQueue();
+  void FlushQueue() override;
 
   // Walks the queue, checking each event with |FilterBeforeForwarding()|.
   // If allowed, forwards the touch event and stops processing further events.
@@ -130,6 +128,10 @@ class CONTENT_EXPORT LegacyTouchEventQueue : public TouchEventQueue {
   void AckTouchEventToClient(InputEventAckState ack_result,
                              const ui::LatencyInfo* optional_latency_info);
 
+  // Dispatch a touch cancel event for the |event_to_cancel|.
+  void SendTouchCancelEventForTouchEvent(
+      const TouchEventWithLatencyInfo& event_to_cancel) override;
+
   // Dispatch |touch| to the client. Before dispatching, updates pointer
   // states in touchmove events for pointers that have not changed position.
   void SendTouchEventImmediately(TouchEventWithLatencyInfo* touch);
@@ -144,17 +146,13 @@ class CONTENT_EXPORT LegacyTouchEventQueue : public TouchEventQueue {
   PreFilterResult FilterBeforeForwarding(const blink::WebTouchEvent& event);
   void ForwardToRenderer(const TouchEventWithLatencyInfo& event);
   void UpdateTouchConsumerStates(const blink::WebTouchEvent& event,
-                                 InputEventAckState ack_result);
+                                 InputEventAckState ack_result) override;
   void FlushPendingAsyncTouchmove();
 
   // Handles touch event forwarding and ack'ed event dispatch.
   TouchEventQueueClient* client_;
 
   std::list<std::unique_ptr<CoalescedWebTouchEvent>> touch_queue_;
-
-  // Position of the first touch in the most recent sequence forwarded to the
-  // client.
-  gfx::PointF touch_sequence_start_position_;
 
   // Used to defer touch forwarding when ack dispatch triggers |QueueEvent()|.
   // True within the scope of |AckTouchEventToClient()|.
@@ -180,10 +178,6 @@ class CONTENT_EXPORT LegacyTouchEventQueue : public TouchEventQueue {
 
   // Optional handler for timed-out touch event acks.
   std::unique_ptr<TouchTimeoutHandler> timeout_handler_;
-
-  // Suppression of TouchMove's within a slop region when a sequence has not yet
-  // been preventDefaulted.
-  std::unique_ptr<TouchMoveSlopSuppressor> touchmove_slop_suppressor_;
 
   // Whether touch events should remain buffered and dispatched asynchronously
   // while a scroll sequence is active.  In this mode, touchmove's are throttled

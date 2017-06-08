@@ -24,7 +24,6 @@ extern const char kErrorConsole[];
 extern const char kExtensionProcess[];
 extern const char kExtensionsOnChromeURLs[];
 extern const char kForceDevModeHighlighting[];
-extern const char kIsolateExtensions[];
 extern const char kLoadApps[];
 extern const char kScriptsRequireAction[];
 extern const char kEnableScriptsRequireAction[];
@@ -36,6 +35,7 @@ extern const char kTraceAppSource[];
 extern const char kNativeCrxBindings[];
 extern const char kWhitelistedExtensionID[];
 extern const char kEnableCrxHashCheck[];
+extern const char kYieldBetweenContentScriptRuns[];
 
 }  // namespace switches
 

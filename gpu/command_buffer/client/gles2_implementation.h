@@ -34,7 +34,8 @@
 #include "gpu/command_buffer/common/debug_marker_manager.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 
-#if !defined(NDEBUG) && !defined(__native_client__) && !defined(GLES2_CONFORMANCE_TESTS)  // NOLINT
+#if DCHECK_IS_ON() && !defined(__native_client__) && \
+    !defined(GLES2_CONFORMANCE_TESTS)
   #if defined(GLES2_INLINE_OPTIMIZATION)
     // TODO(gman): Replace with macros that work with inline optmization.
     #define GPU_CLIENT_SINGLE_THREAD_CHECK()
@@ -189,7 +190,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
 
   // ContextSupport implementation.
   void Swap() override;
-  void SwapWithDamage(const gfx::Rect& damage) override;
+  void SwapWithBounds(const std::vector<gfx::Rect>& rects) override;
   void PartialSwapBuffers(const gfx::Rect& sub_buffer) override;
   void CommitOverlayPlanes() override;
   void ScheduleOverlayPlane(int plane_z_order,
@@ -200,6 +201,8 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   uint64_t ShareGroupTracingGUID() const override;
   void SetErrorMessageCallback(
       const base::Callback<void(const char*, int32_t)>& callback) override;
+  void AddLatencyInfo(
+      const std::vector<ui::LatencyInfo>& latency_info) override;
 
   // TODO(danakj): Move to ContextSupport once ContextProvider doesn't need to
   // intercept it.
@@ -251,9 +254,13 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   // ContextSupport implementation.
   void SignalSyncToken(const gpu::SyncToken& sync_token,
                        const base::Closure& callback) override;
-  bool IsSyncTokenSignalled(const gpu::SyncToken& sync_token) override;
+  bool IsSyncTokenSignaled(const gpu::SyncToken& sync_token) override;
   void SignalQuery(uint32_t query, const base::Closure& callback) override;
   void SetAggressivelyFreeResources(bool aggressively_free_resources) override;
+
+  // Helper to set verified bit on sync token if allowed by gpu control.
+  bool GetVerifiedSyncTokenForIPC(const gpu::SyncToken& sync_token,
+                                  gpu::SyncToken* verified_sync_token);
 
   // base::trace_event::MemoryDumpProvider implementation.
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
@@ -534,10 +541,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
                                    GLsizei height,
                                    GLenum internalformat);
   void DestroyImageCHROMIUMHelper(GLuint image_id);
-  GLuint CreateGpuMemoryBufferImageCHROMIUMHelper(GLsizei width,
-                                                  GLsizei height,
-                                                  GLenum internalformat,
-                                                  GLenum usage);
 
   // Helper for GetVertexAttrib
   bool GetVertexAttribHelper(GLuint index, GLenum pname, uint32_t* param);

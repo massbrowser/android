@@ -32,7 +32,7 @@ public interface BindingManager {
      * Registers a freshly started child process. This can be called on any thread.
      * @param pid handle of the service process
      */
-    void addNewConnection(int pid, ChildProcessConnection connection);
+    void addNewConnection(int pid, ManagedChildProcessConnection connection);
 
     /**
      * Called when the service visibility changes or is determined for the first time. On low-memory
@@ -48,7 +48,7 @@ public interface BindingManager {
      * binding. It's safe to call it multiple times, only the first call matters.
      * @param pid handle of the service process
      */
-    void determinedVisibility(int pid);
+    void onDeterminedVisibility(int pid);
 
     /**
      * Called when the embedding application is sent to background. We want to maintain a strong
@@ -70,25 +70,17 @@ public interface BindingManager {
     void onBroughtToForeground();
 
     /**
-     * @return True iff the given service process is protected from the out-of-memory killing, or it
-     * was protected when it died unexpectedly. This can be used to decide if a disconnection of a
-     * renderer was a crash or a probable out-of-memory kill. This can be called on any thread.
-     */
-    boolean isOomProtected(int pid);
-
-    /**
      * Should be called when the connection to the child process goes away (either after a clean
      * exit or an unexpected crash). At this point we let go of the reference to the
      * ChildProcessConnection. This can be called on any thread.
      */
-    void clearConnection(int pid);
+    void removeConnection(int pid);
 
     /**
      * Starts moderate binding management.
      * Please see https://goo.gl/tl9MQm for details.
      */
-    void startModerateBindingManagement(
-            Context context, int maxSize, boolean moderateBindingTillBackgrounded);
+    void startModerateBindingManagement(Context context, int maxSize);
 
     /**
      * Releases all moderate bindings.

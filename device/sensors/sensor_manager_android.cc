@@ -27,14 +27,16 @@ void UpdateDeviceOrientationHistogram(
 }
 
 void SetOrientation(device::DeviceOrientationHardwareBuffer* buffer,
-    double alpha, double beta, double gamma) {
+                    double alpha,
+                    double beta,
+                    double gamma) {
   buffer->seqlock.WriteBegin();
   buffer->data.alpha = alpha;
-  buffer->data.hasAlpha = true;
+  buffer->data.has_alpha = true;
   buffer->data.beta = beta;
-  buffer->data.hasBeta = true;
+  buffer->data.has_beta = true;
   buffer->data.gamma = gamma;
-  buffer->data.hasGamma = true;
+  buffer->data.has_gamma = true;
   buffer->seqlock.WriteEnd();
 }
 
@@ -43,7 +45,7 @@ void SetOrientationBufferStatus(device::DeviceOrientationHardwareBuffer* buffer,
                                 bool absolute) {
   buffer->seqlock.WriteBegin();
   buffer->data.absolute = absolute;
-  buffer->data.allAvailableSensorsAreActive = ready;
+  buffer->data.all_available_sensors_are_active = ready;
   buffer->seqlock.WriteEnd();
 }
 
@@ -53,7 +55,6 @@ namespace device {
 
 SensorManagerAndroid::SensorManagerAndroid()
     : number_active_device_motion_sensors_(0),
-      device_light_buffer_(nullptr),
       device_motion_buffer_(nullptr),
       device_orientation_buffer_(nullptr),
       motion_buffer_initialized_(false),
@@ -61,12 +62,11 @@ SensorManagerAndroid::SensorManagerAndroid()
       is_shutdown_(false) {
   DCHECK(thread_checker_.CalledOnValidThread());
   memset(received_motion_data_, 0, sizeof(received_motion_data_));
-  device_sensors_.Reset(Java_DeviceSensors_getInstance(
+  device_sensors_.Reset(Java_DeviceSensors_create(
       AttachCurrentThread(), base::android::GetApplicationContext()));
 }
 
-SensorManagerAndroid::~SensorManagerAndroid() {
-}
+SensorManagerAndroid::~SensorManagerAndroid() {}
 
 bool SensorManagerAndroid::Register(JNIEnv* env) {
   return RegisterNativesImpl(env);
@@ -95,7 +95,7 @@ void SensorManagerAndroid::GotOrientation(JNIEnv*,
     OrientationSensorType type =
         static_cast<OrientationSensorType>(GetOrientationSensorTypeUsed());
     SetOrientationBufferStatus(device_orientation_buffer_, true,
-        type != GAME_ROTATION_VECTOR);
+                               type != GAME_ROTATION_VECTOR);
     orientation_buffer_initialized_ = true;
     UpdateDeviceOrientationHistogram(type);
   }
@@ -131,12 +131,12 @@ void SensorManagerAndroid::GotAcceleration(JNIEnv*,
     return;
 
   device_motion_buffer_->seqlock.WriteBegin();
-  device_motion_buffer_->data.accelerationX = x;
-  device_motion_buffer_->data.hasAccelerationX = true;
-  device_motion_buffer_->data.accelerationY = y;
-  device_motion_buffer_->data.hasAccelerationY = true;
-  device_motion_buffer_->data.accelerationZ = z;
-  device_motion_buffer_->data.hasAccelerationZ = true;
+  device_motion_buffer_->data.acceleration_x = x;
+  device_motion_buffer_->data.has_acceleration_x = true;
+  device_motion_buffer_->data.acceleration_y = y;
+  device_motion_buffer_->data.has_acceleration_y = true;
+  device_motion_buffer_->data.acceleration_z = z;
+  device_motion_buffer_->data.has_acceleration_z = true;
   device_motion_buffer_->seqlock.WriteEnd();
 
   if (!motion_buffer_initialized_) {
@@ -157,12 +157,12 @@ void SensorManagerAndroid::GotAccelerationIncludingGravity(
     return;
 
   device_motion_buffer_->seqlock.WriteBegin();
-  device_motion_buffer_->data.accelerationIncludingGravityX = x;
-  device_motion_buffer_->data.hasAccelerationIncludingGravityX = true;
-  device_motion_buffer_->data.accelerationIncludingGravityY = y;
-  device_motion_buffer_->data.hasAccelerationIncludingGravityY = true;
-  device_motion_buffer_->data.accelerationIncludingGravityZ = z;
-  device_motion_buffer_->data.hasAccelerationIncludingGravityZ = true;
+  device_motion_buffer_->data.acceleration_including_gravity_x = x;
+  device_motion_buffer_->data.has_acceleration_including_gravity_x = true;
+  device_motion_buffer_->data.acceleration_including_gravity_y = y;
+  device_motion_buffer_->data.has_acceleration_including_gravity_y = true;
+  device_motion_buffer_->data.acceleration_including_gravity_z = z;
+  device_motion_buffer_->data.has_acceleration_including_gravity_z = true;
   device_motion_buffer_->seqlock.WriteEnd();
 
   if (!motion_buffer_initialized_) {
@@ -182,12 +182,12 @@ void SensorManagerAndroid::GotRotationRate(JNIEnv*,
     return;
 
   device_motion_buffer_->seqlock.WriteBegin();
-  device_motion_buffer_->data.rotationRateAlpha = alpha;
-  device_motion_buffer_->data.hasRotationRateAlpha = true;
-  device_motion_buffer_->data.rotationRateBeta = beta;
-  device_motion_buffer_->data.hasRotationRateBeta = true;
-  device_motion_buffer_->data.rotationRateGamma = gamma;
-  device_motion_buffer_->data.hasRotationRateGamma = true;
+  device_motion_buffer_->data.rotation_rate_alpha = alpha;
+  device_motion_buffer_->data.has_rotation_rate_alpha = true;
+  device_motion_buffer_->data.rotation_rate_beta = beta;
+  device_motion_buffer_->data.has_rotation_rate_beta = true;
+  device_motion_buffer_->data.rotation_rate_gamma = gamma;
+  device_motion_buffer_->data.has_rotation_rate_gamma = true;
   device_motion_buffer_->seqlock.WriteEnd();
 
   if (!motion_buffer_initialized_) {
@@ -196,28 +196,12 @@ void SensorManagerAndroid::GotRotationRate(JNIEnv*,
   }
 }
 
-void SensorManagerAndroid::GotLight(JNIEnv*,
-                                    const JavaParamRef<jobject>&,
-                                    double value) {
-  base::AutoLock autolock(light_buffer_lock_);
-
-  if (!device_light_buffer_)
-    return;
-
-  device_light_buffer_->seqlock.WriteBegin();
-  device_light_buffer_->data.value = value;
-  device_light_buffer_->seqlock.WriteEnd();
-}
-
 bool SensorManagerAndroid::Start(ConsumerType consumer_type) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!device_sensors_.is_null());
-  int rate_in_microseconds = (consumer_type == CONSUMER_TYPE_LIGHT)
-                                 ? kLightSensorIntervalMicroseconds
-                                 : kDeviceSensorIntervalMicroseconds;
   return Java_DeviceSensors_start(
       AttachCurrentThread(), device_sensors_, reinterpret_cast<intptr_t>(this),
-      static_cast<jint>(consumer_type), rate_in_microseconds);
+      static_cast<jint>(consumer_type), kDeviceSensorIntervalMicroseconds);
 }
 
 void SensorManagerAndroid::Stop(ConsumerType consumer_type) {
@@ -236,7 +220,6 @@ int SensorManagerAndroid::GetNumberActiveDeviceMotionSensors() {
 
 SensorManagerAndroid::OrientationSensorType
 SensorManagerAndroid::GetOrientationSensorTypeUsed() {
-  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!device_sensors_.is_null());
   return static_cast<SensorManagerAndroid::OrientationSensorType>(
       Java_DeviceSensors_getOrientationSensorTypeUsed(AttachCurrentThread(),
@@ -244,48 +227,6 @@ SensorManagerAndroid::GetOrientationSensorTypeUsed() {
 }
 
 // ----- Shared memory API methods
-
-// --- Device Light
-
-void SensorManagerAndroid::StartFetchingDeviceLightData(
-    DeviceLightHardwareBuffer* buffer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(buffer);
-  if (is_shutdown_)
-    return;
-
-  {
-    base::AutoLock autolock(light_buffer_lock_);
-    device_light_buffer_ = buffer;
-    SetLightBufferValue(-1);
-  }
-  bool success = Start(CONSUMER_TYPE_LIGHT);
-  if (!success) {
-    base::AutoLock autolock(light_buffer_lock_);
-    SetLightBufferValue(std::numeric_limits<double>::infinity());
-  }
-}
-
-void SensorManagerAndroid::StopFetchingDeviceLightData() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (is_shutdown_)
-    return;
-
-  Stop(CONSUMER_TYPE_LIGHT);
-  {
-    base::AutoLock autolock(light_buffer_lock_);
-    if (device_light_buffer_) {
-      SetLightBufferValue(-1);
-      device_light_buffer_ = nullptr;
-    }
-  }
-}
-
-void SensorManagerAndroid::SetLightBufferValue(double lux) {
-  device_light_buffer_->seqlock.WriteBegin();
-  device_light_buffer_->data.value = lux;
-  device_light_buffer_->seqlock.WriteEnd();
-}
 
 // --- Device Motion
 
@@ -330,8 +271,9 @@ void SensorManagerAndroid::StopFetchingDeviceMotionData() {
 
 void SensorManagerAndroid::CheckMotionBufferReadyToRead() {
   if (received_motion_data_[RECEIVED_MOTION_DATA_ACCELERATION] +
-      received_motion_data_[RECEIVED_MOTION_DATA_ACCELERATION_INCL_GRAVITY] +
-      received_motion_data_[RECEIVED_MOTION_DATA_ROTATION_RATE] ==
+          received_motion_data_
+              [RECEIVED_MOTION_DATA_ACCELERATION_INCL_GRAVITY] +
+          received_motion_data_[RECEIVED_MOTION_DATA_ROTATION_RATE] ==
       number_active_device_motion_sensors_) {
     device_motion_buffer_->seqlock.WriteBegin();
     device_motion_buffer_->data.interval =
@@ -339,20 +281,22 @@ void SensorManagerAndroid::CheckMotionBufferReadyToRead() {
     device_motion_buffer_->seqlock.WriteEnd();
     SetMotionBufferReadyStatus(true);
 
-    UMA_HISTOGRAM_BOOLEAN("InertialSensor.AccelerometerAndroidAvailable",
+    UMA_HISTOGRAM_BOOLEAN(
+        "InertialSensor.AccelerometerAndroidAvailable",
         received_motion_data_[RECEIVED_MOTION_DATA_ACCELERATION] > 0);
     UMA_HISTOGRAM_BOOLEAN(
         "InertialSensor.AccelerometerIncGravityAndroidAvailable",
-        received_motion_data_[RECEIVED_MOTION_DATA_ACCELERATION_INCL_GRAVITY]
-        > 0);
-    UMA_HISTOGRAM_BOOLEAN("InertialSensor.GyroscopeAndroidAvailable",
+        received_motion_data_[RECEIVED_MOTION_DATA_ACCELERATION_INCL_GRAVITY] >
+            0);
+    UMA_HISTOGRAM_BOOLEAN(
+        "InertialSensor.GyroscopeAndroidAvailable",
         received_motion_data_[RECEIVED_MOTION_DATA_ROTATION_RATE] > 0);
   }
 }
 
 void SensorManagerAndroid::SetMotionBufferReadyStatus(bool ready) {
   device_motion_buffer_->seqlock.WriteBegin();
-  device_motion_buffer_->data.allAvailableSensorsAreActive = ready;
+  device_motion_buffer_->data.all_available_sensors_are_active = ready;
   device_motion_buffer_->seqlock.WriteEnd();
   motion_buffer_initialized_ = ready;
 }
@@ -383,7 +327,7 @@ void SensorManagerAndroid::StartFetchingDeviceOrientationData(
     // If Start() was unsuccessful then set the buffer ready flag to true
     // to start firing all-null events.
     SetOrientationBufferStatus(buffer, !success /* ready */,
-        false /* absolute */);
+                               false /* absolute */);
     orientation_buffer_initialized_ = !success;
   }
 
@@ -425,7 +369,7 @@ void SensorManagerAndroid::StartFetchingDeviceOrientationAbsoluteData(
     // If Start() was unsuccessful then set the buffer ready flag to true
     // to start firing all-null events.
     SetOrientationBufferStatus(buffer, !success /* ready */,
-        false /* absolute */);
+                               false /* absolute */);
     orientation_absolute_buffer_initialized_ = !success;
   }
 }
@@ -440,7 +384,7 @@ void SensorManagerAndroid::StopFetchingDeviceOrientationAbsoluteData() {
     base::AutoLock autolock(orientation_absolute_buffer_lock_);
     if (device_orientation_absolute_buffer_) {
       SetOrientationBufferStatus(device_orientation_absolute_buffer_, false,
-          false);
+                                 false);
       orientation_absolute_buffer_initialized_ = false;
       device_orientation_absolute_buffer_ = nullptr;
     }

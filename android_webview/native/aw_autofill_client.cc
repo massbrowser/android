@@ -83,6 +83,15 @@ rappor::RapporServiceImpl* AwAutofillClient::GetRapporServiceImpl() {
   return nullptr;
 }
 
+ukm::UkmService* AwAutofillClient::GetUkmService() {
+  return nullptr;
+}
+
+autofill::SaveCardBubbleController*
+AwAutofillClient::GetSaveCardBubbleController() {
+  return nullptr;
+}
+
 autofill::PersonalDataManager* AwAutofillClient::GetPersonalDataManager() {
   return nullptr;
 }
@@ -181,16 +190,12 @@ void AwAutofillClient::DidFillOrPreviewField(
     const base::string16& autofilled_value,
     const base::string16& profile_full_name) {}
 
-void AwAutofillClient::OnFirstUserGestureObserved() {
-  NOTIMPLEMENTED();
-}
-
-bool AwAutofillClient::IsContextSecure(const GURL& form_origin) {
+bool AwAutofillClient::IsContextSecure() {
   content::SSLStatus ssl_status;
   content::NavigationEntry* navigation_entry =
       web_contents_->GetController().GetLastCommittedEntry();
   if (!navigation_entry)
-     return false;
+    return false;
 
   ssl_status = navigation_entry->GetSSL();
   // Note: The implementation below is a copy of the one in
@@ -251,6 +256,7 @@ void AwAutofillClient::ConfirmSaveCreditCardLocally(
 void AwAutofillClient::ConfirmSaveCreditCardToCloud(
     const autofill::CreditCard& card,
     std::unique_ptr<base::DictionaryValue> legal_message,
+    bool should_cvc_be_requested,
     const base::Closure& callback) {
   NOTIMPLEMENTED();
 }

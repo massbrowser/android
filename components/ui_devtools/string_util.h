@@ -45,6 +45,11 @@ class StringUtil {
   static String fromDouble(double number) {
     return base::DoubleToString(number);
   }
+  static double toDouble(const char* s, size_t len, bool* ok) {
+    double v = 0.0;
+    *ok = base::StringToDouble(std::string(s, len), &v);
+    return *ok ? v : 0.0;
+  }
   static void builderAppend(StringBuilder& builder, const String& s) {
     builder.append(s);
   }
@@ -59,6 +64,12 @@ class StringUtil {
   }
   static String builderToString(StringBuilder& builder) {
     return builder.toString();
+  }
+  static size_t find(const String& s, const char* needle) {
+    return s.find(needle);
+  }
+  static size_t find(const String& s, const String& needle) {
+    return s.find(needle);
   }
   static const size_t kNotFound = static_cast<size_t>(-1);
   static std::unique_ptr<Value> parseJSON(const String& string);

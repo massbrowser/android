@@ -19,7 +19,6 @@
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer.h"
 #include "ui/wm/core/shadow.h"
-#include "ui/wm/core/shadow_types.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -32,7 +31,6 @@ namespace wm {
 
 namespace {
 
-constexpr ShadowElevation kActiveNormalShadowElevation = ShadowElevation::LARGE;
 constexpr ShadowElevation kInactiveNormalShadowElevation =
     ShadowElevation::MEDIUM;
 
@@ -52,11 +50,24 @@ ShadowElevation GetDefaultShadowElevationForWindow(aura::Window* window) {
   return ShadowElevation::NONE;
 }
 
-ShadowElevation GetShadowElevationForActiveState(aura::Window* window) {
-  if (IsActiveWindow(window))
-    return kActiveNormalShadowElevation;
+// Returns the ShadowElevation for |window|, converting |DEFAULT| to the
+// appropriate ShadowElevation.
+ShadowElevation GetShadowElevationConvertDefault(aura::Window* window) {
+  ShadowElevation elevation = window->GetProperty(kShadowElevationKey);
+  return elevation == ShadowElevation::DEFAULT
+             ? GetDefaultShadowElevationForWindow(window)
+             : elevation;
+}
 
-  return GetShadowElevation(window);
+ShadowElevation GetShadowElevationForActiveState(aura::Window* window) {
+  ShadowElevation elevation = window->GetProperty(kShadowElevationKey);
+  if (elevation != ShadowElevation::DEFAULT)
+    return elevation;
+
+  if (IsActiveWindow(window))
+    return ShadowController::kActiveNormalShadowElevation;
+
+  return GetDefaultShadowElevationForWindow(window);
 }
 
 // Returns the shadow style to be applied to |losing_active| when it is losing
@@ -71,7 +82,7 @@ ShadowElevation GetShadowElevationForWindowLosingActive(
                   GetTransientChildren(losing_active).end(),
                   gaining_active);
     if (it != GetTransientChildren(losing_active).end())
-      return kActiveNormalShadowElevation;
+      return ShadowController::kActiveNormalShadowElevation;
   }
   return kInactiveNormalShadowElevation;
 }
@@ -151,7 +162,6 @@ ShadowController::Impl* ShadowController::Impl::GetInstance() {
 
 void ShadowController::Impl::OnWindowInitialized(aura::Window* window) {
   observer_manager_.Add(window);
-  SetShadowElevation(window, GetDefaultShadowElevationForWindow(window));
   HandlePossibleShadowVisibilityChange(window);
 }
 
@@ -198,7 +208,8 @@ void ShadowController::Impl::OnWindowActivated(ActivationReason reason,
   if (lost_active) {
     Shadow* shadow = GetShadowForWindow(lost_active);
     if (shadow &&
-        GetShadowElevation(lost_active) == kInactiveNormalShadowElevation) {
+        GetShadowElevationConvertDefault(lost_active) ==
+            kInactiveNormalShadowElevation) {
       shadow->SetElevation(
           GetShadowElevationForWindowLosingActive(lost_active, gained_active));
     }
@@ -214,7 +225,7 @@ bool ShadowController::Impl::ShouldShowShadowForWindow(
     return false;
   }
 
-  return static_cast<int>(GetShadowElevation(window)) > 0;
+  return static_cast<int>(GetShadowElevationConvertDefault(window)) > 0;
 }
 
 void ShadowController::Impl::HandlePossibleShadowVisibilityChange(

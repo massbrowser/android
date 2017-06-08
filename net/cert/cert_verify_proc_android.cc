@@ -23,7 +23,7 @@
 #include "net/cert/internal/cert_errors.h"
 #include "net/cert/internal/parsed_certificate.h"
 #include "net/cert/x509_certificate.h"
-#include "third_party/boringssl/src/include/openssl/x509v3.h"
+#include "net/cert/x509_util.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -106,11 +106,15 @@ bool PerformAIAFetchAndAddResultToVector(scoped_refptr<CertNetFetcher> fetcher,
   Error error;
   std::vector<uint8_t> aia_fetch_bytes;
   request->WaitForResult(&error, &aia_fetch_bytes);
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.Certificate.AndroidAIAFetchError",
+                              std::abs(error));
   if (error != OK)
     return false;
   CertErrors errors;
   return ParsedCertificate::CreateAndAddToVector(
-      aia_fetch_bytes.data(), aia_fetch_bytes.size(), {}, cert_list, &errors);
+      x509_util::CreateCryptoBuffer(aia_fetch_bytes.data(),
+                                    aia_fetch_bytes.size()),
+      {}, cert_list, &errors);
 }
 
 // Uses android::VerifyX509CertChain() to verify the certificates in |certs| for
@@ -162,9 +166,6 @@ android::CertVerifyStatusAndroid TryVerifyWithAIAFetching(
     scoped_refptr<CertNetFetcher> cert_net_fetcher,
     CertVerifyResult* verify_result,
     std::vector<std::string>* verified_chain) {
-  if (!base::FeatureList::IsEnabled(CertVerifyProcAndroid::kAIAFetchingFeature))
-    return android::CERT_VERIFY_STATUS_ANDROID_NO_TRUSTED_ROOT;
-
   if (!cert_net_fetcher)
     return android::CERT_VERIFY_STATUS_ANDROID_NO_TRUSTED_ROOT;
 
@@ -173,7 +174,8 @@ android::CertVerifyStatusAndroid TryVerifyWithAIAFetching(
   CertErrors errors;
   ParsedCertificateList certs;
   for (const auto& cert : cert_bytes) {
-    if (!ParsedCertificate::CreateAndAddToVector(cert, {}, &certs, &errors)) {
+    if (!ParsedCertificate::CreateAndAddToVector(
+            x509_util::CreateCryptoBuffer(cert), {}, &certs, &errors)) {
       return android::CERT_VERIFY_STATUS_ANDROID_NO_TRUSTED_ROOT;
     }
   }
@@ -294,14 +296,18 @@ bool VerifyFromAndroidTrustManager(
     scoped_refptr<X509Certificate> verified_cert =
         X509Certificate::CreateFromDERCertChain(verified_chain_pieces);
     if (verified_cert.get())
-      verify_result->verified_cert = verified_cert;
+      verify_result->verified_cert = std::move(verified_cert);
+    else
+      verify_result->cert_status |= CERT_STATUS_INVALID;
   }
 
   // Extract the public key hashes.
   for (size_t i = 0; i < verified_chain.size(); i++) {
     base::StringPiece spki_bytes;
-    if (!asn1::ExtractSPKIFromDERCert(verified_chain[i], &spki_bytes))
+    if (!asn1::ExtractSPKIFromDERCert(verified_chain[i], &spki_bytes)) {
+      verify_result->cert_status |= CERT_STATUS_INVALID;
       continue;
+    }
 
     HashValue sha1(HASH_VALUE_SHA1);
     base::SHA1HashBytes(reinterpret_cast<const uint8_t*>(spki_bytes.data()),
@@ -339,10 +345,6 @@ bool GetChainDEREncodedBytes(X509Certificate* cert,
 }
 
 }  // namespace
-
-// static.
-const base::Feature CertVerifyProcAndroid::kAIAFetchingFeature{
-    "AndroidAIAFetching", base::FEATURE_DISABLED_BY_DEFAULT};
 
 CertVerifyProcAndroid::CertVerifyProcAndroid() {}
 
@@ -384,11 +386,6 @@ int CertVerifyProcAndroid::VerifyInternal(
     CRLSet* crl_set,
     const CertificateList& additional_trust_anchors,
     CertVerifyResult* verify_result) {
-  if (!cert->VerifyNameMatch(hostname,
-                             &verify_result->common_name_fallback_used)) {
-    verify_result->cert_status |= CERT_STATUS_COMMON_NAME_INVALID;
-  }
-
   std::vector<std::string> cert_bytes;
   if (!GetChainDEREncodedBytes(cert, &cert_bytes))
     return ERR_CERT_INVALID;
@@ -397,6 +394,7 @@ int CertVerifyProcAndroid::VerifyInternal(
     NOTREACHED();
     return ERR_FAILED;
   }
+
   if (IsCertStatusError(verify_result->cert_status))
     return MapCertStatusToNetError(verify_result->cert_status);
 

@@ -72,6 +72,8 @@ def ParseFlags():
     'successful test run, also pass --disable_buffer. Default=ERROR')
   parser.add_argument('--log_file', help='If given, write logging statements '
     'to the given file instead of stderr.')
+  parser.add_argument('--skip_slow', action='store_true', help='If set, tests '
+    'marked as slow will be skipped.', default=False)
   return parser.parse_args(sys.argv[1:])
 
 def GetLogger(name='common'):
@@ -127,6 +129,8 @@ class TestDriver:
     _driver: A reference to the driver object from the Chrome Driver library.
     _chrome_args: A set of string arguments to start Chrome with.
     _url: The string URL that Chrome will navigate to for this test.
+    _has_logs: Boolean flag set when a page is loaded and cleared when logs are
+      fetched.
   """
 
   def __init__(self):
@@ -135,6 +139,7 @@ class TestDriver:
     self._chrome_args = set()
     self._url = ''
     self._logger = GetLogger(name='TestDriver')
+    self._has_logs = False
 
   def __enter__(self):
     return self
@@ -161,7 +166,8 @@ class TestDriver:
       # Override flags given in code with any command line arguments.
       for override_arg in shlex.split(self._flags.browser_args):
         arg_key = GetDictKey(override_arg)
-        if arg_key in original_args:
+        if (arg_key in original_args
+            and original_args[arg_key] in self._chrome_args):
           self._chrome_args.remove(original_args[arg_key])
           self._logger.info('Removed Chrome flag. %s', original_args[arg_key])
         self._chrome_args.add(override_arg)
@@ -283,6 +289,7 @@ class TestDriver:
     self._logger.debug('Set page load timeout to %f seconds', timeout)
     self._driver.get(self._url)
     self._logger.debug('Loaded page %s', url)
+    self._has_logs = True
 
   def ExecuteJavascript(self, script, timeout=30):
     """Executes the given javascript in the browser's current page in an
@@ -323,9 +330,18 @@ class TestDriver:
     """
     return self.ExecuteJavascript("return " + script, timeout)
 
-  def GetHistogram(self, histogram):
+  def GetHistogram(self, histogram, timeout=30):
+    """Gets a Chrome histogram as a dictionary object.
+
+    Args:
+      histogram: the name of the histogram to fetch
+      timeout: timeout for the underlying Javascript query.
+
+    Returns:
+      A dictionary object containing information about the histogram.
+    """
     js_query = 'statsCollectionController.getBrowserHistogram("%s")' % histogram
-    string_response = self.ExecuteJavascriptStatement(js_query)
+    string_response = self.ExecuteJavascriptStatement(js_query, timeout)
     self._logger.debug('Got %s histogram=%s', histogram, string_response)
     return json.loads(string_response)
 
@@ -355,7 +371,8 @@ class TestDriver:
     return result
 
   def GetPerformanceLogs(self, method_filter=r'Network\.responseReceived'):
-    """Returns all logged Performance events from Chrome.
+    """Returns all logged Performance events from Chrome. Raises an Exception if
+    no pages have been loaded since the last time this function was called.
 
     Args:
       method_filter: A regex expression to match the method of logged events
@@ -364,6 +381,8 @@ class TestDriver:
       Performance logs as a list of dicts, since the last time this function was
       called.
     """
+    if not self._has_logs:
+      raise Exception('No pages loaded since last Network log query!')
     all_messages = []
     for log in self._driver.execute('getLog', {'type': 'performance'})['value']:
       message = json.loads(log['message'])['message']
@@ -372,23 +391,51 @@ class TestDriver:
         all_messages.append(message)
     self._logger.info('Got %d performance logs with filter method=%s',
       len(all_messages), method_filter)
+    self._has_logs = False
     return all_messages
 
-  def GetHTTPResponses(self, include_favicon=False, skip_domainless_pages=True):
+  def SleepUntilHistogramHasEntry(self, histogram_name, sleep_intervals=10):
+    """Polls if a histogram exists in 1-6 second intervals for 10 intervals.
+    Allows script to run with a timeout of 5 seconds, so the default behavior
+    allows up to 60 seconds until timeout.
+
+    Args:
+      histogram_name: The name of the histogram to wait for
+      sleep_intervals: The number of polling intervals, each polling cycle takes
+      no more than 6 seconds.
+    Returns:
+      Whether the histogram exists
+    """
+    histogram = {}
+    while(not histogram and sleep_intervals > 0):
+      histogram = self.GetHistogram(histogram_name, 5)
+      if (not histogram):
+        time.sleep(1)
+        sleep_intervals -= 1
+
+    return bool(histogram)
+
+  def GetHTTPResponses(self, include_favicon=False, skip_domainless_pages=True,
+      override_has_logs=False):
     """Parses the Performance Logs and returns a list of HTTPResponse objects.
 
     Use caution when calling this function  multiple times. Only responses
     since the last time this function was called are returned (or since Chrome
-    started, whichever is later).
+    started, whichever is later). An Exception will be raised if no page was
+    loaded since the last time this function was called.
 
     Args:
       include_favicon: A bool that if True will include responses for favicons.
       skip_domainless_pages: If True, only responses with a net_loc as in RFC
         1808 will be included. Pages such as about:blank will be skipped.
+      override_has_logs: Allows the _has_logs property to be set if there was
+        not a page load but an XHR was expected instead.
     Returns:
       A list of HTTPResponse objects, each representing a single completed HTTP
       transaction by Chrome.
     """
+    if override_has_logs:
+      self._has_logs = True
     def MakeHTTPResponse(log_dict):
       params = log_dict['params']
       response_dict = params['response']
@@ -522,9 +569,12 @@ class IntegrationTest(unittest.TestCase):
     Args:
       http_response: The HTTPResponse object to check.
     """
-    expected_via_header = ParseFlags().via_header_value
     self.assertIn('via', http_response.response_headers)
-    self.assertEqual(expected_via_header, http_response.response_headers['via'])
+    expected_via_header = ParseFlags().via_header_value
+    actual_via_headers = http_response.response_headers['via'].split(',')
+    self.assertIn(expected_via_header, actual_via_headers, "Via header not in "
+      "response headers! Expected: %s, Actual: %s" %
+      (expected_via_header, actual_via_headers))
 
   def assertNotHasChromeProxyViaHeader(self, http_response):
     """Asserts that the Via header in the given HTTPResponse does not match the
@@ -533,11 +583,75 @@ class IntegrationTest(unittest.TestCase):
     Args:
       http_response: The HTTPResponse object to check.
     """
-    expected_via_header = ParseFlags().via_header_value
-    self.assertNotIn('via', http_response.response_headers)
     if 'via' in http_response.response_headers:
-      self.assertNotIn(expected_via_header,
-        http_response.response_headers['via'])
+      expected_via_header = ParseFlags().via_header_value
+      actual_via_headers = http_response.response_headers['via'].split(',')
+      self.assertNotIn(expected_via_header, actual_via_headers, "Via header "
+        "found in response headers! Not expected: %s, Actual: %s" %
+        (expected_via_header, actual_via_headers))
+
+  def checkLoFiResponse(self, http_response, expected_lo_fi):
+    """Asserts that if expected the response headers contain the Lo-Fi directive
+    then the request headers do too. If the CPAT header contains if-heavy, the
+    request should not be LoFi. If-heavy will be deprecated in the future. Also
+    checks that the content size is less than 100 if |expected_lo_fi|.
+    Otherwise, checks that the response and request headers don't contain the
+    Lo-Fi directive and the content size is greater than 100.
+
+    Args:
+      http_response: The HTTPResponse object to check.
+      expected_lo_fi: Whether the response should be Lo-Fi.
+
+    Returns:
+      Whether the response was Lo-Fi.
+    """
+
+    if (expected_lo_fi) :
+      self.assertHasChromeProxyViaHeader(http_response)
+      content_length = http_response.response_headers['content-length']
+      cpat_request = http_response.request_headers[
+                       'chrome-proxy-accept-transform']
+      cpct_response = http_response.response_headers[
+                        'chrome-proxy-content-transform']
+      if ('empty-image' in cpct_response):
+        self.assertIn('empty-image', cpat_request)
+        self.assertTrue(int(content_length) < 100)
+        return True;
+      return False;
+    else:
+      if ('chrome-proxy-accept-transform' in http_response.request_headers):
+        cpat_request = http_response.request_headers[
+                       'chrome-proxy-accept-transform']
+        if ('empty-image' in cpat_request):
+          self.assertIn('if-heavy', cpat_request)
+      self.assertNotIn('chrome-proxy-content-transform',
+        http_response.response_headers)
+      content_length = http_response.response_headers['content-length']
+      self.assertTrue(int(content_length) > 100)
+      return False;
+
+  def checkLitePageResponse(self, http_response):
+    """Asserts that if the response headers contain the Lite Page directive then
+    the request headers do too.
+
+    Args:
+      http_response: The HTTPResponse object to check.
+
+    Returns:
+      Whether the response was a Lite Page.
+    """
+
+    self.assertHasChromeProxyViaHeader(http_response)
+    if ('chrome-proxy-content-transform' not in http_response.response_headers):
+      return False;
+    cpct_response = http_response.response_headers[
+                      'chrome-proxy-content-transform']
+    cpat_request = http_response.request_headers[
+                      'chrome-proxy-accept-transform']
+    if ('lite-page' in cpct_response):
+      self.assertIn('lite-page', cpat_request)
+      return True;
+    return False;
 
   @staticmethod
   def RunAllTests(run_all_tests=False):

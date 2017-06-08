@@ -43,7 +43,9 @@ import random
 import sys
 import time
 
+from webkitpy.common import exit_codes
 from webkitpy.common.net.file_uploader import FileUploader
+from webkitpy.common.webkit_finder import WebKitFinder
 from webkitpy.layout_tests.controllers.layout_test_finder import LayoutTestFinder
 from webkitpy.layout_tests.controllers.layout_test_runner import LayoutTestRunner
 from webkitpy.layout_tests.controllers.test_result_writer import TestResultWriter
@@ -53,6 +55,7 @@ from webkitpy.layout_tests.models import test_failures
 from webkitpy.layout_tests.models import test_run_results
 from webkitpy.layout_tests.models.test_input import TestInput
 from webkitpy.tool import grammar
+from webkitpy.w3c.wpt_manifest import WPTManifest
 
 _log = logging.getLogger(__name__)
 
@@ -88,6 +91,7 @@ class Manager(object):
 
         self._results_directory = self._port.results_directory()
         self._finder = LayoutTestFinder(self._port, self._options)
+        self._webkit_finder = WebKitFinder(port.host.filesystem)
         self._runner = LayoutTestRunner(self._options, self._port, self._printer, self._results_directory, self._test_is_slow)
 
     def run(self, args):
@@ -95,22 +99,46 @@ class Manager(object):
         start_time = time.time()
         self._printer.write_update("Collecting tests ...")
         running_all_tests = False
+
+        self._printer.write_update('Generating MANIFEST.json for web-platform-tests ...')
+
         try:
-            paths, test_names, running_all_tests = self._collect_tests(args)
+            _log.info('run-webkit-tests - calling ensure_manifest')
+            WPTManifest.ensure_manifest(self._port.host)
+        finally:
+            _log.info('run-webkit-tests - completed ensure_manfiest')
+
+        try:
+            paths, all_test_names, running_all_tests = self._collect_tests(args)
         except IOError:
             # This is raised if --test-list doesn't exist
-            return test_run_results.RunDetails(exit_code=test_run_results.NO_TESTS_EXIT_STATUS)
+            return test_run_results.RunDetails(exit_code=exit_codes.NO_TESTS_EXIT_STATUS)
+
+        # Create a sorted list of test files so the subset chunk,
+        # if used, contains alphabetically consecutive tests.
+        if self._options.order == 'natural':
+            all_test_names.sort(key=self._port.test_key)
+        elif self._options.order == 'random':
+            all_test_names.sort()
+            random.Random(self._options.seed).shuffle(all_test_names)
+
+        test_names, tests_in_other_chunks = self._finder.split_into_chunks(all_test_names)
 
         self._printer.write_update("Parsing expectations ...")
         self._expectations = test_expectations.TestExpectations(self._port, test_names)
 
         tests_to_run, tests_to_skip = self._prepare_lists(paths, test_names)
-        self._printer.print_found(len(test_names), len(tests_to_run), self._options.repeat_each, self._options.iterations)
+
+        self._expectations.remove_tests(tests_in_other_chunks)
+
+        self._printer.print_found(
+            len(all_test_names), len(test_names), len(tests_to_run),
+            self._options.repeat_each, self._options.iterations)
 
         # Check to make sure we're not skipping every test.
         if not tests_to_run:
             _log.critical('No tests to run.')
-            return test_run_results.RunDetails(exit_code=test_run_results.NO_TESTS_EXIT_STATUS)
+            return test_run_results.RunDetails(exit_code=exit_codes.NO_TESTS_EXIT_STATUS)
 
         exit_code = self._set_up_run(tests_to_run)
         if exit_code:
@@ -182,27 +210,23 @@ class Manager(object):
             enabled_pixel_tests_in_retry, only_include_failing=True)
 
         exit_code = summarized_failing_results['num_regressions']
-        if exit_code > test_run_results.MAX_FAILURES_EXIT_STATUS:
+        if exit_code > exit_codes.MAX_FAILURES_EXIT_STATUS:
             _log.warning('num regressions (%d) exceeds max exit status (%d)',
-                         exit_code, test_run_results.MAX_FAILURES_EXIT_STATUS)
-            exit_code = test_run_results.MAX_FAILURES_EXIT_STATUS
+                         exit_code, exit_codes.MAX_FAILURES_EXIT_STATUS)
+            exit_code = exit_codes.MAX_FAILURES_EXIT_STATUS
 
         if not self._options.dry_run:
             self._write_json_files(summarized_full_results, summarized_failing_results, initial_results, running_all_tests)
-
-            if self._options.write_full_results_to:
-                self._filesystem.copyfile(self._filesystem.join(self._results_directory, "full_results.json"),
-                                          self._options.write_full_results_to)
 
             self._upload_json_files()
 
             results_path = self._filesystem.join(self._results_directory, "results.html")
             self._copy_results_html_file(results_path)
             if initial_results.keyboard_interrupted:
-                exit_code = test_run_results.INTERRUPTED_EXIT_STATUS
+                exit_code = exit_codes.INTERRUPTED_EXIT_STATUS
             else:
                 if initial_results.interrupted:
-                    exit_code = test_run_results.EARLY_EXIT_STATUS
+                    exit_code = exit_codes.EARLY_EXIT_STATUS
                 if self._options.show_results and (
                         exit_code or (self._options.full_results_html and initial_results.total_failures)):
                     self._port.show_results_html_file(results_path)
@@ -241,21 +265,6 @@ class Manager(object):
     def _prepare_lists(self, paths, test_names):
         tests_to_skip = self._finder.skip_tests(paths, test_names, self._expectations, self._http_tests(test_names))
         tests_to_run = [test for test in test_names if test not in tests_to_skip]
-
-        if not tests_to_run:
-            return tests_to_run, tests_to_skip
-
-        # Create a sorted list of test files so the subset chunk,
-        # if used, contains alphabetically consecutive tests.
-        if self._options.order == 'natural':
-            tests_to_run.sort(key=self._port.test_key)
-        elif self._options.order == 'random':
-            tests_to_run.sort()
-            random.Random(self._options.seed).shuffle(tests_to_run)
-
-        tests_to_run, tests_in_other_chunks = self._finder.split_into_chunks(tests_to_run)
-        self._expectations.add_extra_skipped_tests(tests_in_other_chunks)
-        tests_to_skip.update(tests_in_other_chunks)
 
         return tests_to_run, tests_to_skip
 
@@ -328,13 +337,6 @@ class Manager(object):
                 _log.error("Build check failed")
                 return exit_code
 
-        # Check that the system dependencies (themes, fonts, ...) are correct.
-        if not self._options.nocheck_sys_deps:
-            self._printer.write_update("Checking system dependencies ...")
-            exit_code = self._port.check_sys_deps(self._needs_servers(test_names))
-            if exit_code:
-                return exit_code
-
         if self._options.clobber_old_results:
             self._clobber_old_results()
         elif self._filesystem.exists(self._results_directory):
@@ -346,7 +348,15 @@ class Manager(object):
         self._port.host.filesystem.maybe_make_directory(self._results_directory)
 
         self._port.setup_test_run()
-        return test_run_results.OK_EXIT_STATUS
+
+        # Check that the system dependencies (themes, fonts, ...) are correct.
+        if not self._options.nocheck_sys_deps:
+            self._printer.write_update("Checking system dependencies ...")
+            exit_code = self._port.check_sys_deps(self._needs_servers(test_names))
+            if exit_code:
+                return exit_code
+
+        return exit_codes.OK_EXIT_STATUS
 
     def _run_tests(self, tests_to_run, tests_to_skip, repeat_each, iterations,
                    num_workers, retry_attempt=0):
@@ -360,7 +370,7 @@ class Manager(object):
                                       tests_to_skip, num_workers, retry_attempt)
 
     def _start_servers(self, tests_to_run):
-        if any(self._port.is_wptserve_test(test) for test in tests_to_run):
+        if any(self._port.is_wpt_test(test) for test in tests_to_run):
             self._printer.write_update('Starting WPTServe ...')
             self._port.start_wptserve()
             self._wptserve_started = True
@@ -487,8 +497,15 @@ class Manager(object):
         # from a file url for results.html and Chromium doesn't allow that.
         json_results_generator.write_json(self._filesystem, summarized_failing_results, full_results_path, callback="ADD_RESULTS")
 
+        # Write out the JSON files suitable for other tools to process.
+        # As the output can be quite large (as there are 60k+ tests) we also
+        # support only outputting the failing results.
+        if self._options.json_failing_test_results:
+            # FIXME(tansell): Make sure this includes an *unexpected* results
+            # (IE Passing when expected to be failing.)
+            json_results_generator.write_json(self._filesystem, summarized_failing_results, self._options.json_failing_test_results)
         if self._options.json_test_results:
-            json_results_generator.write_json(self._filesystem, summarized_failing_results, self._options.json_test_results)
+            json_results_generator.write_json(self._filesystem, summarized_full_results, self._options.json_test_results)
 
         _log.debug("Finished writing JSON files.")
 
@@ -525,7 +542,7 @@ class Manager(object):
             _log.error("Upload failed: %s", err)
 
     def _copy_results_html_file(self, destination_path):
-        base_dir = self._port.path_from_webkit_base('LayoutTests', 'fast', 'harness')
+        base_dir = self._webkit_finder.path_from_layout_tests('fast', 'harness')
         results_file = self._filesystem.join(base_dir, 'results.html')
         # Note that the results.html template file won't exist when we're using a MockFileSystem during unit tests,
         # so make sure it exists before we try to copy it.

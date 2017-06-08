@@ -12,7 +12,6 @@ goog.provide('Output.EventType');
 goog.require('AutomationTreeWalker');
 goog.require('EarconEngine');
 goog.require('Spannable');
-goog.require('Stubs');
 goog.require('constants');
 goog.require('cursors.Cursor');
 goog.require('cursors.Range');
@@ -428,10 +427,14 @@ Output.RULES = {
       speak: '$earcon(ALERT_MODAL) $name $nameOrTextContent $state $role'
     },
     cell: {
-      enter: '@cell_summary($tableCellRowIndex, $tableCellColumnIndex) ' +
-          '$node(tableColumnHeader)',
-      speak: '@cell_summary($tableCellRowIndex, $tableCellColumnIndex) ' +
-          '$node(tableColumnHeader) $state'
+      enter: '@cell_summary($if($ariaCellRowIndex, $ariaCellRowIndex, ' +
+      '$tableCellRowIndex), ' +
+      '$if($ariaCellColumnIndex, $ariaCellColumnIndex, ' +
+      '$tableCellColumnIndex)) $node(tableColumnHeader)',
+      speak: '@cell_summary($if($ariaCellRowIndex, $ariaCellRowIndex, ' +
+      '$tableCellRowIndex), ' +
+      '$if($ariaCellColumnIndex, $ariaCellColumnIndex, ' +
+      '$tableCellColumnIndex)) $node(tableColumnHeader) $state'
     },
     checkBox: {
       speak: '$if($checked, $earcon(CHECK_ON), $earcon(CHECK_OFF)) ' +
@@ -480,7 +483,9 @@ Output.RULES = {
       enter: '$nameFromNode $role $description'
     },
     link: {
-      enter: '$nameFromNode= $role $state'
+      enter: '$nameFromNode= $role $state',
+      speak: '$name $value $state ' +
+          '$if($inPageLinkTarget, @internal_link, $role) $description',
     },
     list: {
       enter: '$role @@list_with_items($countChildren(listItem))',
@@ -563,7 +568,9 @@ Output.RULES = {
           '$if($setSize, @describe_index($posInSet, $setSize))',
     },
     table: {
-      enter: '@table_summary($name, $tableRowCount, $tableColumnCount) ' +
+      enter: '@table_summary($name, ' +
+          '$if($ariaRowCount, $ariaRowCount, $tableRowCount), ' +
+          '$if($ariaColumnCount, $ariaColumnCount, $tableColumnCount)) ' +
           '$node(tableHeader)'
     },
     tableHeaderContainer: {
@@ -721,6 +728,21 @@ Output.forceModeForNextSpeechUtterance_;
  */
 Output.forceModeForNextSpeechUtterance = function(mode) {
   Output.forceModeForNextSpeechUtterance_ = mode;
+};
+
+/**
+ * For a given automation property, return true if the value
+ * represents something 'truthy', e.g.: for checked:
+ * 'true'|'mixed' -> true
+ * 'false'|undefined -> false
+ */
+Output.isTruthy = function(node, attrib) {
+  switch(attrib) {
+    case 'checked':
+      return node.checked && node.checked !== 'false';
+    default:
+      return node[attrib] !== undefined || node.state[attrib];
+  }
 };
 
 Output.prototype = {
@@ -1155,20 +1177,16 @@ Output.prototype = {
           }
         } else if (token == 'checked') {
           var msg;
-          var ariaChecked = node.htmlAttributes['aria-checked'];
-          switch (ariaChecked) {
+          switch (node.checked) {
             case 'mixed':
-              msg = 'aria_checked_mixed';
+              msg = 'checked_mixed';
               break;
             case 'true':
-              msg = 'aria_checked_true';
-              break;
-            case 'false':
-              msg = 'aria_checked_false';
+              msg = 'checked_true';
               break;
             default:
-              msg = node.state[StateType.CHECKED] ?
-                  'aria_checked_true' : 'aria_checked_false';
+              msg = 'checked_false';
+              break;
           }
           this.format_(node, '@' + msg, buff);
         } else if (token == 'state') {
@@ -1300,7 +1318,7 @@ Output.prototype = {
           if (token == 'if') {
             var cond = tree.firstChild;
             var attrib = cond.value.slice(1);
-            if (node[attrib] !== undefined || node.state[attrib])
+            if (Output.isTruthy(node, attrib))
               this.format_(node, cond.nextSibling, buff);
             else
               this.format_(node, cond.nextSibling.nextSibling, buff);

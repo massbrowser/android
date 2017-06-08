@@ -11,7 +11,6 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/posix/global_descriptors.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_switches.h"
@@ -19,19 +18,22 @@
 #include "content/public/common/mojo_channel_switches.h"
 #include "ipc/ipc_channel_mojo.h"
 #include "ipc/ipc_descriptors.h"
+#include "mojo/edk/embedder/configuration.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/scoped_ipc_support.h"
 
 #if defined(OS_POSIX)
+#include "base/posix/global_descriptors.h"
 #include "content/public/common/content_descriptors.h"
 #endif
 
 namespace ipc_fuzzer {
 
 void InitializeMojo() {
-  mojo::edk::SetMaxMessageSize(64 * 1024 * 1024);
-  mojo::edk::Init();
+  mojo::edk::Configuration config;
+  config.max_message_num_bytes = 64 * 1024 * 1024;
+  mojo::edk::Init(config);
 }
 
 void InitializeMojoIPCChannel() {

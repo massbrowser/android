@@ -36,7 +36,7 @@ def _RunHistogramValueCheckers(input_api, output_api):
 
 def _RunHistogramChecks(input_api, output_api, histogram_name):
   try:
-    # Setup sys.path so that we can call histrogram code
+    # Setup sys.path so that we can call histograms code.
     import sys
     original_sys_path = sys.path
     sys.path = sys.path + [input_api.os_path.join(
@@ -54,7 +54,6 @@ def _RunHistogramChecks(input_api, output_api, histogram_name):
 def CheckChangeOnUpload(input_api, output_api):
   results = []
   results += _RunHistogramValueCheckers(input_api, output_api)
-  results += input_api.canned_checks.CheckPatchFormatted(input_api, output_api)
   results += _RunHistogramChecks(input_api, output_api,
     "BadMessageReasonExtensions")
   return results

@@ -14,7 +14,7 @@
 #include "base/strings/string_piece.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
-#include "cc/debug/lap_timer.h"
+#include "cc/base/lap_timer.h"
 #include "cc/layers/layer.h"
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/test/fake_layer_tree_host_client.h"
@@ -103,10 +103,11 @@ class CalcDrawPropsTest : public LayerTreeHostCommonPerfTest {
                                 int max_texture_size,
                                 LayerTreeImpl* active_tree,
                                 LayerTreeHostImpl* host_impl) {
-    LayerImplList update_list;
+    RenderSurfaceList update_list;
     LayerTreeHostCommon::CalcDrawPropsImplInputs inputs(
-        active_tree->root_layer_for_testing(), active_tree->DrawViewportSize(),
-        host_impl->DrawTransform(), active_tree->device_scale_factor(),
+        active_tree->root_layer_for_testing(),
+        active_tree->DeviceViewport().size(), host_impl->DrawTransform(),
+        active_tree->device_scale_factor(),
         active_tree->current_page_scale_factor(),
         active_tree->InnerViewportContainerLayer(),
         active_tree->InnerViewportScrollLayer(),
@@ -115,8 +116,6 @@ class CalcDrawPropsTest : public LayerTreeHostCommonPerfTest {
         active_tree->OverscrollElasticityLayer(), max_texture_size,
         can_render_to_separate_surface,
         host_impl->settings().layer_transforms_should_scale_layer_contents,
-        false,  // do not verify_clip_tree_calculation for perf tests
-        false,  // do not verify_visible_rect_calculation for perf tests
         &update_list, active_tree->property_trees());
     LayerTreeHostCommon::CalculateDrawProperties(&inputs);
   }

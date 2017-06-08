@@ -10,13 +10,13 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/threading/thread_checker.h"
-#include "chrome/browser/predictors/resource_prefetch_common.h"
+#include "base/time/time.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request.h"
 #include "url/gurl.h"
@@ -44,6 +44,27 @@ constexpr char kResourcePrefetchPredictorPrefetchedSizeHistogram[] =
 //  - Lives entirely on the IO thread.
 class ResourcePrefetcher : public net::URLRequest::Delegate {
  public:
+  struct PrefetchedRequestStats {
+    PrefetchedRequestStats(const GURL& resource_url,
+                           bool was_cached,
+                           size_t total_received_bytes);
+    ~PrefetchedRequestStats();
+
+    GURL resource_url;
+    bool was_cached;
+    size_t total_received_bytes;
+  };
+
+  struct PrefetcherStats {
+    explicit PrefetcherStats(const GURL& url);
+    ~PrefetcherStats();
+    PrefetcherStats(const PrefetcherStats& other);
+
+    GURL url;
+    base::TimeTicks start_time;
+    std::vector<PrefetchedRequestStats> requests_stats;
+  };
+
   // Used to communicate when the prefetching is done. All methods are invoked
   // on the IO thread.
   class Delegate {
@@ -52,14 +73,17 @@ class ResourcePrefetcher : public net::URLRequest::Delegate {
 
     // Called when the ResourcePrefetcher is finished, i.e. there is nothing
     // pending in flight.
-    virtual void ResourcePrefetcherFinished(ResourcePrefetcher* prefetcher) = 0;
+    virtual void ResourcePrefetcherFinished(
+        ResourcePrefetcher* prefetcher,
+        std::unique_ptr<PrefetcherStats> stats) = 0;
 
     virtual net::URLRequestContext* GetURLRequestContext() = 0;
   };
 
   // |delegate| has to outlive the ResourcePrefetcher.
   ResourcePrefetcher(Delegate* delegate,
-                     const ResourcePrefetchPredictorConfig& config,
+                     size_t max_concurrent_requests,
+                     size_t max_concurrent_requests_per_host,
                      const GURL& main_frame_url,
                      const std::vector<GURL>& urls);
   ~ResourcePrefetcher() override;
@@ -118,7 +142,8 @@ class ResourcePrefetcher : public net::URLRequest::Delegate {
   base::ThreadChecker thread_checker_;
   PrefetcherState state_;
   Delegate* const delegate_;
-  ResourcePrefetchPredictorConfig const config_;
+  size_t max_concurrent_requests_;
+  size_t max_concurrent_requests_per_host_;
   GURL main_frame_url_;
 
   // For histogram reports.
@@ -129,6 +154,7 @@ class ResourcePrefetcher : public net::URLRequest::Delegate {
       inflight_requests_;
   std::list<GURL> request_queue_;
   std::map<std::string, size_t> host_inflight_counts_;
+  std::unique_ptr<PrefetcherStats> stats_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourcePrefetcher);
 };

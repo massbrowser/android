@@ -80,6 +80,10 @@ sed -i 's/['"$NBSP"']/\\u00A0/g' components/polymer/polymer-mini.html
 # a Polymer issue and/or pull request to minimize these patches.
 patch -p1 --forward -r - < chromium.patch
 
+# Undo any changes in paper-ripple, since Chromium's implementation is a fork of
+# the original paper-ripple.
+git checkout -- components-chromium/paper-ripple/*
+
 new=$(git status --porcelain components-chromium | grep '^??' | \
       cut -d' ' -f2 | egrep '\.(html|js|css)$' || true)
 
@@ -107,9 +111,6 @@ python create_components_summary.py > components_summary.txt
 
 echo 'Creating GYP files for interfaces and externs...'
 ./generate_gyp.sh
-
-echo 'Vulcanizing dependent UIs...'
-python ../../../chrome/browser/resources/vulcanize.py
 
 popd > /dev/null
 

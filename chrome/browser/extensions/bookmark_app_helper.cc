@@ -76,8 +76,8 @@
 #endif  // defined(OS_WIN)
 
 #if defined(USE_ASH)
-#include "ash/common/shelf/shelf_delegate.h"  // nogncheck
-#include "ash/common/wm_shell.h"  // nogncheck
+#include "ash/shelf/shelf_model.h"  // nogncheck
+#include "ash/shell.h"              // nogncheck
 #endif
 
 namespace {
@@ -111,12 +111,12 @@ class GeneratedIconImageSource : public gfx::CanvasImageSource {
 #endif
 
     // Draw a rounded rect of the given |color|.
-    cc::PaintFlags background_paint;
-    background_paint.setAntiAlias(true);
-    background_paint.setColor(color_);
+    cc::PaintFlags background_flags;
+    background_flags.setAntiAlias(true);
+    background_flags.setColor(color_);
 
     gfx::Rect icon_rect(icon_inset, icon_inset, icon_size, icon_size);
-    canvas->DrawRoundRect(icon_rect, border_radius, background_paint);
+    canvas->DrawRoundRect(icon_rect, border_radius, background_flags);
 
     // The text rect's size needs to be odd to center the text correctly.
     gfx::Rect text_rect(icon_inset, icon_inset, icon_size + 1, icon_size + 1);
@@ -416,7 +416,11 @@ void BookmarkAppHelper::GenerateIcon(
   gfx::ImageSkia icon_image(
       new GeneratedIconImageSource(letter, color, output_size),
       gfx::Size(output_size, output_size));
-  icon_image.bitmap()->deepCopyTo(&(*bitmaps)[output_size].bitmap);
+  SkBitmap& dst = (*bitmaps)[output_size].bitmap;
+  if (dst.tryAllocPixels(icon_image.bitmap()->info())) {
+    icon_image.bitmap()->readPixels(dst.info(), dst.getPixels(), dst.rowBytes(),
+                                    0, 0);
+  }
 }
 
 // static
@@ -585,21 +589,8 @@ void BookmarkAppHelper::OnDidGetManifest(const GURL& manifest_url,
 
   UpdateWebAppInfoFromManifest(manifest, &web_app_info_);
 
-  if (!ChromeOriginTrialPolicy().IsFeatureDisabled("WebShare")) {
-    const std::string& manifest_url_string = manifest_url.spec();
-
-    base::Optional<std::string> url_template;
-    if (manifest.share_target.has_value() &&
-        !manifest.share_target.value().url_template.is_null()) {
-      url_template = base::Optional<std::string>(base::UTF16ToUTF8(
-          manifest.share_target.value().url_template.string()));
-    }
-
-    // Add this site as a share target, if it declares a url_template in its
-    // manifest, or remove if it doesn't.
-    UpdateShareTargetInPrefs(manifest_url_string, std::move(url_template),
-                             profile_->GetPrefs());
-  }
+  if (!ChromeOriginTrialPolicy().IsFeatureDisabled("WebShare"))
+    UpdateShareTargetInPrefs(manifest_url, manifest, profile_->GetPrefs());
 
   // Add urls from the WebApplicationInfo.
   std::vector<GURL> web_app_info_icon_urls;
@@ -745,9 +736,7 @@ void BookmarkAppHelper::FinishInstallation(const Extension* extension) {
   web_app::CreateShortcuts(web_app::SHORTCUT_CREATION_BY_USER,
                            creation_locations, current_profile, extension);
 #else
-  ash::ShelfDelegate* shelf_delegate = ash::WmShell::Get()->shelf_delegate();
-  DCHECK(shelf_delegate);
-  shelf_delegate->PinAppWithID(extension->id());
+  ash::Shell::Get()->shelf_model()->PinAppWithID(extension->id());
 #endif  // !defined(USE_ASH)
 #endif  // !defined(OS_MACOSX)
 

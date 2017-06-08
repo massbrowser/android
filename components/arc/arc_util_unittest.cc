@@ -5,6 +5,7 @@
 #include "components/arc/arc_util.h"
 
 #include <memory>
+#include <string>
 
 #include "base/command_line.h"
 #include "base/macros.h"
@@ -36,6 +37,20 @@ class ScopedArcFeature {
 
 using ArcUtilTest = testing::Test;
 
+TEST_F(ArcUtilTest, IsArcAvailable_None) {
+  auto* command_line = base::CommandLine::ForCurrentProcess();
+
+  command_line->InitFromArgv({"", "--arc-availability=none"});
+  EXPECT_FALSE(IsArcAvailable());
+
+  // If --arc-availability flag is set to "none", even if Finch experiment is
+  // turned on, ARC cannot be used.
+  {
+    ScopedArcFeature feature(true);
+    EXPECT_FALSE(IsArcAvailable());
+  }
+}
+
 // Test --arc-available with EnableARC feature combination.
 TEST_F(ArcUtilTest, IsArcAvailable_Installed) {
   auto* command_line = base::CommandLine::ForCurrentProcess();
@@ -46,14 +61,17 @@ TEST_F(ArcUtilTest, IsArcAvailable_Installed) {
 
   // Not available, by-default.
   EXPECT_FALSE(IsArcAvailable());
+  EXPECT_FALSE(IsArcKioskAvailable());
 
   {
     ScopedArcFeature feature(true);
     EXPECT_FALSE(IsArcAvailable());
+    EXPECT_FALSE(IsArcKioskAvailable());
   }
   {
     ScopedArcFeature feature(false);
     EXPECT_FALSE(IsArcAvailable());
+    EXPECT_FALSE(IsArcKioskAvailable());
   }
 
   // If ARC is installed, IsArcAvailable() should return true when EnableARC
@@ -63,21 +81,73 @@ TEST_F(ArcUtilTest, IsArcAvailable_Installed) {
   // Not available, by-default, too.
   EXPECT_FALSE(IsArcAvailable());
 
+  // ARC is available in kiosk mode if installed.
+  EXPECT_TRUE(IsArcKioskAvailable());
+
   {
     ScopedArcFeature feature(true);
     EXPECT_TRUE(IsArcAvailable());
+    EXPECT_TRUE(IsArcKioskAvailable());
   }
   {
     ScopedArcFeature feature(false);
     EXPECT_FALSE(IsArcAvailable());
+    EXPECT_TRUE(IsArcKioskAvailable());
+  }
+
+  // If ARC is installed, IsArcAvailable() should return true when EnableARC
+  // feature is set.
+  command_line->InitFromArgv({"", "--arc-availability=installed"});
+
+  // Not available, by-default, too.
+  EXPECT_FALSE(IsArcAvailable());
+
+  // ARC is available in kiosk mode if installed.
+  EXPECT_TRUE(IsArcKioskAvailable());
+
+  {
+    ScopedArcFeature feature(true);
+    EXPECT_TRUE(IsArcAvailable());
+    EXPECT_TRUE(IsArcKioskAvailable());
+  }
+  {
+    ScopedArcFeature feature(false);
+    EXPECT_FALSE(IsArcAvailable());
+    EXPECT_TRUE(IsArcKioskAvailable());
   }
 }
 
-TEST_F(ArcUtilTest, IsArcAvailable_OfficialSupport) {
+TEST_F(ArcUtilTest, IsArcAvailable_OfficiallySupported) {
   // Regardless of FeatureList, IsArcAvailable() should return true.
   auto* command_line = base::CommandLine::ForCurrentProcess();
   command_line->InitFromArgv({"", "--enable-arc"});
   EXPECT_TRUE(IsArcAvailable());
+  EXPECT_TRUE(IsArcKioskAvailable());
+
+  command_line->InitFromArgv({"", "--arc-availability=officially-supported"});
+  EXPECT_TRUE(IsArcAvailable());
+  EXPECT_TRUE(IsArcKioskAvailable());
+}
+
+TEST_F(ArcUtilTest, IsArcAvailable_OfficiallySupportedWithActiveDirectory) {
+  // Regardless of FeatureList, IsArcAvailable() should return true.
+  auto* command_line = base::CommandLine::ForCurrentProcess();
+  command_line->InitFromArgv(
+      {"", "--arc-availability=officially-supported-with-active-directory"});
+  EXPECT_TRUE(IsArcAvailable());
+}
+
+TEST_F(ArcUtilTest, IsArcAllowedForActiveDirectoryUsers_Allowed) {
+  auto* command_line = base::CommandLine::ForCurrentProcess();
+  command_line->InitFromArgv(
+      {"", "--arc-availability=officially-supported-with-active-directory"});
+  EXPECT_TRUE(IsArcAllowedForActiveDirectoryUsers());
+}
+
+TEST_F(ArcUtilTest, IsArcAllowedForActiveDirectoryUsers_NotAllowed) {
+  auto* command_line = base::CommandLine::ForCurrentProcess();
+  command_line->InitFromArgv({"", "--arc-availability=officially-supported"});
+  EXPECT_FALSE(IsArcAllowedForActiveDirectoryUsers());
 }
 
 // TODO(hidehiko): Add test for IsArcKioskMode().
